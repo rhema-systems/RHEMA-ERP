@@ -34,7 +34,9 @@ public sealed class FleetDriverDirectoryService : IFleetDriverDirectoryService
             .GetQueryable(card =>
                 card.TenantId == tenantId &&
                 !card.IsDeleted &&
-                card.DocumentType.ToLower().Contains("driver"));
+                // [HR-MODULE-PORT] `EmployeeIdentificationCard.DocumentType` (free-text) was replaced by the
+                // `IdentificationTypeId` + `IdentificationType` lookup, so match on the lookup's name instead.
+                card.IdentificationType.Name.ToLower().Contains("driver"));
         var assignmentQuery = _unitOfWork.Repository<FleetVehicleAssignment>()
             .GetQueryable(item => item.TenantId == tenantId && item.IsActive && !item.IsDeleted);
         var tripQuery = _unitOfWork.Repository<FleetTrip>()
@@ -80,6 +82,7 @@ public sealed class FleetDriverDirectoryService : IFleetDriverDirectoryService
         var employeeIds = employees.Select(employee => employee.Id).ToList();
         var licenses = await licenseQuery
             .Where(card => employeeIds.Contains(card.EmployeeId))
+            .Include(card => card.IdentificationType)
             .ToListAsync();
         var assignments = await assignmentQuery
             .Where(item => employeeIds.Contains(item.EmployeeId))
@@ -142,7 +145,10 @@ public sealed class FleetDriverDirectoryService : IFleetDriverDirectoryService
                 DriverLicenseNumber = license?.DocumentNumber,
                 LicenseIssueDate = license?.IssueDate,
                 LicenseExpiryDate = license?.ExpiryDate,
-                LicenseIssuingAuthority = license?.IssuingAuthority,
+                // [HR-MODULE-PORT] The ported `EmployeeIdentificationCard` no longer carries a per-card
+                // `IssuingAuthority`; the port normalised it onto the `IdentificationType` lookup. This mirrors
+                // the convention already used by EmployeeMappingExtensions.ToDto/ToSummaryDto.
+                LicenseIssuingAuthority = license?.IdentificationType?.IssuingAuthorityName,
                 IsLicenseVerified = license?.IsVerified == true,
                 LicenseVerifiedDate = license?.VerifiedDate,
                 LicenseStatus = status,

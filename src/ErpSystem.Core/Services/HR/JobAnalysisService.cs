@@ -1,0 +1,1824 @@
+using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.JobAnalysis;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Extensions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
+namespace ErpSystem.Core.Services.HR;
+
+#region Job Description Service
+
+public class JobDescriptionService : IJobDescriptionService
+{
+    private readonly IJobDescriptionRepository _jobDescriptionRepository;
+    private readonly IJobResponsibilityRepository _responsibilityRepository;
+    private readonly IJobQualificationRepository _qualificationRepository;
+    private readonly IJobCompetencyRepository _competencyRepository;
+    private readonly IJobPhysicalDemandRepository _physicalDemandRepository;
+    private readonly IJobWorkingConditionRepository _workingConditionRepository;
+    private readonly IJobEquipmentToolRepository _equipmentToolRepository;
+    private readonly IJobReportingRelationshipRepository _reportingRelationshipRepository;
+    private readonly IJobDutyItemRepository _dutyItemRepository;
+    private readonly IJobPpeRequirementRepository _ppeRequirementRepository;
+    private readonly IJobEquipmentTrainingRepository _equipmentTrainingRepository;
+    private readonly IJobMedicalRequirementRepository _medicalRequirementRepository;
+    private readonly IJobResponsibilityKpiRepository _kpiRepository;
+    private readonly ISalaryGradeRepository _salaryGradeRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<JobDescriptionService> _logger;
+
+    public JobDescriptionService(
+        IJobDescriptionRepository jobDescriptionRepository,
+        IJobResponsibilityRepository responsibilityRepository,
+        IJobQualificationRepository qualificationRepository,
+        IJobCompetencyRepository competencyRepository,
+        IJobPhysicalDemandRepository physicalDemandRepository,
+        IJobWorkingConditionRepository workingConditionRepository,
+        IJobEquipmentToolRepository equipmentToolRepository,
+        IJobReportingRelationshipRepository reportingRelationshipRepository,
+        IJobDutyItemRepository dutyItemRepository,
+        IJobPpeRequirementRepository ppeRequirementRepository,
+        IJobEquipmentTrainingRepository equipmentTrainingRepository,
+        IJobMedicalRequirementRepository medicalRequirementRepository,
+        IJobResponsibilityKpiRepository kpiRepository,
+        ISalaryGradeRepository salaryGradeRepository,
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        ILogger<JobDescriptionService> logger)
+    {
+        _jobDescriptionRepository = jobDescriptionRepository;
+        _responsibilityRepository = responsibilityRepository;
+        _qualificationRepository = qualificationRepository;
+        _competencyRepository = competencyRepository;
+        _physicalDemandRepository = physicalDemandRepository;
+        _workingConditionRepository = workingConditionRepository;
+        _equipmentToolRepository = equipmentToolRepository;
+        _reportingRelationshipRepository = reportingRelationshipRepository;
+        _dutyItemRepository = dutyItemRepository;
+        _ppeRequirementRepository = ppeRequirementRepository;
+        _equipmentTrainingRepository = equipmentTrainingRepository;
+        _medicalRequirementRepository = medicalRequirementRepository;
+        _kpiRepository = kpiRepository;
+        _salaryGradeRepository = salaryGradeRepository;
+        _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    // A job description owned by another tenant is reported as missing rather than forbidden, so the endpoints do
+    // not confirm that the id exists elsewhere.
+    private async Task<JobDescription> GetOwnedJobDescriptionAsync(Guid id)
+    {
+        var entity = await _jobDescriptionRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Job description with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<JobDescriptionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _jobDescriptionRepository.GetQueryable()
+            .Include(jd => jd.Position)
+            .Include(jd => jd.PreparedBy)
+            .Include(jd => jd.ReviewedBy)
+            .Include(jd => jd.ApprovedBy)
+            .Include(jd => jd.StaffLevel)
+            .Include(jd => jd.Union)
+            .Include(jd => jd.SuggestedSalaryGrade)
+            .Include(jd => jd.JobFamily)
+            .Include(jd => jd.JobSubFamily)
+            .Include(jd => jd.JobLevel)
+            .FirstOrDefaultAsync(jd => jd.Id == id && jd.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Job description with ID '{id}' not found.");
+
+        return entity.ToDto();
+    }
+
+    public async Task<JobDescriptionDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _jobDescriptionRepository.GetQueryable()
+            .Include(jd => jd.Position)
+            .Include(jd => jd.PreparedBy)
+            .Include(jd => jd.ReviewedBy)
+            .Include(jd => jd.ApprovedBy)
+            .Include(jd => jd.DutyItems)
+            .Include(jd => jd.StaffLevel)
+            .Include(jd => jd.Union)
+            .Include(jd => jd.Responsibilities).ThenInclude(r => r.Qualifications).ThenInclude(q => q.Qualification)
+            .Include(jd => jd.Responsibilities).ThenInclude(r => r.Competencies)
+            .Include(jd => jd.Responsibilities).ThenInclude(r => r.Kpis)
+            .Include(jd => jd.PhysicalDemands)
+            .Include(jd => jd.JobWorkingConditions)
+            .Include(jd => jd.PpeRequirements).ThenInclude(p => p.PpeType)
+            .Include(jd => jd.EquipmentTools).ThenInclude(e => e.TrainingRequirements).ThenInclude(t => t.TrainingProgram)
+            .Include(jd => jd.ReportingRelationships).ThenInclude(r => r.RelatedPosition)
+            .Include(jd => jd.MedicalRequirements)
+            .Include(jd => jd.SuggestedSalaryGrade)
+            .Include(jd => jd.JobFamily)
+            .Include(jd => jd.JobSubFamily)
+            .Include(jd => jd.JobLevel)
+            .FirstOrDefaultAsync(jd => jd.Id == id && jd.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Job description with ID '{id}' not found.");
+
+        var qualifications = (await _qualificationRepository.GetByJobDescriptionIdAsync(id))
+            .Where(q => q.TenantId == tenantId);
+        var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(id))
+            .Where(c => c.TenantId == tenantId);
+
+        return entity.ToDetailDto(
+            qualifications,
+            competencies,
+            entity.PhysicalDemands,
+            entity.JobWorkingConditions,
+            entity.EquipmentTools,
+            entity.ReportingRelationships,
+            entity.DutyItems.OrderBy(d => d.SequenceNumber),
+            entity.PpeRequirements,
+            entity.MedicalRequirements);
+    }
+
+    public async Task<IEnumerable<JobDescriptionDto>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId)
+            .Include(jd => jd.Position)
+            .Include(jd => jd.PreparedBy)
+            .ToListAsync(cancellationToken);
+
+        return entities.ToDtoList();
+    }
+
+    public async Task<PagedResult<JobDescriptionDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var query = _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId)
+            .Include(jd => jd.Position)
+            .Include(jd => jd.PreparedBy);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(jd => jd.EffectiveDate)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<JobDescriptionDto>
+        {
+            Items = items.ToDtoList(),
+            TotalCount = totalCount,
+            Page = pageNumber,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<IEnumerable<JobDescriptionSummaryDto>> GetByPositionIdAsync(Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _jobDescriptionRepository.GetByPositionIdAsync(positionId);
+        return entities.Where(j => j.TenantId == tenantId).ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<JobDescriptionSummaryDto>> GetByStatusAsync(JobDescriptionStatus status, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _jobDescriptionRepository.GetByStatusAsync(status);
+        return entities.Where(j => j.TenantId == tenantId).ToSummaryDtoList();
+    }
+
+    public async Task<JobDescriptionDto?> GetCurrentVersionForPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _jobDescriptionRepository.GetCurrentVersionForPositionAsync(positionId);
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobDescriptionSummaryDto>> GetDueForReviewAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _jobDescriptionRepository.GetDueForReviewAsync(daysAhead);
+        return entities.Where(j => j.TenantId == tenantId).ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<JobDescriptionSummaryDto>> GetVersionHistoryAsync(Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _jobDescriptionRepository.GetVersionHistoryAsync(positionId);
+        return entities.Where(j => j.TenantId == tenantId).ToSummaryDtoList();
+    }
+
+    public async Task<JobAnalyticsDto> GetAnalyticsAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var jds = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId)
+            .Include(jd => jd.JobFamily)
+            .ToListAsync(cancellationToken);
+
+        var today = DateTime.Today;
+        var horizon = today.AddDays(30);
+
+        var analytics = new JobAnalyticsDto
+        {
+            TotalJobDescriptions = jds.Count,
+            DraftCount = jds.Count(j => j.Status == JobDescriptionStatus.Draft),
+            PendingReviewCount = jds.Count(j => j.Status == JobDescriptionStatus.PendingReview),
+            ApprovedCount = jds.Count(j => j.Status == JobDescriptionStatus.Approved),
+            ActiveCount = jds.Count(j => j.Status == JobDescriptionStatus.Active),
+            DueForReviewCount = jds.Count(j => j.Status == JobDescriptionStatus.Approved && j.NextReviewDate != null && j.NextReviewDate <= horizon),
+            PositionsCovered = jds.Where(j => j.Status == JobDescriptionStatus.Approved || j.Status == JobDescriptionStatus.Active).Select(j => j.PositionId).Distinct().Count(),
+            ValuedRoleCount = jds.Count(j => j.EstimatedSalaryLow != null),
+            MissionCriticalRoleCount = jds.Count(j => j.RoleCriticality == RoleCriticalityLevel.MissionCritical),
+        };
+
+        var valued = jds.Where(j => j.EstimatedSalaryLow != null && j.EstimatedSalaryHigh != null)
+            .Select(j => (j.EstimatedSalaryLow!.Value + j.EstimatedSalaryHigh!.Value) / 2m).ToList();
+        analytics.AverageEstimatedSalary = valued.Count > 0 ? Math.Round(valued.Average(), 2) : null;
+
+        analytics.StatusBreakdown = jds.GroupBy(j => j.Status)
+            .Select(g => new NameCountDto { Name = g.Key.ToString(), Count = g.Count() })
+            .OrderByDescending(x => x.Count).ToList();
+
+        analytics.FamilyBreakdown = jds.Where(j => j.JobFamily != null)
+            .GroupBy(j => j.JobFamily!.Name)
+            .Select(g => new NameCountDto { Name = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count).ToList();
+
+        analytics.TopCompetencies = await _competencyRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId)
+            .GroupBy(c => c.CompetencyName)
+            .Select(g => new NameCountDto { Name = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .Take(10)
+            .ToListAsync(cancellationToken);
+
+        return analytics;
+    }
+
+    public async Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
+        entity.JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken);
+        entity.VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(createDto.PositionId);
+        entity.PreparedById = preparedById;
+        entity.PreparedDate = DateTime.UtcNow;
+        entity.Status = JobDescriptionStatus.Draft;
+
+        await _jobDescriptionRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Add responsibilities if provided
+        if (createDto.Responsibilities?.Any() == true)
+        {
+            foreach (var respDto in createDto.Responsibilities)
+            {
+                respDto.JobDescriptionId = entity.Id;
+                var responsibility = respDto.ToEntity();
+                responsibility.TenantId = tenantId;
+                await _responsibilityRepository.AddAsync(responsibility);
+
+                // Add qualifications if provided
+                if (respDto.Qualifications?.Any() == true)
+                {
+                    foreach (var qualDto in respDto.Qualifications)
+                    {
+                        qualDto.JobDescriptionId = entity.Id;
+                        qualDto.JobResponsibilityId = responsibility.Id;
+                        var qualification = qualDto.ToEntity();
+                        qualification.TenantId = tenantId;
+                        await _qualificationRepository.AddAsync(qualification);
+                    }
+                }
+
+                // Add competencies if provided
+                if (respDto.Competencies?.Any() == true)
+                {
+                    foreach (var compDto in respDto.Competencies)
+                    {
+                        compDto.JobDescriptionId = entity.Id;
+                        compDto.JobResponsibilityId = responsibility.Id;
+                        var competency = compDto.ToEntity();
+                        competency.TenantId = tenantId;
+                        await _competencyRepository.AddAsync(competency);
+                    }
+                }
+            }
+        }
+
+        // Add physical demands if provided
+        if (createDto.PhysicalDemands?.Any() == true)
+        {
+            foreach (var demandDto in createDto.PhysicalDemands)
+            {
+                demandDto.JobDescriptionId = entity.Id;
+                var demand = demandDto.ToEntity();
+                demand.TenantId = tenantId;
+                await _physicalDemandRepository.AddAsync(demand);
+            }
+        }
+
+        // Add working conditions if provided
+        if (createDto.WorkingConditions?.Any() == true)
+        {
+            foreach (var condDto in createDto.WorkingConditions)
+            {
+                condDto.JobDescriptionId = entity.Id;
+                var condition = condDto.ToEntity();
+                condition.TenantId = tenantId;
+                await _workingConditionRepository.AddAsync(condition);
+            }
+        }
+
+        // Add equipment tools if provided
+        if (createDto.EquipmentTools?.Any() == true)
+        {
+            foreach (var toolDto in createDto.EquipmentTools)
+            {
+                toolDto.JobDescriptionId = entity.Id;
+                var tool = toolDto.ToEntity();
+                tool.TenantId = tenantId;
+                await _equipmentToolRepository.AddAsync(tool);
+            }
+        }
+
+        // Add reporting relationships if provided
+        if (createDto.ReportingRelationships?.Any() == true)
+        {
+            foreach (var relDto in createDto.ReportingRelationships)
+            {
+                relDto.JobDescriptionId = entity.Id;
+                var relationship = relDto.ToEntity();
+                relationship.TenantId = tenantId;
+                await _reportingRelationshipRepository.AddAsync(relationship);
+            }
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description created: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return entity.ToDto();
+    }
+
+    public async Task<JobDescriptionDto> UpdateAsync(UpdateJobDescriptionDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _jobDescriptionRepository.GetQueryable()
+            .Include(jd => jd.Position)
+            .FirstOrDefaultAsync(jd => jd.Id == updateDto.Id && jd.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Job description with ID '{updateDto.Id}' not found.");
+
+        if (entity.Status == JobDescriptionStatus.Approved)
+            throw new InvalidOperationException("Cannot update an approved job description. Create a new version instead.");
+
+        updateDto.UpdateEntity(entity);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description updated: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> SubmitForReviewAsync(SubmitJobDescriptionForReviewDto submitDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(submitDto.JobDescriptionId);
+
+        if (entity.Status != JobDescriptionStatus.Draft)
+            throw new InvalidOperationException("Only draft job descriptions can be submitted for review.");
+
+        entity.Status = JobDescriptionStatus.PendingReview;
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description submitted for review: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return true;
+    }
+
+    public async Task<bool> ReviewAsync(ReviewJobDescriptionDto reviewDto, Guid reviewedById, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(reviewDto.JobDescriptionId);
+
+        if (entity.Status != JobDescriptionStatus.PendingReview)
+            throw new InvalidOperationException("Only job descriptions pending review can be reviewed.");
+
+        entity.ReviewedById = reviewedById;
+        entity.ReviewedDate = DateTime.UtcNow;
+        entity.Status = reviewDto.IsApproved ? JobDescriptionStatus.PendingReview : JobDescriptionStatus.Draft;
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description reviewed: {JobDescriptionNumber}, Approved: {IsApproved}", entity.JobDescriptionNumber, reviewDto.IsApproved);
+
+        return true;
+    }
+
+    public async Task<bool> ApproveAsync(ApproveJobDescriptionDto approveDto, Guid approvedById, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await GetOwnedJobDescriptionAsync(approveDto.JobDescriptionId);
+
+        if (entity.Status != JobDescriptionStatus.PendingReview)
+            throw new InvalidOperationException("Only job descriptions pending review can be approved.");
+
+        entity.ApprovedById = approvedById;
+        entity.ApprovalDate = DateTime.UtcNow;
+        entity.Status = JobDescriptionStatus.Approved;
+        entity.NextReviewDate = DateTime.Today.AddMonths(entity.ReviewCycleMonths);
+
+        // Expire any existing approved versions for this position
+        var existingApproved = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId &&
+                        jd.PositionId == entity.PositionId &&
+                        jd.Id != entity.Id &&
+                        jd.Status == JobDescriptionStatus.Approved)
+            .ToListAsync(cancellationToken);
+
+        foreach (var existing in existingApproved)
+        {
+            existing.Status = JobDescriptionStatus.Superseded;
+            existing.SupersededByVersionId = entity.Id;
+            existing.ExpiryDate = DateTime.Today;
+            await _jobDescriptionRepository.UpdateAsync(existing);
+        }
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description approved: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return true;
+    }
+
+    public async Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var original = await _jobDescriptionRepository.GetQueryable()
+            .Include(jd => jd.Responsibilities).ThenInclude(r => r.Qualifications)
+            .Include(jd => jd.Responsibilities).ThenInclude(r => r.Competencies)
+            .Include(jd => jd.PhysicalDemands)
+            .Include(jd => jd.JobWorkingConditions)
+            .Include(jd => jd.EquipmentTools)
+            .Include(jd => jd.ReportingRelationships)
+            .FirstOrDefaultAsync(jd => jd.Id == versionDto.OriginalJobDescriptionId && jd.TenantId == tenantId, cancellationToken);
+
+        if (original == null)
+            throw new ArgumentException($"Original job description with ID '{versionDto.OriginalJobDescriptionId}' not found.");
+
+        var newVersion = new JobDescription
+        {
+            TenantId = tenantId,
+            JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken),
+            PositionId = original.PositionId,
+            JobTitle = original.JobTitle,
+            JobSummary = original.JobSummary,
+            VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(original.PositionId),
+            EffectiveDate = DateTime.Today,
+            RevisionReason = versionDto.RevisionReason,
+            ReviewCycleMonths = original.ReviewCycleMonths,
+            PreparedById = preparedById,
+            PreparedDate = DateTime.UtcNow,
+            Status = JobDescriptionStatus.Draft
+        };
+
+        await _jobDescriptionRepository.AddAsync(newVersion);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Copy responsibilities, qualifications, and competencies
+        foreach (var responsibility in original.Responsibilities)
+        {
+            var newResp = new JobResponsibility
+            {
+                TenantId = tenantId,
+                JobDescriptionId = newVersion.Id,
+                ResponsibilityDescription = responsibility.ResponsibilityDescription,
+                Type = responsibility.Type,
+                PercentageOfTime = responsibility.PercentageOfTime,
+                ImportanceWeight = responsibility.ImportanceWeight
+            };
+            await _responsibilityRepository.AddAsync(newResp);
+
+            foreach (var qual in responsibility.Qualifications)
+            {
+                var newQual = new JobQualification
+                {
+                    TenantId = tenantId,
+                    JobDescriptionId = newVersion.Id,
+                    JobResponsibilityId = newResp.Id,
+                    Type = qual.Type,
+                    QualificationId = qual.QualificationId,
+                    Title = qual.Title,
+                    Description = qual.Description,
+                    IsRequired = qual.IsRequired,
+                    JobSpecificRequirements = qual.JobSpecificRequirements
+                };
+                await _qualificationRepository.AddAsync(newQual);
+            }
+
+            foreach (var comp in responsibility.Competencies)
+            {
+                var newComp = new JobCompetency
+                {
+                    TenantId = tenantId,
+                    JobDescriptionId = newVersion.Id,
+                    JobResponsibilityId = newResp.Id,
+                    CompetencyName = comp.CompetencyName,
+                    Description = comp.Description,
+                    Type = comp.Type,
+                    RequiredLevel = comp.RequiredLevel,
+                    IsCritical = comp.IsCritical
+                };
+                await _competencyRepository.AddAsync(newComp);
+            }
+        }
+
+        // Copy physical demands
+        foreach (var demand in original.PhysicalDemands)
+        {
+            await _physicalDemandRepository.AddAsync(new JobPhysicalDemand
+            {
+                TenantId = tenantId,
+                JobDescriptionId = newVersion.Id,
+                DemandType = demand.DemandType,
+                DemandDescription = demand.DemandDescription,
+                Frequency = demand.Frequency,
+                WeightOrForceKg = demand.WeightOrForceKg,
+                DistanceOrDuration = demand.DistanceOrDuration,
+                IsEssential = demand.IsEssential,
+                NotesOrExamples = demand.NotesOrExamples
+            });
+        }
+
+        // Copy working conditions
+        foreach (var condition in original.JobWorkingConditions)
+        {
+            await _workingConditionRepository.AddAsync(new JobWorkingCondition
+            {
+                TenantId = tenantId,
+                JobDescriptionId = newVersion.Id,
+                EnvironmentType = condition.EnvironmentType,
+                Description = condition.Description,
+                ExposureLevel = condition.ExposureLevel,
+                RequiresPPE = condition.RequiresPPE,
+                PPERequirements = condition.PPERequirements,
+                TravelPercentage = condition.TravelPercentage,
+                TravelRequirements = condition.TravelRequirements
+            });
+        }
+
+        // Copy equipment tools
+        foreach (var tool in original.EquipmentTools)
+        {
+            await _equipmentToolRepository.AddAsync(new JobEquipmentTool
+            {
+                TenantId = tenantId,
+                JobDescriptionId = newVersion.Id,
+                ItemName = tool.ItemName,
+                Type = tool.Type,
+                DescriptionOrSpecification = tool.DescriptionOrSpecification,
+                RequiredProficiency = tool.RequiredProficiency,
+                IsEssential = tool.IsEssential,
+                TrainingRequired = tool.TrainingRequired
+            });
+        }
+
+        // Copy reporting relationships
+        foreach (var rel in original.ReportingRelationships)
+        {
+            await _reportingRelationshipRepository.AddAsync(new JobReportingRelationship
+            {
+                TenantId = tenantId,
+                JobDescriptionId = newVersion.Id,
+                RelationshipType = rel.RelationshipType,
+                TitleOrRole = rel.TitleOrRole,
+                EmployeeOrPositionId = rel.EmployeeOrPositionId,
+                Description = rel.Description,
+                NumberOfDirectReports = rel.NumberOfDirectReports,
+                IsPrimarySupervisor = rel.IsPrimarySupervisor
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("New job description version created: {JobDescriptionNumber} from {OriginalNumber}",
+            newVersion.JobDescriptionNumber, original.JobDescriptionNumber);
+
+        return newVersion.ToDto();
+    }
+
+    public async Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var src = await _jobDescriptionRepository.GetQueryable()
+            .Include(jd => jd.DutyItems)
+            .Include(jd => jd.Responsibilities).ThenInclude(r => r.Kpis)
+            .Include(jd => jd.PhysicalDemands)
+            .Include(jd => jd.JobWorkingConditions)
+            .Include(jd => jd.PpeRequirements)
+            .Include(jd => jd.EquipmentTools).ThenInclude(e => e.TrainingRequirements)
+            .Include(jd => jd.ReportingRelationships)
+            .Include(jd => jd.MedicalRequirements)
+            .FirstOrDefaultAsync(jd => jd.Id == id && jd.TenantId == tenantId, cancellationToken);
+        if (src == null)
+            throw new ArgumentException($"Job description with ID '{id}' not found.");
+
+        var qualifications = (await _qualificationRepository.GetByJobDescriptionIdAsync(id))
+            .Where(q => q.TenantId == tenantId).ToList();
+        var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(id))
+            .Where(c => c.TenantId == tenantId).ToList();
+
+        var clone = new JobDescription
+        {
+            TenantId = tenantId,
+            JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken),
+            PositionId = src.PositionId,
+            JobTitle = src.JobTitle + " (Copy)",
+            JobSummary = src.JobSummary,
+            VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(src.PositionId),
+            EffectiveDate = DateTime.Today,
+            ReviewCycleMonths = src.ReviewCycleMonths,
+            Status = JobDescriptionStatus.Draft,
+            PreparedById = preparedById,
+            PreparedDate = DateTime.UtcNow,
+            // Valuation
+            RoleIntrinsicValue = src.RoleIntrinsicValue,
+            RoleCriticality = src.RoleCriticality,
+            IndustryBenchmarkSalary = src.IndustryBenchmarkSalary,
+            ValuationNotes = src.ValuationNotes,
+            // Authority + classification
+            AutonomyLevel = src.AutonomyLevel,
+            DecisionMakingScope = src.DecisionMakingScope,
+            FinancialAuthorityLimit = src.FinancialAuthorityLimit,
+            ApprovalAuthorityNotes = src.ApprovalAuthorityNotes,
+            StaffLevelId = src.StaffLevelId,
+            IntendedEmploymentType = src.IntendedEmploymentType,
+            IsBargainingUnitRole = src.IsBargainingUnitRole,
+            UnionId = src.UnionId,
+            OccupationCode = src.OccupationCode,
+            EssentialFunctionsSummary = src.EssentialFunctionsSummary,
+            // Architecture
+            JobFamilyId = src.JobFamilyId,
+            JobSubFamilyId = src.JobSubFamilyId,
+            JobLevelId = src.JobLevelId
+        };
+        await _jobDescriptionRepository.AddAsync(clone);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        foreach (var d in src.DutyItems)
+            await _dutyItemRepository.AddAsync(new JobDutyItem { TenantId = tenantId, JobDescriptionId = clone.Id, SequenceNumber = d.SequenceNumber, DutyStatement = d.DutyStatement, Notes = d.Notes });
+
+        // Responsibilities + KPIs, tracking old->new ids for qualification/competency linkage
+        var respMap = new Dictionary<Guid, Guid>();
+        foreach (var r in src.Responsibilities)
+        {
+            var nr = new JobResponsibility { TenantId = tenantId, JobDescriptionId = clone.Id, ResponsibilityDescription = r.ResponsibilityDescription, Type = r.Type, PercentageOfTime = r.PercentageOfTime, ImportanceWeight = r.ImportanceWeight };
+            await _responsibilityRepository.AddAsync(nr);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            respMap[r.Id] = nr.Id;
+            foreach (var k in r.Kpis)
+                await _kpiRepository.AddAsync(new JobResponsibilityKpi { TenantId = tenantId, JobResponsibilityId = nr.Id, KpiStatement = k.KpiStatement, TargetOrStandard = k.TargetOrStandard, UnitOfMeasure = k.UnitOfMeasure, Weight = k.Weight, SequenceNumber = k.SequenceNumber });
+        }
+
+        foreach (var q in qualifications)
+            await _qualificationRepository.AddAsync(new JobQualification { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = q.JobResponsibilityId.HasValue && respMap.TryGetValue(q.JobResponsibilityId.Value, out var rid) ? rid : null, Type = q.Type, QualificationId = q.QualificationId, Title = q.Title, Description = q.Description, IsRequired = q.IsRequired, JobSpecificRequirements = q.JobSpecificRequirements, MonetaryValue = q.MonetaryValue });
+
+        foreach (var c in competencies)
+            await _competencyRepository.AddAsync(new JobCompetency { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = c.JobResponsibilityId.HasValue && respMap.TryGetValue(c.JobResponsibilityId.Value, out var rid) ? rid : null, SkillId = c.SkillId, CompetencyId = c.CompetencyId, CompetencyName = c.CompetencyName, Description = c.Description, Type = c.Type, RequiredLevel = c.RequiredLevel, IsCritical = c.IsCritical, MonetaryValue = c.MonetaryValue });
+
+        foreach (var p in src.PhysicalDemands)
+            await _physicalDemandRepository.AddAsync(new JobPhysicalDemand { TenantId = tenantId, JobDescriptionId = clone.Id, DemandType = p.DemandType, DemandDescription = p.DemandDescription, Frequency = p.Frequency, WeightOrForceKg = p.WeightOrForceKg, DistanceOrDuration = p.DistanceOrDuration, IsEssential = p.IsEssential, NotesOrExamples = p.NotesOrExamples, IsPhysicalAttribute = p.IsPhysicalAttribute, AttributeRequirement = p.AttributeRequirement, Justification = p.Justification });
+
+        foreach (var w in src.JobWorkingConditions)
+            await _workingConditionRepository.AddAsync(new JobWorkingCondition { TenantId = tenantId, JobDescriptionId = clone.Id, EnvironmentType = w.EnvironmentType, Description = w.Description, ExposureLevel = w.ExposureLevel, RequiresPPE = w.RequiresPPE, PPERequirements = w.PPERequirements, TravelPercentage = w.TravelPercentage, TravelRequirements = w.TravelRequirements });
+
+        foreach (var pe in src.PpeRequirements)
+            await _ppeRequirementRepository.AddAsync(new JobPpeRequirement { TenantId = tenantId, JobDescriptionId = clone.Id, PpeTypeId = pe.PpeTypeId, CustomPpeName = pe.CustomPpeName, IsMandatory = pe.IsMandatory, Notes = pe.Notes });
+
+        foreach (var e in src.EquipmentTools)
+        {
+            var ne = new JobEquipmentTool { TenantId = tenantId, JobDescriptionId = clone.Id, ItemName = e.ItemName, Type = e.Type, DescriptionOrSpecification = e.DescriptionOrSpecification, RequiredProficiency = e.RequiredProficiency, IsEssential = e.IsEssential, TrainingRequired = e.TrainingRequired };
+            await _equipmentToolRepository.AddAsync(ne);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            foreach (var t in e.TrainingRequirements)
+                await _equipmentTrainingRepository.AddAsync(new JobEquipmentTraining { TenantId = tenantId, JobEquipmentToolId = ne.Id, TrainingProgramId = t.TrainingProgramId, RequirementText = t.RequirementText, IsMandatory = t.IsMandatory });
+        }
+
+        foreach (var rr in src.ReportingRelationships)
+            await _reportingRelationshipRepository.AddAsync(new JobReportingRelationship { TenantId = tenantId, JobDescriptionId = clone.Id, RelationshipType = rr.RelationshipType, TitleOrRole = rr.TitleOrRole, EmployeeOrPositionId = rr.EmployeeOrPositionId, Description = rr.Description, NumberOfDirectReports = rr.NumberOfDirectReports, IsPrimarySupervisor = rr.IsPrimarySupervisor });
+
+        foreach (var m in src.MedicalRequirements)
+            await _medicalRequirementRepository.AddAsync(new JobMedicalRequirement { TenantId = tenantId, JobDescriptionId = clone.Id, Category = m.Category, RequirementDescription = m.RequirementDescription, Rationale = m.Rationale, Contraindications = m.Contraindications, IsMandatory = m.IsMandatory });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Job description cloned: {New} from {Old}", clone.JobDescriptionNumber, src.JobDescriptionNumber);
+        return clone.ToDto();
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(id);
+
+        if (entity.Status == JobDescriptionStatus.Approved)
+            throw new InvalidOperationException("Cannot delete an approved job description.");
+
+        await _jobDescriptionRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description deleted: {Id}", id);
+
+        return true;
+    }
+
+    #region Responsibility Operations
+
+    public async Task<JobResponsibilityDto> AddResponsibilityAsync(CreateJobResponsibilityDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+
+        await _responsibilityRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Responsibility added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobResponsibilityDto>> GetResponsibilitiesAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _responsibilityRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobResponsibilityDto> UpdateResponsibilityAsync(UpdateJobResponsibilityDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _responsibilityRepository.GetByIdAsync(updateDto.Id);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Responsibility not found");
+
+        updateDto.UpdateEntity(entity);
+
+        await _responsibilityRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Responsibility updated: {ResponsibilityId}", updateDto.Id);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteResponsibilityAsync(Guid responsibilityId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _responsibilityRepository.GetByIdAsync(responsibilityId);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Responsibility not found");
+
+        await _responsibilityRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Responsibility deleted: {ResponsibilityId}", responsibilityId);
+
+        return true;
+    }
+
+    #endregion
+
+    #region Qualification Operations
+
+    public async Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+
+        await _qualificationRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        entity = await _qualificationRepository.GetQueryable()
+            .Include(q => q.Qualification)
+            .FirstOrDefaultAsync(q => q.Id == entity.Id, cancellationToken);
+
+        _logger.LogInformation("Qualification added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+
+        return entity!.ToDto();
+    }
+
+    public async Task<IEnumerable<JobQualificationDto>> GetQualificationsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _qualificationRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobQualificationDto> UpdateQualificationAsync(UpdateJobQualificationDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _qualificationRepository.GetQueryable()
+            .Include(q => q.Qualification)
+            .FirstOrDefaultAsync(q => q.Id == updateDto.Id, cancellationToken);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Qualification not found");
+
+        updateDto.UpdateEntity(entity);
+
+        await _qualificationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Qualification updated: {QualificationId}", updateDto.Id);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteQualificationAsync(Guid qualificationId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _qualificationRepository.GetByIdAsync(qualificationId);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Qualification not found");
+
+        await _qualificationRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Qualification deleted: {QualificationId}", qualificationId);
+
+        return true;
+    }
+
+    #endregion
+
+    #region Competency Operations
+
+    public async Task<JobCompetencyDto> AddCompetencyAsync(CreateJobCompetencyDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+
+        await _competencyRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Competency added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobCompetencyDto>> GetCompetenciesAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _competencyRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobCompetencyDto> UpdateCompetencyAsync(UpdateJobCompetencyDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _competencyRepository.GetByIdAsync(updateDto.Id);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Competency not found");
+
+        updateDto.UpdateEntity(entity);
+
+        await _competencyRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Competency updated: {CompetencyId}", updateDto.Id);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteCompetencyAsync(Guid competencyId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _competencyRepository.GetByIdAsync(competencyId);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Competency not found");
+
+        await _competencyRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Competency deleted: {CompetencyId}", competencyId);
+
+        return true;
+    }
+
+    #endregion
+
+    #region Physical Demand Operations
+
+    public async Task<JobPhysicalDemandDto> AddPhysicalDemandAsync(CreateJobPhysicalDemandDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _physicalDemandRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Physical demand added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobPhysicalDemandDto>> GetPhysicalDemandsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _physicalDemandRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobPhysicalDemandDto> UpdatePhysicalDemandAsync(UpdateJobPhysicalDemandDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _physicalDemandRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Physical demand not found");
+        updateDto.UpdateEntity(entity);
+        await _physicalDemandRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Physical demand updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeletePhysicalDemandAsync(Guid demandId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _physicalDemandRepository.GetByIdAsync(demandId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Physical demand not found");
+        await _physicalDemandRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Physical demand deleted: {Id}", demandId);
+        return true;
+    }
+
+    #endregion
+
+    #region Working Condition Operations
+
+    public async Task<JobWorkingConditionDto> AddWorkingConditionAsync(CreateJobWorkingConditionDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _workingConditionRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Working condition added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobWorkingConditionDto>> GetWorkingConditionsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _workingConditionRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobWorkingConditionDto> UpdateWorkingConditionAsync(UpdateJobWorkingConditionDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _workingConditionRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Working condition not found");
+        updateDto.UpdateEntity(entity);
+        await _workingConditionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Working condition updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteWorkingConditionAsync(Guid conditionId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _workingConditionRepository.GetByIdAsync(conditionId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Working condition not found");
+        await _workingConditionRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Working condition deleted: {Id}", conditionId);
+        return true;
+    }
+
+    #endregion
+
+    #region Equipment Tool Operations
+
+    public async Task<JobEquipmentToolDto> AddEquipmentToolAsync(CreateJobEquipmentToolDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _equipmentToolRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Equipment tool added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobEquipmentToolDto>> GetEquipmentToolsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _equipmentToolRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobEquipmentToolDto> UpdateEquipmentToolAsync(UpdateJobEquipmentToolDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _equipmentToolRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment tool not found");
+        updateDto.UpdateEntity(entity);
+        await _equipmentToolRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Equipment tool updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteEquipmentToolAsync(Guid toolId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _equipmentToolRepository.GetByIdAsync(toolId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment tool not found");
+        await _equipmentToolRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Equipment tool deleted: {Id}", toolId);
+        return true;
+    }
+
+    #endregion
+
+    #region Reporting Relationship Operations
+
+    public async Task<JobReportingRelationshipDto> AddReportingRelationshipAsync(CreateJobReportingRelationshipDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _reportingRelationshipRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Reporting relationship added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobReportingRelationshipDto>> GetReportingRelationshipsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _reportingRelationshipRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobReportingRelationshipDto> UpdateReportingRelationshipAsync(UpdateJobReportingRelationshipDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _reportingRelationshipRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Reporting relationship not found");
+        updateDto.UpdateEntity(entity);
+        await _reportingRelationshipRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Reporting relationship updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteReportingRelationshipAsync(Guid relationshipId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _reportingRelationshipRepository.GetByIdAsync(relationshipId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Reporting relationship not found");
+        await _reportingRelationshipRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Reporting relationship deleted: {Id}", relationshipId);
+        return true;
+    }
+
+    #endregion
+
+    #region Duty Item Operations
+
+    public async Task<JobDutyItemDto> AddDutyItemAsync(CreateJobDutyItemDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        if (entity.SequenceNumber <= 0)
+            entity.SequenceNumber = await _dutyItemRepository.GetNextSequenceNumberAsync(createDto.JobDescriptionId);
+        await _dutyItemRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Duty item added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobDutyItemDto>> GetDutyItemsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _dutyItemRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobDutyItemDto> UpdateDutyItemAsync(UpdateJobDutyItemDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _dutyItemRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Duty item not found");
+        updateDto.UpdateEntity(entity);
+        await _dutyItemRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Duty item updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteDutyItemAsync(Guid dutyItemId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _dutyItemRepository.GetByIdAsync(dutyItemId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Duty item not found");
+        await _dutyItemRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Duty item deleted: {Id}", dutyItemId);
+        return true;
+    }
+
+    #endregion
+
+    #region PPE Requirement Operations
+
+    public async Task<JobPpeRequirementDto> AddPpeRequirementAsync(CreateJobPpeRequirementDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _ppeRequirementRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        entity = await _ppeRequirementRepository.GetQueryable()
+            .Include(p => p.PpeType)
+            .FirstOrDefaultAsync(p => p.Id == entity.Id, cancellationToken);
+
+        _logger.LogInformation("PPE requirement added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity!.ToDto();
+    }
+
+    public async Task<IEnumerable<JobPpeRequirementDto>> GetPpeRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _ppeRequirementRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobPpeRequirementDto> UpdatePpeRequirementAsync(UpdateJobPpeRequirementDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _ppeRequirementRepository.GetQueryable()
+            .Include(p => p.PpeType)
+            .FirstOrDefaultAsync(p => p.Id == updateDto.Id, cancellationToken);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("PPE requirement not found");
+        updateDto.UpdateEntity(entity);
+        await _ppeRequirementRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("PPE requirement updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeletePpeRequirementAsync(Guid ppeRequirementId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _ppeRequirementRepository.GetByIdAsync(ppeRequirementId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("PPE requirement not found");
+        await _ppeRequirementRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("PPE requirement deleted: {Id}", ppeRequirementId);
+        return true;
+    }
+
+    #endregion
+
+    #region Equipment Training Operations
+
+    public async Task<JobEquipmentTrainingDto> AddEquipmentTrainingAsync(CreateJobEquipmentTrainingDto createDto, CancellationToken cancellationToken = default)
+    {
+        var tool = await _equipmentToolRepository.GetByIdAsync(createDto.JobEquipmentToolId);
+        if (tool == null || tool.TenantId != GetTenantId())
+            throw new ArgumentException("Equipment tool not found");
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _equipmentTrainingRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        entity = await _equipmentTrainingRepository.GetQueryable()
+            .Include(t => t.TrainingProgram)
+            .FirstOrDefaultAsync(t => t.Id == entity.Id, cancellationToken);
+
+        _logger.LogInformation("Equipment training added to tool: {ToolId}", createDto.JobEquipmentToolId);
+        return entity!.ToDto();
+    }
+
+    public async Task<IEnumerable<JobEquipmentTrainingDto>> GetEquipmentTrainingsAsync(Guid jobEquipmentToolId, CancellationToken cancellationToken = default)
+    {
+        var tool = await _equipmentToolRepository.GetByIdAsync(jobEquipmentToolId);
+        if (tool == null || tool.TenantId != GetTenantId())
+            throw new ArgumentException("Equipment tool not found");
+        var tenantId = GetTenantId();
+        var entities = await _equipmentTrainingRepository.GetByEquipmentToolIdAsync(jobEquipmentToolId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobEquipmentTrainingDto> UpdateEquipmentTrainingAsync(UpdateJobEquipmentTrainingDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _equipmentTrainingRepository.GetQueryable()
+            .Include(t => t.TrainingProgram)
+            .FirstOrDefaultAsync(t => t.Id == updateDto.Id, cancellationToken);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment training not found");
+        updateDto.UpdateEntity(entity);
+        await _equipmentTrainingRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Equipment training updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteEquipmentTrainingAsync(Guid equipmentTrainingId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _equipmentTrainingRepository.GetByIdAsync(equipmentTrainingId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment training not found");
+        await _equipmentTrainingRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Equipment training deleted: {Id}", equipmentTrainingId);
+        return true;
+    }
+
+    #endregion
+
+    #region Medical Requirement Operations
+
+    public async Task<JobMedicalRequirementDto> AddMedicalRequirementAsync(CreateJobMedicalRequirementDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        await _medicalRequirementRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Medical requirement added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobMedicalRequirementDto>> GetMedicalRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+        var entities = await _medicalRequirementRepository.GetByJobDescriptionIdAsync(jobDescriptionId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobMedicalRequirementDto> UpdateMedicalRequirementAsync(UpdateJobMedicalRequirementDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _medicalRequirementRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Medical requirement not found");
+        updateDto.UpdateEntity(entity);
+        await _medicalRequirementRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Medical requirement updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteMedicalRequirementAsync(Guid medicalRequirementId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _medicalRequirementRepository.GetByIdAsync(medicalRequirementId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Medical requirement not found");
+        await _medicalRequirementRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Medical requirement deleted: {Id}", medicalRequirementId);
+        return true;
+    }
+
+    #endregion
+
+    #region Job Evaluation / Valuation
+
+    public async Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var jd = await _jobDescriptionRepository.GetQueryable()
+            .Include(x => x.SuggestedSalaryGrade)
+            .FirstOrDefaultAsync(x => x.Id == jobDescriptionId && x.TenantId == tenantId, cancellationToken);
+        if (jd == null)
+            throw new ArgumentException($"Job description with ID '{jobDescriptionId}' not found.");
+
+        var qualifications = (await _qualificationRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
+            .Where(q => q.TenantId == tenantId).ToList();
+        var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
+            .Where(c => c.TenantId == tenantId).ToList();
+
+        var totalQual = qualifications.Sum(q => q.MonetaryValue ?? 0m);
+        var totalComp = competencies.Sum(c => c.MonetaryValue ?? 0m);
+        var roleValue = jd.RoleIntrinsicValue ?? 0m;
+        var totalEstimated = totalQual + totalComp + roleValue;
+
+        // Midpoint blends the computed value with any external industry benchmark.
+        decimal midpoint;
+        if (jd.IndustryBenchmarkSalary.HasValue && jd.IndustryBenchmarkSalary.Value > 0 && totalEstimated > 0)
+            midpoint = (totalEstimated + jd.IndustryBenchmarkSalary.Value) / 2m;
+        else if (jd.IndustryBenchmarkSalary.HasValue && jd.IndustryBenchmarkSalary.Value > 0)
+            midpoint = jd.IndustryBenchmarkSalary.Value;
+        else
+            midpoint = totalEstimated;
+
+        decimal? low = midpoint > 0 ? Math.Round(midpoint * 0.9m, 2) : (decimal?)null;
+        decimal? high = midpoint > 0 ? Math.Round(midpoint * 1.1m, 2) : (decimal?)null;
+
+        // Match a salary grade whose band contains the midpoint (tenant-scoped); else nearest by min salary.
+        SalaryGrade? suggestedGrade = null;
+        if (midpoint > 0)
+        {
+            var grades = await _salaryGradeRepository.GetAllAsync(jd.TenantId, includeInactive: false, cancellationToken);
+            suggestedGrade = grades.FirstOrDefault(g => g.MinSalary <= midpoint && midpoint <= g.MaxSalary)
+                          ?? grades.OrderBy(g => Math.Abs(g.MinSalary - midpoint)).FirstOrDefault();
+        }
+
+        // Persist the computed estimate + suggested grade on the JD.
+        jd.EstimatedSalaryLow = low;
+        jd.EstimatedSalaryHigh = high;
+        jd.SuggestedSalaryGradeId = suggestedGrade?.Id;
+        await _jobDescriptionRepository.UpdateAsync(jd);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return new JobValuationSummaryDto
+        {
+            JobDescriptionId = jd.Id,
+            JobTitle = jd.JobTitle,
+            TotalQualificationValue = totalQual,
+            TotalCompetencyValue = totalComp,
+            RoleIntrinsicValue = roleValue,
+            RoleCriticality = jd.RoleCriticality,
+            IndustryBenchmarkSalary = jd.IndustryBenchmarkSalary,
+            EstimatedSalaryLow = low,
+            EstimatedSalaryHigh = high,
+            SuggestedSalaryGradeId = suggestedGrade?.Id,
+            SuggestedSalaryGradeName = suggestedGrade?.Name,
+            SuggestedGradeMinSalary = suggestedGrade?.MinSalary,
+            SuggestedGradeMaxSalary = suggestedGrade?.MaxSalary,
+            ValuationNotes = jd.ValuationNotes,
+            QualificationLines = qualifications
+                .Select(q => new JobValuationLineDto { Id = q.Id, Name = q.Title, MonetaryValue = q.MonetaryValue })
+                .ToList(),
+            CompetencyLines = competencies
+                .Select(c => new JobValuationLineDto { Id = c.Id, Name = c.CompetencyName, MonetaryValue = c.MonetaryValue })
+                .ToList()
+        };
+    }
+
+    #endregion
+
+    #region Responsibility KPI Operations
+
+    public async Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default)
+    {
+        var responsibility = await _responsibilityRepository.GetByIdAsync(createDto.JobResponsibilityId);
+        if (responsibility == null || responsibility.TenantId != GetTenantId())
+            throw new ArgumentException("Responsibility not found");
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+        if (entity.SequenceNumber <= 0)
+        {
+            var existing = await _kpiRepository.GetByResponsibilityIdAsync(createDto.JobResponsibilityId);
+            entity.SequenceNumber = (existing.Any() ? existing.Max(k => k.SequenceNumber) : 0) + 1;
+        }
+        await _kpiRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("KPI added to responsibility: {ResponsibilityId}", createDto.JobResponsibilityId);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<JobResponsibilityKpiDto>> GetResponsibilityKpisAsync(Guid responsibilityId, CancellationToken cancellationToken = default)
+    {
+        var responsibility = await _responsibilityRepository.GetByIdAsync(responsibilityId);
+        if (responsibility == null || responsibility.TenantId != GetTenantId())
+            throw new ArgumentException("Responsibility not found");
+        var tenantId = GetTenantId();
+        var entities = await _kpiRepository.GetByResponsibilityIdAsync(responsibilityId);
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<JobResponsibilityKpiDto> UpdateResponsibilityKpiAsync(UpdateJobResponsibilityKpiDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _kpiRepository.GetByIdAsync(updateDto.Id);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("KPI not found");
+        updateDto.UpdateEntity(entity);
+        await _kpiRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("KPI updated: {Id}", updateDto.Id);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteResponsibilityKpiAsync(Guid kpiId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _kpiRepository.GetByIdAsync(kpiId);
+        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("KPI not found");
+        await _kpiRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("KPI deleted: {Id}", kpiId);
+        return true;
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private async Task<string> GenerateJobDescriptionNumberAsync(CancellationToken cancellationToken)
+    {
+        var year = DateTime.UtcNow.Year;
+        var tenantId = GetTenantId();
+        var count = await _jobDescriptionRepository.GetQueryable()
+            .CountAsync(jd => jd.TenantId == tenantId && jd.CreatedAt.Year == year, cancellationToken);
+
+        return $"JD-{year}-{(count + 1):D5}";
+    }
+
+    #endregion
+}
+
+#endregion Job Description Service
+
+#region Manpower Budget Service
+
+public class ManpowerBudgetService : IManpowerBudgetService
+{
+    private readonly IManpowerBudgetRepository _budgetRepository;
+    private readonly IManpowerBudgetLineRepository _budgetLineRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<ManpowerBudgetService> _logger;
+
+    public ManpowerBudgetService(
+        IManpowerBudgetRepository budgetRepository,
+        IManpowerBudgetLineRepository budgetLineRepository,
+        ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        ILogger<ManpowerBudgetService> logger)
+    {
+        _budgetRepository = budgetRepository;
+        _budgetLineRepository = budgetLineRepository;
+        _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes reads/writes to
+    // the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private async Task<ManpowerBudget> GetOwnedBudgetAsync(Guid id)
+    {
+        var entity = await _budgetRepository.GetByIdAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Manpower budget with ID '{id}' not found.");
+        return entity;
+    }
+
+    public async Task<ManpowerBudgetDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _budgetRepository.GetQueryable()
+            .Include(b => b.OrganizationLevel)
+            .Include(b => b.OrganizationUnit)
+            .Include(b => b.ApprovedBy)
+            .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Manpower budget with ID '{id}' not found.");
+
+        return entity.ToDto();
+    }
+
+    public async Task<ManpowerBudgetDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _budgetRepository.GetQueryable()
+            .Include(b => b.OrganizationLevel)
+            .Include(b => b.OrganizationUnit)
+            .Include(b => b.ApprovedBy)
+            .Include(b => b.BudgetLines).ThenInclude(l => l.Position)
+            .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Manpower budget with ID '{id}' not found.");
+
+        return entity.ToDetailDto();
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetDto>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _budgetRepository.GetQueryable()
+            .Where(b => b.TenantId == tenantId)
+            .Include(b => b.OrganizationLevel)
+            .Include(b => b.OrganizationUnit)
+            .ToListAsync(cancellationToken);
+
+        return entities.ToDtoList();
+    }
+
+    public async Task<PagedResult<ManpowerBudgetDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var query = _budgetRepository.GetQueryable()
+            .Where(b => b.TenantId == tenantId)
+            .Include(b => b.OrganizationLevel)
+            .Include(b => b.OrganizationUnit);
+
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(b => b.FiscalYear)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<ManpowerBudgetDto>
+        {
+            Items = items.ToDtoList(),
+            TotalCount = totalCount,
+            Page = pageNumber,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByFiscalYearAsync(int fiscalYear, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = (await _budgetRepository.GetByFiscalYearAsync(fiscalYear)).Where(b => b.TenantId == tenantId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByOrganizationUnitIdAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = (await _budgetRepository.GetByOrganizationUnitIdAsync(organizationUnitId)).Where(b => b.TenantId == tenantId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByOrganizationLevelIdAsync(Guid organizationLevelId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = (await _budgetRepository.GetByOrganizationLevelIdAsync(organizationLevelId)).Where(b => b.TenantId == tenantId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetSummaryDto>> GetByStatusAsync(ManpowerBudgetStatus status, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = (await _budgetRepository.GetByStatusAsync(status)).Where(b => b.TenantId == tenantId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<ManpowerBudgetDto?> GetCurrentBudgetForOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _budgetRepository.GetCurrentBudgetForOrganizationUnitAsync(organizationUnitId);
+        return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetSummaryDto>> GetPendingApprovalsAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = (await _budgetRepository.GetPendingApprovalsAsync()).Where(b => b.TenantId == tenantId);
+        return entities.ToSummaryDtoList();
+    }
+
+    public async Task<ManpowerBudgetDto> CreateAsync(CreateManpowerBudgetDto createDto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
+        entity.BudgetNumber = await GenerateBudgetNumberAsync(cancellationToken);
+        entity.Status = ManpowerBudgetStatus.Draft;
+        entity.TotalBudget = createDto.SalaryBudget + createDto.BenefitsBudget + createDto.RecruitmentBudget + createDto.TrainingBudget;
+
+        await _budgetRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Add budget lines if provided
+        if (createDto.BudgetLines?.Any() == true)
+        {
+            foreach (var lineDto in createDto.BudgetLines)
+            {
+                lineDto.ManpowerBudgetId = entity.Id;
+                var line = lineDto.ToEntity();
+                line.TenantId = tenantId;
+                await _budgetLineRepository.AddAsync(line);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        _logger.LogInformation("Manpower budget created: {BudgetNumber}", entity.BudgetNumber);
+
+        return entity.ToDto();
+    }
+
+    public async Task<ManpowerBudgetDto> UpdateAsync(UpdateManpowerBudgetDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _budgetRepository.GetQueryable()
+            .Include(b => b.OrganizationLevel)
+            .Include(b => b.OrganizationUnit)
+            .FirstOrDefaultAsync(b => b.Id == updateDto.Id && b.TenantId == tenantId, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Manpower budget with ID '{updateDto.Id}' not found.");
+
+        if (entity.Status == ManpowerBudgetStatus.Approved)
+            throw new InvalidOperationException("Cannot update an approved budget.");
+
+        updateDto.UpdateEntity(entity);
+        entity.TotalBudget = updateDto.SalaryBudget + updateDto.BenefitsBudget + updateDto.RecruitmentBudget + updateDto.TrainingBudget;
+        entity.Variance = entity.TotalBudget - updateDto.ActualSpent;
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget updated: {BudgetNumber}", entity.BudgetNumber);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> SubmitForApprovalAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+
+        if (entity.Status != ManpowerBudgetStatus.Draft)
+            throw new InvalidOperationException("Only draft budgets can be submitted for approval.");
+
+        entity.Status = ManpowerBudgetStatus.Submitted;
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget submitted for approval: {BudgetNumber}", entity.BudgetNumber);
+
+        return true;
+    }
+
+    public async Task<bool> ApproveAsync(ApproveManpowerBudgetDto approveDto, Guid approvedById, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(approveDto.BudgetId);
+
+        if (entity.Status != ManpowerBudgetStatus.Submitted && entity.Status != ManpowerBudgetStatus.UnderReview)
+            throw new InvalidOperationException("Only submitted budgets can be approved.");
+
+        entity.ApprovedById = approvedById;
+        entity.ApprovalDate = DateTime.UtcNow;
+        entity.Status = ManpowerBudgetStatus.Approved;
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget approved: {BudgetNumber}", entity.BudgetNumber);
+
+        return true;
+    }
+
+    public async Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+
+        entity.Status = ManpowerBudgetStatus.Rejected;
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget rejected: {BudgetNumber}", entity.BudgetNumber);
+
+        return true;
+    }
+
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(id);
+
+        if (entity.Status == ManpowerBudgetStatus.Approved)
+            throw new InvalidOperationException("Cannot delete an approved budget.");
+
+        await _budgetRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget deleted: {Id}", id);
+
+        return true;
+    }
+
+    #region Budget Line Operations
+
+    public async Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedBudgetAsync(createDto.ManpowerBudgetId);
+        var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
+
+        await _budgetLineRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        entity = await _budgetLineRepository.GetQueryable()
+            .Include(l => l.Position)
+            .FirstOrDefaultAsync(l => l.Id == entity.Id, cancellationToken);
+
+        _logger.LogInformation("Budget line added to budget: {BudgetId}", createDto.ManpowerBudgetId);
+
+        return entity!.ToDto();
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetLineDto>> GetBudgetLinesAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedBudgetAsync(budgetId);
+        var tenantId = GetTenantId();
+        var entities = await _budgetLineRepository.GetByBudgetIdAsync(budgetId);
+        return entities.Where(l => l.TenantId == tenantId).ToDtoList();
+    }
+
+    public async Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var entity = await _budgetLineRepository.GetQueryable()
+            .Include(l => l.Position)
+            .FirstOrDefaultAsync(l => l.Id == updateDto.Id, cancellationToken);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Budget line not found");
+
+        updateDto.UpdateEntity(entity);
+
+        await _budgetLineRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Budget line updated: {LineId}", updateDto.Id);
+
+        return entity.ToDto();
+    }
+
+    public async Task<bool> DeleteBudgetLineAsync(Guid lineId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _budgetLineRepository.GetByIdAsync(lineId);
+
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException("Budget line not found");
+
+        await _budgetLineRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Budget line deleted: {LineId}", lineId);
+
+        return true;
+    }
+
+    public async Task<IEnumerable<ManpowerBudgetLineDto>> GetCriticalPositionsAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedBudgetAsync(budgetId);
+        var tenantId = GetTenantId();
+        var entities = await _budgetLineRepository.GetCriticalPositionsAsync(budgetId);
+        return entities.Where(l => l.TenantId == tenantId).ToDtoList();
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private async Task<string> GenerateBudgetNumberAsync(CancellationToken cancellationToken)
+    {
+        var year = DateTime.UtcNow.Year;
+        var tenantId = GetTenantId();
+        var count = await _budgetRepository.GetQueryable()
+            .CountAsync(b => b.TenantId == tenantId && b.FiscalYear == year, cancellationToken);
+
+        return $"MPB-{year}-{(count + 1):D4}";
+    }
+
+    #endregion
+}
+
+#endregion Manpower Budget Service

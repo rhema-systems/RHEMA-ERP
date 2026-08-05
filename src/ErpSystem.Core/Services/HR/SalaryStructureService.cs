@@ -25,6 +25,8 @@ public class SalaryStructureService :
     ISalaryNotchService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ISalaryStructureProjectionService _projectionService;
     private readonly ILogger<SalaryStructureService> _logger;
 
     private readonly IGenericRepository<SalaryGrade> _salaryGradeRepository;
@@ -36,13 +38,52 @@ public class SalaryStructureService :
         IGenericRepository<SalaryLevel> salaryLevelRepository,
         IGenericRepository<SalaryNotch> salaryNotchRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
+        ISalaryStructureProjectionService projectionService,
         ILogger<SalaryStructureService> logger)
     {
         _salaryGradeRepository = salaryGradeRepository;
         _salaryLevelRepository = salaryLevelRepository;
         _salaryNotchRepository = salaryNotchRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
+        _projectionService = projectionService;
         _logger = logger;
+    }
+
+    // Payroll owns the salary structure; these tables are a mirror of it (see
+    // ISalaryStructureProjectionService). Because the payroll module cannot be modified to push changes,
+    // HR pulls them on read. The call short-circuits cheaply when payroll has not changed.
+    private async Task EnsureProjectedAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _projectionService.EnsureCurrentAsync(tenantId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // A projection failure must not take down a read. Serve what is already mirrored.
+            _logger.LogError(ex, "Salary structure projection failed for tenant {TenantId}; serving the existing mirror.", tenantId);
+        }
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
+    // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
+    private Guid RequireCurrentTenant(Guid tenantId)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        return current;
     }
 
     #region Salary Grades
@@ -50,6 +91,7 @@ public class SalaryStructureService :
     public async Task<SalaryGradeDto> CreateGradeAsync(Guid tenantId, CreateSalaryGradeDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
         EnsureTenantMatches(dto.TenantId, tenantId, nameof(CreateSalaryGradeDto.TenantId));
 
         var code = NormalizeCode(dto.Code);
@@ -80,6 +122,7 @@ public class SalaryStructureService :
     public async Task<SalaryGradeDto> UpdateGradeAsync(Guid tenantId, UpdateSalaryGradeDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
         EnsureTenantMatches(dto.TenantId, tenantId, nameof(UpdateSalaryGradeDto.TenantId));
 
         var entity = await _salaryGradeRepository
@@ -116,6 +159,7 @@ public class SalaryStructureService :
 
     public async Task<SalaryGradeDto> SetGradeActiveAsync(Guid tenantId, Guid gradeId, bool isActive, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId && g.Id == gradeId)
             .FirstOrDefaultAsync(cancellationToken);
@@ -136,6 +180,7 @@ public class SalaryStructureService :
 
     public async Task<bool> DeleteGradeAsync(Guid tenantId, Guid gradeId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId && g.Id == gradeId)
             .FirstOrDefaultAsync(cancellationToken);
@@ -164,6 +209,9 @@ public class SalaryStructureService :
 
     public async Task<SalaryGradeDetailDto> GetGradeHierarchyAsync(Guid tenantId, Guid gradeId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var entity = await _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId && g.Id == gradeId)
             .AsNoTracking()
@@ -181,6 +229,9 @@ public class SalaryStructureService :
 
     public async Task<IReadOnlyList<SalaryGradeDto>> GetAllGradesAsync(Guid tenantId, bool includeInactive = true, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var query = _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId)
             .AsNoTracking();
@@ -206,8 +257,11 @@ public class SalaryStructureService :
         bool? isActive = null,
         CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         if (pageNumber <= 0) throw new ArgumentOutOfRangeException(nameof(pageNumber));
         if (pageSize <= 0) throw new ArgumentOutOfRangeException(nameof(pageSize));
+
+        await EnsureProjectedAsync(tenantId, cancellationToken);
 
         var query = _salaryGradeRepository
             .GetQueryable(g => g.TenantId == tenantId)
@@ -249,6 +303,7 @@ public class SalaryStructureService :
     public async Task<SalaryLevelDto> CreateLevelAsync(Guid tenantId, CreateSalaryLevelDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
         EnsureTenantMatches(dto.TenantId, tenantId, nameof(CreateSalaryLevelDto.TenantId));
 
         // Ensure parent grade exists
@@ -290,6 +345,7 @@ public class SalaryStructureService :
     public async Task<SalaryLevelDto> UpdateLevelAsync(Guid tenantId, UpdateSalaryLevelDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
         EnsureTenantMatches(dto.TenantId, tenantId, nameof(UpdateSalaryLevelDto.TenantId));
 
         var entity = await _salaryLevelRepository
@@ -338,6 +394,7 @@ public class SalaryStructureService :
 
     public async Task<SalaryLevelDetailDto> GetLevelDetailAsync(Guid tenantId, Guid levelId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var entity = await _salaryLevelRepository
             .GetQueryable(l => l.TenantId == tenantId && l.Id == levelId)
             .AsNoTracking()
@@ -354,6 +411,9 @@ public class SalaryStructureService :
 
     public async Task<IReadOnlyList<SalaryLevelDto>> GetLevelsByGradeAsync(Guid tenantId, Guid gradeId, bool includeInactive = true, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var query = _salaryLevelRepository
             .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == gradeId)
             .AsNoTracking();
@@ -373,6 +433,7 @@ public class SalaryStructureService :
 
     public async Task<bool> DeleteLevelAsync(Guid tenantId, Guid levelId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var level = await _salaryLevelRepository
             .GetQueryable(l => l.TenantId == tenantId && l.Id == levelId)
             .FirstOrDefaultAsync(cancellationToken);
@@ -401,6 +462,7 @@ public class SalaryStructureService :
 
     public async Task<SalaryLevelDto> SetLevelActiveAsync(Guid tenantId, Guid levelId, bool isActive, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var level = await _salaryLevelRepository
             .GetQueryable(l => l.TenantId == tenantId && l.Id == levelId)
             .FirstOrDefaultAsync(cancellationToken);
@@ -421,6 +483,7 @@ public class SalaryStructureService :
 
     public async Task ResequenceLevelsAsync(Guid tenantId, Guid gradeId, IReadOnlyList<Guid> orderedLevelIds, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         ArgumentNullException.ThrowIfNull(orderedLevelIds);
 
         if (orderedLevelIds.Count == 0)
@@ -467,29 +530,20 @@ public class SalaryStructureService :
             sequences[orderedLevelIds[i]] = i + 1;
         }
 
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            var levels = await _salaryLevelRepository
-                .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == gradeId && existingIds.Contains(l.Id))
-                .ToListAsync(cancellationToken);
+        var levels = await _salaryLevelRepository
+            .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == gradeId && existingIds.Contains(l.Id))
+            .ToListAsync(cancellationToken);
 
-            foreach (var level in levels)
+        foreach (var level in levels)
+        {
+            if (sequences.TryGetValue(level.Id, out var sequence))
             {
-                if (sequences.TryGetValue(level.Id, out var sequence))
-                {
-                    level.Sequence = sequence;
-                }
+                level.Sequence = sequence;
             }
+        }
 
-            await _salaryLevelRepository.UpdateRangeAsync(levels);
-            await _unitOfWork.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+        await _salaryLevelRepository.UpdateRangeAsync(levels);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Salary levels resequenced for grade: {GradeId}", gradeId);
     }
@@ -501,6 +555,7 @@ public class SalaryStructureService :
     public async Task<SalaryNotchDto> CreateNotchAsync(Guid tenantId, CreateSalaryNotchDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
         EnsureTenantMatches(dto.TenantId, tenantId, nameof(CreateSalaryNotchDto.TenantId));
 
         // Ensure parent level exists
@@ -550,6 +605,7 @@ public class SalaryStructureService :
     public async Task<SalaryNotchDto> UpdateNotchAsync(Guid tenantId, UpdateSalaryNotchDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        tenantId = RequireCurrentTenant(tenantId);
         EnsureTenantMatches(dto.TenantId, tenantId, nameof(UpdateSalaryNotchDto.TenantId));
 
         var entity = await _salaryNotchRepository
@@ -615,6 +671,7 @@ public class SalaryStructureService :
 
     public async Task<bool> DeleteNotchAsync(Guid tenantId, Guid notchId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         // Hard delete via EF Core translated DELETE. No DbContext dependency needed here.
         var deleted = await _salaryNotchRepository
             .GetQueryable(n => n.TenantId == tenantId && n.Id == notchId)
@@ -632,6 +689,9 @@ public class SalaryStructureService :
 
     public async Task<IReadOnlyList<SalaryNotchDto>> GetNotchesByLevelAsync(Guid tenantId, Guid levelId, bool includeInactive = true, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
+        await EnsureProjectedAsync(tenantId, cancellationToken);
+
         var query = _salaryNotchRepository
             .GetQueryable(n => n.TenantId == tenantId && n.SalaryLevelId == levelId)
             .AsNoTracking();
@@ -650,6 +710,7 @@ public class SalaryStructureService :
 
     public async Task<SalaryNotchDto> GetNotchByIdAsync(Guid tenantId, Guid notchId, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var notch = await _salaryNotchRepository
             .GetQueryable(n => n.TenantId == tenantId && n.Id == notchId)
             .AsNoTracking()
@@ -665,6 +726,7 @@ public class SalaryStructureService :
 
     public async Task<SalaryNotchDto> SetNotchActiveAsync(Guid tenantId, Guid notchId, bool isActive, CancellationToken cancellationToken = default)
     {
+        tenantId = RequireCurrentTenant(tenantId);
         var notch = await _salaryNotchRepository
             .GetQueryable(n => n.TenantId == tenantId && n.Id == notchId)
             .FirstOrDefaultAsync(cancellationToken);

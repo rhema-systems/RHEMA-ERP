@@ -1,0 +1,926 @@
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.CompanySchedule;
+
+namespace ErpSystem.Core.Services.HR.Extensions;
+
+public static class CompanyScheduleMappingExtensions
+{
+    #region CompanyEvent
+
+    public static CompanyEventDto ToDto(this CompanyEvent entity)
+    {
+        return new CompanyEventDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            EventNumber = entity.EventNumber,
+            EventName = entity.EventName,
+            Description = entity.Description,
+            Category = entity.Category,
+            Type = entity.Type,
+            Priority = entity.Priority,
+            StartDate = entity.StartDate,
+            StartTime = entity.StartTime,
+            EndDate = entity.EndDate,
+            EndTime = entity.EndTime,
+            IsAllDayEvent = entity.IsAllDayEvent,
+            IsRecurring = entity.IsRecurring,
+            RecurrencePattern = entity.RecurrencePattern,
+            RecurrenceDetails = entity.RecurrenceDetails,
+            RecurrenceEndDate = entity.RecurrenceEndDate,
+            RecurrenceCount = entity.RecurrenceCount,
+            LocationType = entity.LocationType,
+            VenueName = entity.VenueName,
+            VenueAddress = entity.VenueAddress,
+            OnlineMeetingLink = entity.OnlineMeetingLink,
+            MeetingPassword = entity.MeetingPassword,
+            StationId = entity.StationId,
+            StationName = entity.Station?.Name,
+            OrganizerId = entity.OrganizerId,
+            OrganizerName = entity.Organizer?.FullName ?? string.Empty,
+            DepartmentId = entity.DepartmentId,
+            DepartmentName = entity.Department?.Name,
+            Scope = entity.Scope,
+            EstimatedAttendees = entity.EstimatedAttendees,
+            RequiresRsvp = entity.RequiresRsvp,
+            RsvpDeadline = entity.RsvpDeadline,
+            Visibility = entity.Visibility,
+            ShowOnCompanyCalendar = entity.ShowOnCompanyCalendar,
+            ShowOnIntranet = entity.ShowOnIntranet,
+            Status = entity.Status,
+            RequiresApproval = entity.RequiresApproval,
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy?.FullName,
+            ApprovalDate = entity.ApprovalDate,
+            HasBudget = entity.HasBudget,
+            BudgetAmount = entity.BudgetAmount,
+            ActualCost = entity.ActualCost,
+            BudgetCode = entity.BudgetCode,
+            RequiredResources = entity.RequiredResources,
+            CateringRequirements = entity.CateringRequirements,
+            TechnicalRequirements = entity.TechnicalRequirements,
+            SendReminders = entity.SendReminders,
+            ReminderDaysBefore = entity.ReminderDaysBefore,
+            ReminderSentDate = entity.ReminderSentDate,
+            ActualStartTime = entity.ActualStartTime,
+            ActualEndTime = entity.ActualEndTime,
+            ActualAttendance = entity.ActualAttendance,
+            OutcomeSummary = entity.OutcomeSummary,
+            IsCancelled = entity.IsCancelled,
+            CancellationDate = entity.CancellationDate,
+            CancellationReason = entity.CancellationReason,
+            IsRescheduled = entity.IsRescheduled,
+            RescheduledDate = entity.RescheduledDate,
+            RescheduleReason = entity.RescheduleReason,
+            AdditionalNotes = entity.AdditionalNotes,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static CompanyEventSummaryDto ToSummaryDto(this CompanyEvent entity)
+    {
+        return new CompanyEventSummaryDto
+        {
+            Id = entity.Id,
+            EventNumber = entity.EventNumber,
+            EventName = entity.EventName,
+            Category = entity.Category,
+            StartDate = entity.StartDate,
+            StartTime = entity.StartTime,
+            EndDate = entity.EndDate,
+            IsAllDayEvent = entity.IsAllDayEvent,
+            LocationType = entity.LocationType,
+            VenueName = entity.VenueName,
+            Status = entity.Status,
+            OrganizerName = entity.Organizer?.FullName ?? string.Empty,
+            EstimatedAttendees = entity.EstimatedAttendees
+        };
+    }
+
+    public static CompanyEventDetailDto ToDetailDto(this CompanyEvent entity)
+    {
+        var dto = new CompanyEventDetailDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            EventNumber = entity.EventNumber,
+            EventName = entity.EventName,
+            Description = entity.Description,
+            Category = entity.Category,
+            Type = entity.Type,
+            Priority = entity.Priority,
+            StartDate = entity.StartDate,
+            StartTime = entity.StartTime,
+            EndDate = entity.EndDate,
+            EndTime = entity.EndTime,
+            IsAllDayEvent = entity.IsAllDayEvent,
+            IsRecurring = entity.IsRecurring,
+            RecurrencePattern = entity.RecurrencePattern,
+            RecurrenceDetails = entity.RecurrenceDetails,
+            RecurrenceEndDate = entity.RecurrenceEndDate,
+            RecurrenceCount = entity.RecurrenceCount,
+            LocationType = entity.LocationType,
+            VenueName = entity.VenueName,
+            VenueAddress = entity.VenueAddress,
+            OnlineMeetingLink = entity.OnlineMeetingLink,
+            MeetingPassword = entity.MeetingPassword,
+            StationId = entity.StationId,
+            StationName = entity.Station?.Name,
+            OrganizerId = entity.OrganizerId,
+            OrganizerName = entity.Organizer?.FullName ?? string.Empty,
+            DepartmentId = entity.DepartmentId,
+            DepartmentName = entity.Department?.Name,
+            Scope = entity.Scope,
+            EstimatedAttendees = entity.EstimatedAttendees,
+            RequiresRsvp = entity.RequiresRsvp,
+            RsvpDeadline = entity.RsvpDeadline,
+            Visibility = entity.Visibility,
+            ShowOnCompanyCalendar = entity.ShowOnCompanyCalendar,
+            ShowOnIntranet = entity.ShowOnIntranet,
+            Status = entity.Status,
+            RequiresApproval = entity.RequiresApproval,
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy?.FullName,
+            ApprovalDate = entity.ApprovalDate,
+            HasBudget = entity.HasBudget,
+            BudgetAmount = entity.BudgetAmount,
+            ActualCost = entity.ActualCost,
+            BudgetCode = entity.BudgetCode,
+            RequiredResources = entity.RequiredResources,
+            CateringRequirements = entity.CateringRequirements,
+            TechnicalRequirements = entity.TechnicalRequirements,
+            SendReminders = entity.SendReminders,
+            ReminderDaysBefore = entity.ReminderDaysBefore,
+            ReminderSentDate = entity.ReminderSentDate,
+            ActualStartTime = entity.ActualStartTime,
+            ActualEndTime = entity.ActualEndTime,
+            ActualAttendance = entity.ActualAttendance,
+            OutcomeSummary = entity.OutcomeSummary,
+            IsCancelled = entity.IsCancelled,
+            CancellationDate = entity.CancellationDate,
+            CancellationReason = entity.CancellationReason,
+            IsRescheduled = entity.IsRescheduled,
+            RescheduledDate = entity.RescheduledDate,
+            RescheduleReason = entity.RescheduleReason,
+            AdditionalNotes = entity.AdditionalNotes,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy,
+            Participants = entity.Participants?.Select(p => p.ToDto()).ToList() ?? new List<EventParticipantDto>(),
+            AttendanceRecords = entity.AttendanceRecords?.Select(a => a.ToDto()).ToList() ?? new List<EventAttendanceDto>(),
+            Attachments = entity.Attachments?.Select(a => a.ToDto()).ToList() ?? new List<EventAttachmentDto>(),
+            Tasks = entity.Tasks?.Select(t => t.ToDto()).ToList() ?? new List<EventTaskDto>()
+        };
+
+        return dto;
+    }
+
+    public static CompanyEvent ToEntity(this CreateCompanyEventDto dto)
+    {
+        return new CompanyEvent
+        {
+            EventName = dto.EventName,
+            Description = dto.Description,
+            Category = dto.Category,
+            Type = dto.Type,
+            Priority = dto.Priority,
+            StartDate = dto.StartDate,
+            StartTime = dto.StartTime,
+            EndDate = dto.EndDate,
+            EndTime = dto.EndTime,
+            IsAllDayEvent = dto.IsAllDayEvent,
+            IsRecurring = dto.IsRecurring,
+            RecurrencePattern = dto.RecurrencePattern,
+            RecurrenceDetails = dto.RecurrenceDetails,
+            RecurrenceEndDate = dto.RecurrenceEndDate,
+            RecurrenceCount = dto.RecurrenceCount,
+            LocationType = dto.LocationType,
+            VenueName = dto.VenueName,
+            VenueAddress = dto.VenueAddress,
+            OnlineMeetingLink = dto.OnlineMeetingLink,
+            MeetingPassword = dto.MeetingPassword,
+            StationId = dto.StationId,
+            DepartmentId = dto.DepartmentId,
+            Scope = dto.Scope,
+            EstimatedAttendees = dto.EstimatedAttendees,
+            RequiresRsvp = dto.RequiresRsvp,
+            RsvpDeadline = dto.RsvpDeadline,
+            Visibility = dto.Visibility,
+            ShowOnCompanyCalendar = dto.ShowOnCompanyCalendar,
+            ShowOnIntranet = dto.ShowOnIntranet,
+            RequiresApproval = dto.RequiresApproval,
+            HasBudget = dto.HasBudget,
+            BudgetAmount = dto.BudgetAmount,
+            BudgetCode = dto.BudgetCode,
+            RequiredResources = dto.RequiredResources,
+            CateringRequirements = dto.CateringRequirements,
+            TechnicalRequirements = dto.TechnicalRequirements,
+            SendReminders = dto.SendReminders,
+            ReminderDaysBefore = dto.ReminderDaysBefore,
+            AdditionalNotes = dto.AdditionalNotes
+        };
+    }
+
+    public static void UpdateEntity(this UpdateCompanyEventDto dto, CompanyEvent entity)
+    {
+        entity.EventName = dto.EventName;
+        entity.Description = dto.Description;
+        entity.Category = dto.Category;
+        entity.Type = dto.Type;
+        entity.Priority = dto.Priority;
+        entity.StartDate = dto.StartDate;
+        entity.StartTime = dto.StartTime;
+        entity.EndDate = dto.EndDate;
+        entity.EndTime = dto.EndTime;
+        entity.IsAllDayEvent = dto.IsAllDayEvent;
+        entity.LocationType = dto.LocationType;
+        entity.VenueName = dto.VenueName;
+        entity.VenueAddress = dto.VenueAddress;
+        entity.OnlineMeetingLink = dto.OnlineMeetingLink;
+        entity.MeetingPassword = dto.MeetingPassword;
+        entity.StationId = dto.StationId;
+        entity.DepartmentId = dto.DepartmentId;
+        entity.Scope = dto.Scope;
+        entity.EstimatedAttendees = dto.EstimatedAttendees;
+        entity.RequiresRsvp = dto.RequiresRsvp;
+        entity.RsvpDeadline = dto.RsvpDeadline;
+        entity.Visibility = dto.Visibility;
+        entity.ShowOnCompanyCalendar = dto.ShowOnCompanyCalendar;
+        entity.ShowOnIntranet = dto.ShowOnIntranet;
+        entity.Status = dto.Status;
+        entity.HasBudget = dto.HasBudget;
+        entity.BudgetAmount = dto.BudgetAmount;
+        entity.ActualCost = dto.ActualCost;
+        entity.BudgetCode = dto.BudgetCode;
+        entity.RequiredResources = dto.RequiredResources;
+        entity.CateringRequirements = dto.CateringRequirements;
+        entity.TechnicalRequirements = dto.TechnicalRequirements;
+        entity.SendReminders = dto.SendReminders;
+        entity.ReminderDaysBefore = dto.ReminderDaysBefore;
+        entity.AdditionalNotes = dto.AdditionalNotes;
+    }
+
+    public static List<CompanyEventDto> ToDtoList(this IEnumerable<CompanyEvent> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public static List<CompanyEventSummaryDto> ToSummaryDtoList(this IEnumerable<CompanyEvent> entities)
+    {
+        return entities.Select(e => e.ToSummaryDto()).ToList();
+    }
+
+    #endregion
+
+    #region EventParticipant
+
+    public static EventParticipantDto ToDto(this EventParticipant entity)
+    {
+        return new EventParticipantDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            EventId = entity.EventId,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = entity.Employee?.FullName,
+            ExternalParticipantName = entity.ExternalParticipantName,
+            ExternalParticipantEmail = entity.ExternalParticipantEmail,
+            ExternalParticipantOrganization = entity.ExternalParticipantOrganization,
+            Role = entity.Role,
+            IsRequired = entity.IsRequired,
+            InvitationStatus = entity.InvitationStatus,
+            InvitationSentDate = entity.InvitationSentDate,
+            ResponseDate = entity.ResponseDate,
+            ResponseComments = entity.ResponseComments,
+            SpecialRequirements = entity.SpecialRequirements,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static EventParticipant ToEntity(this CreateEventParticipantDto dto)
+    {
+        return new EventParticipant
+        {
+            EventId = dto.EventId,
+            EmployeeId = dto.EmployeeId,
+            ExternalParticipantName = dto.ExternalParticipantName,
+            ExternalParticipantEmail = dto.ExternalParticipantEmail,
+            ExternalParticipantOrganization = dto.ExternalParticipantOrganization,
+            Role = dto.Role,
+            IsRequired = dto.IsRequired,
+            SpecialRequirements = dto.SpecialRequirements
+        };
+    }
+
+    public static List<EventParticipantDto> ToDtoList(this IEnumerable<EventParticipant> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region EventAttendance
+
+    public static EventAttendanceDto ToDto(this EventAttendance entity)
+    {
+        return new EventAttendanceDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            EventId = entity.EventId,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            Attended = entity.Attended,
+            CheckInTime = entity.CheckInTime,
+            CheckOutTime = entity.CheckOutTime,
+            AbsenceReason = entity.AbsenceReason,
+            Notes = entity.Notes,
+            MarkedById = entity.MarkedById,
+            MarkedByName = entity.MarkedBy?.FullName,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static EventAttendance ToEntity(this MarkEventAttendanceDto dto)
+    {
+        return new EventAttendance
+        {
+            EventId = dto.EventId,
+            EmployeeId = dto.EmployeeId,
+            Attended = dto.Attended,
+            CheckInTime = dto.CheckInTime,
+            AbsenceReason = dto.AbsenceReason,
+            Notes = dto.Notes
+        };
+    }
+
+    public static List<EventAttendanceDto> ToDtoList(this IEnumerable<EventAttendance> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region EventAttachment
+
+    public static EventAttachmentDto ToDto(this EventAttachment entity)
+    {
+        return new EventAttachmentDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            EventId = entity.EventId,
+            FileName = entity.FileName,
+            FilePath = entity.FilePath,
+            Type = entity.Type,
+            Description = entity.Description,
+            UploadDate = entity.UploadDate,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static EventAttachment ToEntity(this CreateEventAttachmentDto dto)
+    {
+        return new EventAttachment
+        {
+            EventId = dto.EventId,
+            FileName = dto.FileName,
+            FilePath = dto.FilePath,
+            Type = dto.Type,
+            Description = dto.Description
+        };
+    }
+
+    public static List<EventAttachmentDto> ToDtoList(this IEnumerable<EventAttachment> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region EventTask
+
+    public static EventTaskDto ToDto(this EventTask entity)
+    {
+        return new EventTaskDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            EventId = entity.EventId,
+            TaskDescription = entity.TaskDescription,
+            Category = entity.Category,
+            AssignedToId = entity.AssignedToId,
+            AssignedToName = entity.AssignedTo?.FullName,
+            DueDate = entity.DueDate,
+            Priority = entity.Priority,
+            Status = entity.Status,
+            CompletionDate = entity.CompletionDate,
+            CompletionNotes = entity.CompletionNotes,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static EventTask ToEntity(this CreateEventTaskDto dto)
+    {
+        return new EventTask
+        {
+            EventId = dto.EventId,
+            TaskDescription = dto.TaskDescription,
+            Category = dto.Category,
+            AssignedToId = dto.AssignedToId,
+            DueDate = dto.DueDate,
+            Priority = dto.Priority
+        };
+    }
+
+    public static void UpdateEntity(this UpdateEventTaskDto dto, EventTask entity)
+    {
+        entity.TaskDescription = dto.TaskDescription;
+        entity.Category = dto.Category;
+        entity.AssignedToId = dto.AssignedToId;
+        entity.DueDate = dto.DueDate;
+        entity.Priority = dto.Priority;
+        entity.Status = dto.Status;
+    }
+
+    public static List<EventTaskDto> ToDtoList(this IEnumerable<EventTask> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region MeetingRoom
+
+    public static MeetingRoomDto ToDto(this MeetingRoom entity)
+    {
+        return new MeetingRoomDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            RoomCode = entity.RoomCode,
+            RoomName = entity.RoomName,
+            Description = entity.Description,
+            StationId = entity.StationId,
+            StationName = entity.Station?.Name ?? string.Empty,
+            Location = entity.Location,
+            Floor = entity.Floor,
+            Building = entity.Building,
+            Capacity = entity.Capacity,
+            Type = entity.Type,
+            HasProjector = entity.HasProjector,
+            HasWhiteboard = entity.HasWhiteboard,
+            HasVideoConference = entity.HasVideoConference,
+            HasAudioSystem = entity.HasAudioSystem,
+            HasAirConditioning = entity.HasAirConditioning,
+            OtherFacilities = entity.OtherFacilities,
+            IsActive = entity.IsActive,
+            RequiresApproval = entity.RequiresApproval,
+            IsBookable = entity.IsBookable,
+            MaxBookingDurationHours = entity.MaxBookingDurationHours,
+            AdvanceBookingDays = entity.AdvanceBookingDays,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static MeetingRoomSummaryDto ToSummaryDto(this MeetingRoom entity)
+    {
+        return new MeetingRoomSummaryDto
+        {
+            Id = entity.Id,
+            RoomCode = entity.RoomCode,
+            RoomName = entity.RoomName,
+            StationName = entity.Station?.Name ?? string.Empty,
+            Location = entity.Location,
+            Capacity = entity.Capacity,
+            Type = entity.Type,
+            IsActive = entity.IsActive,
+            IsBookable = entity.IsBookable
+        };
+    }
+
+    public static MeetingRoom ToEntity(this CreateMeetingRoomDto dto)
+    {
+        return new MeetingRoom
+        {
+            RoomCode = dto.RoomCode,
+            RoomName = dto.RoomName,
+            Description = dto.Description,
+            StationId = dto.StationId,
+            Location = dto.Location,
+            Floor = dto.Floor,
+            Building = dto.Building,
+            Capacity = dto.Capacity,
+            Type = dto.Type,
+            HasProjector = dto.HasProjector,
+            HasWhiteboard = dto.HasWhiteboard,
+            HasVideoConference = dto.HasVideoConference,
+            HasAudioSystem = dto.HasAudioSystem,
+            HasAirConditioning = dto.HasAirConditioning,
+            OtherFacilities = dto.OtherFacilities,
+            IsActive = dto.IsActive,
+            RequiresApproval = dto.RequiresApproval,
+            IsBookable = dto.IsBookable,
+            MaxBookingDurationHours = dto.MaxBookingDurationHours,
+            AdvanceBookingDays = dto.AdvanceBookingDays
+        };
+    }
+
+    public static void UpdateEntity(this UpdateMeetingRoomDto dto, MeetingRoom entity)
+    {
+        entity.RoomCode = dto.RoomCode;
+        entity.RoomName = dto.RoomName;
+        entity.Description = dto.Description;
+        entity.StationId = dto.StationId;
+        entity.Location = dto.Location;
+        entity.Floor = dto.Floor;
+        entity.Building = dto.Building;
+        entity.Capacity = dto.Capacity;
+        entity.Type = dto.Type;
+        entity.HasProjector = dto.HasProjector;
+        entity.HasWhiteboard = dto.HasWhiteboard;
+        entity.HasVideoConference = dto.HasVideoConference;
+        entity.HasAudioSystem = dto.HasAudioSystem;
+        entity.HasAirConditioning = dto.HasAirConditioning;
+        entity.OtherFacilities = dto.OtherFacilities;
+        entity.IsActive = dto.IsActive;
+        entity.RequiresApproval = dto.RequiresApproval;
+        entity.IsBookable = dto.IsBookable;
+        entity.MaxBookingDurationHours = dto.MaxBookingDurationHours;
+        entity.AdvanceBookingDays = dto.AdvanceBookingDays;
+    }
+
+    public static List<MeetingRoomDto> ToDtoList(this IEnumerable<MeetingRoom> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public static List<MeetingRoomSummaryDto> ToSummaryDtoList(this IEnumerable<MeetingRoom> entities)
+    {
+        return entities.Select(e => e.ToSummaryDto()).ToList();
+    }
+
+    #endregion
+
+    #region RoomBooking
+
+    public static RoomBookingDto ToDto(this RoomBooking entity)
+    {
+        return new RoomBookingDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            BookingNumber = entity.BookingNumber,
+            RoomId = entity.RoomId,
+            RoomName = entity.Room?.RoomName ?? string.Empty,
+            EventId = entity.EventId,
+            EventName = entity.Event?.EventName,
+            BookedById = entity.BookedById,
+            BookedByName = entity.BookedBy?.FullName ?? string.Empty,
+            BookingDate = entity.BookingDate,
+            StartDateTime = entity.StartDateTime,
+            EndDateTime = entity.EndDateTime,
+            Purpose = entity.Purpose,
+            ExpectedAttendees = entity.ExpectedAttendees,
+            SpecialRequirements = entity.SpecialRequirements,
+            CateringRequirements = entity.CateringRequirements,
+            Status = entity.Status,
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy?.FullName,
+            ApprovalDate = entity.ApprovalDate,
+            IsCancelled = entity.IsCancelled,
+            CancellationDate = entity.CancellationDate,
+            CancellationReason = entity.CancellationReason,
+            Notes = entity.Notes,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static RoomBookingSummaryDto ToSummaryDto(this RoomBooking entity)
+    {
+        return new RoomBookingSummaryDto
+        {
+            Id = entity.Id,
+            BookingNumber = entity.BookingNumber,
+            RoomName = entity.Room?.RoomName ?? string.Empty,
+            BookedByName = entity.BookedBy?.FullName ?? string.Empty,
+            StartDateTime = entity.StartDateTime,
+            EndDateTime = entity.EndDateTime,
+            Purpose = entity.Purpose,
+            Status = entity.Status
+        };
+    }
+
+    public static RoomBooking ToEntity(this CreateRoomBookingDto dto)
+    {
+        return new RoomBooking
+        {
+            RoomId = dto.RoomId,
+            EventId = dto.EventId,
+            StartDateTime = dto.StartDateTime,
+            EndDateTime = dto.EndDateTime,
+            Purpose = dto.Purpose,
+            ExpectedAttendees = dto.ExpectedAttendees,
+            SpecialRequirements = dto.SpecialRequirements,
+            CateringRequirements = dto.CateringRequirements,
+            Notes = dto.Notes
+        };
+    }
+
+    public static void UpdateEntity(this UpdateRoomBookingDto dto, RoomBooking entity)
+    {
+        entity.StartDateTime = dto.StartDateTime;
+        entity.EndDateTime = dto.EndDateTime;
+        entity.Purpose = dto.Purpose;
+        entity.ExpectedAttendees = dto.ExpectedAttendees;
+        entity.SpecialRequirements = dto.SpecialRequirements;
+        entity.CateringRequirements = dto.CateringRequirements;
+        entity.Notes = dto.Notes;
+    }
+
+    public static List<RoomBookingDto> ToDtoList(this IEnumerable<RoomBooking> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    public static List<RoomBookingSummaryDto> ToSummaryDtoList(this IEnumerable<RoomBooking> entities)
+    {
+        return entities.Select(e => e.ToSummaryDto()).ToList();
+    }
+
+    #endregion
+
+    #region CompanyMilestone
+
+    public static CompanyMilestoneDto ToDto(this CompanyMilestone entity)
+    {
+        return new CompanyMilestoneDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            Title = entity.Title,
+            Description = entity.Description,
+            Category = entity.Category,
+            MilestoneDate = entity.MilestoneDate,
+            IsRecurringAnnually = entity.IsRecurringAnnually,
+            ShowOnCalendar = entity.ShowOnCalendar,
+            Significance = entity.Significance,
+            RelatedDocuments = entity.RelatedDocuments,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static CompanyMilestone ToEntity(this CreateCompanyMilestoneDto dto)
+    {
+        return new CompanyMilestone
+        {
+            Title = dto.Title,
+            Description = dto.Description,
+            Category = dto.Category,
+            MilestoneDate = dto.MilestoneDate,
+            IsRecurringAnnually = dto.IsRecurringAnnually,
+            ShowOnCalendar = dto.ShowOnCalendar,
+            Significance = dto.Significance,
+            RelatedDocuments = dto.RelatedDocuments
+        };
+    }
+
+    public static void UpdateEntity(this UpdateCompanyMilestoneDto dto, CompanyMilestone entity)
+    {
+        entity.Title = dto.Title;
+        entity.Description = dto.Description;
+        entity.Category = dto.Category;
+        entity.MilestoneDate = dto.MilestoneDate;
+        entity.IsRecurringAnnually = dto.IsRecurringAnnually;
+        entity.ShowOnCalendar = dto.ShowOnCalendar;
+        entity.Significance = dto.Significance;
+        entity.RelatedDocuments = dto.RelatedDocuments;
+    }
+
+    public static List<CompanyMilestoneDto> ToDtoList(this IEnumerable<CompanyMilestone> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region BusinessClosure
+
+    public static BusinessClosureDto ToDto(this BusinessClosure entity)
+    {
+        return new BusinessClosureDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            Title = entity.Title,
+            Reason = entity.Reason,
+            StartDate = entity.StartDate,
+            EndDate = entity.EndDate,
+            Type = entity.Type,
+            AffectsAllStations = entity.AffectsAllStations,
+            StationId = entity.StationId,
+            StationName = entity.Station?.Name,
+            DepartmentId = entity.DepartmentId,
+            DepartmentName = entity.Department?.Name,
+            IsPaidClosure = entity.IsPaidClosure,
+            CountsAsWorkingDay = entity.CountsAsWorkingDay,
+            AnnouncementDate = entity.AnnouncementDate,
+            AnnouncedById = entity.AnnouncedById,
+            AnnouncedByName = entity.AnnouncedBy?.FullName,
+            CommunicationNotes = entity.CommunicationNotes,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static BusinessClosure ToEntity(this CreateBusinessClosureDto dto)
+    {
+        return new BusinessClosure
+        {
+            Title = dto.Title,
+            Reason = dto.Reason,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate,
+            Type = dto.Type,
+            AffectsAllStations = dto.AffectsAllStations,
+            StationId = dto.StationId,
+            DepartmentId = dto.DepartmentId,
+            IsPaidClosure = dto.IsPaidClosure,
+            CountsAsWorkingDay = dto.CountsAsWorkingDay,
+            CommunicationNotes = dto.CommunicationNotes
+        };
+    }
+
+    public static void UpdateEntity(this UpdateBusinessClosureDto dto, BusinessClosure entity)
+    {
+        entity.Title = dto.Title;
+        entity.Reason = dto.Reason;
+        entity.StartDate = dto.StartDate;
+        entity.EndDate = dto.EndDate;
+        entity.Type = dto.Type;
+        entity.AffectsAllStations = dto.AffectsAllStations;
+        entity.StationId = dto.StationId;
+        entity.DepartmentId = dto.DepartmentId;
+        entity.IsPaidClosure = dto.IsPaidClosure;
+        entity.CountsAsWorkingDay = dto.CountsAsWorkingDay;
+        entity.CommunicationNotes = dto.CommunicationNotes;
+    }
+
+    public static List<BusinessClosureDto> ToDtoList(this IEnumerable<BusinessClosure> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region FiscalYear
+
+    public static FiscalYearDto ToDto(this FiscalYear entity)
+    {
+        return new FiscalYearDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            Year = entity.Year,
+            FiscalYearName = entity.FiscalYearName,
+            StartDate = entity.StartDate,
+            EndDate = entity.EndDate,
+            IsCurrent = entity.IsCurrent,
+            Status = entity.Status,
+            PeriodCount = entity.Periods?.Count ?? 0,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static FiscalYearDetailDto ToDetailDto(this FiscalYear entity)
+    {
+        return new FiscalYearDetailDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            Year = entity.Year,
+            FiscalYearName = entity.FiscalYearName,
+            StartDate = entity.StartDate,
+            EndDate = entity.EndDate,
+            IsCurrent = entity.IsCurrent,
+            Status = entity.Status,
+            PeriodCount = entity.Periods?.Count ?? 0,
+            Periods = entity.Periods?.Select(p => p.ToDto()).ToList() ?? new List<FiscalPeriodDto>(),
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static FiscalYear ToEntity(this CreateFiscalYearDto dto)
+    {
+        return new FiscalYear
+        {
+            Year = dto.Year,
+            FiscalYearName = dto.FiscalYearName,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate,
+            IsCurrent = dto.IsCurrent
+        };
+    }
+
+    public static void UpdateEntity(this UpdateFiscalYearDto dto, FiscalYear entity)
+    {
+        entity.FiscalYearName = dto.FiscalYearName;
+        entity.StartDate = dto.StartDate;
+        entity.EndDate = dto.EndDate;
+        entity.IsCurrent = dto.IsCurrent;
+        entity.Status = dto.Status;
+    }
+
+    public static List<FiscalYearDto> ToDtoList(this IEnumerable<FiscalYear> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+
+    #region FiscalPeriod
+
+    public static FiscalPeriodDto ToDto(this FiscalPeriod entity)
+    {
+        return new FiscalPeriodDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            FiscalYearId = entity.FiscalYearId,
+            FiscalYearName = entity.FiscalYear?.FiscalYearName ?? string.Empty,
+            PeriodNumber = entity.PeriodNumber,
+            PeriodName = entity.PeriodName,
+            Type = entity.Type,
+            StartDate = entity.StartDate,
+            EndDate = entity.EndDate,
+            IsClosed = entity.IsClosed,
+            ClosedDate = entity.ClosedDate,
+            CreatedAt = entity.CreatedAt,
+            CreatedBy = entity.CreatedBy ?? string.Empty,
+            UpdatedAt = entity.UpdatedAt,
+            UpdatedBy = entity.UpdatedBy
+        };
+    }
+
+    public static FiscalPeriod ToEntity(this CreateFiscalPeriodDto dto)
+    {
+        return new FiscalPeriod
+        {
+            FiscalYearId = dto.FiscalYearId,
+            PeriodNumber = dto.PeriodNumber,
+            PeriodName = dto.PeriodName,
+            Type = dto.Type,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate
+        };
+    }
+
+    public static void UpdateEntity(this UpdateFiscalPeriodDto dto, FiscalPeriod entity)
+    {
+        entity.PeriodNumber = dto.PeriodNumber;
+        entity.PeriodName = dto.PeriodName;
+        entity.Type = dto.Type;
+        entity.StartDate = dto.StartDate;
+        entity.EndDate = dto.EndDate;
+    }
+
+    public static List<FiscalPeriodDto> ToDtoList(this IEnumerable<FiscalPeriod> entities)
+    {
+        return entities.Select(e => e.ToDto()).ToList();
+    }
+
+    #endregion
+}

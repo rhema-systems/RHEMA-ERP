@@ -1,19 +1,17 @@
-using ErpSystem.Core.DTOs.HR;
-using MaintenanceDTOs = ErpSystem.Core.DTOs.Maintenance;
-using ErpSystem.Core.Enums;
-using ErpSystem.Core.Interfaces.HR;
-using Microsoft.Extensions.Logging;
-using ErpSystem.Core.Entities.HR;
-using Microsoft.EntityFrameworkCore;
-using ErpSystem.Core.Entities;
 using ErpSystem.Core.Services.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// Service implementation for employee operations
+/// Application service for the Employee aggregate. Orchestrates repositories, enforces rules, and manages transactions.
 /// </summary>
 public class EmployeeService : IEmployeeService
 {
@@ -21,29 +19,37 @@ public class EmployeeService : IEmployeeService
     private readonly IOrganizationUnitRepository _organizationUnitRepository;
     private readonly IEmployeePositionRepository _positionRepository;
     private readonly ILocationRepository _locationRepository;
-    private readonly IDepartmentRepository _departmentRepository;
-    private readonly IEmployeeSkillRepository _employeeSkillRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeeService> _logger;
 
     public EmployeeService(
         IEmployeeRepository employeeRepository,
-        IDepartmentRepository departmentRepository,
-        IEmployeeSkillRepository employeeSkillRepository,
-        ILogger<EmployeeService> logger,
         IOrganizationUnitRepository organizationUnitRepository,
         IEmployeePositionRepository positionRepository,
         ILocationRepository locationRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
+        ILogger<EmployeeService> logger)
     {
         _employeeRepository = employeeRepository;
-        _departmentRepository = departmentRepository;
-        _employeeSkillRepository = employeeSkillRepository;
-        _logger = logger;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
         _locationRepository = locationRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
+        _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     #region 1) Core Employee Lifecycle
@@ -120,10 +126,10 @@ public class EmployeeService : IEmployeeService
         if (position.OrganizationUnitId != dto.OrganizationUnitId)
             throw new InvalidOperationException("Selected position does not belong to the specified organization unit.");
 
-        if (dto.LocationId == Guid.Empty)
+        if (!dto.LocationId.HasValue || dto.LocationId.Value == Guid.Empty)
             throw new ArgumentException("LocationId is required for employee assignment.");
 
-        var location = await _locationRepository.GetWithDetailsAsync(dto.LocationId);
+        var location = await _locationRepository.GetWithDetailsAsync(dto.LocationId.Value);
         if (location == null || !location.IsActive)
             throw new ArgumentException("Location not found or inactive.");
 
@@ -136,11 +142,17 @@ public class EmployeeService : IEmployeeService
 
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
+        employeeEntity.TenantId = GetTenantId();
 
-        await _employeeRepository.AddAsync(employeeEntity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        await EnsureInitialPositionHistoryExistsAsync(employeeEntity, cancellationToken);
+        // Persist the employee and its initial position-history row atomically:
+        // both commit together, or neither does. Prevents an orphaned employee
+        // (saved) with no position history (failed) if the child insert throws.
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _employeeRepository.AddAsync(employeeEntity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            await EnsureInitialPositionHistoryExistsAsync(employeeEntity, ct);
+        }, cancellationToken);
 
         _logger.LogInformation("Employee created: {EmployeeNumber} ({EmployeeId})", employeeEntity.EmployeeNumber, employeeEntity.Id);
 
@@ -161,6 +173,18 @@ public class EmployeeService : IEmployeeService
             return;
         }
 
+        // OrganizationLevelId and PositionId are required on the history row. An employee may not have
+        // them yet, and coalescing to Guid.Empty writes an FK that matches no row — the insert then
+        // fails and takes the whole read down with it. Skip the back-fill instead; it runs again once
+        // the employee has an org level.
+        if (!employee.OrganizationLevelId.HasValue || employee.PositionId == Guid.Empty)
+        {
+            _logger.LogDebug(
+                "Skipping initial position history for {EmployeeId}: no organization level or position yet.",
+                employee.Id);
+            return;
+        }
+
         var startDate = employee.DateEmployed.HasValue
             ? employee.DateEmployed.Value.ToDateTime(TimeOnly.MinValue)
             : DateTime.UtcNow;
@@ -168,9 +192,11 @@ public class EmployeeService : IEmployeeService
         var initial = new EmployeePositionHistory
         {
             EmployeeId = employee.Id,
-            LocationLevelId = employee.LocationLevelId ?? Guid.Empty,
+            TenantId = employee.TenantId,
+            // Nullable on both sides — leave it null rather than inventing an empty FK.
+            LocationLevelId = employee.LocationLevelId,
             LocationId = employee.LocationId,
-            OrganizationLevelId = employee.OrganizationLevelId ?? Guid.Empty,
+            OrganizationLevelId = employee.OrganizationLevelId.Value,
             OrganizationUnitId = employee.OrganizationUnitId,
             PositionId = employee.PositionId,
             StartDate = startDate,
@@ -286,7 +312,7 @@ public class EmployeeService : IEmployeeService
             if (currentHistory != null)
             {
                 currentHistory.EndDate = today;
-                currentHistory.ChangeReason = PositionChangeReason.Restructure; // or determine based on context
+                currentHistory.ChangeReason = PositionChangeReason.Transfer; // or determine based on context
                 await posHistoryRepo.UpdateAsync(currentHistory);
             }
 
@@ -298,13 +324,13 @@ public class EmployeeService : IEmployeeService
                 {
                     EmployeeId = employeeId,
                     PositionId = dto.PositionId.Value,
-                    LocationLevelId = newLocationLevelId ?? employee.LocationLevelId ?? Guid.Empty,
+                    LocationLevelId = (newLocationLevelId ?? employee.LocationLevelId) ?? Guid.Empty,
                     LocationId = dto.LocationId ?? employee.LocationId,
-                    OrganizationLevelId = newOrgLevelId ?? employee.OrganizationLevelId ?? Guid.Empty,
+                    OrganizationLevelId = (newOrgLevelId ?? employee.OrganizationLevelId) ?? Guid.Empty,
                     OrganizationUnitId = dto.OrganizationUnitId ?? employee.OrganizationUnitId,
                     StartDate = today,
                     EndDate = null,
-                    ChangeReason = PositionChangeReason.Restructure, // or determine based on context
+                    ChangeReason = PositionChangeReason.Transfer, // or determine based on context
                     Notes = "Position changed via employee update"
                 };
                 await posHistoryRepo.AddAsync(newHistory);
@@ -375,7 +401,7 @@ public class EmployeeService : IEmployeeService
         employee.StaffStatus = StaffStatus.Terminated;
         employee.IsActive = false;
         employee.TerminationDate = dto.TerminationDate;
-        employee.TerminationReason = dto.TerminationReason;
+        employee.TerminationReason = Enum.TryParse<TerminationReason>(dto.TerminationReason, out var tr) ? tr : null;
         employee.TerminationNotes = dto.TerminationNotes;
 
         // Terminate active contracts
@@ -450,12 +476,12 @@ public class EmployeeService : IEmployeeService
     {
         var employee = await _employeeRepository.GetByIdAsync(employeeId,
             e => e.Position,
-            e => e.Department,
-            e => e.Section,
-            e => e.OrganizationUnit,
-            e => e.OrganizationLevel,
-            e => e.Location,
-            e => e.LocationLevel);
+            e => e.Department!,
+            e => e.Section!,
+            e => e.OrganizationUnit!,
+            e => e.OrganizationLevel!,
+            e => e.Location!,
+            e => e.LocationLevel!);
 
         return employee?.ToSummaryDto();
     }
@@ -508,7 +534,8 @@ public class EmployeeService : IEmployeeService
         if (pageSize <= 0) pageSize = 20;
         if (pageSize > 200) pageSize = 200;
 
-        IQueryable<Employee> q = _employeeRepository.GetQueryable();
+        var tenantId = GetTenantId();
+        IQueryable<Employee> q = _employeeRepository.GetQueryable().Where(e => e.TenantId == tenantId);
 
         q = q
             .Include(e => e.Position)
@@ -571,10 +598,10 @@ public class EmployeeService : IEmployeeService
     public async Task<IEnumerable<EmployeeDto>> GetEmployeesByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
         => (await _employeeRepository.FindAsync(e => e.LocationId == locationId,
             e => e.Position,
-            e => e.OrganizationUnit,
-            e => e.OrganizationLevel,
-            e => e.Location,
-            e => e.LocationLevel)).Select(e => e.ToSummaryDto());
+            e => e.OrganizationUnit!,
+            e => e.OrganizationLevel!,
+            e => e.Location!,
+            e => e.LocationLevel!)).Select(e => e.ToSummaryDto());
 
     public async Task<IEnumerable<EmployeeDto>> GetEmployeesByManagerAsync(Guid managerId, CancellationToken cancellationToken = default)
         => (await _employeeRepository.GetByManagerAsync(managerId)).Select(e => e.ToSummaryDto());
@@ -600,6 +627,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeContact>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -696,6 +726,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeEmergencyContact>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -800,12 +833,6 @@ public class EmployeeService : IEmployeeService
         return entity.ToDto();
     }
 
-    public async Task<EmployeeEmergencyContactDto?> GetEmergencyContactByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeEmergencyContact>();
-        var entity = await repo.GetByIdAsync(id);
-        return entity?.ToDto();
-    }
 
     public async Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
@@ -821,6 +848,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeDependent>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -843,23 +873,19 @@ public class EmployeeService : IEmployeeService
         return entity.ToReadDto();
     }
 
-    public async Task<bool> RemoveDependentAsync(Guid dependentId, CancellationToken cancellationToken = default)
+    public async Task<bool> RemoveDependentAsync(Guid employeeId, Guid dependentId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeDependent>();
         var entity = await repo.GetByIdAsync(dependentId);
         if (entity == null) return false;
 
+        if (entity.EmployeeId != employeeId)
+            throw new ArgumentException("Dependent does not belong to the specified employee.");
+
         await repo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
-    }
-
-    public async Task<EmployeeDependentReadDto?> GetDependentAsync(Guid dependentId, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeDependent>();
-        var entity = await repo.GetByIdAsync(dependentId);
-        return entity?.ToReadDto();
     }
 
     public async Task<IEnumerable<EmployeeDependentBenefitDto>> GetDependentBenefitsAsync(Guid employeeDependentId, CancellationToken cancellationToken = default)
@@ -885,6 +911,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeDependentBenefit>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -950,15 +979,6 @@ public class EmployeeService : IEmployeeService
         return (reloaded ?? entity).ToDto();
     }
 
-    public async Task<EmployeeDependentBenefitDto?> GetDependentBenefitByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeDependentBenefit>();
-        var entity = await repo.GetQueryable()
-            .Include(b => b.BenefitPolicy)
-            .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
-        return entity?.ToDto();
-    }
-
     public async Task<IEnumerable<EmployeeQualificationDto>> GetQualificationsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeQualification>();
@@ -983,6 +1003,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeQualification>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1054,16 +1077,6 @@ public class EmployeeService : IEmployeeService
         return (reloaded ?? entity).ToDto();
     }
 
-    public async Task<EmployeeQualificationDto?> GetQualificationByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeQualification>();
-        var entity = await repo.GetQueryable()
-            .Include(x => x.Qualification)
-            .Include(x => x.Country)
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
-        return entity?.ToDto();
-    }
-
     public async Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeSkill>();
@@ -1088,6 +1101,9 @@ public class EmployeeService : IEmployeeService
         if (exists) throw new InvalidOperationException("Employee already has this skill assigned.");
 
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1154,15 +1170,6 @@ public class EmployeeService : IEmployeeService
         return (reloaded ?? entity).ToDto();
     }
 
-    public async Task<EmployeeSkillDto?> GetSkillByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeSkill>();
-        var entity = await repo.GetQueryable()
-            .Include(s => s.Skill)
-            .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
-        return entity?.ToDto();
-    }
-
     public async Task<IEnumerable<EmployeeIdentificationCardListDto>> GetIdentificationCardsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeIdentificationCard>();
@@ -1193,6 +1200,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeIdentificationCard>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1287,6 +1297,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeWorkHistory>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1349,6 +1362,7 @@ public class EmployeeService : IEmployeeService
         var entity = new EmployeeContractDetail
         {
             EmployeeId = dto.EmployeeId,
+            TenantId = GetTenantId(),
             ContractNumber = dto.ContractNumber.Trim(),
             EmploymentType = dto.EmploymentType,
             StartDate = dto.StartDate,
@@ -1424,13 +1438,6 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
-    }
-
-    public async Task<EmployeeContractDetailDto?> GetContractByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var repo = _unitOfWork.Repository<EmployeeContractDetail>();
-        var entity = await repo.GetByIdAsync(id);
-        return entity?.ToDto();
     }
 
     public async Task<EmployeeContractDetailDto> ActivateContractAsync(Guid contractId, CancellationToken cancellationToken = default)
@@ -1513,6 +1520,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<ExpatriateAssignment>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1588,6 +1598,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeePositionHistory>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         // close current history if overlapping
         var current = await repo.FirstOrDefaultAsync(x => x.EmployeeId == dto.EmployeeId && x.EndDate == null);
@@ -1663,6 +1676,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         // Prevent overlaps: close any assignment overlapping the new EffectiveDate
         var current = await repo.FirstOrDefaultAsync(a =>
@@ -1730,6 +1746,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeReferee>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -1845,6 +1864,9 @@ public class EmployeeService : IEmployeeService
 
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
 
         if (entity.IsPrimary)
         {
@@ -2008,6 +2030,9 @@ public class EmployeeService : IEmployeeService
         }
 
         var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
+        // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
+        entity.TenantId = GetTenantId();
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -2173,7 +2198,7 @@ public class EmployeeService : IEmployeeService
             if (!visited.Add(managerId.Value))
                 throw new InvalidOperationException("Circular reporting detected while building management chain.");
 
-            var manager = await _employeeRepository.GetByIdAsync(managerId.Value, e => e.Position, e => e.OrganizationUnit, e => e.OrganizationLevel);
+            var manager = await _employeeRepository.GetByIdAsync(managerId.Value, e => e.Position, e => e.OrganizationUnit!, e => e.OrganizationLevel!);
             if (manager == null) break;
             chain.Add(manager);
             managerId = manager.ManagerId;
@@ -2316,559 +2341,74 @@ public class EmployeeService : IEmployeeService
 
     #endregion
 
-    #region Employee CRUD Operations
+    #region Legacy / Backward compatibility
 
-    public async Task<EmployeeDto?> GetByIdAsync(Guid id)
-    {
-        var employee = await _employeeRepository.GetByIdAsync(id);
-        return employee != null ? MapToDto(employee) : null;
-    }
-
-    public async Task<EmployeeDetailDto?> GetDetailsByIdAsync(Guid id)
-    {
-        var employee = await _employeeRepository.GetByIdWithDetailsAsync(id);
-        return employee != null ? MapToDetailDto(employee) : null;
-    }
-
-    public async Task<EmployeeDto?> GetByEmployeeNumberAsync(string employeeNumber)
-    {
-        var employee = await _employeeRepository.GetByEmployeeNumberAsync(employeeNumber);
-        return employee != null ? MapToDto(employee) : null;
-    }
+    public Task<EmployeeDto?> GetByIdAsync(Guid id) => GetEmployeeSummaryByIdAsync(id);
+    public Task<EmployeeDetailDto?> GetDetailsByIdAsync(Guid id) => GetEmployeeDetailsByIdAsync(id);
+    public Task<EmployeeDto?> GetByEmployeeNumberAsync(string employeeNumber) => GetEmployeeSummaryByEmployeeNumberAsync(employeeNumber);
 
     public async Task<IEnumerable<EmployeeDto>> GetAllAsync()
     {
-        var employees = await _employeeRepository.GetAllAsync();
-        return employees.Select(MapToDto);
+        var employees = await _employeeRepository.GetAllAsync(e => e.Position, e => e.OrganizationUnit!, e => e.OrganizationLevel!);
+        return employees.Select(e => e.ToSummaryDto());
     }
 
     public async Task<IEnumerable<EmployeeDto>> GetActiveEmployeesAsync()
-    {
-        var employees = await _employeeRepository.GetActiveEmployeesAsync();
-        return employees.Select(MapToDto);
-    }
+        => (await _employeeRepository.GetActiveEmployeesAsync()).Select(e => e.ToSummaryDto());
 
     public async Task<IEnumerable<EmployeeDto>> SearchEmployeesAsync(EmployeeSearchDto searchCriteria)
-    {
-        var employees = await _employeeRepository.GetAllAsync();
-
-        // Apply filters
-        var query = employees.AsEnumerable();
-
-        if (!string.IsNullOrEmpty(searchCriteria.SearchTerm))
-        {
-            var searchEmployees = await _employeeRepository.SearchEmployeesAsync(searchCriteria.SearchTerm);
-            query = searchEmployees;
-        }
-
-        if (searchCriteria.DepartmentId.HasValue)
-        {
-            query = query.Where(e => e.DepartmentId == searchCriteria.DepartmentId.Value);
-        }
-
-        if (searchCriteria.SectionId.HasValue)
-        {
-            query = query.Where(e => e.SectionId == searchCriteria.SectionId.Value);
-        }
-
-        if (searchCriteria.PositionId.HasValue)
-        {
-            query = query.Where(e => e.PositionId == searchCriteria.PositionId.Value);
-        }
-
-        if (searchCriteria.StaffStatus.HasValue)
-        {
-            query = query.Where(e => e.StaffStatus == searchCriteria.StaffStatus.Value);
-        }
-
-        if (searchCriteria.EmploymentType.HasValue)
-        {
-            query = query.Where(e => e.EmploymentType == searchCriteria.EmploymentType.Value);
-        }
-
-        if (searchCriteria.IsActive.HasValue)
-        {
-            query = query.Where(e => e.IsActive == searchCriteria.IsActive.Value);
-        }
-
-        if (searchCriteria.IsFullTime.HasValue)
-        {
-            query = query.Where(e => e.IsFullTime == searchCriteria.IsFullTime.Value);
-        }
-
-        if (searchCriteria.MaintenanceTechniciansOnly == true)
-        {
-            query = query.Where(e => e.CanBeAssignedToMaintenance);
-        }
-
-        if (searchCriteria.HiredAfter.HasValue)
-        {
-            query = query.Where(e => e.DateEmployed >= searchCriteria.HiredAfter.Value);
-        }
-
-        if (searchCriteria.HiredBefore.HasValue)
-        {
-            query = query.Where(e => e.DateEmployed <= searchCriteria.HiredBefore.Value);
-        }
-
-        return query.Select(MapToDto);
-    }
+        => (await GetEmployeesPagedAsync(searchCriteria, 1, 200)).Items;
 
     public async Task<EmployeeDto> CreateEmployeeAsync(CreateEmployeeDto createDto)
     {
-        // Generate employee number if not provided
-        if (string.IsNullOrEmpty(createDto.EmployeeNumber))
-        {
-            createDto.EmployeeNumber = await _employeeRepository.GenerateEmployeeNumberAsync();
-        }
-
-        // Validate employee number uniqueness
-        if (await _employeeRepository.EmployeeNumberExistsAsync(createDto.EmployeeNumber))
-        {
-            throw new InvalidOperationException($"Employee number {createDto.EmployeeNumber} already exists.");
-        }
-
-        // Validate email uniqueness
-        if (await _employeeRepository.EmailExistsAsync(createDto.EmailAddress))
-        {
-            throw new InvalidOperationException($"Email address {createDto.EmailAddress} already exists.");
-        }
-
-        var employee = new Employee
-        {
-            EmployeeNumber = createDto.EmployeeNumber,
-            CorporateEmployeeID = createDto.CorporateEmployeeID,
-            FirstName = createDto.FirstName,
-            MiddleName = createDto.MiddleName,
-            LastName = createDto.LastName,
-            Title = createDto.Title,
-            Gender = createDto.Gender,
-            DateOfBirth = createDto.DateOfBirth,
-            MaritalStatus = createDto.MaritalStatus,
-            Religion = createDto.Religion,
-            IsFullTime = createDto.IsFullTime,
-            DateEmployed = createDto.DateEmployed,
-            Address = createDto.Address,
-            City = createDto.City,
-            State = createDto.State,
-            PostalCode = createDto.PostalCode,
-            DigitalAddress = createDto.DigitalAddress,
-            CountryId = createDto.CountryId,
-            EmailAddress = createDto.EmailAddress,
-            TelephoneNumber = createDto.TelephoneNumber,
-            BusinessNumber = createDto.BusinessNumber,
-            MobileNumber = createDto.MobileNumber,
-            Extension = createDto.Extension,
-            EmploymentType = createDto.EmploymentType,
-            ProbationPeriodDays = createDto.ProbationPeriodDays,
-            ConfirmationDate = createDto.ConfirmationDate,
-            RetirementDate = createDto.RetirementDate,
-            DivisionId = createDto.DivisionId,
-            DepartmentId = createDto.DepartmentId,
-            SectionId = createDto.SectionId,
-            UnitId = createDto.UnitId,
-            PositionId = createDto.PositionId,
-            StaffStatus = createDto.StaffStatus,
-            StationId = createDto.StationId,
-            TaxNumber = createDto.TaxNumber,
-            SocialSecurityNumber = createDto.SocialSecurityNumber,
-            BloodType = createDto.BloodType,
-            ShiftId = createDto.ShiftId,
-            Salary = createDto.Salary,
-            BadgeNumber = createDto.BadgeNumber,
-            PicturePath = createDto.PicturePath,
-            IsExpatriate = createDto.IsExpatriate,
-            IsActive = true
-        };
-
-        var createdEmployee = await _employeeRepository.AddAsync(employee);
-        _logger.LogInformation("Employee created successfully: {EmployeeNumber} - {FullName}",
-            createdEmployee.EmployeeNumber, createdEmployee.FullName);
-
-        return MapToDto(createdEmployee);
+        var detail = await CreateEmployeeAsync(createDto, CancellationToken.None);
+        var summary = await GetEmployeeSummaryByIdAsync(detail.Id, CancellationToken.None);
+        return summary ?? ToSummaryFromDetail(detail);
     }
 
     public async Task<EmployeeDto> UpdateEmployeeAsync(Guid id, UpdateEmployeeDto updateDto)
     {
-        var employee = await _employeeRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Employee with ID {id} not found.");
-
-        // Check email uniqueness if email is being changed
-        if (!string.IsNullOrEmpty(updateDto.EmailAddress) && updateDto.EmailAddress != employee.EmailAddress)
-        {
-            if (await _employeeRepository.EmailExistsAsync(updateDto.EmailAddress))
-            {
-                throw new InvalidOperationException($"Email address {updateDto.EmailAddress} already exists.");
-            }
-            employee.EmailAddress = updateDto.EmailAddress;
-        }
-
-        // Update fields
-        if (updateDto.CorporateEmployeeID != null)
-        {
-            employee.CorporateEmployeeID = updateDto.CorporateEmployeeID;
-        }
-
-        if (updateDto.Title != null)
-        {
-            employee.Title = updateDto.Title;
-        }
-
-        if (updateDto.Gender.HasValue)
-        {
-            employee.Gender = updateDto.Gender;
-        }
-
-        if (updateDto.DateOfBirth.HasValue)
-        {
-            employee.DateOfBirth = updateDto.DateOfBirth;
-        }
-
-        if (updateDto.MaritalStatus.HasValue)
-        {
-            employee.MaritalStatus = updateDto.MaritalStatus;
-        }
-
-        if (updateDto.Religion != null)
-        {
-            employee.Religion = updateDto.Religion;
-        }
-
-        employee.IsFullTime = updateDto.IsFullTime;
-
-        // Update contact information
-        if (updateDto.Address != null)
-        {
-            employee.Address = updateDto.Address;
-        }
-
-        if (updateDto.City != null)
-        {
-            employee.City = updateDto.City;
-        }
-
-        if (updateDto.State != null)
-        {
-            employee.State = updateDto.State;
-        }
-
-        if (updateDto.PostalCode != null)
-        {
-            employee.PostalCode = updateDto.PostalCode;
-        }
-
-        if (updateDto.DigitalAddress != null)
-        {
-            employee.DigitalAddress = updateDto.DigitalAddress;
-        }
-
-        if (updateDto.CountryId.HasValue)
-        {
-            employee.CountryId = updateDto.CountryId;
-        }
-
-        if (updateDto.TelephoneNumber != null)
-        {
-            employee.TelephoneNumber = updateDto.TelephoneNumber;
-        }
-
-        if (updateDto.BusinessNumber != null)
-        {
-            employee.BusinessNumber = updateDto.BusinessNumber;
-        }
-
-        if (updateDto.MobileNumber != null)
-        {
-            employee.MobileNumber = updateDto.MobileNumber;
-        }
-
-        if (updateDto.Extension != null)
-        {
-            employee.Extension = updateDto.Extension;
-        }
-
-        // Update employment details
-        if (updateDto.EmploymentType.HasValue)
-        {
-            employee.EmploymentType = updateDto.EmploymentType.Value;
-        }
-
-        if (updateDto.ProbationPeriodDays.HasValue)
-        {
-            employee.ProbationPeriodDays = updateDto.ProbationPeriodDays.Value;
-        }
-
-        if (updateDto.ConfirmationDate.HasValue)
-        {
-            employee.ConfirmationDate = updateDto.ConfirmationDate;
-        }
-
-        if (updateDto.RetirementDate.HasValue)
-        {
-            employee.RetirementDate = updateDto.RetirementDate;
-        }
-
-        if (updateDto.DivisionId.HasValue)
-        {
-            employee.DivisionId = updateDto.DivisionId.Value;
-        }
-
-        if (updateDto.DepartmentId.HasValue)
-        {
-            employee.DepartmentId = updateDto.DepartmentId.Value;
-        }
-
-        if (updateDto.UnitId.HasValue)
-        {
-            employee.UnitId = updateDto.UnitId.Value;
-        }
-
-        if (updateDto.SectionId.HasValue)
-        {
-            employee.SectionId = updateDto.SectionId;
-        }
-
-        if (updateDto.PositionId.HasValue)
-        {
-            employee.PositionId = updateDto.PositionId.Value;
-        }
-
-        if (updateDto.StaffStatus.HasValue)
-        {
-            employee.StaffStatus = updateDto.StaffStatus.Value;
-        }
-
-        if (updateDto.StationId.HasValue)
-        {
-            employee.StationId = updateDto.StationId;
-        }
-
-        if (updateDto.TaxNumber != null)
-        {
-            employee.TaxNumber = updateDto.TaxNumber;
-        }
-
-        if (updateDto.SocialSecurityNumber != null)
-        {
-            employee.SocialSecurityNumber = updateDto.SocialSecurityNumber;
-        }
-
-        if (updateDto.BloodType.HasValue)
-        {
-            employee.BloodType = updateDto.BloodType;
-        }
-
-        if (updateDto.ShiftId.HasValue)
-        {
-            employee.ShiftId = updateDto.ShiftId;
-        }
-
-        if (updateDto.Salary.HasValue)
-        {
-            employee.Salary = updateDto.Salary;
-        }
-
-        if (updateDto.BadgeNumber != null)
-        {
-            employee.BadgeNumber = updateDto.BadgeNumber;
-        }
-
-        if (updateDto.Notes != null)
-        {
-            employee.Notes = updateDto.Notes;
-        }
-
-        if (updateDto.Notes != null)
-        {
-            employee.Notes = updateDto.Notes;
-        }
-
-        if (updateDto.LastPromotionDate.HasValue)
-        {
-            employee.LastPromotionDate = updateDto.LastPromotionDate;
-        }
-
-        if (updateDto.LastReviewDate.HasValue)
-        {
-            employee.LastReviewDate = updateDto.LastReviewDate;
-        }
-
-        if (updateDto.NextReviewDate.HasValue)
-        {
-            employee.NextReviewDate = updateDto.NextReviewDate;
-        }
-
-        if (updateDto.TerminationDate.HasValue)
-        {
-            employee.TerminationDate = updateDto.TerminationDate;
-        }
-
-        if (updateDto.TerminationReason != null)
-        {
-            employee.TerminationReason = updateDto.TerminationReason;
-        }
-
-        if (updateDto.TerminationNotes != null)
-        {
-            employee.TerminationNotes = updateDto.TerminationNotes;
-        }
-
-        if (updateDto.IsExpatriate.HasValue)
-        {
-            employee.IsExpatriate = updateDto.IsExpatriate.Value;
-        }
-
-        if (updateDto.IsActive.HasValue)
-        {
-            employee.IsActive = updateDto.IsActive.Value;
-        }
-
-        await _employeeRepository.UpdateAsync(employee);
-        _logger.LogInformation("Employee updated successfully: {EmployeeNumber} - {FullName}",
-            employee.EmployeeNumber, employee.FullName);
-
-        return MapToDto(employee);
+        var detail = await UpdateEmployeeAsync(id, updateDto, CancellationToken.None);
+        var summary = await GetEmployeeSummaryByIdAsync(detail.Id, CancellationToken.None);
+        return summary ?? ToSummaryFromDetail(detail);
     }
 
-    public async Task<bool> DeleteEmployeeAsync(Guid id)
-    {
-        await _employeeRepository.DeleteAsync(id);
-        bool result = true; // Assuming successful deletion
-        if (result)
-        {
-            _logger.LogInformation("Employee deleted successfully: {EmployeeId}", id);
-        }
-        return result;
-    }
+    public Task<bool> DeleteEmployeeAsync(Guid id) => DeleteEmployeeAsync(id, CancellationToken.None);
 
     public async Task<bool> DeactivateEmployeeAsync(Guid id)
     {
-        var employee = await _employeeRepository.GetByIdAsync(id);
-        if (employee == null)
-        {
-            return false;
-        }
-
-        employee.IsActive = false;
-        employee.StaffStatus = StaffStatus.Inactive;
-        await _employeeRepository.UpdateAsync(employee);
-
-        _logger.LogInformation("Employee deactivated: {EmployeeNumber} - {FullName}",
-            employee.EmployeeNumber, employee.FullName);
+        await DeactivateEmployeeAsync(id, CancellationToken.None);
         return true;
     }
 
     public async Task<bool> ActivateEmployeeAsync(Guid id)
     {
-        var employee = await _employeeRepository.GetByIdAsync(id);
-        if (employee == null)
-        {
-            return false;
-        }
-
-        employee.IsActive = true;
-        employee.StaffStatus = StaffStatus.Active;
-        await _employeeRepository.UpdateAsync(employee);
-
-        _logger.LogInformation("Employee activated: {EmployeeNumber} - {FullName}",
-            employee.EmployeeNumber, employee.FullName);
+        await ActivateEmployeeAsync(id, CancellationToken.None);
         return true;
     }
 
     public async Task<bool> TerminateEmployeeAsync(Guid id, TerminateEmployeeDto dto)
     {
-        var employee = await _employeeRepository.GetByIdAsync(id);
-
-        if (employee == null)
-        {
-            throw new ArgumentException($"Employee with ID '{id}' not found.");
-        }
-
-        if (employee.StaffStatus == StaffStatus.Terminated)
-        {
-            throw new InvalidOperationException("Employee is already terminated.");
-        }
-
-        employee.StaffStatus = StaffStatus.Terminated;
-        employee.TerminationDate = dto.TerminationDate;
-        employee.TerminationReason = dto.TerminationReason;
-        employee.TerminationNotes = dto.TerminationNotes;
-
-        // Close current position history
-        var currentPositionHistory = await _employeeRepository
-            .GetQueryable()
-            .Where(e => e.Id == id)
-            .SelectMany(e => e.PositionHistories)
-            .FirstOrDefaultAsync(ph => ph.EndDate == null);
-
-        if (currentPositionHistory != null)
-        {
-            currentPositionHistory.EndDate = dto.TerminationDate;
-            currentPositionHistory.ChangeReason = PositionChangeReason.Termination;
-        }
-
-        await _employeeRepository.UpdateAsync(employee);
-        await _employeeRepository.SaveChangesAsync();
-
-        _logger.LogInformation("Employee terminated successfully: {EmployeeId}", id);
-
+        await TerminateEmployeeAsync(id, dto, CancellationToken.None);
         return true;
     }
 
-    #endregion
-
-    #region Employee Filtering and Grouping
-
     public async Task<IEnumerable<EmployeeDto>> GetByDepartmentAsync(Guid departmentId)
-    {
-        var employees = await _employeeRepository.GetByDepartmentAsync(departmentId);
-        return employees.Select(MapToDto);
-    }
+        => (await _employeeRepository.GetByDepartmentAsync(departmentId)).Select(e => e.ToSummaryDto());
 
     public async Task<IEnumerable<EmployeeDto>> GetBySectionAsync(Guid sectionId)
-    {
-        var employees = await _employeeRepository.GetBySectionAsync(sectionId);
-        return employees.Select(MapToDto);
-    }
+        => (await _employeeRepository.GetBySectionAsync(sectionId)).Select(e => e.ToSummaryDto());
 
     public async Task<IEnumerable<EmployeeDto>> GetByPositionAsync(Guid positionId)
-    {
-        var employees = await _employeeRepository.GetByPositionAsync(positionId);
-        return employees.Select(MapToDto);
-    }
+        => (await _employeeRepository.GetByPositionAsync(positionId)).Select(e => e.ToSummaryDto());
 
     public async Task<IEnumerable<EmployeeDto>> GetByStatusAsync(StaffStatus status)
-    {
-        var employees = await _employeeRepository.GetByStatusAsync(status);
-        return employees.Select(MapToDto);
-    }
+        => (await _employeeRepository.GetByStatusAsync(status)).Select(e => e.ToSummaryDto());
 
     public async Task<IEnumerable<EmployeeDto>> GetByEmploymentTypeAsync(EmploymentType employmentType)
-    {
-        return (await _employeeRepository.GetByEmploymentTypeAsync(employmentType)).Select(e => e.ToSummaryDto());
-    }
+        => (await _employeeRepository.GetByEmploymentTypeAsync(employmentType)).Select(e => e.ToSummaryDto());
 
-    public async Task<IEnumerable<EmployeeDto>> GetByStationAsync(Guid stationId)
-    {
-        var employees = await _employeeRepository.GetByStationAsync(stationId);
-        return employees.Select(MapToDto);
-    }
-
-    public async Task<IEnumerable<EmployeeDto>> GetByDivisionAsync(Guid divisionId)
-    {
-        var employees = await _employeeRepository.GetByDivisionAsync(divisionId);
-        return employees.Select(MapToDto);
-    }
-
-    public async Task<IEnumerable<EmployeeDto>> GetByUnitAsync(Guid unitId)
-    {
-        var employees = await _employeeRepository.GetByUnitAsync(unitId);
-        return employees.Select(MapToDto);
-    }
-
-    #endregion
-
-    #region Maintenance Integration
-
+    // Maintenance integration left as existing (no aggregate writes)
     public async Task<IEnumerable<MaintenanceTechnicianDto>> GetMaintenanceTechniciansAsync()
     {
         var technicians = await _employeeRepository.GetMaintenanceTechniciansAsync();
@@ -2884,252 +2424,49 @@ public class EmployeeService : IEmployeeService
     public async Task<MaintenanceTechnicianDto?> GetTechnicianByIdAsync(Guid employeeId)
     {
         var employee = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
-        if (employee == null || !employee.CanBeAssignedToMaintenance)
-        {
-            return null;
-        }
-
-        return MapToMaintenanceTechnicianDto(employee);
+        return employee == null || !employee.CanBeAssignedToMaintenance ? null : MapToMaintenanceTechnicianDto(employee);
     }
 
     public async Task<TechnicianAvailabilityDto?> GetTechnicianAvailabilityAsync(Guid employeeId)
     {
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
-        if (employee == null || !employee.CanBeAssignedToMaintenance)
-        {
-            return null;
-        }
+        if (employee == null || !employee.CanBeAssignedToMaintenance) return null;
 
-        // This would typically check against work orders, schedules, etc.
-        // For now, return basic availability based on status
         return new TechnicianAvailabilityDto
         {
             EmployeeId = employee.Id,
             EmployeeName = employee.FullName,
             IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            AvailableFrom = employee.StaffStatus == StaffStatus.Active ? DateTime.Now : null,
+            AvailableFrom = employee.StaffStatus == StaffStatus.Active ? DateTime.UtcNow : null,
             UnavailabilityReason = employee.StaffStatus != StaffStatus.Active ? employee.StaffStatus.ToString() : null,
-            CurrentWorkOrders = 0, // Would come from work order service
-            WorkloadPercentage = 0 // Would come from workload calculation
+            CurrentWorkOrders = 0,
+            WorkloadPercentage = 0
         };
     }
 
     public async Task<IEnumerable<MaintenanceTechnicianDto>> GetTechniciansWithSkillAsync(Guid skillId, SkillLevel? minLevel = null)
     {
         var employees = await _employeeRepository.GetEmployeesBySkillAsync(skillId, minLevel);
-        var technicians = employees.Where(e => e.CanBeAssignedToMaintenance);
-        return technicians.Select(MapToMaintenanceTechnicianDto);
+        return employees.Where(e => e.CanBeAssignedToMaintenance).Select(MapToMaintenanceTechnicianDto);
     }
 
-    #endregion
+    public Task<bool> EmployeeNumberExistsAsync(string employeeNumber) => _employeeRepository.EmployeeNumberExistsAsync(employeeNumber);
+    public Task<bool> EmailExistsAsync(string email) => _employeeRepository.EmailExistsAsync(NormalizeEmail(email));
+    public Task<string> GenerateEmployeeNumberAsync() => _employeeRepository.GenerateEmployeeNumberAsync();
 
-    #region Employee Validation
-
-    public async Task<bool> EmployeeNumberExistsAsync(string employeeNumber)
-    {
-        return await _employeeRepository.EmployeeNumberExistsAsync(employeeNumber);
-    }
-
-    public async Task<bool> EmailExistsAsync(string email)
-    {
-        return await _employeeRepository.EmailExistsAsync(email);
-    }
-
-    public async Task<string> GenerateEmployeeNumberAsync()
-    {
-        return await _employeeRepository.GenerateEmployeeNumberAsync();
-    }
-
-    #endregion
-
-    #region Employee Statistics
-
-    public async Task<int> GetTotalEmployeeCountAsync()
-    {
-        var employees = await _employeeRepository.GetAllAsync();
-        return employees.Count();
-    }
-
-    public async Task<int> GetActiveEmployeeCountAsync()
-    {
-        var employees = await _employeeRepository.GetActiveEmployeesAsync();
-        return employees.Count();
-    }
+    public async Task<int> GetTotalEmployeeCountAsync() => await _employeeRepository.CountAsync();
+    public async Task<int> GetActiveEmployeeCountAsync() => await _employeeRepository.CountAsync(e => e.IsActive);
 
     public async Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync()
     {
         var employees = await _employeeRepository.GetAllAsync();
-        return employees.GroupBy(e => e.StaffStatus)
-                      .ToDictionary(g => g.Key, g => g.Count());
+        return employees.GroupBy(e => e.StaffStatus).ToDictionary(g => g.Key, g => g.Count());
     }
 
     public async Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync()
     {
-        var employees = await _employeeRepository.GetAllAsync();
-        return employees.GroupBy(e => e.Department.Name)
-                      .ToDictionary(g => g.Key, g => g.Count());
-    }
-
-    #endregion
-
-    #region Private Mapping Methods
-
-    private static EmployeeDto MapToDto(Employee employee)
-    {
-        return new EmployeeDto
-        {
-            Id = employee.Id,
-            EmployeeNumber = employee.EmployeeNumber,
-            CorporateEmployeeID = employee.CorporateEmployeeID,
-            FirstName = employee.FirstName,
-            MiddleName = employee.MiddleName,
-            LastName = employee.LastName,
-            FullName = employee.FullName,
-            DisplayName = employee.DisplayName,
-            Title = employee.Title,
-            Gender = employee.Gender,
-            EmailAddress = employee.EmailAddress,
-            MobileNumber = employee.MobileNumber,
-            DivisionName = employee.Division?.Name ?? string.Empty,
-            DepartmentName = employee.Department?.Name ?? string.Empty,
-            SectionName = employee.Section?.Name ?? string.Empty,
-            UnitName = employee.Unit?.Name ?? string.Empty,
-            PositionTitle = employee.Position?.Title ?? string.Empty,
-            LocationId = employee.LocationId,
-            LocationName = employee.Location?.Name,
-            StaffStatus = employee.StaffStatus,
-            EmploymentType = employee.EmploymentType,
-            IsActive = employee.IsActive,
-            IsFullTime = employee.IsFullTime,
-            IsExpatriate = employee.IsExpatriate,
-            DateEmployed = employee.DateEmployed,
-            YearsOfService = employee.YearsOfService,
-            CanBeAssignedToMaintenance = employee.CanBeAssignedToMaintenance,
-            PicturePath = employee.PicturePath
-        };
-    }
-
-    private static EmployeeDetailDto MapToDetailDto(Employee employee)
-    {
-        var basicDto = MapToDto(employee);
-        return new EmployeeDetailDto
-        {
-            Id = basicDto.Id,
-            EmployeeNumber = basicDto.EmployeeNumber,
-            CorporateEmployeeID = basicDto.CorporateEmployeeID,
-            FirstName = basicDto.FirstName,
-            MiddleName = basicDto.MiddleName,
-            LastName = basicDto.LastName,
-            FullName = basicDto.FullName,
-            DisplayName = basicDto.DisplayName,
-            Title = basicDto.Title,
-            Gender = basicDto.Gender,
-            EmailAddress = basicDto.EmailAddress,
-            MobileNumber = basicDto.MobileNumber,
-            DepartmentName = basicDto.DepartmentName,
-            SectionName = basicDto.SectionName,
-            PositionTitle = basicDto.PositionTitle,
-            LocationId = basicDto.LocationId,
-            LocationName = basicDto.LocationName,
-            StaffStatus = basicDto.StaffStatus,
-            EmploymentType = basicDto.EmploymentType,
-            IsActive = basicDto.IsActive,
-            IsFullTime = basicDto.IsFullTime,
-            DateEmployed = basicDto.DateEmployed,
-            YearsOfService = basicDto.YearsOfService,
-            CanBeAssignedToMaintenance = basicDto.CanBeAssignedToMaintenance,
-            PicturePath = basicDto.PicturePath,
-
-            // Additional detail fields
-            DateOfBirth = employee.DateOfBirth,
-            MaritalStatus = employee.MaritalStatus,
-            Religion = employee.Religion,
-            Address = employee.Address,
-            City = employee.City,
-            State = employee.State,
-            PostalCode = employee.PostalCode,
-            DigitalAddress = employee.DigitalAddress,
-            CountryName = employee.Country?.Name,
-            TelephoneNumber = employee.TelephoneNumber,
-            BusinessNumber = employee.BusinessNumber,
-            Extension = employee.Extension,
-            ProbationPeriodDays = employee.ProbationPeriodDays,
-            ConfirmationDate = employee.ConfirmationDate,
-            RetirementDate = employee.RetirementDate,
-            TaxNumber = employee.TaxNumber,
-            BloodType = employee.BloodType,
-            ShiftName = employee.Shift?.Name,
-            Salary = employee.Salary,
-            BadgeNumber = employee.BadgeNumber,
-            Notes = employee.Notes,
-            LastPromotionDate = employee.LastPromotionDate,
-            LastReviewDate = employee.LastReviewDate,
-            NextReviewDate = employee.NextReviewDate,
-            StationName = employee.Station?.Name,
-            TerminationDate = employee.TerminationDate,
-            TerminationReason = employee.TerminationReason,
-            TerminationNotes = employee.TerminationNotes,
-
-            // Related collections would be mapped here
-            EmergencyContacts = employee.EmergencyContacts?.Select(ec => new EmployeeEmergencyContactDto
-            {
-                Id = ec.Id,
-                EmployeeId = ec.EmployeeId,
-                FirstName = ec.FirstName,
-                LastName = ec.LastName,
-                Relationship = ec.Relationship,
-                PhoneNumber = ec.PhoneNumber,
-                AlternatePhoneNumber = ec.AlternatePhoneNumber,
-                EmailAddress = ec.EmailAddress,
-                Address = ec.Address,
-                IsPrimary = ec.IsPrimary
-            }).ToList() ?? new List<EmployeeEmergencyContactDto>(),
-
-            Skills = employee.Skills?.Select(es => new EmployeeSkillDto
-            {
-                Id = es.Id,
-                EmployeeId = es.EmployeeId,
-                SkillId = es.SkillId,
-                SkillName = es.Skill.Name,
-                SkillCategory = es.Skill.Category,
-                SkillLevel = es.SkillLevel,
-                AcquiredDate = es.AcquiredDate,
-                CertificationDate = es.CertificationDate,
-                CertificationExpiryDate = es.CertificationExpiryDate,
-                CertificationNumber = es.CertificationNumber,
-                CertifyingBody = es.CertifyingBody,
-                IsVerified = es.IsVerified,
-                IsCertificationExpired = es.CertificationExpiryDate.HasValue &&
-                                       es.CertificationExpiryDate < DateOnly.FromDateTime(DateTime.Now),
-                Notes = es.Notes
-            }).ToList() ?? new List<EmployeeSkillDto>()
-        };
-    }
-
-    private static MaintenanceTechnicianDto MapToMaintenanceTechnicianDto(Employee employee)
-    {
-        return new MaintenanceTechnicianDto
-        {
-            Id = employee.Id,
-            EmployeeNumber = employee.EmployeeNumber,
-            FullName = employee.FullName,
-            DisplayName = employee.DisplayName,
-            EmailAddress = employee.EmailAddress,
-            MobileNumber = employee.MobileNumber,
-            PositionTitle = employee.Position?.Title ?? string.Empty,
-            IsActive = employee.IsActive,
-            IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
-            Skills = employee.Skills?.Select(es => new MaintenanceDTOs.UserTechnicianSkillDto
-            {
-                SkillName = es.Skill.Name,
-                Level = (int)es.SkillLevel,
-                IsCertified = es.CertificationDate.HasValue
-            }).ToList() ?? new List<MaintenanceDTOs.UserTechnicianSkillDto>(),
-            CurrentWorkOrders = 0, // Would come from work order service
-            WorkloadScore = 0, // Would come from workload calculation
-            BadgeNumber = employee.BadgeNumber,
-            ShiftName = employee.Shift?.Name
-        };
+        var employees = await _employeeRepository.GetAllAsync(e => e.Department!);
+        return employees.GroupBy(e => e.Department?.Name ?? "Unassigned").ToDictionary(g => g.Key, g => g.Count());
     }
 
     #endregion
@@ -3158,7 +2495,39 @@ public class EmployeeService : IEmployeeService
         if (employeeId != Guid.Empty && await WouldCreateCircularReportingAsync(employeeId, managerId, cancellationToken))
             throw new InvalidOperationException("Manager assignment would create circular reporting.");
     }
-    
+
+    private static EmployeeDto ToSummaryFromDetail(EmployeeDetailDto d)
+        => new()
+        {
+            Id = d.Id,
+            EmployeeNumber = d.EmployeeNumber,
+            FirstName = d.FirstName,
+            MiddleName = d.MiddleName,
+            LastName = d.LastName,
+            FullName = d.FullName,
+            DisplayName = d.DisplayName,
+            Title = d.Title,
+            Gender = d.Gender,
+            EmailAddress = d.EmailAddress,
+            MobileNumber = d.MobileNumber,
+            DepartmentName = d.DepartmentName,
+            SectionName = d.SectionName,
+            PositionTitle = d.PositionTitle,
+            OrganizationLevelName = d.OrganizationLevelName,
+            OrganizationUnitName = d.OrganizationUnitName,
+            LocationLevelName = d.LocationLevelName,
+            LocationName = d.LocationName,
+            StaffStatus = d.StaffStatus,
+            EmploymentType = d.EmploymentType,
+            IsActive = d.IsActive,
+            IsFullTime = d.IsFullTime,
+            IsExpatriate = d.IsExpatriate,
+            DateEmployed = d.DateEmployed,
+            YearsOfService = d.YearsOfService,
+            CanBeAssignedToMaintenance = d.CanBeAssignedToMaintenance,
+            PicturePath = d.PicturePath
+        };
+
     private static void ValidateContractTaxRules(TaxTreatmentType taxTreatmentType, decimal? withholdingTaxRate)
     {
         if (taxTreatmentType == TaxTreatmentType.WithholdingTax && !withholdingTaxRate.HasValue)
@@ -3167,6 +2536,32 @@ public class EmployeeService : IEmployeeService
         if (withholdingTaxRate.HasValue && (withholdingTaxRate < 0 || withholdingTaxRate > 100))
             throw new InvalidOperationException("WithholdingTaxRate must be between 0 and 100.");
     }
-    
+
+    private static MaintenanceTechnicianDto MapToMaintenanceTechnicianDto(Employee employee)
+    {
+        return new MaintenanceTechnicianDto
+        {
+            Id = employee.Id,
+            EmployeeNumber = employee.EmployeeNumber,
+            FullName = employee.FullName,
+            DisplayName = employee.DisplayName,
+            EmailAddress = employee.EmailAddress,
+            MobileNumber = employee.MobileNumber,
+            PositionTitle = employee.Position?.Title ?? string.Empty,
+            IsActive = employee.IsActive,
+            IsAvailable = employee.IsActive && employee.StaffStatus == StaffStatus.Active,
+            Skills = employee.Skills?.Select(es => new ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto
+            {
+                SkillName = es.Skill.Name,
+                Level = (int)es.SkillLevel,
+                IsCertified = es.CertificationDate.HasValue
+            }).ToList() ?? new List<ErpSystem.Core.DTOs.Maintenance.UserTechnicianSkillDto>(),
+            CurrentWorkOrders = 0,
+            WorkloadScore = 0,
+            BadgeNumber = employee.BadgeNumber,
+            ShiftName = null
+        };
+    }
+
     #endregion
 }

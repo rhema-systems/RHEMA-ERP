@@ -6590,6 +6590,11 @@ namespace ErpSystem.Web.Services
                 new { Department = "Executive Approvals", Code = "LA-EXE", Username = "executive.approver4", First = "Patricia", Last = "Executive", Role = "Executive Approver", Number = "LA-EXE-004" }
             };
 
+            // [HR-MODULE-PORT] Positions require OrganizationUnitId + OrganizationLevelId (DepartmentId
+            // anchoring was removed). Resolve a default org unit/level for the tenant once so the position
+            // inserts below satisfy their FKs. Departments are still created — Employee.DepartmentId keeps them.
+            var (orgUnitId, orgLevelId) = await ErpSystem.Data.Seeders.SeederOrgDefaults.EnsureDefaultUnitAsync(_context, tenant.Id);
+
             foreach (var account in accounts)
             {
                 var department = await _context.Departments.FirstOrDefaultAsync(item =>
@@ -6624,7 +6629,8 @@ namespace ErpSystem.Web.Services
                     {
                         Id = Guid.NewGuid(),
                         TenantId = tenant.Id,
-                        DepartmentId = department.Id,
+                        OrganizationUnitId = orgUnitId,
+                        OrganizationLevelId = orgLevelId,
                         Title = account.Role,
                         Code = positionCode,
                         Description = "Land acquisition workflow test position",
@@ -7327,6 +7333,13 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            .Concat(HrPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Last())
             .ToArray();
@@ -7368,8 +7381,10 @@ namespace ErpSystem.Web.Services
 
             var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
-                [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames,
-                [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames,
+                [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
+                    .Concat(HrPermissions.AllNames).ToArray(),
+                [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
+                    .Concat(HrPermissions.AllNames).ToArray(),
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -7660,6 +7675,16 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
+                },
+                // "HR User" is the role this seeder actually creates; note the HR controllers'
+                // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded
+                // here. Both names are covered by HrPermissions.MedicalFallbackRoles.
+                // HR staff maintain occupational-health records but do not administer them:
+                // deleting a medical record stays with tenant administrators.
+                ["HR User"] = new[]
+                {
+                    HrPermissions.ViewMedicalRecords,
+                    HrPermissions.MaintainMedicalRecords
                 }
             };
 

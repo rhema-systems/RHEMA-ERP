@@ -1,0 +1,27 @@
+{
+  "_comment": "TEMPLATE. Copy to appsettings.Production.json (gitignored) and fill in real secrets, OR supply these via environment variables (JwtSettings__SecretKey, JwtSettings__PortalSecretKey, JwtSettings__PortalAudience, CandidatePortal__PortalUrl). The API throws at startup if the portal values are missing.",
+  "JwtSettings": {
+    "SecretKey": "REPLACE_WITH_A_256_BIT_SECRET",
+    "Issuer": "ErpSystem.Api",
+    "Audience": "ErpSystem.Client",
+    "ExpiryInHours": 24,
+
+    "_PortalSecretKey_comment": "REQUIRED. MUST be different from SecretKey — external portal tokens are signed with a separate key.",
+    "PortalSecretKey": "REPLACE_WITH_A_DIFFERENT_256_BIT_PORTAL_SECRET",
+
+    "_PortalAudience_comment": "REQUIRED. MUST be different from Audience.",
+    "PortalAudience": "ErpSystem.Portal"
+  },
+
+  "_CandidatePortal_comment": "REQUIRED. Absolute base URL of the external portal, used to build verification / password-reset / offer email links.",
+  "CandidatePortal": {
+    "PortalUrl": "https://portal.example.com"
+  },
+
+  "_ForwardedHeaders_comment": "Optional. List trusted reverse-proxy/load-balancer IPs and/or CIDR networks so the app sees the REAL client IP (used by rate limiting + audit logs). Empty arrays = trust no proxy (X-Forwarded-* ignored).",
+  "ForwardedHeaders": {
+    "ForwardLimit": 1,
+    "KnownNetworks": [],
+    "KnownProxies": []
+  }
+}

@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR.JobAnalysis;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR.Requisition;
@@ -9,147 +11,247 @@ namespace ErpSystem.Core.Entities.HR.Requisition;
 /// </summary>
 public class StaffRequisition : TenantEntity
 {
+    [MaxLength(50)]
     public string RequisitionNumber { get; set; } = string.Empty;
+	
+	[MaxLength(200)]
+	public string? RequisitionTitle { get; set; }
 
-    // Position Details
+	[MaxLength(500)]
+	public string? Description { get; set; }
+
+    public Guid? LocationLevelId { get; set; }
+
+    [ForeignKey(nameof(LocationLevelId))]
+    public virtual LocationLevel? LocationLevel { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    public Guid? OrganizationLevelId { get; set; }
+
+    [ForeignKey(nameof(OrganizationLevelId))]
+    public virtual OrganizationLevel? OrganizationLevel { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
     public Guid PositionId { get; set; }
-    public EmployeePosition Position { get; set; } = null!;
 
-    public Guid DepartmentId { get; set; }
-    public Department Department { get; set; } = null!;
+    [ForeignKey(nameof(PositionId))]
+    public virtual EmployeePosition Position { get; set; } = null!;
+	
+	public Guid? JobDescriptionId { get; set; }
 
-    public Guid? StationId { get; set; }
-    public WorkStation? Station { get; set; }
+    [ForeignKey(nameof(JobDescriptionId))]
+    public virtual JobDescription? JobDescription { get; set; }
 
-    // Requisition Type
-    public StaffRequisitionType Type { get; set; } // New Position, Replacement, Temporary
+    public StaffRequisitionType Type { get; set; }
     public StaffRequisitionPriority Priority { get; set; }
-    public StaffRequisitionStatus Status { get; set; }
+	public StaffRequisitionStatus Status { get; set; } = StaffRequisitionStatus.Draft;
+
+    public int NumberOfPositions { get; set; } = 1;
+	public int PositionsFilled { get; set; }
+	[NotMapped]
+	public int PositionsRemaining => NumberOfPositions - PositionsFilled;
 
     // If Replacement
     public Guid? ReplacementForEmployeeId { get; set; }
-    public Employee? ReplacementForEmployee { get; set; }
-    public ReplacementReason? ReplacementReason { get; set; }
+
+    [ForeignKey(nameof(ReplacementForEmployeeId))]
+    public virtual Employee? ReplacementForEmployee { get; set; }
+
+    public StaffReplacementReason? ReplacementReason { get; set; }
     public DateTime? EmployeeDepartureDate { get; set; }
-
-    // Number of Positions
-    public int NumberOfPositions { get; set; }
-
-    // Employment Terms
-    // public EmploymentType EmploymentType { get; set; }
-    public DateTime? TemporaryStartDate { get; set; }
-    public DateTime? TemporaryEndDate { get; set; }
-    public string? ContractDuration { get; set; }
+	
+	// Timeline
+	public DateTime RequestDate { get; set; } = DateTime.UtcNow;
+	public DateTime DesiredStartDate { get; set; }
+	public DateTime? LatestAcceptableStartDate { get; set; }
+	public DateTime? TargetFillDate { get; set; }
+	public DateTime? ExpectedOfferDate { get; set; }
+	public int? DaysToFill { get; set; } // Calculated field
+	[MaxLength(1000)]
+	public string? TargetStartDateReason { get; set; }
 
     // Justification
+    [MaxLength(2000)]
     public string BusinessJustification { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
     public string? ImpactIfNotFilled { get; set; }
-    public bool IsBudgeted { get; set; }
+
+	// Budget
+	public bool IsBudgeted { get; set; }
+
+	[MaxLength(50)]
     public string? BudgetCode { get; set; }
 
-    // Job Requirements
-    public string? ModifiedJobDescription { get; set; }
-    public string? EssentialQualifications { get; set; }
-    public string? PreferredQualifications { get; set; }
-    public string? KeyResponsibilities { get; set; }
-
-    // Compensation
-    public decimal? ProposedMinSalary { get; set; }
-    public decimal? ProposedMaxSalary { get; set; }
-    public string? ProposedBenefits { get; set; }
-
-    // Timeline
-    public DateTime RequestDate { get; set; }
-    public DateTime DesiredStartDate { get; set; }
-    public DateTime? LatestStartDate { get; set; }
+    // Recruitment Strategy
+    public bool AllowInternalCandidates { get; set; }
+    public bool AllowExternalCandidates { get; set; }
 
     // Requestor
     public Guid RequestedById { get; set; }
-    public Employee RequestedBy { get; set; } = null!;
 
-    // Approval Workflow
-    public Guid? SupervisorApprovedById { get; set; }
-    public Employee? SupervisorApprovedBy { get; set; }
-    public DateTime? SupervisorApprovalDate { get; set; }
-    public string? SupervisorComments { get; set; }
-
-    public Guid? HodApprovedById { get; set; }
-    public Employee? HodApprovedBy { get; set; }
-    public DateTime? HodApprovalDate { get; set; }
-    public string? HodComments { get; set; }
-
-    public Guid? HrApprovedById { get; set; }
-    public Employee? HrApprovedBy { get; set; }
-    public DateTime? HrApprovalDate { get; set; }
-    public string? HrComments { get; set; }
-
-    public Guid? FinanceApprovedById { get; set; }
-    public Employee? FinanceApprovedBy { get; set; }
-    public DateTime? FinanceApprovalDate { get; set; }
-    public string? FinanceComments { get; set; }
-
-    public Guid? CeoApprovedById { get; set; }
-    public Employee? CeoApprovedBy { get; set; }
-    public DateTime? CeoApprovalDate { get; set; }
-    public string? CeoComments { get; set; }
-
-    // Rejection
-    public DateTime? RejectedDate { get; set; }
-    public Guid? RejectedById { get; set; }
-    public Employee? RejectedBy { get; set; }
-    public string? RejectionReason { get; set; }
-
-    // Cancellation
-    public DateTime? CancelledDate { get; set; }
-    public string? CancellationReason { get; set; }
+    [ForeignKey(nameof(RequestedById))]
+    public virtual Employee RequestedBy { get; set; } = null!;
 
     // Fulfillment
     public bool IsFulfilled { get; set; }
     public DateTime? FulfilledDate { get; set; }
-    public int PositionsFilled { get; set; }
+	
+    // Cancellation
+    public Guid? CancelledById { get; set; }
 
-    // Linked Vacancy
-    public Guid? VacancyId { get; set; }
-    public Recruitment.Vacancy? Vacancy { get; set; }
+    [ForeignKey(nameof(CancelledById))]
+    public virtual Employee? CancelledBy { get; set; }
 
-    public ICollection<RequisitionAttachment> Attachments { get; set; } = new List<RequisitionAttachment>();
+    public DateTime? CancelledDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+	
+	// Workflow Integration
+    public Guid? WorkflowInstanceId { get; set; }
+
+    // Linked Job Vacancy
+    public Guid? JobVacancyId { get; set; }
+
+    [ForeignKey(nameof(JobVacancyId))]
+    public virtual JobVacancy? JobVacancy { get; set; }
+
+    [MaxLength(1000)]
+    public string Notes { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Concurrency token. Submit / approve / reject / hold / cancel / fulfil are load-check-mutate-save,
+    /// so concurrent approvers could otherwise overwrite one another's decision.
+    /// </summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
+    public virtual ICollection<StaffRequisitionCost> Costs { get; set; } = new List<StaffRequisitionCost>();
+    public virtual ICollection<StaffRequisitionAttachment> Attachments { get; set; } = new List<StaffRequisitionAttachment>();
+    public virtual ICollection<StaffRequisitionHistory> History { get; set; } = new List<StaffRequisitionHistory>();
+    public virtual ICollection<StaffRequisitionComment> Comments { get; set; } = new List<StaffRequisitionComment>();
 }
 
-public class RequisitionAttachment : TenantEntity
+public class StaffRequisitionCost : TenantEntity
 {
     public Guid RequisitionId { get; set; }
-    public StaffRequisition Requisition { get; set; } = null!;
 
-    public string FileName { get; set; } = string.Empty;
-    public string FilePath { get; set; } = string.Empty;
+    [ForeignKey(nameof(RequisitionId))]
+    public virtual StaffRequisition Requisition { get; set; } = null!;
+	
+    public StaffRequisitionCostCategory Category { get; set; }
+
+    [MaxLength(100)]
+    public string Purpose { get; set; } = string.Empty;
+    
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// ISO 4217 currency code (e.g. GHS, USD, GBP).
+    /// </summary>
+    [MaxLength(3)]
+    public string Currency { get; set; } = "GHS";
+
+    /// <summary>
+    /// Exchange rate to the tenant's base currency at time of recording.
+    /// Defaults to 1 (same currency / no conversion needed).
+    /// </summary>
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal ExchangeRate { get; set; } = 1;
+
+    [MaxLength(500)]
     public string? Description { get; set; }
-    public DateTime UploadDate { get; set; }
+
+    [MaxLength(50)]
+    public string? PaymentVoucherNumber { get; set; }
+	
+    public Guid RecordedById { get; set; }
+
+    [ForeignKey(nameof(RecordedById))]
+    public virtual Employee RecordedBy { get; set; } = null!;
+
+    public DateTime RecordedDate { get; set; } = DateTime.UtcNow;
 }
 
-/// <summary>
-/// Headcount tracking and authorization
-/// </summary>
-public class HeadcountAuthorization : TenantEntity
+public class StaffRequisitionAttachment : TenantEntity
 {
-    public int FiscalYear { get; set; }
+    public Guid RequisitionId { get; set; }
 
-    public Guid? DepartmentId { get; set; }
-    public Department? Department { get; set; }
+    [ForeignKey(nameof(RequisitionId))]
+    public virtual StaffRequisition Requisition { get; set; } = null!;
 
-    public Guid PositionId { get; set; }
-    public EmployeePosition Position { get; set; } = null!;
+    [MaxLength(200)]
+    public string FileName { get; set; } = string.Empty;
+    
+    [MaxLength(500)]
+    public string FilePath { get; set; } = string.Empty;
+    
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+    
+    public DateTime UploadDate { get; set; }
+	
+	public Guid UploadedById { get; set; }
+    
+	[ForeignKey(nameof(UploadedById))]
+    public virtual Employee UploadedBy { get; set; } = null!;
+}
 
-    public int AuthorizedHeadcount { get; set; }
-    public int CurrentHeadcount { get; set; }
-    public int VacantPositions { get; set; }
-    public int PendingRequisitions { get; set; }
+public class StaffRequisitionComment : TenantEntity
+{
+    public Guid RequisitionId { get; set; }
+    
+    [ForeignKey(nameof(RequisitionId))]
+    public virtual StaffRequisition Requisition { get; set; } = null!;
+	
+    /// <summary>
+    /// Null for top-level comments; set to parent comment Id for replies.
+    /// </summary>
+    public Guid? ParentCommentId { get; set; }
 
-    public DateTime EffectiveDate { get; set; }
-    public DateTime? ExpiryDate { get; set; }
+    [ForeignKey(nameof(ParentCommentId))]
+    public virtual StaffRequisitionComment? ParentComment { get; set; }
+	
+    [MaxLength(3000)]
+    public string Body { get; set; } = string.Empty;
 
-    public Guid AuthorizedById { get; set; }
-    public Employee AuthorizedBy { get; set; } = null!;
+    public Guid AuthorId { get; set; }
 
-    public bool IsActive { get; set; }
-    public string? Notes { get; set; }
+    [ForeignKey(nameof(AuthorId))]
+    public virtual Employee Author { get; set; } = null!;
+
+    public DateTime PostedDate { get; set; } = DateTime.UtcNow;
+	
+	public virtual ICollection<StaffRequisitionComment> Replies { get; set; } = new List<StaffRequisitionComment>();
+}
+
+public class StaffRequisitionHistory : TenantEntity
+{
+    public Guid RequisitionId { get; set; }
+
+    [ForeignKey(nameof(RequisitionId))]
+    public virtual StaffRequisition Requisition { get; set; } = null!;
+
+    public StaffRequisitionStatus FromStatus { get; set; }
+    public StaffRequisitionStatus ToStatus { get; set; }
+
+    public Guid ChangedById { get; set; }
+
+    [ForeignKey(nameof(ChangedById))]
+    public virtual Employee ChangedBy { get; set; } = null!;
+
+	[MaxLength(1000)]
+    public string? Comments { get; set; }
+	
+    public DateTime ActionDate { get; set; } = DateTime.UtcNow;
 }

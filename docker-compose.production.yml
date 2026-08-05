@@ -47,6 +47,12 @@ services:
       - JwtSettings__SecretKey=${JWT_SECRET_KEY}
       - JwtSettings__Issuer=ErpSystem.Production.Api
       - JwtSettings__Audience=ErpSystem.Production.Client
+      # External-portal auth (candidate careers / consultant-client). REQUIRED — the app throws at
+      # startup without these. PortalSecretKey MUST differ from JWT_SECRET_KEY and PortalAudience MUST
+      # differ from the internal Audience above.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Production.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-https://erp.company.com}
       - Redis__Configuration=${REDIS_CONNECTION_STRING}
       - Redis__InstanceName=ErpSystem_Production_Api1
       - LoadBalancer__NodeId=api-1
@@ -96,6 +102,12 @@ services:
       - JwtSettings__SecretKey=${JWT_SECRET_KEY}
       - JwtSettings__Issuer=ErpSystem.Production.Api
       - JwtSettings__Audience=ErpSystem.Production.Client
+      # External-portal auth (candidate careers / consultant-client). REQUIRED — the app throws at
+      # startup without these. PortalSecretKey MUST differ from JWT_SECRET_KEY and PortalAudience MUST
+      # differ from the internal Audience above.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Production.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-https://erp.company.com}
       - Redis__Configuration=${REDIS_CONNECTION_STRING}
       - Redis__InstanceName=ErpSystem_Production_Api2
       - LoadBalancer__NodeId=api-2
@@ -145,6 +157,12 @@ services:
       - JwtSettings__SecretKey=${JWT_SECRET_KEY}
       - JwtSettings__Issuer=ErpSystem.Production.Api
       - JwtSettings__Audience=ErpSystem.Production.Client
+      # External-portal auth (candidate careers / consultant-client). REQUIRED — the app throws at
+      # startup without these. PortalSecretKey MUST differ from JWT_SECRET_KEY and PortalAudience MUST
+      # differ from the internal Audience above.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Production.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-https://erp.company.com}
       - Redis__Configuration=${REDIS_CONNECTION_STRING}
       - Redis__InstanceName=ErpSystem_Production_Api3
       - LoadBalancer__NodeId=api-3
@@ -195,6 +213,12 @@ services:
       - JwtSettings__SecretKey=${JWT_SECRET_KEY}
       - JwtSettings__Issuer=ErpSystem.Production.Api
       - JwtSettings__Audience=ErpSystem.Production.Client
+      # External-portal auth (candidate careers / consultant-client). REQUIRED — the app throws at
+      # startup without these. PortalSecretKey MUST differ from JWT_SECRET_KEY and PortalAudience MUST
+      # differ from the internal Audience above.
+      - JwtSettings__PortalSecretKey=${JWT_PORTAL_SECRET_KEY}
+      - JwtSettings__PortalAudience=${JWT_PORTAL_AUDIENCE:-ErpSystem.Production.Portal}
+      - CandidatePortal__PortalUrl=${PORTAL_URL:-https://erp.company.com}
       - Redis__Configuration=${REDIS_CONNECTION_STRING}
       - Redis__InstanceName=ErpSystem_Production_ApiBackup
       - LoadBalancer__NodeId=api-backup

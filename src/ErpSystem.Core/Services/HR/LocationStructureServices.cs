@@ -30,6 +30,17 @@ public class LocationStructureService : ILocationStructureService
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
     public async Task<LocationStructureDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _repository.GetByIdAsync(id);
@@ -52,22 +63,26 @@ public class LocationStructureService : ILocationStructureService
 
     public async Task<IEnumerable<LocationStructureDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToDtoList();
     }
 
     public async Task<IEnumerable<LocationStructureSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<LocationStructureDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var pagedEntities = await query
+            .OrderBy(e => e.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -92,6 +107,7 @@ public class LocationStructureService : ILocationStructureService
             throw new InvalidOperationException($"Location structure with code '{createDto.Code}' already exists.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -105,7 +121,7 @@ public class LocationStructureService : ILocationStructureService
     {
         var entity = await _repository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Location structure with ID '{updateDto.Id}' not found.");
 
         // Validate unique name
@@ -130,7 +146,7 @@ public class LocationStructureService : ILocationStructureService
     {
         var entity = await _repository.GetByIdAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Location structure with ID '{id}' not found.");
 
         await _repository.DeleteAsync(entity);
@@ -151,7 +167,7 @@ public class LocationStructureService : ILocationStructureService
     {
         var entity = await _repository.GetByIdAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Location structure with ID '{id}' not found.");
 
         // Unset all defaults for this tenant
@@ -182,18 +198,32 @@ public class LocationLevelService : ILocationLevelService
     private readonly ILocationLevelRepository _repository;
     private readonly ILocationStructureRepository _structureRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationLevelService> _logger;
 
     public LocationLevelService(
         ILocationLevelRepository repository,
         ILocationStructureRepository structureRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<LocationLevelService> logger)
     {
         _repository = repository;
         _structureRepository = structureRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<LocationLevelDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -218,14 +248,22 @@ public class LocationLevelService : ILocationLevelService
 
     public async Task<IEnumerable<LocationLevelDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _repository.GetAllAsync();
+        var tenantId = GetTenantId();
+        // Include the structure so the list DTO can populate StructureName.
+        var entities = await _repository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .Include(e => e.Structure)
+            .OrderBy(e => e.LevelNumber).ThenBy(e => e.Name)
+            .ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<LocationLevelSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.LevelNumber).ThenBy(e => e.Name).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<LocationLevelDto>> GetByStructureIdAsync(Guid structureId, CancellationToken cancellationToken = default)
@@ -236,10 +274,12 @@ public class LocationLevelService : ILocationLevelService
 
     public async Task<PagedResult<LocationLevelDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var pagedEntities = await query
+            .OrderBy(e => e.LevelNumber).ThenBy(e => e.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -273,6 +313,7 @@ public class LocationLevelService : ILocationLevelService
             throw new InvalidOperationException($"Level number '{createDto.LevelNumber}' is already used in this structure.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -286,7 +327,7 @@ public class LocationLevelService : ILocationLevelService
     {
         var entity = await _repository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Location level with ID '{updateDto.Id}' not found.");
 
         // Validate unique name in structure
@@ -341,18 +382,32 @@ public class LocationService : ILocationService
     private readonly ILocationRepository _repository;
     private readonly ILocationLevelRepository _levelRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationService> _logger;
 
     public LocationService(
         ILocationRepository repository,
         ILocationLevelRepository levelRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<LocationService> logger)
     {
         _repository = repository;
         _levelRepository = levelRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<LocationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -382,14 +437,24 @@ public class LocationService : ILocationService
 
     public async Task<IEnumerable<LocationDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _repository.GetAllAsync();
+        var tenantId = GetTenantId();
+        // Include navigations so the list DTO can populate LevelName / StructureName /
+        // ParentLocationName.
+        var entities = await _repository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .Include(e => e.Structure)
+            .Include(e => e.LocationLevel)
+            .Include(e => e.ParentLocation)
+            .OrderBy(e => e.Name)
+            .ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<IEnumerable<LocationSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<LocationDto>> GetByLevelIdAsync(Guid levelId, CancellationToken cancellationToken = default)
@@ -444,10 +509,12 @@ public class LocationService : ILocationService
 
     public async Task<PagedResult<LocationDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var pagedEntities = await query
+            .OrderBy(e => e.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -469,6 +536,8 @@ public class LocationService : ILocationService
 
     public async Task<LocationDto> CreateAsync(CreateLocationDto createDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
         // Validate level exists
         var level = await _levelRepository.GetByIdAsync(createDto.LocationLevelId);
         if (level == null)
@@ -501,7 +570,7 @@ public class LocationService : ILocationService
         }
 
         // Validate unique code
-        if (!string.IsNullOrEmpty(createDto.Code) && await _repository.ExistsByCodeAsync(Guid.Empty, createDto.Code)) // TenantId from context
+        if (!string.IsNullOrEmpty(createDto.Code) && await _repository.ExistsByCodeAsync(tenantId, createDto.Code))
             throw new InvalidOperationException($"Location with code '{createDto.Code}' already exists.");
 
         // Validate unique name in level
@@ -509,6 +578,7 @@ public class LocationService : ILocationService
             throw new InvalidOperationException($"Location with name '{createDto.Name}' already exists in this level.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = tenantId;
 
         // Build path
         if (createDto.ParentLocationId.HasValue)
@@ -536,7 +606,7 @@ public class LocationService : ILocationService
     {
         var entity = await _repository.GetWithDetailsAsync(updateDto.Id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Location with ID '{updateDto.Id}' not found.");
 
         // Structure + level are immutable once a location exists

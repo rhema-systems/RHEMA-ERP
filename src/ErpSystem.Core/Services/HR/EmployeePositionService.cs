@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.Extensions.Logging;
 
@@ -11,14 +12,28 @@ namespace ErpSystem.Core.Services.HR;
 public class EmployeePositionService : IEmployeePositionService
 {
     private readonly IEmployeePositionRepository _positionRepository;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeePositionService> _logger;
 
     public EmployeePositionService(
         IEmployeePositionRepository positionRepository,
+        ICurrentUserProvider currentUserProvider,
         ILogger<EmployeePositionService> logger)
     {
         _positionRepository = positionRepository;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<EmployeePositionDto?> GetByIdAsync(Guid id)
@@ -29,14 +44,17 @@ public class EmployeePositionService : IEmployeePositionService
 
     public async Task<IEnumerable<EmployeePositionDto>> GetAllAsync()
     {
-        var positions = await _positionRepository.GetAllAsync(p => p.OrganizationUnit!, p => p.StaffLevel);
-        return positions.Select(MapToDto);
+        var tenantId = GetTenantId();
+        var positions = await _positionRepository.GetAllAsync(
+            p => p.OrganizationUnit!, p => p.OrganizationLevel!, p => p.StaffLevel);
+        return positions.Where(p => p.TenantId == tenantId).OrderBy(p => p.Title).Select(MapToDto);
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetActivePositionsAsync()
     {
+        var tenantId = GetTenantId();
         var positions = await _positionRepository.GetActivePositionsAsync();
-        return positions.Select(MapToDto);
+        return positions.Where(p => p.TenantId == tenantId).OrderBy(p => p.Title).Select(MapToDto);
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId)
@@ -69,6 +87,7 @@ public class EmployeePositionService : IEmployeePositionService
             Title = createDto.Title,
             Code = createDto.Code ?? string.Empty,
             Description = createDto.Description,
+            TenantId = GetTenantId(),
             OrganizationLevelId = createDto.OrganizationLevelId,
             OrganizationUnitId = createDto.OrganizationUnitId,
             Level = createDto.Level,
@@ -83,6 +102,8 @@ public class EmployeePositionService : IEmployeePositionService
             RequiresLicense = createDto.RequiresLicense,
             StaffLevelId = createDto.StaffLevelId,
             ReportsToPositionId = createDto.ReportsToPositionId,
+            ProbationPeriodMonths = createDto.ProbationPeriodMonths,
+            NoticePeriodMonths = createDto.NoticePeriodMonths,
             IsActive = true
         };
 
@@ -93,6 +114,7 @@ public class EmployeePositionService : IEmployeePositionService
                 .Select(g => g.First())
                 .Select(x => new PositionSkillRequirement
                 {
+                    TenantId = GetTenantId(),
                     SkillId = x.SkillId,
                     RequiredLevel = x.RequiredLevel,
                     IsRequired = x.IsRequired,
@@ -108,6 +130,7 @@ public class EmployeePositionService : IEmployeePositionService
                 .Select(g => g.First())
                 .Select(x => new EmployeePositionBenefit
                 {
+                    TenantId = GetTenantId(),
                     PolicyId = x.PolicyId,
                     ExpiryDate = x.ExpiryDate,
                     PositionAmount = x.PositionAmount
@@ -156,12 +179,18 @@ public class EmployeePositionService : IEmployeePositionService
         position.MaximumAge = updateDto.MaximumAge;
         position.StaffLevelId = updateDto.StaffLevelId;
         position.ReportsToPositionId = updateDto.ReportsToPositionId;
+        position.ProbationPeriodMonths = updateDto.ProbationPeriodMonths;
+        position.NoticePeriodMonths = updateDto.NoticePeriodMonths;
         position.IsActive = updateDto.IsActive;
 
-        SyncSkillRequirements(position, updateDto.SkillRequirements);
-        SyncPositionBenefits(position, updateDto.PositionBenefits);
+        await SyncSkillRequirementsAsync(position, updateDto.SkillRequirements);
+        await SyncPositionBenefitsAsync(position, updateDto.PositionBenefits);
 
-        await _positionRepository.UpdateAsync(position);
+        // Don't call UpdateAsync (which calls _dbSet.Update) — the entity graph is already
+        // tracked by EF. Calling Update() forces all navigation entities (including newly
+        // Added benefits that have Guid IDs from BaseEntity's constructor) into Modified state,
+        // causing SaveChanges to issue UPDATEs for rows that don't exist yet.
+        position.UpdatedAt = DateTime.UtcNow;
         await _positionRepository.SaveChangesAsync();
         _logger.LogInformation("Employee position updated: {PositionId} ({Code})", position.Id, position.Code);
 
@@ -204,6 +233,8 @@ public class EmployeePositionService : IEmployeePositionService
             SalaryGradeId = position.SalaryGradeId,
             SalaryGradeName = position.SalaryGrade?.Name,
             WorkMode = position.WorkMode,
+            ProbationPeriodMonths = position.ProbationPeriodMonths,
+            NoticePeriodMonths = position.NoticePeriodMonths,
             RequiresCertification = position.RequiresCertification,
             RequiresGuarantor = position.RequiresGuarantor,
             RequiresLicense = position.RequiresLicense,
@@ -240,7 +271,7 @@ public class EmployeePositionService : IEmployeePositionService
         };
     }
 
-    private static void SyncSkillRequirements(EmployeePosition position, ICollection<CreatePositionSkillRequirementDto> desired)
+    private async Task SyncSkillRequirementsAsync(EmployeePosition position, ICollection<CreatePositionSkillRequirementDto> desired)
     {
         desired ??= new List<CreatePositionSkillRequirementDto>();
 
@@ -250,32 +281,45 @@ public class EmployeePositionService : IEmployeePositionService
             .Select(g => g.First())
             .ToList();
 
-        var existing = position.SkillRequirements
-            .Where(x => !x.IsDeleted)
-            .ToDictionary(x => x.SkillId, x => x);
+        // Read through a filter-ignoring query for the same reason as the benefits sync: an
+        // Include cannot see soft-deleted rows, so removing a skill and adding it back would hit
+        // the unique index on TenantId+PositionId+SkillId instead of reviving the row.
+        var allBySkillId = (await _positionRepository.GetSkillRequirementsIncludingDeletedAsync(position.Id))
+            .GroupBy(x => x.SkillId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         foreach (var req in desiredDistinct)
         {
-            if (existing.TryGetValue(req.SkillId, out var entity))
+            if (allBySkillId.TryGetValue(req.SkillId, out var entity))
             {
+                // Re-activate if previously soft-deleted, then update values.
+                entity.IsDeleted = false;
+                entity.DeletedAt = null;
                 entity.RequiredLevel = req.RequiredLevel;
                 entity.IsRequired = req.IsRequired;
                 entity.Priority = req.Priority;
             }
             else
             {
-                position.SkillRequirements.Add(new PositionSkillRequirement
+                // Truly new — set FK explicitly and track via the repository to guarantee
+                // EntityState.Added. Adding to the nav-collection alone is not safe here
+                // because EF infers Unchanged (not Added) for non-default Guid keys when the
+                // parent is already Modified, which later causes a zero-row UPDATE.
+                var newReq = new PositionSkillRequirement
                 {
+                    PositionId = position.Id,
+                    TenantId = GetTenantId(),
                     SkillId = req.SkillId,
                     RequiredLevel = req.RequiredLevel,
                     IsRequired = req.IsRequired,
                     Priority = req.Priority
-                });
+                };
+                _positionRepository.TrackSkillRequirement(newReq);
             }
         }
 
         var desiredSkillIds = desiredDistinct.Select(x => x.SkillId).ToHashSet();
-        foreach (var entity in position.SkillRequirements.Where(x => !x.IsDeleted))
+        foreach (var entity in allBySkillId.Values.Where(x => !x.IsDeleted))
         {
             if (!desiredSkillIds.Contains(entity.SkillId))
             {
@@ -285,7 +329,7 @@ public class EmployeePositionService : IEmployeePositionService
         }
     }
 
-    private static void SyncPositionBenefits(EmployeePosition position, ICollection<CreateEmployeePositionBenefitDto> desired)
+    private async Task SyncPositionBenefitsAsync(EmployeePosition position, ICollection<CreateEmployeePositionBenefitDto> desired)
     {
         desired ??= new List<CreateEmployeePositionBenefitDto>();
 
@@ -295,30 +339,45 @@ public class EmployeePositionService : IEmployeePositionService
             .Select(g => g.First())
             .ToList();
 
-        var existing = position.PositionBenefits
-            .Where(x => !x.IsDeleted)
-            .ToDictionary(x => x.PolicyId, x => x);
+        // Soft-deleted entries are re-activated rather than re-inserted, which would violate the
+        // unique index on TenantId+PositionId+PolicyId. They have to be read through a
+        // filter-ignoring query: position.PositionBenefits comes from an Include, and the global
+        // soft-delete filter applies to included navigations, so a removed entitlement is simply
+        // absent there — making re-adding one a 500 rather than a revival.
+        var allByPolicyId = (await _positionRepository.GetBenefitsIncludingDeletedAsync(position.Id))
+            .GroupBy(x => x.PolicyId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         foreach (var ben in desiredDistinct)
         {
-            if (existing.TryGetValue(ben.PolicyId, out var entity))
+            if (allByPolicyId.TryGetValue(ben.PolicyId, out var entity))
             {
+                // Re-activate if previously soft-deleted, then update values.
+                entity.IsDeleted = false;
+                entity.DeletedAt = null;
                 entity.ExpiryDate = ben.ExpiryDate;
                 entity.PositionAmount = ben.PositionAmount;
             }
             else
             {
-                position.PositionBenefits.Add(new EmployeePositionBenefit
+                // Truly new — set FK explicitly and track via the repository to guarantee
+                // EntityState.Added. Adding to the nav-collection alone is not safe here
+                // because EF infers Unchanged (not Added) for non-default Guid keys when the
+                // parent is already Modified, which later causes a zero-row UPDATE.
+                var newBenefit = new EmployeePositionBenefit
                 {
+                    PositionId = position.Id,
+                    TenantId = GetTenantId(),
                     PolicyId = ben.PolicyId,
                     ExpiryDate = ben.ExpiryDate,
                     PositionAmount = ben.PositionAmount
-                });
+                };
+                _positionRepository.TrackBenefit(newBenefit);
             }
         }
 
         var desiredPolicyIds = desiredDistinct.Select(x => x.PolicyId).ToHashSet();
-        foreach (var entity in position.PositionBenefits.Where(x => !x.IsDeleted))
+        foreach (var entity in allByPolicyId.Values.Where(x => !x.IsDeleted))
         {
             if (!desiredPolicyIds.Contains(entity.PolicyId))
             {

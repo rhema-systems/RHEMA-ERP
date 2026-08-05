@@ -536,7 +536,12 @@ public partial class LocalFileStorageService : IFileStorageService
                 || category.Equals(ControlledFileUploadCategories.SupplierRegistrationEvidence, StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-land-acquisition-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-managed-asset-documents", StringComparison.OrdinalIgnoreCase)
-                || category.StartsWith("procedure-case-documents", StringComparison.OrdinalIgnoreCase));
+                || category.StartsWith("procedure-case-documents", StringComparison.OrdinalIgnoreCase)
+                // Every HR document family is personal data: CVs, identity documents,
+                // sick-note certificates, disciplinary evidence, medical exam results.
+                // A prefix rule rather than a list, so a future hr-* category is private
+                // by default instead of by remembering to opt in here.
+                || category.StartsWith("hr-", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsPrivatePath(string? filePath)
         => !string.IsNullOrWhiteSpace(filePath)

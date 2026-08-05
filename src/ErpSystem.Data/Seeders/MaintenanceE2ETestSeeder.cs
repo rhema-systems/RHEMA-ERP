@@ -326,6 +326,10 @@ public class MaintenanceE2ETestSeeder
 
         await _context.SaveChangesAsync();
 
+        // [HR-MODULE-PORT] Positions require OrganizationUnitId + OrganizationLevelId; resolve a default
+        // org unit/level for the tenant so the position inserts below satisfy their FKs.
+        var (orgUnitId, orgLevelId) = await SeederOrgDefaults.EnsureDefaultUnitAsync(_context, _defaultTenantId);
+
         // Seed Positions
         if (!await _context.EmployeePositions.AnyAsync(p => p.Id == managerPosId))
         {
@@ -334,7 +338,10 @@ public class MaintenanceE2ETestSeeder
                 Id = managerPosId,
                 Title = "Manager",
                 Code = "MGR",
-                DepartmentId = maintenanceDeptId,
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 5,
                 IsActive = true,
                 TenantId = _defaultTenantId,
@@ -350,7 +357,10 @@ public class MaintenanceE2ETestSeeder
                 Id = supervisorPosId,
                 Title = "Supervisor",
                 Code = "SUP",
-                DepartmentId = maintenanceDeptId,
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 4,
                 IsActive = true,
                 TenantId = _defaultTenantId,
@@ -366,7 +376,10 @@ public class MaintenanceE2ETestSeeder
                 Id = technicianPosId,
                 Title = "Technician",
                 Code = "TECH",
-                DepartmentId = maintenanceDeptId,
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 2,
                 IsActive = true,
                 TenantId = _defaultTenantId,
@@ -382,7 +395,10 @@ public class MaintenanceE2ETestSeeder
                 Id = inspectorPosId,
                 Title = "Inspector",
                 Code = "INSP",
-                DepartmentId = qcDeptId,
+                // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                OrganizationUnitId = orgUnitId,
+                OrganizationLevelId = orgLevelId,
                 Level = 3,
                 IsActive = true,
                 TenantId = _defaultTenantId,

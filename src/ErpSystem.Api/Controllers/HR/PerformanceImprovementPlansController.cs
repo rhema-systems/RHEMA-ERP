@@ -1,23 +1,53 @@
+using ErpSystem.Api.Models;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Models;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
+[Route("api/Pip")]
 [Authorize]
 public class PerformanceImprovementPlansController : ControllerBase
 {
     private readonly IPerformanceImprovementPlanService _improvementPlanService;
-    private readonly ILogger<PerformanceAppraisalsController> _logger;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IGenericRepository<Employee> _employeeRepository;
+    private readonly ILogger<PerformanceImprovementPlansController> _logger;
 
-    public PerformanceImprovementPlansController(IPerformanceImprovementPlanService improvementPlanService, ILogger<PerformanceAppraisalsController> logger)
+    public PerformanceImprovementPlansController(
+        IPerformanceImprovementPlanService improvementPlanService,
+        IFileStorageService fileStorageService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
+        IGenericRepository<Employee> employeeRepository,
+        ILogger<PerformanceImprovementPlansController> logger)
     {
         _improvementPlanService = improvementPlanService;
+        _fileStorageService = fileStorageService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _db = db;
+        _currentUserService = currentUserService;
+        _employeeRepository = employeeRepository;
         _logger = logger;
     }
 
@@ -144,17 +174,37 @@ public class PerformanceImprovementPlansController : ControllerBase
     /// Create a new PIP
     /// </summary>
     [HttpPost]
-    [ProducesResponseType(typeof(PerformanceImprovementPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(Guid), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Create([FromBody] CreatePerformanceImprovementPlanDto createDto)
+    public async Task<IActionResult> Create([FromBody] PipCreateRequest req)
     {
         try
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
+            var createDto = new CreatePerformanceImprovementPlanDto
+            {
+                EmployeeId        = req.EmployeeId,
+                AppraisalId       = req.AppraisalId,
+                StartDate         = req.StartDate,
+                EndDate           = req.EndDate,
+                PerformanceIssues = req.PerformanceIssues,
+                ExpectedStandards = req.ExpectedStandards,
+                ImprovementActions = req.ImprovementActions,
+                SupportProvided   = req.SupportProvided ?? string.Empty,
+                MeasurementCriteria = req.MeasurementCriteria ?? string.Empty,
+                SupervisorId      = req.SupervisorId,
+                HROwnerId         = req.HROwnerId,
+                ReviewSchedule    = req.ReviewSchedule,
+            };
+
             var response = await _improvementPlanService.CreateAsync(createDto);
-            return Ok(response);
+            return Ok(response.Id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (ArgumentException ex)
         {
@@ -174,17 +224,30 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(typeof(PerformanceImprovementPlanDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Update(Guid id, [FromBody] UpdatePerformanceImprovementPlanDto updateDto)
+    public async Task<IActionResult> Update(Guid id, [FromBody] PipUpdateRequest req)
     {
         try
         {
-            if (id != updateDto.Id)
-            {
-                return BadRequest("ID mismatch");
-            }
-
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
+
+            var updateDto = new UpdatePerformanceImprovementPlanDto
+            {
+                Id                 = id,
+                EmployeeId         = req.EmployeeId,
+                AppraisalId        = req.AppraisalId,
+                StartDate          = req.StartDate,
+                EndDate            = req.EndDate,
+                Status             = req.Status,
+                PerformanceIssues  = req.PerformanceIssues,
+                ExpectedStandards  = req.ExpectedStandards,
+                ImprovementActions = req.ImprovementActions,
+                SupportProvided    = req.SupportProvided ?? string.Empty,
+                MeasurementCriteria = req.MeasurementCriteria ?? string.Empty,
+                SupervisorId       = req.SupervisorId,
+                HROwnerId          = req.HROwnerId,
+                ReviewSchedule     = req.ReviewSchedule,
+            };
 
             var response = await _improvementPlanService.UpdateAsync(updateDto);
             return Ok(response);
@@ -289,6 +352,484 @@ public class PerformanceImprovementPlansController : ControllerBase
             return StatusCode(500, "An error occurred while deleting the performance improvement plan");
         }
     }
+
+    #region New Pip-specific Endpoints
+
+    /// <summary>
+    /// Prepare a new PIP form with pre-populated employee and optional appraisal data.
+    /// </summary>
+    [HttpGet("prepare")]
+    [ProducesResponseType(typeof(PipPrepareResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Prepare([FromQuery] Guid employeeId, [FromQuery] Guid? appraisalId)
+    {
+        try
+        {
+            var employee = await _employeeRepository.GetQueryable(e => e.Id == employeeId)
+                .Include(e => e.Position)
+                .Include(e => e.Department)
+                .Include(e => e.Manager)
+                .FirstOrDefaultAsync();
+
+            if (employee == null)
+                return NotFound("Employee not found");
+
+            var result = new PipPrepareResponse
+            {
+                EmployeeId         = employee.Id,
+                EmployeeName       = employee.FullName,
+                EmployeePosition   = employee.Position?.Title ?? string.Empty,
+                EmployeeDepartment = employee.Department?.Name ?? string.Empty,
+                EmployeePhotoUrl   = employee.PicturePath,
+                SupervisorId       = employee.ManagerId ?? Guid.Empty,
+                SupervisorName     = employee.Manager?.FullName ?? string.Empty,
+                StartDate          = DateTime.Today,
+                EndDate            = DateTime.Today.AddDays(90),
+            };
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error preparing PIP for employee {EmployeeId}", employeeId);
+            return StatusCode(500, "An error occurred while preparing the PIP");
+        }
+    }
+
+    /// <summary>
+    /// Get full PIP detail including goals, meetings, and attachments.
+    /// </summary>
+    [HttpGet("{id:guid}/detail")]
+    [ProducesResponseType(typeof(PipDetailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDetail(Guid id)
+    {
+        try
+        {
+            var pip     = await _improvementPlanService.GetByIdAsync(id);
+            var goals   = (await _improvementPlanService.GetPipGoalsAsync(id)).ToList();
+            var meetings = (await _improvementPlanService.GetReviewMeetingsAsync(id)).ToList();
+            var attachments = (await _improvementPlanService.GetPipAttachmentsAsync(id)).ToList();
+
+            var detail = new PipDetailResponse
+            {
+                PipId               = pip.Id,
+                PipNumber           = pip.PipNumber,
+                EmployeeId          = pip.EmployeeId,
+                EmployeeName        = pip.EmployeeName,
+                SupervisorId        = pip.SupervisorId,
+                SupervisorName      = pip.SupervisorName,
+                HROwnerId           = pip.HROwnerId,
+                HROwnerName         = pip.HROwnerName,
+                AppraisalId         = pip.AppraisalId,
+                StartDate           = pip.StartDate,
+                EndDate             = pip.EndDate,
+                Status              = pip.Status,
+                PerformanceIssues   = pip.PerformanceIssues,
+                ExpectedStandards   = pip.ExpectedStandards,
+                ImprovementActions  = pip.ImprovementActions,
+                SupportProvided     = pip.SupportProvided,
+                MeasurementCriteria = pip.MeasurementCriteria,
+                ReviewSchedule      = pip.ReviewSchedule,
+                Outcome             = pip.Outcome,
+                CompletionDate      = pip.CompletionDate,
+                OutcomeNotes        = pip.OutcomeNotes,
+                Goals = goals.Select(g => new PipGoalResponse
+                {
+                    GoalId          = g.Id,
+                    Title           = g.Title,
+                    Description     = g.Description,
+                    SuccessCriteria = g.SuccessCriteria,
+                    DueDate         = g.DueDate,
+                    Status          = g.Status,
+                    ProgressPercent = g.ProgressPercent,
+                    ProgressNotes   = g.ProgressNotes,
+                }).ToList(),
+                Attachments = attachments.Select(a => new PipAttachmentResponse
+                {
+                    AttachmentId    = a.Id,
+                    FileName        = a.FileName,
+                    FileSizeBytes   = a.FileSizeBytes,
+                    Description     = a.Description,
+                    UploadDate      = a.UploadDate,
+                    UploadedByName  = a.UploadedByName,
+                    PublicUrl       = a.PublicUrl,
+                }).ToList(),
+                ReviewMeetings = meetings.Select(m => new PipMeetingSummaryResponse
+                {
+                    MeetingId           = m.Id,
+                    MeetingDate         = m.MeetingDate,
+                    EmployeeAttended    = m.EmployeeAttended,
+                    ConductedByName     = m.ConductedByName,
+                    ProgressNotesPreview = m.ProgressNotes.Length > 120 ? m.ProgressNotes[..120] + "..." : m.ProgressNotes,
+                    IsCompleted         = m.MeetingDate <= DateTime.UtcNow,
+                }).ToList(),
+            };
+
+            detail.NextScheduledMeeting = detail.ReviewMeetings
+                .Where(m => !m.IsCompleted)
+                .OrderBy(m => m.MeetingDate)
+                .FirstOrDefault();
+
+            return Ok(detail);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving PIP detail for {PipId}", id);
+            return StatusCode(500, "An error occurred while retrieving PIP detail");
+        }
+    }
+
+    // ── Goals ─────────────────────────────────────────────────────────────────
+
+    [HttpGet("{pipId:guid}/goals")]
+    [ProducesResponseType(typeof(IEnumerable<PipGoalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGoals(Guid pipId)
+    {
+        try
+        {
+            var goals = await _improvementPlanService.GetPipGoalsAsync(pipId);
+            return Ok(goals);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving goals for PIP {PipId}", pipId);
+            return StatusCode(500, "An error occurred while retrieving PIP goals");
+        }
+    }
+
+    [HttpPost("{pipId:guid}/goals")]
+    [ProducesResponseType(typeof(PipGoalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> AddGoal(Guid pipId, [FromBody] PipGoalRequest req)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var dto = new CreatePipGoalDto
+            {
+                PipId           = pipId,
+                Title           = req.Title,
+                Description     = req.Description,
+                SuccessCriteria = req.SuccessCriteria,
+                DueDate         = req.DueDate,
+                Status          = req.Status,
+            };
+
+            var result = await _improvementPlanService.AddPipGoalAsync(pipId, dto);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding goal to PIP {PipId}", pipId);
+            return StatusCode(500, "An error occurred while adding the goal");
+        }
+    }
+
+    [HttpPut("goals/{goalId:guid}")]
+    [ProducesResponseType(typeof(PipGoalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateGoal(Guid goalId, [FromBody] PipGoalRequest req)
+    {
+        try
+        {
+            var existingGoal = await _improvementPlanService.GetGoalByIdAsync(goalId);
+            if (existingGoal == null)
+                return NotFound("Goal not found");
+
+            var dto = new UpdatePipGoalDto
+            {
+                Id              = goalId,
+                PipId           = existingGoal.PipId,
+                Title           = req.Title,
+                Description     = req.Description,
+                SuccessCriteria = req.SuccessCriteria,
+                DueDate         = req.DueDate,
+                Status          = req.Status,
+                ProgressPercent = req.ProgressPercent,
+                ProgressNotes   = req.ProgressNotes,
+            };
+
+            var result = await _improvementPlanService.UpdatePipGoalAsync(existingGoal.PipId, dto);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating goal {GoalId}", goalId);
+            return StatusCode(500, "An error occurred while updating the goal");
+        }
+    }
+
+    [HttpDelete("goals/{goalId:guid}")]
+    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteGoal(Guid goalId)
+    {
+        try
+        {
+            var existingGoal = await _improvementPlanService.GetGoalByIdAsync(goalId);
+            if (existingGoal == null)
+                return NotFound("Goal not found");
+
+            var result = await _improvementPlanService.DeletePipGoalAsync(existingGoal.PipId, goalId);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting goal {GoalId}", goalId);
+            return StatusCode(500, "An error occurred while deleting the goal");
+        }
+    }
+
+    // ── Attachments ───────────────────────────────────────────────────────────
+
+    [HttpPost("{pipId:guid}/attachments")]
+    [ProducesResponseType(typeof(PipAttachmentResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UploadAttachment(
+        Guid pipId, IFormFile file, [FromForm] string? description, CancellationToken ct = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file provided");
+
+        var uploadedById = _currentUserService.EmployeeId ?? Guid.Empty;
+        if (uploadedById == Guid.Empty)
+            return Unauthorized("User employee context not found");
+
+        if (_currentUserService.TenantId is not Guid tenantId ||
+            !Guid.TryParse(_currentUserService.UserId, out var actorUserId))
+            return Unauthorized("User context could not be resolved");
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = actorUserId,
+                ActorName = _currentUserService.UserName,
+                Category = ControlledFileUploadCategories.HrPipAttachments,
+                File = file,
+                Registration = new HrDocumentDmsRegistration
+                {
+                    SourceLabel = "Performance improvement plan attachment",
+                    SourceEntityType = "PerformanceImprovementPlan",
+                    SourceRecordId = pipId,
+                    Title = Path.GetFileName(file.FileName),
+                    DocumentType = "PipAttachment",
+                    ChangeSummary = description
+                }
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+
+        try
+        {
+            var dto = await _improvementPlanService.CreatePipAttachmentAsync(
+                pipId, uploadedById, document.OriginalFileName, string.Empty,
+                publicUrl: null, document.FileSize, description, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
+
+            return Ok(new PipAttachmentResponse
+            {
+                AttachmentId   = dto.Id,
+                FileName       = dto.FileName,
+                FileSizeBytes  = dto.FileSizeBytes,
+                Description    = dto.Description,
+                UploadDate     = dto.UploadDate,
+                UploadedByName = dto.UploadedByName,
+                // No public URL any more: the file lives outside the web root and is only
+                // reachable through the authorizing download endpoint below.
+                PublicUrl      = null,
+            });
+        }
+        catch (Exception ex)
+        {
+            await _hrDocuments.RollbackAsync(document, tenantId, actorUserId, ct);
+
+            if (ex is ArgumentException)
+                return NotFound(ex.Message);
+
+            _logger.LogError(ex, "Error uploading attachment for PIP {PipId}", pipId);
+            return StatusCode(500, "An error occurred while uploading the attachment");
+        }
+    }
+
+    /// <summary>
+    /// Streams a PIP attachment to a caller entitled to see it.
+    /// </summary>
+    /// <remarks>
+    /// Improvement plans are sensitive employment records. Neither this endpoint's helper nor
+    /// the DMS performs the entitlement check — that is the ownership test below.
+    /// </remarks>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AppraisalAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == attachmentId && item.TenantId == tenantId && !item.IsDeleted,
+                ct);
+        if (attachment?.PipId is not Guid pipId)
+            return NotFound("Attachment not found");
+
+        var plan = await _db.Set<PerformanceImprovementPlan>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == pipId && item.TenantId == tenantId, ct);
+        if (plan is null)
+            return NotFound("Attachment not found");
+
+        var employeeId = _currentUserService.EmployeeId;
+        var isSubject = employeeId is Guid id && plan.EmployeeId == id;
+        var isHr = _currentUserService.IsInRole("HR") ||
+                   _currentUserService.IsInRole("Admin") ||
+                   _currentUserService.IsInRole("SuperAdmin");
+        if (!isSubject && !isHr)
+            return Forbid();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    [HttpDelete("attachments/{attachmentId:guid}")]
+    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
+    {
+        try
+        {
+            var attachment = await _improvementPlanService.GetAttachmentByIdAsync(attachmentId);
+            if (attachment == null)
+                return NotFound("Attachment not found");
+
+            // Delete file from storage
+            if (!string.IsNullOrWhiteSpace(attachment.FilePath))
+            {
+                try { await _fileStorageService.DeleteFileAsync(attachment.FilePath); }
+                catch (Exception storageEx)
+                {
+                    _logger.LogWarning(storageEx, "Could not delete file from storage for attachment {Id}", attachmentId);
+                }
+            }
+
+            var result = await _improvementPlanService.DeletePipAttachmentAsync(attachmentId);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting attachment {AttachmentId}", attachmentId);
+            return StatusCode(500, "An error occurred while deleting the attachment");
+        }
+    }
+
+    // ── Outcome ───────────────────────────────────────────────────────────────
+
+    [HttpPost("{pipId:guid}/outcome")]
+    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RecordOutcome(Guid pipId, [FromBody] PipOutcomeRequest req)
+    {
+        try
+        {
+            var completeDto = new CompletePipDto
+            {
+                PipId        = pipId,
+                Outcome      = (PipOutcome)req.Outcome,
+                OutcomeNotes = req.Notes ?? string.Empty,
+            };
+
+            var result = await _improvementPlanService.CompletePipAsync(completeDto);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recording outcome for PIP {PipId}", pipId);
+            return StatusCode(500, "An error occurred while recording the outcome");
+        }
+    }
+
+    // ── Employee search ───────────────────────────────────────────────────────
+
+    [HttpGet("employees/search")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeSearchResult>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SearchEmployees([FromQuery] string? q)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+                return Ok(Array.Empty<EmployeeSearchResult>());
+
+            var term = q.Trim().ToLower();
+            var employees = await _employeeRepository.GetQueryable()
+                .Include(e => e.Position)
+                .Include(e => e.Department)
+                .Include(e => e.Manager)
+                .Where(e =>
+                    e.FirstName.ToLower().Contains(term) ||
+                    e.LastName.ToLower().Contains(term) ||
+                    e.EmployeeNumber.ToLower().Contains(term) ||
+                    (e.MiddleName != null && e.MiddleName.ToLower().Contains(term)))
+                .Take(20)
+                .ToListAsync();
+
+            var results = employees.Select(e => new EmployeeSearchResult(
+                e.Id,
+                e.FullName,
+                e.Position?.Title ?? string.Empty,
+                e.Department?.Name ?? string.Empty,
+                e.PicturePath,
+                e.ManagerId,
+                e.Manager?.FullName
+            ));
+
+            return Ok(results);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching employees with term '{Term}'", q);
+            return StatusCode(500, "An error occurred while searching employees");
+        }
+    }
+
+    #endregion
 
     #region PIP Review Meeting Operations
 

@@ -1,0 +1,22 @@
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ErpSystem.Api.Controllers.HR;
+
+[ApiController]
+[Route("api/safety/dashboard")]
+[Authorize]
+public class SheDashboardController : SheApiControllerBase
+{
+    private readonly ISheDashboardService _service;
+
+    public SheDashboardController(ISheDashboardService service, ICurrentUserService currentUser)
+        : base(currentUser) => _service = service;
+
+    [HttpGet]
+    public async Task<ActionResult<SheDashboardDto>> Get()
+        => Ok(await _service.GetAsync());
+}

@@ -151,3 +151,19 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802190244_TDC0615InventoryDisposalLifecycle")] partial class TDC0615InventoryDisposalLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802202554_TDC0616ItemMasterProfile")] partial class TDC0616ItemMasterProfile { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260803233103_Phase6ReviewInventoryTrackingHardening")] partial class Phase6ReviewInventoryTrackingHardening { }
+
+// [HR-MODULE-PORT] Migrations authored on hrdev. Unlike the hand-written migrations above, these were
+// scaffolded by `dotnet ef migrations add`, so their [Migration] attribute lives in a generated
+// *.Designer.cs rather than inline in the migration class. Fast Debug builds strip those designers, so
+// without these entries the six migrations below are invisible to startup MigrateAsync — including the
+// two that create the HR module itself. Registered per the convention in ErpSystem.Data.csproj.
+[DbContext(typeof(ApplicationDbContext)), Migration("20260720181131_AddHRModule")] partial class AddHRModule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260720193903_AddHRPerformanceModule")] partial class AddHRPerformanceModule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260722202144_MergeHrPortWithMasterPayroll")] partial class MergeHrPortWithMasterPayroll { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260723234640_MergeProcurementPhase0")] partial class MergeProcurementPhase0 { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260726181817_MergeFinanceModule")] partial class MergeFinanceModule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260730222806_MergeEstateAndProcurementPhase3")] partial class MergeEstateAndProcurementPhase3 { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260731143111_MergeProcurementPhase4AndEstateReadiness")] partial class MergeProcurementPhase4AndEstateReadiness { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260801224538_HrControlledDocumentLinks")] partial class HrControlledDocumentLinks { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260805104205_HrRemoveDuplicateShadowForeignKeys")] partial class HrRemoveDuplicateShadowForeignKeys { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260805114001_MergeFinanceControlHardeningAndSharedReporting")] partial class MergeFinanceControlHardeningAndSharedReporting { }
