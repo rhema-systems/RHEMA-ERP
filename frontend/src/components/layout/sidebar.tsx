@@ -82,6 +82,8 @@ import {
   Upload,
   Fingerprint,
   Receipt,
+  Coins,
+  ShieldPlus,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -361,6 +363,16 @@ const navigationItems: NavItem[] = [
           { title: 'Compliance', href: '/hr/leave/compliance', icon: FileCheck },
           { title: 'Year-End', href: '/hr/leave/year-end', icon: CalendarClock },
         ],
+      },
+      {
+        title: 'Emoluments',
+        href: '/hr/emoluments',
+        icon: Coins,
+      },
+      {
+        title: 'Benefits',
+        href: '/hr/benefits',
+        icon: ShieldPlus,
       },
       {
         title: 'Attendance & Time',
@@ -971,6 +983,16 @@ const navigationItems: NavItem[] = [
           { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
           { title: 'Departments', href: '/administration/hr/departments', icon: Building },
           { title: 'Leave Types', href: '/administration/hr/leave-types', icon: CalendarDays },
+          {
+            title: 'Compensation & Benefits',
+            href: '/administration/hr/compensation',
+            icon: Coins,
+            children: [
+              { title: 'Pay Components', href: '/administration/hr/compensation/pay-components', icon: Coins },
+              { title: 'Position Emoluments', href: '/administration/hr/compensation/position-emoluments', icon: Briefcase },
+              { title: 'Benefit Policies', href: '/administration/hr/compensation/benefit-policies', icon: ShieldPlus },
+            ],
+          },
           {
             title: 'Attendance & Time',
             href: '/administration/hr/attendance',

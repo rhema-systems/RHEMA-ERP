@@ -89,7 +89,7 @@ public class EnrollmentStatusChangeDto
 }
 
 /// <summary>DTO to add a dependent to an enrollment.</summary>
-public class CreateEnrollmentDependentDto
+public class CreateEnrollmentDependentDto : IValidatableObject
 {
     [Required]
     public Guid EmployeeDependentId { get; set; }
@@ -97,6 +97,84 @@ public class CreateEnrollmentDependentDto
     public DateOnly? CoverageStartDate { get; set; }
 
     public DateOnly? CoverageEndDate { get; set; }
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (CoverageStartDate.HasValue && CoverageEndDate.HasValue && CoverageEndDate.Value < CoverageStartDate.Value)
+        {
+            yield return new ValidationResult(
+                "CoverageEndDate cannot be earlier than CoverageStartDate.",
+                new[] { nameof(CoverageStartDate), nameof(CoverageEndDate) });
+        }
+    }
+}
+
+/// <summary>
+/// DTO to amend a dependent's coverage on an enrollment. The dependent themselves cannot be
+/// swapped — remove the row and add the other dependent instead, so the claim ledger stays
+/// attributable to whoever the claims were actually made for.
+/// </summary>
+public class UpdateEnrollmentDependentDto : IValidatableObject
+{
+    public DateOnly? CoverageStartDate { get; set; }
+
+    public DateOnly? CoverageEndDate { get; set; }
+
+    /// <summary>Clearing this ends cover: claims can no longer be recorded against the dependent.</summary>
+    public bool IsActive { get; set; } = true;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (CoverageStartDate.HasValue && CoverageEndDate.HasValue && CoverageEndDate.Value < CoverageStartDate.Value)
+        {
+            yield return new ValidationResult(
+                "CoverageEndDate cannot be earlier than CoverageStartDate.",
+                new[] { nameof(CoverageStartDate), nameof(CoverageEndDate) });
+        }
+    }
+}
+
+/// <summary>
+/// Replaces an enrollment's whole beneficiary set in one call.
+/// <para>
+/// Beneficiaries are edited as a set rather than row by row because the shares must total 100.
+/// A per-row API cannot honour that: every path from one valid split to another passes through an
+/// intermediate state that does not add up, so the server would have to either reject the first
+/// step of any legitimate edit or stop enforcing the invariant altogether. Sending the whole set
+/// lets it be checked exactly once, against the state the caller actually intends.
+/// </para>
+/// </summary>
+public class ReplaceBenefitBeneficiariesDto : IValidatableObject
+{
+    public ICollection<CreateBenefitBeneficiaryDto> Beneficiaries { get; set; } = new List<CreateBenefitBeneficiaryDto>();
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        // An empty set is allowed — it clears the nomination, which is a legitimate thing to want.
+        if (Beneficiaries is not { Count: > 0 })
+        {
+            yield break;
+        }
+
+        if (Beneficiaries.Sum(b => b.Percentage) != 100m)
+        {
+            yield return new ValidationResult(
+                "Beneficiary percentages must total 100.",
+                new[] { nameof(Beneficiaries) });
+        }
+
+        var duplicateDependent = Beneficiaries
+            .Where(b => b.EmployeeDependentId.HasValue)
+            .GroupBy(b => b.EmployeeDependentId!.Value)
+            .Any(g => g.Count() > 1);
+
+        if (duplicateDependent)
+        {
+            yield return new ValidationResult(
+                "The same dependent cannot be named as a beneficiary more than once.",
+                new[] { nameof(Beneficiaries) });
+        }
+    }
 }
 
 /// <summary>DTO to add a beneficiary to an enrollment.</summary>
@@ -222,6 +300,12 @@ public class EmployeeBenefitEnrollmentDto : BaseDto
 public class EnrollmentDependentDto : BaseDto
 {
     public Guid EmployeeDependentId { get; set; }
+
+    /// <summary>Who the dependent is. Without it a coverage list is a column of bare identifiers.</summary>
+    public string DependentName { get; set; } = string.Empty;
+
+    /// <summary>The dependent's relationship to the employee, as registered on their profile.</summary>
+    public DependentRelationship Relationship { get; set; }
 
     public Guid PolicyId { get; set; }
 

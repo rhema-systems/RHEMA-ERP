@@ -10,10 +10,28 @@ namespace ErpSystem.Core.Interfaces.HR;
 public interface IEmolumentService
 {
     // ── Pay component master ──
+    //
+    // Ownership is split. Payroll owns code, name, type, calculation basis, default amount,
+    // taxability and the active flag; those are mirrored by IPayComponentProjectionService and
+    // the three write methods below throw PayrollOwnedException (surfaced as 409). HR owns
+    // pension, tax treatment, gross-pay effect and effective dating, because payroll models none
+    // of them and emoluments and the leave-encashment rate read them.
     Task<IEnumerable<PayComponentDto>> GetPayComponentsAsync(bool activeOnly = true);
     Task<PayComponentDto> GetPayComponentByIdAsync(Guid id);
+
+    /// <summary>Forces a payroll → HR projection pass and reports what changed.</summary>
+    Task<PayComponentProjectionResultDto> SyncPayComponentsAsync(CancellationToken ct = default);
+
+    /// <summary>Updates the HR-owned attributes of a component, mirrored or not.</summary>
+    Task<PayComponentDto> UpdatePayComponentHrAttributesAsync(Guid id, UpdatePayComponentHrAttributesDto dto);
+
+    /// <summary>Not supported — payroll owns the component master. Throws PayrollOwnedException.</summary>
     Task<PayComponentDto> CreatePayComponentAsync(CreatePayComponentDto dto);
+
+    /// <summary>Not supported — payroll owns these fields. Throws PayrollOwnedException.</summary>
     Task<PayComponentDto> UpdatePayComponentAsync(Guid id, UpdatePayComponentDto dto);
+
+    /// <summary>Not supported — payroll owns the active flag. Throws PayrollOwnedException.</summary>
     Task DeactivatePayComponentAsync(Guid id);
 
     // ── Position-level assignment ──

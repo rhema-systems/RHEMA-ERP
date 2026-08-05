@@ -63,4 +63,37 @@ public interface IEmployeeBenefitEnrollmentService
     /// remaining balance is rejected; cache amounts are refreshed afterwards.
     /// </summary>
     Task<BenefitUtilizationDto> ChangeClaimStatusAsync(Guid claimId, ClaimStatusChangeDto dto);
+
+    // ─────────────────────── covered dependents ───────────────────────
+
+    /// <summary>Lists the dependents covered under an enrollment, inactive ones included.</summary>
+    Task<IReadOnlyList<EnrollmentDependentDto>> GetDependentsAsync(Guid enrollmentId);
+
+    /// <summary>
+    /// Extends cover to one of the employee's registered dependents. Rejected when the policy covers
+    /// staff only, when the dependent belongs to someone else, when they are already covered, or when
+    /// the policy's dependent cap is already met.
+    /// </summary>
+    Task<EnrollmentDependentDto> AddDependentAsync(Guid enrollmentId, CreateEnrollmentDependentDto dto);
+
+    /// <summary>Amends a covered dependent's coverage window or ends their cover.</summary>
+    Task<EnrollmentDependentDto> UpdateDependentAsync(Guid enrollmentId, Guid dependentBenefitId, UpdateEnrollmentDependentDto dto);
+
+    /// <summary>
+    /// Removes a dependent from an enrollment. A dependent with claims against this enrollment is
+    /// deactivated rather than deleted, so the claim ledger keeps its attribution; returns true when
+    /// the row was deleted outright and false when it was retained as inactive.
+    /// </summary>
+    Task<bool> RemoveDependentAsync(Guid enrollmentId, Guid dependentBenefitId);
+
+    // ───────────────────────── beneficiaries ──────────────────────────
+
+    /// <summary>Lists an enrollment's named beneficiaries.</summary>
+    Task<IReadOnlyList<BenefitBeneficiaryDto>> GetBeneficiariesAsync(Guid enrollmentId);
+
+    /// <summary>
+    /// Replaces the whole beneficiary set atomically. Set-at-a-time is deliberate — see
+    /// <see cref="ReplaceBenefitBeneficiariesDto"/> for why the 100% rule forces it.
+    /// </summary>
+    Task<IReadOnlyList<BenefitBeneficiaryDto>> ReplaceBeneficiariesAsync(Guid enrollmentId, ReplaceBenefitBeneficiariesDto dto);
 }

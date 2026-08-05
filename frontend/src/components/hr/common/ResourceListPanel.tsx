@@ -29,6 +29,7 @@ export interface ResourceListPanelProps<TItem, TForm extends FieldValues>
     'parentId' | 'list' | 'create' | 'update' | 'remove'
   > {
   list: () => Promise<TItem[]>;
+  /** Never called when `allowCreate` is false — pass a no-op for mirrored resources. */
   create: (values: TForm) => Promise<unknown>;
   update: (id: string, values: TForm) => Promise<unknown>;
   remove?: (id: string) => Promise<unknown>;

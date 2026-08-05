@@ -9,6 +9,8 @@ import {
   CalendarDays,
   Clock,
   Briefcase,
+  Coins,
+  ShieldPlus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -101,6 +103,18 @@ export default function HrHomePage() {
               description: 'Requests, approvals, balances, plans and year-end.',
               href: '/hr/leave',
               icon: CalendarDays,
+            },
+            {
+              title: 'Emoluments',
+              description: 'The resolved pay package: basic, allowances and deductions.',
+              href: '/hr/emoluments',
+              icon: Coins,
+            },
+            {
+              title: 'Benefits',
+              description: 'Benefit enrolments, coverage balances and claims.',
+              href: '/hr/benefits',
+              icon: ShieldPlus,
             },
             {
               title: 'Attendance & Time',

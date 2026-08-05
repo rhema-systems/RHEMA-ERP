@@ -237,4 +237,164 @@ public class EmployeeBenefitEnrollmentsController : ControllerBase
             return Conflict(new { message = ex.Message });
         }
     }
+
+    // ─────────────────────── covered dependents ───────────────────────
+
+    /// <summary>Lists the dependents covered under an enrollment (inactive ones included).</summary>
+    [HttpGet("{id:guid}/dependents")]
+    [ProducesResponseType(typeof(IReadOnlyList<EnrollmentDependentDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<EnrollmentDependentDto>>> GetDependentsAsync([FromRoute] Guid id)
+    {
+        try
+        {
+            return Ok(await _service.GetDependentsAsync(id));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Extends cover to one of the employee's registered dependents.</summary>
+    /// <response code="400">The dependent does not exist or is not registered to this employee.</response>
+    /// <response code="409">
+    /// The policy covers staff only, the dependent is deceased or already covered, the policy's
+    /// dependent cap is met, or the enrollment is no longer editable.
+    /// </response>
+    [HttpPost("{id:guid}/dependents")]
+    [ProducesResponseType(typeof(EnrollmentDependentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<EnrollmentDependentDto>> AddDependentAsync([FromRoute] Guid id, [FromBody] CreateEnrollmentDependentDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            var result = await _service.AddDependentAsync(id, dto);
+            return Created($"/api/hr/employee-benefit-enrollments/{id}/dependents/{result.Id}", result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Amends a covered dependent's coverage window, or ends their cover.</summary>
+    [HttpPut("{id:guid}/dependents/{dependentBenefitId:guid}")]
+    [ProducesResponseType(typeof(EnrollmentDependentDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<EnrollmentDependentDto>> UpdateDependentAsync(
+        [FromRoute] Guid id,
+        [FromRoute] Guid dependentBenefitId,
+        [FromBody] UpdateEnrollmentDependentDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            return Ok(await _service.UpdateDependentAsync(id, dependentBenefitId, dto));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Removes a dependent from an enrollment. One with claims against it is kept as inactive rather
+    /// than deleted; <c>deleted</c> in the response says which happened.
+    /// </summary>
+    [HttpDelete("{id:guid}/dependents/{dependentBenefitId:guid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RemoveDependentAsync([FromRoute] Guid id, [FromRoute] Guid dependentBenefitId)
+    {
+        try
+        {
+            var deleted = await _service.RemoveDependentAsync(id, dependentBenefitId);
+            return Ok(new
+            {
+                deleted,
+                message = deleted
+                    ? "Cover removed."
+                    : "Cover ended. The dependent has claims on this enrollment, so the record was retained.",
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
+
+    // ───────────────────────── beneficiaries ──────────────────────────
+
+    /// <summary>Lists an enrollment's named beneficiaries.</summary>
+    [HttpGet("{id:guid}/beneficiaries")]
+    [ProducesResponseType(typeof(IReadOnlyList<BenefitBeneficiaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<BenefitBeneficiaryDto>>> GetBeneficiariesAsync([FromRoute] Guid id)
+    {
+        try
+        {
+            return Ok(await _service.GetBeneficiariesAsync(id));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Replaces the whole beneficiary set. Sent as a set because the shares must total 100 — see
+    /// <see cref="ReplaceBenefitBeneficiariesDto"/>. An empty list clears the nomination.
+    /// </summary>
+    /// <response code="400">The shares do not total 100, or a dependent is named twice.</response>
+    [HttpPut("{id:guid}/beneficiaries")]
+    [ProducesResponseType(typeof(IReadOnlyList<BenefitBeneficiaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<IReadOnlyList<BenefitBeneficiaryDto>>> ReplaceBeneficiariesAsync(
+        [FromRoute] Guid id,
+        [FromBody] ReplaceBenefitBeneficiariesDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        try
+        {
+            return Ok(await _service.ReplaceBeneficiariesAsync(id, dto));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+    }
 }

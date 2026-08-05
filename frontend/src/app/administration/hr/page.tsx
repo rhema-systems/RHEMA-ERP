@@ -14,6 +14,7 @@ import {
   CreditCard,
   Clock,
   CalendarDays,
+  Coins,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -118,6 +119,21 @@ export default function HrAdministrationPage() {
               description: 'Leave types with their sub-types, allocations and accrual policies.',
               href: '/administration/hr/leave-types',
               icon: CalendarDays,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Compensation</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Compensation & Benefits',
+              description:
+                'Pay components mirrored from Payroll, position emoluments and benefit policies.',
+              href: '/administration/hr/compensation',
+              icon: Coins,
             },
           ]}
         />

@@ -21,6 +21,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     private readonly IGenericRepository<EmployeePositionBenefit> _positionBenefitRepository;
     private readonly IGenericRepository<BenefitGradeValue> _gradeValueRepository;
     private readonly IGenericRepository<EmployeeDependentBenefit> _dependentBenefitRepository;
+    private readonly IGenericRepository<EmployeeDependent> _employeeDependentRepository;
     private readonly IGenericRepository<BenefitBeneficiary> _beneficiaryRepository;
     private readonly IGenericRepository<BenefitUtilization> _utilizationRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
@@ -35,6 +36,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         IGenericRepository<EmployeePositionBenefit> positionBenefitRepository,
         IGenericRepository<BenefitGradeValue> gradeValueRepository,
         IGenericRepository<EmployeeDependentBenefit> dependentBenefitRepository,
+        IGenericRepository<EmployeeDependent> employeeDependentRepository,
         IGenericRepository<BenefitBeneficiary> beneficiaryRepository,
         IGenericRepository<BenefitUtilization> utilizationRepository,
         IGenericRepository<Employee> employeeRepository,
@@ -48,6 +50,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         _positionBenefitRepository = positionBenefitRepository ?? throw new ArgumentNullException(nameof(positionBenefitRepository));
         _gradeValueRepository = gradeValueRepository ?? throw new ArgumentNullException(nameof(gradeValueRepository));
         _dependentBenefitRepository = dependentBenefitRepository ?? throw new ArgumentNullException(nameof(dependentBenefitRepository));
+        _employeeDependentRepository = employeeDependentRepository ?? throw new ArgumentNullException(nameof(employeeDependentRepository));
         _beneficiaryRepository = beneficiaryRepository ?? throw new ArgumentNullException(nameof(beneficiaryRepository));
         _utilizationRepository = utilizationRepository ?? throw new ArgumentNullException(nameof(utilizationRepository));
         _employeeRepository = employeeRepository ?? throw new ArgumentNullException(nameof(employeeRepository));
@@ -234,7 +237,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         await _unitOfWork.SaveChangesAsync();
 
         await AddDependentsAsync(entity, policy, dto.Dependents);
-        AddBeneficiaries(entity, dto.Beneficiaries);
+        await AddBeneficiariesAsync(entity, dto.Beneficiaries);
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Created benefit enrollment {EnrollmentId} for employee {EmployeeId}.", entity.Id, entity.EmployeeId);
@@ -499,10 +502,15 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
             throw new InvalidOperationException("Claims can only be recorded against an active enrollment.");
         }
 
+        // Cover must be live, not merely on record. Checking existence alone would let claims keep
+        // flowing for a dependent whose cover had been ended, which is precisely what ending it means
+        // to prevent — and ending cover is how a dependent with claim history is removed.
         if (dto.EmployeeDependentId.HasValue
-            && enrollment.Dependents.All(d => d.EmployeeDependentId != dto.EmployeeDependentId.Value))
+            && !enrollment.Dependents.Any(d => d.EmployeeDependentId == dto.EmployeeDependentId.Value
+                && d.TenantId == enrollment.TenantId
+                && d.IsActive))
         {
-            throw new ArgumentException("The selected dependent is not covered under this enrollment.");
+            throw new ArgumentException("The selected dependent is not currently covered under this enrollment.");
         }
 
         var entity = new BenefitUtilization
@@ -565,13 +573,254 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         return ToUtilizationDto(tracked);
     }
 
+    // ─────────────────────── covered dependents ───────────────────────
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EnrollmentDependentDto>> GetDependentsAsync(Guid enrollmentId)
+    {
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId, q => q
+            .Include(e => e.Dependents).ThenInclude(d => d.EmployeeDependent));
+
+        return MapDependents(enrollment);
+    }
+
+    /// <inheritdoc />
+    public async Task<EnrollmentDependentDto> AddDependentAsync(Guid enrollmentId, CreateEnrollmentDependentDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId, q => q
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Dependents));
+
+        EnsureCoverageEditable(enrollment);
+
+        var policy = enrollment.BenefitPolicy
+            ?? throw new InvalidOperationException("The enrollment's benefit policy could not be loaded.");
+
+        await EnsureCoverableDependentAsync(
+            policy,
+            enrollment.EmployeeId,
+            enrollment.TenantId,
+            dto.EmployeeDependentId,
+            enrollment.Dependents.Where(d => d.TenantId == enrollment.TenantId && !d.IsDeleted).ToList());
+
+        var entity = new EmployeeDependentBenefit
+        {
+            EmployeeDependentId = dto.EmployeeDependentId,
+            PolicyId = policy.Id,
+            EnrollmentId = enrollment.Id,
+            EnrolledDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            CoverageStartDate = dto.CoverageStartDate,
+            CoverageEndDate = dto.CoverageEndDate,
+            IsActive = true,
+            TenantId = enrollment.TenantId
+        };
+
+        await _dependentBenefitRepository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "Added dependent {EmployeeDependentId} to benefit enrollment {EnrollmentId}.",
+            dto.EmployeeDependentId, enrollmentId);
+
+        return await ReadDependentAsync(entity.Id, enrollment.TenantId);
+    }
+
+    /// <inheritdoc />
+    public async Task<EnrollmentDependentDto> UpdateDependentAsync(Guid enrollmentId, Guid dependentBenefitId, UpdateEnrollmentDependentDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId, q => q
+            .Include(e => e.BenefitPolicy)
+            .Include(e => e.Dependents));
+
+        EnsureCoverageEditable(enrollment);
+
+        var row = FindCoveredDependent(enrollment, dependentBenefitId);
+
+        // Re-activating consumes a slot, so it has to re-clear the policy's cap — otherwise a cap of
+        // 2 could be exceeded by deactivating, adding, then re-activating.
+        if (dto.IsActive && !row.IsActive)
+        {
+            var policy = enrollment.BenefitPolicy
+                ?? throw new InvalidOperationException("The enrollment's benefit policy could not be loaded.");
+
+            await EnsureCoverableDependentAsync(
+                policy,
+                enrollment.EmployeeId,
+                enrollment.TenantId,
+                row.EmployeeDependentId,
+                enrollment.Dependents.Where(d => d.TenantId == enrollment.TenantId && !d.IsDeleted && d.Id != row.Id).ToList());
+        }
+
+        row.CoverageStartDate = dto.CoverageStartDate;
+        row.CoverageEndDate = dto.CoverageEndDate;
+        row.IsActive = dto.IsActive;
+
+        await _dependentBenefitRepository.UpdateAsync(row);
+        await _unitOfWork.SaveChangesAsync();
+
+        return await ReadDependentAsync(row.Id, enrollment.TenantId);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RemoveDependentAsync(Guid enrollmentId, Guid dependentBenefitId)
+    {
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId, q => q
+            .Include(e => e.Dependents));
+
+        EnsureCoverageEditable(enrollment);
+
+        var row = FindCoveredDependent(enrollment, dependentBenefitId);
+
+        var hasClaims = await _utilizationRepository
+            .GetQueryable(u => u.TenantId == enrollment.TenantId
+                && u.EnrollmentId == enrollment.Id
+                && u.EmployeeDependentId == row.EmployeeDependentId)
+            .AnyAsync();
+
+        if (hasClaims)
+        {
+            // Deleting would strand claims that were made in this dependent's name. Ending cover has
+            // the same forward effect — no further claims can be recorded — without losing the trail.
+            row.IsActive = false;
+            row.CoverageEndDate ??= DateOnly.FromDateTime(DateTime.UtcNow);
+            await _dependentBenefitRepository.UpdateAsync(row);
+            await _unitOfWork.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "Dependent {EmployeeDependentId} on enrollment {EnrollmentId} has claims; ended cover instead of deleting.",
+                row.EmployeeDependentId, enrollmentId);
+
+            return false;
+        }
+
+        await _dependentBenefitRepository.DeleteAsync(row);
+        await _unitOfWork.SaveChangesAsync();
+
+        return true;
+    }
+
+    // ───────────────────────── beneficiaries ──────────────────────────
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<BenefitBeneficiaryDto>> GetBeneficiariesAsync(Guid enrollmentId)
+    {
+        // Proves ownership first, so a wrong-tenant id reads as missing rather than empty.
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId);
+        return await ReadBeneficiariesAsync(enrollment.Id, enrollment.TenantId);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<BenefitBeneficiaryDto>> ReplaceBeneficiariesAsync(Guid enrollmentId, ReplaceBenefitBeneficiariesDto dto)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        // Deliberately loaded WITHOUT the beneficiary navigation: the rows are queried and written
+        // through their own repository below, and tracking them twice — once via the graph, once
+        // directly — is what turns a straightforward replace into an identity-map conflict.
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId);
+
+        EnsureCoverageEditable(enrollment);
+
+        var existing = await _beneficiaryRepository
+            .GetQueryable(b => b.TenantId == enrollment.TenantId && b.EnrollmentId == enrollment.Id)
+            .ToListAsync();
+
+        foreach (var row in existing)
+        {
+            await _beneficiaryRepository.DeleteAsync(row);
+        }
+
+        await AddBeneficiariesAsync(enrollment, dto.Beneficiaries);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "Replaced the beneficiary set on enrollment {EnrollmentId} with {Count} nomination(s).",
+            enrollmentId, dto.Beneficiaries?.Count ?? 0);
+
+        return await ReadBeneficiariesAsync(enrollment.Id, enrollment.TenantId);
+    }
+
     // ─────────────────────────── helpers ───────────────────────────
+
+    private static EmployeeDependentBenefit FindCoveredDependent(EmployeeBenefitEnrollment enrollment, Guid dependentBenefitId)
+        => enrollment.Dependents.FirstOrDefault(d => d.Id == dependentBenefitId && d.TenantId == enrollment.TenantId && !d.IsDeleted)
+            ?? throw new ArgumentException($"Dependent cover '{dependentBenefitId}' was not found on this enrollment.");
+
+    /// <summary>
+    /// Re-reads a coverage row through the graph so the response carries the dependent's name. The
+    /// navigation is not populated on a row we just built or on one whose FK was only now assigned.
+    /// </summary>
+    private async Task<EnrollmentDependentDto> ReadDependentAsync(Guid dependentBenefitId, Guid tenantId)
+    {
+        var row = await _dependentBenefitRepository
+            .GetQueryable(d => d.Id == dependentBenefitId && d.TenantId == tenantId)
+            .AsNoTracking()
+            .Include(d => d.EmployeeDependent)
+            .FirstAsync();
+
+        return ToDependentDto(row);
+    }
+
+    private static EnrollmentDependentDto ToDependentDto(EmployeeDependentBenefit d) => new()
+    {
+        Id = d.Id,
+        EmployeeDependentId = d.EmployeeDependentId,
+        DependentName = DependentDisplayName(d.EmployeeDependent),
+        Relationship = d.EmployeeDependent?.Relationship ?? default,
+        PolicyId = d.PolicyId,
+        EnrolledDate = d.EnrolledDate,
+        CoverageStartDate = d.CoverageStartDate,
+        CoverageEndDate = d.CoverageEndDate,
+        IsActive = d.IsActive,
+        BenefitAmountUsed = d.BenefitAmountUsed
+    };
+
+    // The !IsDeleted guards below are deliberate. The global filter already excludes soft-deleted
+    // rows from queries, but these collections are read off a tracked graph, where EF's navigation
+    // fixup can re-attach an entity we deleted earlier in the same unit of work.
+    private static IReadOnlyList<EnrollmentDependentDto> MapDependents(EmployeeBenefitEnrollment enrollment)
+        => enrollment.Dependents
+            .Where(d => d.TenantId == enrollment.TenantId && !d.IsDeleted)
+            .OrderByDescending(d => d.IsActive)
+            .ThenBy(d => DependentDisplayName(d.EmployeeDependent))
+            .Select(ToDependentDto)
+            .ToList();
+
+    /// <summary>
+    /// Reads the nomination set from its own table rather than off the enrollment graph, so a
+    /// replace that just soft-deleted and re-inserted rows reports what is actually stored.
+    /// </summary>
+    private async Task<IReadOnlyList<BenefitBeneficiaryDto>> ReadBeneficiariesAsync(Guid enrollmentId, Guid tenantId)
+    {
+        var rows = await _beneficiaryRepository
+            .GetQueryable(b => b.TenantId == tenantId && b.EnrollmentId == enrollmentId)
+            .AsNoTracking()
+            .OrderByDescending(b => b.Percentage)
+            .ThenBy(b => b.FullName)
+            .ToListAsync();
+
+        return rows.Select(b => new BenefitBeneficiaryDto
+        {
+            Id = b.Id,
+            FullName = b.FullName,
+            Relationship = b.Relationship,
+            EmployeeDependentId = b.EmployeeDependentId,
+            PhoneNumber = b.PhoneNumber,
+            Percentage = b.Percentage,
+            IsActive = b.IsActive
+        }).ToList();
+    }
 
     private IQueryable<EmployeeBenefitEnrollment> QueryWithGraph()
         => _enrollmentRepository.GetQueryable(e => e.TenantId == GetTenantId())
             .Include(e => e.BenefitPolicy)
             .Include(e => e.Employee).ThenInclude(emp => emp.Position)
-            .Include(e => e.Dependents)
+            // The dependent's own record supplies the name and relationship the coverage list shows.
+            .Include(e => e.Dependents).ThenInclude(d => d.EmployeeDependent)
             .Include(e => e.Beneficiaries)
             .Include(e => e.Utilizations);
 
@@ -723,16 +972,10 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         => value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
 
     private static string? DependentName(EmployeeDependent? d)
-    {
-        if (d is null)
-        {
-            return null;
-        }
+        => d is null ? null : EmployeeBenefitEnrollmentMappingExtensions.DependentDisplayName(d);
 
-        return string.IsNullOrWhiteSpace(d.MiddleName)
-            ? $"{d.FirstName} {d.LastName}".Trim()
-            : $"{d.FirstName} {d.MiddleName} {d.LastName}".Trim();
-    }
+    private static string DependentDisplayName(EmployeeDependent? d)
+        => EmployeeBenefitEnrollmentMappingExtensions.DependentDisplayName(d);
 
     private static BenefitUtilizationDto ToUtilizationDto(BenefitUtilization u) => new()
     {
@@ -854,9 +1097,15 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
 
     private async Task AddDependentsAsync(EmployeeBenefitEnrollment enrollment, BenefitPolicy policy, IEnumerable<CreateEnrollmentDependentDto> dependents)
     {
+        // Accumulates as we go, so the cap and the duplicate check see the rows added earlier in this
+        // same call — not just whatever was already persisted.
+        var covered = new List<EmployeeDependentBenefit>();
+
         foreach (var dep in dependents ?? Enumerable.Empty<CreateEnrollmentDependentDto>())
         {
             if (dep is null) continue;
+
+            await EnsureCoverableDependentAsync(policy, enrollment.EmployeeId, enrollment.TenantId, dep.EmployeeDependentId, covered);
 
             var entity = new EmployeeDependentBenefit
             {
@@ -871,16 +1120,29 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
             };
 
             await _dependentBenefitRepository.AddAsync(entity);
+            covered.Add(entity);
         }
     }
 
-    private void AddBeneficiaries(EmployeeBenefitEnrollment enrollment, IEnumerable<CreateBenefitBeneficiaryDto> beneficiaries)
+    private async Task AddBeneficiariesAsync(EmployeeBenefitEnrollment enrollment, IEnumerable<CreateBenefitBeneficiaryDto> beneficiaries)
     {
         foreach (var b in beneficiaries ?? Enumerable.Empty<CreateBenefitBeneficiaryDto>())
         {
             if (b is null) continue;
 
-            enrollment.Beneficiaries.Add(new BenefitBeneficiary
+            // A beneficiary may optionally point at a registered dependent; when it does, that
+            // dependent must be the employee's own, for the same reason cover is.
+            if (b.EmployeeDependentId.HasValue)
+            {
+                await EnsureOwnDependentAsync(enrollment.EmployeeId, enrollment.TenantId, b.EmployeeDependentId.Value);
+            }
+
+            // Added through the repository, not by appending to enrollment.Beneficiaries. BaseEntity
+            // assigns an Id in its initializer, so a new child discovered through a navigation off an
+            // ALREADY-TRACKED enrollment is resolved as Modified — EF issues an UPDATE for a row that
+            // was never inserted and SaveChanges throws DbUpdateConcurrencyException. Going through
+            // AddAsync states the intent outright, and matches how dependents are added.
+            await _beneficiaryRepository.AddAsync(new BenefitBeneficiary
             {
                 EnrollmentId = enrollment.Id,
                 FullName = b.FullName,
@@ -891,6 +1153,88 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
                 IsActive = true,
                 TenantId = enrollment.TenantId
             });
+        }
+    }
+
+    /// <summary>
+    /// Loads a dependent and proves it is the employee's own. Without this any dependent id in the
+    /// tenant would be accepted, quietly extending one employee's benefit to another's family.
+    /// </summary>
+    private async Task<EmployeeDependent> EnsureOwnDependentAsync(Guid employeeId, Guid tenantId, Guid employeeDependentId)
+    {
+        var dependent = await _employeeDependentRepository
+            .GetQueryable(d => d.Id == employeeDependentId && d.TenantId == tenantId)
+            .AsNoTracking()
+            .FirstOrDefaultAsync()
+            ?? throw new ArgumentException($"Dependent '{employeeDependentId}' not found.");
+
+        if (dependent.EmployeeId != employeeId)
+        {
+            throw new ArgumentException("The selected dependent is not registered to this employee.");
+        }
+
+        return dependent;
+    }
+
+    /// <summary>
+    /// The full gate a dependent must pass before cover is extended to them: the policy must cover
+    /// dependents at all, the dependent must be the employee's own and living, they must not already
+    /// be covered, and the policy's dependent cap must have room.
+    /// </summary>
+    private async Task<EmployeeDependent> EnsureCoverableDependentAsync(
+        BenefitPolicy policy,
+        Guid employeeId,
+        Guid tenantId,
+        Guid employeeDependentId,
+        IReadOnlyCollection<EmployeeDependentBenefit> alreadyCovered)
+    {
+        if (policy.Recipient == BenefitRecipient.Staff)
+        {
+            throw new InvalidOperationException(
+                $"Policy '{policy.PolicyName}' covers staff only; dependents cannot be added to it.");
+        }
+
+        var dependent = await EnsureOwnDependentAsync(employeeId, tenantId, employeeDependentId);
+
+        if (dependent.IsDeceased)
+        {
+            throw new InvalidOperationException(
+                $"{DependentDisplayName(dependent)} is recorded as deceased and cannot be covered.");
+        }
+
+        if (alreadyCovered.Any(d => d.EmployeeDependentId == employeeDependentId && d.IsActive))
+        {
+            throw new InvalidOperationException(
+                $"{DependentDisplayName(dependent)} is already covered under this enrollment.");
+        }
+
+        // MaxDependents is declared on the policy but was previously never enforced, so a policy
+        // capped at 2 would happily accept 10.
+        if (policy.MaxDependents is > 0)
+        {
+            var activeCount = alreadyCovered.Count(d => d.IsActive);
+            if (activeCount >= policy.MaxDependents.Value)
+            {
+                throw new InvalidOperationException(
+                    $"Policy '{policy.PolicyName}' covers at most {policy.MaxDependents.Value} dependent(s); {activeCount} are already covered.");
+            }
+        }
+
+        return dependent;
+    }
+
+    /// <summary>
+    /// Cover and nominations describe an enrollment that is still going somewhere. Once it has been
+    /// terminated, rejected or has expired, editing them would rewrite settled history.
+    /// </summary>
+    private static void EnsureCoverageEditable(EmployeeBenefitEnrollment enrollment)
+    {
+        if (enrollment.Status is EmployeeBenefitEnrollmentStatus.Terminated
+            or EmployeeBenefitEnrollmentStatus.Rejected
+            or EmployeeBenefitEnrollmentStatus.Expired)
+        {
+            throw new InvalidOperationException(
+                $"Cover cannot be changed on a {enrollment.Status.ToString().ToLowerInvariant()} enrollment.");
         }
     }
 
@@ -943,11 +1287,13 @@ internal static class EmployeeBenefitEnrollmentMappingExtensions
         TerminationReason = e.TerminationReason,
         Notes = e.Notes,
         Dependents = (e.Dependents ?? new List<EmployeeDependentBenefit>())
-            .Where(d => d.TenantId == e.TenantId)
+            .Where(d => d.TenantId == e.TenantId && !d.IsDeleted)
             .Select(d => new EnrollmentDependentDto
             {
                 Id = d.Id,
                 EmployeeDependentId = d.EmployeeDependentId,
+                DependentName = DependentDisplayName(d.EmployeeDependent),
+                Relationship = d.EmployeeDependent?.Relationship ?? default,
                 PolicyId = d.PolicyId,
                 EnrolledDate = d.EnrolledDate,
                 CoverageStartDate = d.CoverageStartDate,
@@ -956,7 +1302,7 @@ internal static class EmployeeBenefitEnrollmentMappingExtensions
                 BenefitAmountUsed = d.BenefitAmountUsed
             }).ToList(),
         Beneficiaries = (e.Beneficiaries ?? new List<BenefitBeneficiary>())
-            .Where(b => b.TenantId == e.TenantId)
+            .Where(b => b.TenantId == e.TenantId && !b.IsDeleted)
             .Select(b => new BenefitBeneficiaryDto
             {
                 Id = b.Id,
@@ -968,4 +1314,20 @@ internal static class EmployeeBenefitEnrollmentMappingExtensions
                 IsActive = b.IsActive
             }).ToList()
     };
+
+    /// <summary>
+    /// Full name of a dependent, tolerating a missing middle name and an unloaded navigation.
+    /// Shared with the enrollment service so a dependent reads the same everywhere they appear.
+    /// </summary>
+    internal static string DependentDisplayName(EmployeeDependent? d)
+    {
+        if (d is null)
+        {
+            return string.Empty;
+        }
+
+        return string.IsNullOrWhiteSpace(d.MiddleName)
+            ? $"{d.FirstName} {d.LastName}".Trim()
+            : $"{d.FirstName} {d.MiddleName} {d.LastName}".Trim();
+    }
 }

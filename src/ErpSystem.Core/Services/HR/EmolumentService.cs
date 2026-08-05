@@ -1,10 +1,12 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Exceptions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +22,7 @@ public class EmolumentService : IEmolumentService
     private readonly IGenericRepository<Employee> _employeeRepo;
     private readonly IGenericRepository<EmployeeSalaryAssignment> _salaryAssignmentRepo;
     private readonly IGenericRepository<LeaveType> _leaveTypeRepo;
+    private readonly IPayComponentProjectionService _componentProjection;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
@@ -32,6 +35,7 @@ public class EmolumentService : IEmolumentService
         IGenericRepository<Employee> employeeRepo,
         IGenericRepository<EmployeeSalaryAssignment> salaryAssignmentRepo,
         IGenericRepository<LeaveType> leaveTypeRepo,
+        IPayComponentProjectionService componentProjection,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
@@ -43,10 +47,37 @@ public class EmolumentService : IEmolumentService
         _employeeRepo = employeeRepo;
         _salaryAssignmentRepo = salaryAssignmentRepo;
         _leaveTypeRepo = leaveTypeRepo;
+        _componentProjection = componentProjection;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _clock = clock;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Provenance marker the projection stamps into <see cref="PayComponent.Description"/>.
+    /// Duplicated here rather than shared so the projection stays the only thing that writes it.
+    /// </summary>
+    private const string PayrollProvenanceMarker = "Defined in Payroll";
+
+    private static bool IsPayrollDefined(PayComponent component) =>
+        component.Description is not null &&
+        component.Description.Contains(PayrollProvenanceMarker, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Brings the mirror up to date before a read. Payroll is another team's module and never
+    /// pushes, so HR pulls on read; a projection failure must not take the read down with it.
+    /// </summary>
+    private async Task EnsureComponentsCurrentAsync()
+    {
+        try
+        {
+            await _componentProjection.EnsureCurrentAsync(GetTenantId());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Pay component projection failed; serving the mirror as it stands.");
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -90,6 +121,8 @@ public class EmolumentService : IEmolumentService
 
     public async Task<IEnumerable<PayComponentDto>> GetPayComponentsAsync(bool activeOnly = true)
     {
+        await EnsureComponentsCurrentAsync();
+
         var tenantId = GetTenantId();
         var query = _componentRepo.GetQueryable().Where(c => c.TenantId == tenantId);
         if (activeOnly) query = query.Where(c => c.IsActive);
@@ -99,44 +132,43 @@ public class EmolumentService : IEmolumentService
 
     public async Task<PayComponentDto> GetPayComponentByIdAsync(Guid id)
     {
+        await EnsureComponentsCurrentAsync();
+
         var entity = await GetOwnedPayComponentAsync(id);
         return ToDto(entity);
     }
 
-    public async Task<PayComponentDto> CreatePayComponentAsync(CreatePayComponentDto dto)
-    {
-        if (string.IsNullOrWhiteSpace(dto.Code))
-            throw new InvalidOperationException("A code is required.");
+    public async Task<PayComponentProjectionResultDto> SyncPayComponentsAsync(CancellationToken ct = default)
+        => await _componentProjection.ReconcileAsync(GetTenantId(), ct);
 
-        var tenantId = GetTenantId();
-        var exists = await _componentRepo.GetQueryable()
-            .AnyAsync(c => c.TenantId == tenantId && c.Code == dto.Code);
-        if (exists)
-            throw new InvalidOperationException($"A pay component with code '{dto.Code}' already exists.");
+    /// <summary>
+    /// Creating a pay component in HR is not supported: payroll is the single source of truth for
+    /// the component master, and anything created here would not exist in payroll to be paid.
+    /// </summary>
+    public Task<PayComponentDto> CreatePayComponentAsync(CreatePayComponentDto dto) =>
+        throw new PayrollOwnedException(
+            "Pay components are defined in Payroll and mirrored into HR. Create the component in " +
+            "Payroll (Administration → HR → Payroll → Components), then sync.");
 
-        var entity = new PayComponent
-        {
-            TenantId = tenantId,
-            Code = dto.Code.Trim(),
-            Name = dto.Name.Trim(),
-            Description = dto.Description,
-            ComponentType = dto.ComponentType,
-            CalculationBasis = dto.CalculationBasis,
-            DefaultAmount = dto.DefaultAmount,
-            IsTaxable = dto.IsTaxable,
-            EffectiveFrom = dto.EffectiveFrom == default ? _clock.UtcNow : dto.EffectiveFrom,
-            EffectiveTo = dto.EffectiveTo,
-            IsActive = true
-        };
-        await _componentRepo.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
-        _logger.LogInformation("Pay component created: {code}", entity.Code);
-        return ToDto(entity);
-    }
-
+    /// <summary>
+    /// Full update. Refused for mirrored components — the next projection pass would overwrite the
+    /// change, so <see cref="UpdatePayComponentHrAttributesAsync"/> is the only way to edit those.
+    ///
+    /// Components HR defined itself are still fully editable. The emolument seeder creates six
+    /// (HOUSING, TRANSPORT, MEDICAL, RESP, PAYE, PENSION) that payroll does not know about and
+    /// never will; freezing them would leave things like PENSION's 5.5% rate uncorrectable.
+    /// </summary>
     public async Task<PayComponentDto> UpdatePayComponentAsync(Guid id, UpdatePayComponentDto dto)
     {
         var entity = await GetOwnedPayComponentAsync(id);
+
+        if (IsPayrollDefined(entity))
+            throw new PayrollOwnedException(
+                $"'{entity.Name}' is defined in Payroll and mirrored into HR, so its code, name, type, " +
+                "calculation basis, amount, taxability and active flag would be overwritten by the next " +
+                "sync. Edit those in Payroll. Pension, tax treatment, gross-pay effect and effective " +
+                "dates are HR-owned and can be changed here.");
+
         var tenantId = GetTenantId();
 
         if (!string.IsNullOrWhiteSpace(dto.Code) && dto.Code != entity.Code)
@@ -163,12 +195,47 @@ public class EmolumentService : IEmolumentService
         return ToDto(entity);
     }
 
+    /// <summary>
+    /// Refused for mirrored components — HR mirrors payroll's active flag, so the next sync would
+    /// simply restore it. HR-defined components can still be deactivated here.
+    /// </summary>
     public async Task DeactivatePayComponentAsync(Guid id)
     {
         var entity = await GetOwnedPayComponentAsync(id);
+
+        if (IsPayrollDefined(entity))
+            throw new PayrollOwnedException(
+                $"'{entity.Name}' is defined in Payroll. Deactivate it there — HR mirrors the active " +
+                "flag and the next sync would restore it.");
+
         entity.IsActive = false;
         await _componentRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Updates the fields HR owns. Payroll models none of them, so the projection never touches
+    /// them and they stay editable on mirrored components — otherwise SSNIT and tax treatment
+    /// would be stuck at their defaults on every component.
+    /// </summary>
+    public async Task<PayComponentDto> UpdatePayComponentHrAttributesAsync(
+        Guid id, UpdatePayComponentHrAttributesDto dto)
+    {
+        var entity = await GetOwnedPayComponentAsync(id);
+
+        if (dto.EffectiveTo.HasValue && dto.EffectiveFrom != default && dto.EffectiveTo < dto.EffectiveFrom)
+            throw new InvalidOperationException("The effective-to date cannot be before the effective-from date.");
+
+        entity.IsPensionable = dto.IsPensionable;
+        entity.AffectsGrossPay = dto.AffectsGrossPay;
+        entity.StatutoryTreatment = dto.StatutoryTreatment;
+        if (dto.EffectiveFrom != default) entity.EffectiveFrom = dto.EffectiveFrom;
+        entity.EffectiveTo = dto.EffectiveTo;
+
+        await _componentRepo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync();
+        _logger.LogInformation("Pay component HR attributes updated: {code}", entity.Code);
+        return ToDto(entity);
     }
 
     // ─── Position-level assignment ─────────────────────────────────────────────
@@ -475,9 +542,14 @@ public class EmolumentService : IEmolumentService
         CalculationBasis = e.CalculationBasis,
         DefaultAmount = e.DefaultAmount,
         IsTaxable = e.IsTaxable,
+        IsActive = e.IsActive,
+        // HR-owned — the projection leaves these alone.
+        IsPensionable = e.IsPensionable,
+        AffectsGrossPay = e.AffectsGrossPay,
+        StatutoryTreatment = e.StatutoryTreatment,
         EffectiveFrom = e.EffectiveFrom,
         EffectiveTo = e.EffectiveTo,
-        IsActive = e.IsActive
+        IsPayrollDefined = IsPayrollDefined(e)
     };
 
     private static PositionPayComponentDto ToDto(PositionPayComponent e) => new()

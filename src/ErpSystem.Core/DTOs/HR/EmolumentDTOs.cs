@@ -7,6 +7,9 @@ namespace ErpSystem.Core.DTOs.HR;
 public class PayComponentDto
 {
     public Guid Id { get; set; }
+
+    // ── Payroll-owned ────────────────────────────────────────────────────────
+    // Mirrored from PayrollComponent and overwritten on every projection pass.
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -14,9 +17,62 @@ public class PayComponentDto
     public PayComponentCalculationBasis CalculationBasis { get; set; }
     public decimal? DefaultAmount { get; set; }
     public bool IsTaxable { get; set; }
+    public bool IsActive { get; set; }
+
+    // ── HR-owned ─────────────────────────────────────────────────────────────
+    // Payroll has no equivalent for these, so the projection never touches them
+    // and they stay editable. See UpdatePayComponentHrAttributesDto.
+    /// <summary>Whether this component counts toward pension/SSNIT contributions.</summary>
+    public bool IsPensionable { get; set; }
+
+    /// <summary>False for notional benefit-in-kind lines that do not add to gross pay.</summary>
+    public bool AffectsGrossPay { get; set; }
+
+    /// <summary>Income-tax treatment HR asserts for this component.</summary>
+    public TaxTreatmentType StatutoryTreatment { get; set; }
+
+    /// <summary>
+    /// Emoluments and the leave-encashment rate filter on this window, so it is HR-owned:
+    /// payroll models no effective dating at all.
+    /// </summary>
     public DateTime EffectiveFrom { get; set; }
     public DateTime? EffectiveTo { get; set; }
-    public bool IsActive { get; set; }
+
+    // ── Provenance ───────────────────────────────────────────────────────────
+    /// <summary>
+    /// True when this row mirrors a payroll component. The payroll-owned fields above are then
+    /// read-only and every write to them returns 409; only the HR-owned fields can be edited.
+    /// </summary>
+    public bool IsPayrollDefined { get; set; }
+}
+
+/// <summary>
+/// The subset of a pay component HR owns. Payroll models none of these, so they remain editable
+/// on mirrored components — without this they would be stuck at their defaults forever, which
+/// would misstate SSNIT and tax treatment on every emolument that reads them.
+/// </summary>
+public class UpdatePayComponentHrAttributesDto
+{
+    public bool IsPensionable { get; set; }
+    public bool AffectsGrossPay { get; set; } = true;
+    public TaxTreatmentType StatutoryTreatment { get; set; } = TaxTreatmentType.PAYE;
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+}
+
+/// <summary>Outcome of a payroll → HR pay-component projection pass.</summary>
+public class PayComponentProjectionResultDto
+{
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Deactivated { get; set; }
+    public bool SkippedAsUnchanged { get; set; }
+
+    /// <summary>
+    /// Non-fatal issues: duplicate payroll codes, and employer-contribution components that have
+    /// no HR equivalent and were skipped.
+    /// </summary>
+    public List<string> Warnings { get; set; } = new();
 }
 
 public class CreatePayComponentDto

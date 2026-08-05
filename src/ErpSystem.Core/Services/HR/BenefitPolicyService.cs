@@ -352,8 +352,15 @@ public class BenefitPolicyService : IBenefitPolicyService
         var tenantId = GetTenantId();
         var normalizedUpper = NormalizeCode(policyCode).ToUpperInvariant();
 
+        // ToUpperInvariant() has no SQL translation, so composing it into the predicate made
+        // this query throw at execution — every attempt to create or rename a policy with a
+        // code failed. ToUpper() does translate; the comparison is already case-insensitive
+        // under the default collation, and upper-casing both sides keeps it correct under a
+        // case-sensitive one too.
         var query = _benefitPolicyRepository
-            .GetQueryable(p => p.TenantId == tenantId && (p.PolicyCode ?? string.Empty).Trim().ToUpperInvariant() == normalizedUpper)
+            .GetQueryable(p => p.TenantId == tenantId
+                && p.PolicyCode != null
+                && p.PolicyCode.Trim().ToUpper() == normalizedUpper)
             .AsNoTracking();
 
         if (excludeId.HasValue)

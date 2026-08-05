@@ -76,6 +76,12 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    * removed, but not edited in place. `update` is then never called.
    */
   allowUpdate?: boolean;
+  /**
+   * Set false when rows cannot originate here — the add affordance disappears but editing
+   * stays available. Needed by mirrored resources like pay components, where new rows come
+   * from the owning module and a create would be refused with 409.
+   */
+  allowCreate?: boolean;
 
   columns: CollectionColumn<TItem>[];
   actions?: CollectionAction<TItem>[];
@@ -113,6 +119,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   remove,
   readOnly = false,
   allowUpdate = true,
+  allowCreate = true,
   columns,
   actions = [],
   schema,
@@ -216,7 +223,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   };
 
   const rows = data ?? [];
-  const canAdd = !readOnly;
+  const canAdd = !readOnly && allowCreate;
   const canEdit = !readOnly && allowUpdate;
   const canRemove = !readOnly && !!remove;
   const hasRowMenu = canEdit || canRemove || actions.length > 0;
