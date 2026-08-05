@@ -58,8 +58,9 @@ public sealed class StartSupplierApplicantSessionRequest
 
 public sealed class SupplierApplicantSessionDto
 {
+    public Guid SessionId { get; set; }
     public Guid SessionReference { get; set; }
-    public Guid SystemActorUserId { get; set; }
+    public Guid ApplicantActorId { get; set; }
     public Guid TenantId { get; set; }
     public Guid RegistrationId { get; set; }
     public Guid TokenId { get; set; }

@@ -23,7 +23,7 @@ public sealed class ProcurementAccessControlServiceTests
     public void RegistryContainsTheCompleteTdcLeastPrivilegeBaseline()
     {
         ProcurementAccessControlRegistry.Roles.Should().HaveCount(19).And.OnlyHaveUniqueItems(item => item.Code);
-        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(38).And.OnlyHaveUniqueItems(item => item.Code);
+        ProcurementAccessControlRegistry.Permissions.Should().HaveCount(39).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Committees.Should().HaveCount(4).And.OnlyHaveUniqueItems(item => item.Code);
         ProcurementAccessControlRegistry.Workflows.Should().HaveCount(13).And.OnlyHaveUniqueItems(item => item.Code);
 
@@ -31,6 +31,14 @@ public sealed class ProcurementAccessControlServiceTests
         audit.IsReadOnly.Should().BeTrue();
         audit.PermissionCodes.Select(ProcurementAccessControlRegistry.FindPermission)
             .Should().OnlyContain(permission => permission != null && !permission.IsMutation);
+
+        ProcurementAccessControlRegistry.FindPermission(
+                ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission)
+            .Should().NotBeNull().And.Match<ProcurementPermissionDefinition>(permission =>
+                permission.IsMutation);
+        ProcurementAccessControlRegistry.FindRole("TDC_PROCUREMENT_OFFICER")!
+            .PermissionCodes.Should().Contain(
+                ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission);
     }
 
     [Fact]
@@ -42,11 +50,52 @@ public sealed class ProcurementAccessControlServiceTests
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
 
         (await fixture.Context.Roles.CountAsync(item => item.Name!.StartsWith("TDC_"))).Should().Be(19);
-        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(38);
+        (await fixture.Context.Permissions.CountAsync(item => item.Category == ProcurementAccessControlRegistry.Category)).Should().Be(39);
         (await fixture.Context.ProcurementCommittees.CountAsync(item => item.TenantId == fixture.TenantId)).Should().Be(4);
         var workflows = await fixture.Context.WorkflowDefinitions.Where(item => item.TenantId == fixture.TenantId).ToListAsync();
         workflows.Should().HaveCount(13).And.OnlyContain(item =>
             item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Draft && !item.IsActive && item.PublishedAt == null);
+    }
+
+    [Fact]
+    public async Task SecurityRoleGrantsAnUnscopedPrivilegeWithoutAProcurementResponsibilityAssignment()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_PROCUREMENT_OFFICER");
+
+        var decision = await fixture.Service.CheckCapabilityAsync(new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission,
+            SourceType = "SupplierOnboardingPayment",
+            SourceReference = "PAYMENT-001"
+        }, "trace-security-role");
+
+        decision.Allowed.Should().BeTrue();
+        decision.MatchedRoles.Should().ContainSingle("TDC_PROCUREMENT_OFFICER");
+        decision.MatchedAssignmentIds.Should().BeEmpty();
+        (await fixture.Context.ProcurementResponsibilityAssignments.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ActiveContextScopeCannotBeCreatedBeforeTheSecurityRoleIsGranted()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+
+        var action = () => fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
+        {
+            UserId = fixture.UserId,
+            RoleName = "TDC_STORES_OFFICER",
+            WarehouseScopeMode = ProcurementWarehouseScopeMode.Restricted,
+            WarehouseIds = new() { fixture.WarehouseId },
+            LocationScopeMode = ProcurementLocationScopeMode.All,
+            EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+            Reason = "Scope must not replace Security membership"
+        }, "trace-role-required");
+
+        (await action.Should().ThrowAsync<ProcurementAccessValidationException>())
+            .Which.Code.Should().Be("SECURITY_ROLE_REQUIRED");
     }
 
     [Fact]
@@ -109,6 +158,7 @@ public sealed class ProcurementAccessControlServiceTests
     {
         await using var fixture = new Fixture();
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_STORES_OFFICER");
         var consignmentLocationId = Guid.NewGuid();
         fixture.Context.WarehouseLocations.Add(new WarehouseLocation
         {
@@ -150,6 +200,7 @@ public sealed class ProcurementAccessControlServiceTests
     {
         await using var fixture = new Fixture();
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_STORES_OFFICER");
         await fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
         {
             UserId = fixture.UserId,
@@ -225,6 +276,7 @@ public sealed class ProcurementAccessControlServiceTests
     {
         await using var fixture = new Fixture();
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_STORES_OFFICER");
 
         var action = () => fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
         {
@@ -246,6 +298,7 @@ public sealed class ProcurementAccessControlServiceTests
     {
         await using var fixture = new Fixture();
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_STORES_OFFICER");
 
         var action = () => fixture.Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
         {
@@ -268,6 +321,7 @@ public sealed class ProcurementAccessControlServiceTests
         await using var fixture = new Fixture();
         await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
         var created = await fixture.AssignStoresOfficerAsync(fixture.WarehouseId);
+        await fixture.GrantSecurityRoleAsync("TDC_STORES_MANAGER");
         var assignment = await fixture.Context.ProcurementResponsibilityAssignments.SingleAsync(item => item.Id == created.Id);
         assignment.RowVersion = new byte[] { 1, 2, 3, 4 };
         await fixture.Context.SaveChangesAsync();
@@ -367,8 +421,10 @@ public sealed class ProcurementAccessControlServiceTests
         public ProcurementAccessControlService Service { get; }
         public ProcurementAccessControlSeeder Seeder { get; }
 
-        public Task<ProcurementResponsibilityAssignmentDto> AssignStoresOfficerAsync(Guid warehouseId, Guid? locationId = null) =>
-            Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
+        public async Task<ProcurementResponsibilityAssignmentDto> AssignStoresOfficerAsync(Guid warehouseId, Guid? locationId = null)
+        {
+            await GrantSecurityRoleAsync("TDC_STORES_OFFICER");
+            return await Service.SaveAssignmentAsync(null, new SaveProcurementResponsibilityAssignmentRequest
             {
                 UserId = UserId,
                 RoleName = "TDC_STORES_OFFICER",
@@ -379,6 +435,17 @@ public sealed class ProcurementAccessControlServiceTests
                 EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
                 Reason = "Acceptance fixture"
             }, "trace-assign");
+        }
+
+        public async Task GrantSecurityRoleAsync(string roleName)
+        {
+            var role = await Context.Roles.SingleAsync(item => item.Name == roleName);
+            if (!await Context.Set<ApplicationUserRole>().AnyAsync(item => item.UserId == UserId && item.RoleId == role.Id))
+            {
+                Context.Set<ApplicationUserRole>().Add(new ApplicationUserRole { UserId = UserId, RoleId = role.Id });
+                await Context.SaveChangesAsync();
+            }
+        }
 
         public async ValueTask DisposeAsync()
         {

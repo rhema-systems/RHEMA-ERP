@@ -355,8 +355,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         {
             var session = await _applicantAccess.ValidateSessionAsync(
                 SessionReference(), Correlation("payment-session"), cancellationToken);
-            var result = await _tokens.RecordPaymentAsync(
-                session.TokenId, request, Correlation("payment"), cancellationToken);
+            var result = await _tokens.RecordApplicantPaymentAsync(
+                session.TokenId,
+                session.SessionId,
+                request,
+                Correlation("payment"),
+                cancellationToken);
             return Ok(result.Token);
         }
         catch (Exception exception)
@@ -394,7 +398,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 new ControlledFileUploadRequest
                 {
                     TenantId = session.TenantId,
-                    ActorUserId = session.SystemActorUserId,
+                    ActorUserId = session.ApplicantActorId,
                     ActorName = "Supplier Applicant",
                     Category = ControlledFileUploadCategories.DocumentManagement,
                     FileName = safeName,
@@ -410,7 +414,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     new CentralDocumentRepositoryRegistration
                     {
                         TenantId = session.TenantId,
-                        ActorUserId = session.SystemActorUserId,
+                        ActorUserId = session.ApplicantActorId,
                         ActorName = "Supplier Applicant",
                         FileUploadRecordId = upload.Record.Id,
                         SourceModule = "Procurement",
@@ -431,7 +435,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 await _controlledFiles.DeleteAsync(
                     session.TenantId,
                     upload.Record.Id,
-                    session.SystemActorUserId,
+                    session.ApplicantActorId,
                     cancellationToken);
                 throw;
             }
@@ -458,14 +462,14 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         ExpiryDate = expiryDate,
                         ChecksumSha256 = upload.ChecksumSha256
                     },
-                    session.SystemActorUserId);
+                    session.ApplicantActorId);
             }
             catch
             {
                 await _centralDocuments.DeleteAsync(
                     session.TenantId,
                     centralDocument.DocumentRecordId,
-                    session.SystemActorUserId,
+                    session.ApplicantActorId,
                     cancellationToken);
                 throw;
             }
@@ -590,13 +594,13 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     await _registrations.DeleteDocumentAsync(
                         session.RegistrationId,
                         documentId,
-                        session.SystemActorUserId);
+                        session.ApplicantActorId);
                     if (document.CentralDocumentRecordId.HasValue)
                     {
                         await _centralDocuments.DeleteAsync(
                             session.TenantId,
                             document.CentralDocumentRecordId.Value,
-                            session.SystemActorUserId,
+                            session.ApplicantActorId,
                             cancellationToken);
                     }
                     else if (document.FileUploadRecordId.HasValue)
@@ -604,7 +608,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         await _controlledFiles.DeleteAsync(
                             session.TenantId,
                             document.FileUploadRecordId.Value,
-                            session.SystemActorUserId,
+                            session.ApplicantActorId,
                             cancellationToken);
                     }
                     await _unitOfWork.CommitAsync(cancellationToken);

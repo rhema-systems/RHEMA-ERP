@@ -156,8 +156,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var tokenId = Guid.NewGuid();
         var paymentSession = new SupplierApplicantSessionDto
         {
+            SessionId = Guid.NewGuid(),
             SessionReference = Guid.NewGuid(),
-            SystemActorUserId = Guid.NewGuid(),
+            ApplicantActorId = Guid.NewGuid(),
             TenantId = tenantId,
             RegistrationId = registrationId,
             TokenId = tokenId,
@@ -281,10 +282,12 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var centralDocumentRecordId = Guid.NewGuid();
         var centralDocumentVersionId = Guid.NewGuid();
         var paymentMethodId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
         var session = new SupplierApplicantSessionDto
         {
+            SessionId = sessionId,
             SessionReference = sessionReference,
-            SystemActorUserId = actorId,
+            ApplicantActorId = actorId,
             TenantId = tenantId,
             RegistrationId = registrationId,
             TokenId = tokenId,
@@ -322,8 +325,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
         tokens.Setup(item => item.GetPaymentMethodsAsync(
                 tokenId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(paymentMethods);
-        tokens.Setup(item => item.RecordPaymentAsync(
+        tokens.Setup(item => item.RecordApplicantPaymentAsync(
                 tokenId,
+                sessionId,
                 It.IsAny<RecordProcurementSupplierOnboardingPaymentRequest>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -427,8 +431,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
             payment, CancellationToken.None);
         paymentResult.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().BeSameAs(pendingToken);
-        tokens.Verify(item => item.RecordPaymentAsync(
+        tokens.Verify(item => item.RecordApplicantPaymentAsync(
             tokenId,
+            sessionId,
             It.Is<RecordProcurementSupplierOnboardingPaymentRequest>(request =>
                 request.PaymentMethodId == paymentMethodId &&
                 request.PaymentReference == "MOMO-12345"),
@@ -503,8 +508,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierApplicantSessionDto
             {
+                SessionId = Guid.NewGuid(),
                 SessionReference = sessionReference,
-                SystemActorUserId = actorId,
+                ApplicantActorId = actorId,
                 TenantId = tenantId,
                 RegistrationId = registrationId,
                 TokenId = Guid.NewGuid(),
@@ -581,8 +587,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierApplicantSessionDto
             {
+                SessionId = Guid.NewGuid(),
                 SessionReference = sessionReference,
-                SystemActorUserId = Guid.NewGuid(),
+                ApplicantActorId = Guid.NewGuid(),
                 TenantId = Guid.NewGuid(),
                 RegistrationId = Guid.NewGuid(),
                 TokenId = Guid.NewGuid(),
@@ -625,8 +632,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierApplicantSessionDto
             {
+                SessionId = Guid.NewGuid(),
                 SessionReference = sessionReference,
-                SystemActorUserId = Guid.NewGuid(),
+                ApplicantActorId = Guid.NewGuid(),
                 TenantId = Guid.NewGuid(),
                 RegistrationId = Guid.NewGuid(),
                 TokenId = Guid.NewGuid(),

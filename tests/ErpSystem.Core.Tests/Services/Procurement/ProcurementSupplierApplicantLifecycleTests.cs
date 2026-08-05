@@ -43,8 +43,20 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         issued.RestrictedSession.Should().NotBeNull();
         issued.RestrictedSession!.PaymentOnly.Should().BeTrue();
         issued.RestrictedSession.TokenId.Should().Be(issued.TokenId);
-        (await fixture.Context.ProcurementSupplierApplicantSessions.CountAsync())
-            .Should().Be(1);
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync();
+        var registration = await fixture.Context.BusinessPartnerRegistrations
+            .SingleAsync();
+        var session = await fixture.Context.ProcurementSupplierApplicantSessions
+            .SingleAsync();
+        issued.RestrictedSession.SessionId.Should().Be(session.Id);
+        issued.RestrictedSession.ApplicantActorId.Should().Be(access.Id);
+        registration.CreatedBy.Should().Be("Verified Supplier Applicant");
+        registration.CreatedById.Should().Be(access.Id);
+        access.CreatedById.Should().Be(access.Id);
+        session.CreatedById.Should().Be(access.Id);
+        access.Id.Should().NotBe(fixture.ActorId,
+            "a pre-approval applicant must not borrow the tenant administrator identity");
     }
 
     [Fact]
@@ -146,7 +158,8 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         var access = await fixture.Context.ProcurementSupplierApplicantAccesses
             .SingleAsync();
         access.RegistrationId.Should().Be(registration.Id);
-        access.CreatedById.Should().Be(fixture.ActorId);
+        access.CreatedById.Should().Be(access.Id);
+        access.Id.Should().NotBe(fixture.ActorId);
     }
 
     [Fact]

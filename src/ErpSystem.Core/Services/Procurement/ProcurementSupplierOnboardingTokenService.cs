@@ -532,11 +532,67 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         };
     }
 
-    public async Task<ProcurementSupplierOnboardingTokenIssueResultDto> RecordPaymentAsync(
+    public Task<ProcurementSupplierOnboardingTokenIssueResultDto> RecordPaymentAsync(
         Guid id,
         RecordProcurementSupplierOnboardingPaymentRequest request,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        RecordPaymentCoreAsync(
+            id, null, request, correlationId, cancellationToken);
+
+    public async Task<ProcurementSupplierOnboardingTokenIssueResultDto>
+        RecordApplicantPaymentAsync(
+            Guid id,
+            Guid applicantSessionId,
+            RecordProcurementSupplierOnboardingPaymentRequest request,
+            string correlationId,
+            CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        if (!_currentUser.IsExternalUser ||
+            !string.Equals(
+                _currentUser.AuthenticationProvider,
+                "ApplicantToken",
+                StringComparison.OrdinalIgnoreCase) ||
+            _currentUser.Claims is null ||
+            !_currentUser.Claims.TryGetValue(
+                "supplier_applicant_session",
+                out var sessionReferenceClaim) ||
+            !Guid.TryParse(sessionReferenceClaim, out var sessionReference))
+        {
+            throw new ProcurementSupplierOnboardingTokenAuthorizationException(
+                "A validated applicant-only session is required to submit this payment claim.");
+        }
+
+        var now = DateTime.UtcNow;
+        var session = await ApplicantSessions.GetQueryable(item =>
+                item.Id == applicantSessionId &&
+                item.TenantId == _currentUser.TenantId &&
+                item.SessionReference == sessionReference &&
+                item.Status == ProcurementSupplierApplicantSessionStatus.Active &&
+                item.ExpiresAtUtc > now &&
+                !item.IsDeleted &&
+                item.ApplicantAccess.TokenId == id &&
+                item.ApplicantAccess.Status ==
+                    ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
+                !item.ApplicantAccess.TerminalAtUtc.HasValue &&
+                !item.ApplicantAccess.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new ProcurementSupplierOnboardingTokenAuthorizationException(
+                "The applicant session is not active or is not bound to this token.");
+
+        return await RecordPaymentCoreAsync(
+            id, session.Id, request, correlationId, cancellationToken);
+    }
+
+    private async Task<ProcurementSupplierOnboardingTokenIssueResultDto>
+        RecordPaymentCoreAsync(
+            Guid id,
+            Guid? submittedByApplicantSessionId,
+            RecordProcurementSupplierOnboardingPaymentRequest request,
+            string correlationId,
+            CancellationToken cancellationToken)
     {
         var correlation = NormalizeCorrelation(correlationId);
         var entity = await LoadAsync(id, tracked: true, cancellationToken);
@@ -595,6 +651,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             Id = Guid.NewGuid(),
             TenantId = entity.TenantId,
             TokenId = entity.Id,
+            SubmittedByApplicantSessionId = submittedByApplicantSessionId,
             PaymentMethodId = method.Id,
             PaymentMethodCode = methodCode,
             PaymentMethodName = method.Name,
@@ -611,8 +668,12 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             LastOperationCorrelationId = correlation,
             LastOperation = "Recorded",
             CreatedAt = now,
-            CreatedBy = ActorName,
-            CreatedById = _currentUser.UserId,
+            CreatedBy = submittedByApplicantSessionId.HasValue
+                ? "Verified Supplier Applicant"
+                : ActorName,
+            CreatedById = submittedByApplicantSessionId.HasValue
+                ? null
+                : _currentUser.UserId,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(payment);
@@ -630,11 +691,14 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 ProcurementControlEventResult.Succeeded, before,
                 new { Token = Snapshot(entity), Payment = PaymentSnapshot(payment) },
                 "Applicant payment claim is pending trusted cashier or provider verification.",
-                [], correlation, now, cancellationToken);
+                [], correlation, now, cancellationToken,
+                systemEvent: submittedByApplicantSessionId.HasValue);
         }, cancellationToken);
         await PublishNotificationAsync(
             "procurement.supplier-onboarding-token.payment-submitted",
-            entity, cancellationToken);
+            entity,
+            cancellationToken,
+            systemEvent: submittedByApplicantSessionId.HasValue);
         return new ProcurementSupplierOnboardingTokenIssueResultDto { Token = Map(entity) };
     }
 
@@ -647,7 +711,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     {
         var correlation = NormalizeCorrelation(correlationId);
         var entity = await LoadAsync(tokenId, tracked: true, cancellationToken);
-        await EnsureCapabilityAsync(ReviewPermission, entity.TokenReference, correlation,
+        await EnsureCapabilityAsync(
+            ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission,
+            entity.TokenReference,
+            correlation,
             cancellationToken);
         var payment = entity.Payments.SingleOrDefault(item => item.Id == paymentId)
             ?? throw NotFound("SUPPLIER_ONBOARDING_PAYMENT_NOT_FOUND",
@@ -664,8 +731,11 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 ProcurementSupplierOnboardingPaymentStatus.Posted))
             throw Conflict("SUPPLIER_ONBOARDING_PAYMENT_NOT_VERIFIABLE",
                 "Only a pending payment claim or legacy Finance-posted payment can be verified.");
-        await EnsureIndependentActorAsync(payment.CreatedById, entity.TokenReference,
-            correlation, cancellationToken);
+        if (!payment.SubmittedByApplicantSessionId.HasValue)
+        {
+            await EnsureIndependentActorAsync(payment.CreatedById, entity.TokenReference,
+                correlation, cancellationToken);
+        }
 
         var applicantBound = await ApplicantAccesses.GetQueryable(item =>
                 item.TenantId == entity.TenantId && item.TokenId == entity.Id &&
@@ -683,10 +753,6 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                     "Payment verified; sign in with the newly delivered application token.",
                     now,
                     cancellationToken);
-            payment.ReconciledAtUtc = now;
-            payment.ReconciledById = _currentUser.UserId;
-            payment.ReconciliationReference = request.ReconciliationReference.Trim();
-            payment.ReconciliationNotes = request.Notes.Trim();
             if (payment.Status == ProcurementSupplierOnboardingPaymentStatus.Pending)
             {
                 var method = await PaymentMethods.GetQueryable(item =>
@@ -732,8 +798,22 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 payment.ReceiptNumber = receipt;
                 payment.ReceiptIssuedAtUtc = now;
                 payment.FailureReason = null;
+                // Persist the trusted Finance-posted state before completing
+                // reconciliation. SQL protects the lifecycle as Pending ->
+                // Posted -> Reconciled and must never observe a direct jump.
+                payment.Status = ProcurementSupplierOnboardingPaymentStatus.Posted;
+                Touch(payment, "Posted", correlation, now);
+                Capture(payment);
+                await Payments.UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
+            payment.ReconciledAtUtc = now;
+            payment.ReconciledById = _currentUser.UserId;
+            payment.ReconciliationReference = request.ReconciliationReference.Trim();
+            payment.ReconciliationNotes = string.IsNullOrWhiteSpace(request.Notes)
+                ? null
+                : request.Notes.Trim();
             payment.Status = ProcurementSupplierOnboardingPaymentStatus.Reconciled;
             Touch(payment, "Verified", correlation, now);
             Capture(payment);
@@ -1451,7 +1531,6 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 item.TenantId == registration.TenantId &&
                 item.RegistrationId == registration.Id &&
                 item.TokenId == claimedTokenId &&
-                item.CreatedById == _currentUser.UserId &&
                 item.Status ==
                     ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
                 !item.TerminalAtUtc.HasValue &&
@@ -1559,7 +1638,8 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     private async Task PublishNotificationAsync(
         string topic,
         ProcurementSupplierOnboardingToken entity,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool systemEvent = false)
     {
         try
         {
@@ -1570,7 +1650,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 NotificationType = "ProcurementSupplierOnboardingTokenControl",
                 EntityType = SourceType,
                 EntityId = entity.Id,
-                TriggeredByUserId = _currentUser.UserId,
+                TriggeredByUserId = systemEvent ? null : _currentUser.UserId,
                 Data = new Dictionary<string, object>
                 {
                     ["tokenReference"] = entity.TokenReference,
@@ -1698,6 +1778,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         ProcurementSupplierOnboardingPayment item) => new()
     {
         Id = item.Id,
+        SubmittedByApplicantSessionId = item.SubmittedByApplicantSessionId,
         PaymentMethodId = item.PaymentMethodId,
         PaymentMethodCode = item.PaymentMethodCode,
         PaymentMethodName = item.PaymentMethodName,
@@ -1772,6 +1853,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     {
         item.Id,
         item.TokenId,
+        item.SubmittedByApplicantSessionId,
         item.PaymentMethodId,
         item.PaymentMethodCode,
         item.PaymentReference,

@@ -20,7 +20,7 @@ export interface ProcurementAccessPermission {
   code: string; name: string; description: string; isMutation: boolean; isWarehouseScoped: boolean; isConfigured: boolean;
 }
 
-export interface ProcurementAccessUser { userId: string; username: string; displayName: string; isActive: boolean; }
+export interface ProcurementAccessUser { userId: string; username: string; displayName: string; isActive: boolean; roleNames: string[]; }
 export interface ProcurementAccessWarehouse { warehouseId: string; code: string; name: string; isActive: boolean; }
 export interface ProcurementAccessLocation { locationId: string; warehouseId: string; warehouseCode: string; code: string; name: string; isActive: boolean; }
 

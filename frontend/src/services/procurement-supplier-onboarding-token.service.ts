@@ -45,12 +45,12 @@ export const procurementSupplierOnboardingTokenService = {
     tokenId: string,
     paymentId: string,
     reconciliationReference: string,
-    notes: string,
+    notes: string | undefined,
     rowVersion: string
   ) =>
     apiService.post<SupplierOnboardingToken>(
       `${root}/${tokenId}/payments/${paymentId}/reconcile`,
-      { reconciliationReference, notes, rowVersion }
+      { reconciliationReference, ...(notes ? { notes } : {}), rowVersion }
     ),
   requestExemption: (
     id: string,

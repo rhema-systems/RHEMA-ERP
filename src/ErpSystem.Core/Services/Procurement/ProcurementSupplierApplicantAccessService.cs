@@ -177,7 +177,10 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 existingMatches[0], request, correlation, cancellationToken);
         }
 
-        var systemActor = await ResolveSystemActorAsync(request.TenantId, cancellationToken);
+        // A verified applicant is not an ERP user until approval. Use the
+        // applicant-access identity as the external actor instead of borrowing
+        // an administrator account for ownership and audit lineage.
+        var applicantActorId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var retainedApplication = request.RetainedRegistrationId.HasValue;
         Guid? originalCreatedById = null;
@@ -240,7 +243,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 }, JsonOptions),
                 CreatedAt = now,
                 CreatedBy = "Verified Supplier Applicant",
-                CreatedById = systemActor
+                CreatedById = applicantActorId
             };
             await Registrations.AddAsync(registration);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -270,7 +273,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
 
         var access = new ProcurementSupplierApplicantAccess
         {
-            Id = Guid.NewGuid(),
+            Id = applicantActorId,
             TenantId = request.TenantId,
             RegistrationId = registration.Id,
             TokenId = issued.Token.Id,
@@ -282,7 +285,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
             Status = ProcurementSupplierApplicantAccessStatus.ApplicationInProgress,
             CreatedAt = now,
             CreatedBy = "Verified Supplier Applicant",
-            CreatedById = systemActor,
+            CreatedById = applicantActorId,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(access);
@@ -316,7 +319,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
             restrictedSession = await CreateSessionCoreAsync(
                 access,
                 issued.Token,
-                systemActor,
                 correlation,
                 "ApplicantPaymentSessionStarted",
                 cancellationToken);
@@ -383,13 +385,10 @@ public sealed class ProcurementSupplierApplicantAccessService :
             await Sessions.UpdateAsync(activeSession);
         }
 
-        var actor = access.CreatedById ??
-            await ResolveSystemActorAsync(access.TenantId, cancellationToken);
         var token = MapToken(access.Token);
         var session = await CreateSessionCoreAsync(
             access,
             token,
-            actor,
             correlation,
             "ApplicantVerifiedSessionResumed",
             cancellationToken);
@@ -475,12 +474,9 @@ public sealed class ProcurementSupplierApplicantAccessService :
             throw Error("SUPPLIER_APPLICANT_APPLICATION_COMPLETE",
                 "This application is complete and cannot start another applicant session.", 401);
 
-        var actor = access.CreatedById ??
-            await ResolveSystemActorAsync(request.TenantId, cancellationToken);
         return await CreateSessionCoreAsync(
             access,
             token,
-            actor,
             correlation,
             "ApplicantSessionStarted",
             cancellationToken);
@@ -489,7 +485,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
     private async Task<SupplierApplicantSessionDto> CreateSessionCoreAsync(
         ProcurementSupplierApplicantAccess access,
         ProcurementSupplierOnboardingTokenDto token,
-        Guid actor,
         string correlation,
         string action,
         CancellationToken cancellationToken)
@@ -508,7 +503,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
             LastUsedAtUtc = now,
             CreatedAt = now,
             CreatedBy = "Verified Supplier Applicant",
-            CreatedById = actor,
+            CreatedById = access.Id,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(session);
@@ -528,7 +523,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
             "A restricted applicant-only session was started.",
             correlation,
             cancellationToken);
-        return MapSession(session, actor, access, token);
+        return MapSession(session, access, token);
     }
 
     public async Task<SupplierApplicantTokenDeliveryDto> DeliverApplicationTokenAsync(
@@ -725,7 +720,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return MapSession(
             session,
-            session.CreatedById ?? Guid.Empty,
             session.ApplicantAccess,
             MapToken(session.ApplicantAccess.Token));
     }
@@ -786,7 +780,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 Phone = request.Phone?.Trim(),
                 RegistrationData = request.RegistrationData
             },
-            session.SystemActorUserId);
+            session.ApplicantActorId);
         var token = await _tokenService.GetForRegistrationAsync(
             session.RegistrationId, cancellationToken)
             ?? throw Error("SUPPLIER_APPLICANT_TOKEN_NOT_FOUND",
@@ -815,7 +809,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "Payment or an approved exemption is required before submission.", 409);
         await _registrationService.SubmitForReviewAsync(
             session.RegistrationId,
-            session.SystemActorUserId);
+            session.ApplicantActorId);
         var detail = await _registrationService.GetByIdAsync(session.RegistrationId)
             ?? throw Error("SUPPLIER_APPLICANT_REGISTRATION_NOT_FOUND",
                 "The supplier application was not found.", 404);
@@ -1575,29 +1569,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "The verified applicant access record was not found.", 404);
     }
 
-    private async Task<Guid> ResolveSystemActorAsync(
-        Guid tenantId,
-        CancellationToken cancellationToken)
-    {
-        var userId = await UserTenants.GetQueryable(item =>
-                item.TenantId == tenantId && !item.IsDeleted &&
-                item.Status == UserTenantStatus.Active &&
-                (item.ExpiresAt == null || item.ExpiresAt > DateTime.UtcNow) &&
-                item.User.IsActive)
-            .OrderByDescending(item => item.User.UserRoles.Any(role =>
-                role.Role.Name == "SuperAdmin"))
-            .ThenByDescending(item => item.User.UserRoles.Any(role =>
-                role.Role.Name == "TenantAdmin"))
-            .ThenBy(item => item.User.UserName)
-            .Select(item => item.UserId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (userId == Guid.Empty)
-            throw Error("SUPPLIER_APPLICANT_SYSTEM_ACTOR_UNAVAILABLE",
-                "Supplier applications require one active tenant administrator for audit lineage.",
-                503);
-        return userId;
-    }
-
     private async Task EnsureApprovalPermissionAsync(
         Guid registrationId,
         string correlationId,
@@ -1737,13 +1708,13 @@ public sealed class ProcurementSupplierApplicantAccessService :
 
     private static SupplierApplicantSessionDto MapSession(
         ProcurementSupplierApplicantSession session,
-        Guid actor,
         ProcurementSupplierApplicantAccess access,
         ProcurementSupplierOnboardingTokenDto token) =>
         new()
         {
+            SessionId = session.Id,
             SessionReference = session.SessionReference,
-            SystemActorUserId = actor,
+            ApplicantActorId = access.Id,
             TenantId = session.TenantId,
             RegistrationId = access.RegistrationId,
             TokenId = access.TokenId,

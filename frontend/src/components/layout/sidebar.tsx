@@ -486,7 +486,7 @@ export const navigationItems: NavItem[] = [
             title: 'Supplier Onboarding Tokens',
             href: '/administration/procurement/supplier-onboarding-tokens',
             icon: KeyRound,
-            permissions: ['procurement.supplier.manage', 'procurement.supplier.review'],
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.payment.verify'],
             accessMode: 'any',
           },
           {
@@ -1135,7 +1135,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Executable Policies', href: '/administration/procurement/policy-sets', icon: ShieldCheck },
           { title: 'Policy Simulator', href: '/administration/procurement/compliance-simulator', icon: ClipboardCheck },
           { title: 'SOD Controls', href: '/administration/procurement/sod-controls', icon: Swords },
-          { title: 'Access & Committees', href: '/administration/procurement/access-controls', icon: Users },
+          { title: 'Scopes & Committees', href: '/administration/procurement/access-controls', icon: Users },
           { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },
           { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
           { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },

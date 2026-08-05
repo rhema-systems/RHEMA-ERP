@@ -73364,6 +73364,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ReconciledById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("SubmittedByApplicantSessionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ReconciliationNotes")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -73403,6 +73406,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("PaymentMethodId");
 
+                    b.HasIndex("SubmittedByApplicantSessionId");
+
                     b.HasIndex("TokenId");
 
                     b.HasIndex("TenantId", "CreationCorrelationId")
@@ -73418,11 +73423,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "TokenId", "Status");
 
+                    b.HasIndex("TenantId", "SubmittedByApplicantSessionId");
+
                     b.ToTable("ProcurementSupplierOnboardingPayments", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementSupplierOnboardingPayments_Protected");
 
-                            t.HasCheckConstraint("CK_ProcurementSupplierOnboardingPayments_State", "[Status] BETWEEN 1 AND 5 AND [FeeAmount] >= 0 AND [TaxAmount] >= 0 AND [TotalAmount] > 0 AND [TotalAmount] = [FeeAmount] + [TaxAmount] AND LEN([CurrencyCode]) = 3 AND LEN([IntegrityHash]) = 64 AND (([Status] IN (2, 3) AND [PostedAtUtc] IS NOT NULL AND [PostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [ReceiptNumber] IS NOT NULL AND [ReceiptIssuedAtUtc] IS NOT NULL) OR [Status] NOT IN (2, 3)) AND (([Status] = 3 AND [ReconciledAtUtc] IS NOT NULL AND [ReconciledById] IS NOT NULL AND [ReconciliationReference] IS NOT NULL) OR [Status] <> 3)");
+                            t.HasCheckConstraint("CK_ProcurementSupplierOnboardingPayments_State", "[Status] BETWEEN 1 AND 5 AND [FeeAmount] >= 0 AND [TaxAmount] >= 0 AND [TotalAmount] > 0 AND [TotalAmount] = [FeeAmount] + [TaxAmount] AND LEN([CurrencyCode]) = 3 AND LEN([IntegrityHash]) = 64 AND (([Status] IN (2, 3) AND [PostedAtUtc] IS NOT NULL AND [PostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [ReceiptNumber] IS NOT NULL AND [ReceiptIssuedAtUtc] IS NOT NULL) OR [Status] NOT IN (2, 3)) AND (([Status] = 3 AND [ReconciledAtUtc] IS NOT NULL AND [ReconciledById] IS NOT NULL AND [ReconciliationReference] IS NOT NULL) OR [Status] <> 3) AND ([SubmittedByApplicantSessionId] IS NULL OR [CreatedById] IS NULL)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -115702,7 +115709,14 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementSupplierApplicantSession", "SubmittedByApplicantSession")
+                        .WithMany("SubmittedPayments")
+                        .HasForeignKey("SubmittedByApplicantSessionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("PaymentMethod");
+
+                    b.Navigation("SubmittedByApplicantSession");
 
                     b.Navigation("Tenant");
 
@@ -123381,6 +123395,11 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementSupplierApplicantAccess", b =>
                 {
                     b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementSupplierApplicantSession", b =>
+                {
+                    b.Navigation("SubmittedPayments");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementSupplierAvlEntry", b =>

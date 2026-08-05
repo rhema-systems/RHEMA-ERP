@@ -36,6 +36,8 @@ public static class ProcurementAccessControlRegistry
     public const string Category = "TDC Procurement";
     public const string InternalAuditRole = "TDC_INTERNAL_AUDIT";
     public const string IctAdministratorRole = "TDC_ICT_ADMINISTRATOR";
+    public const string SupplierPaymentVerifyPermission =
+        "procurement.supplier.payment.verify";
 
     public static IReadOnlyList<ProcurementPermissionDefinition> Permissions { get; } =
     [
@@ -59,6 +61,7 @@ public static class ProcurementAccessControlRegistry
         P("procurement.tender.approve", "Approve tender awards", "Approve tender recommendations and awards within delegated authority.", true),
         P("procurement.supplier.manage", "Manage supplier onboarding", "Prepare supplier onboarding, compliance, AVL, and profile records.", true),
         P("procurement.supplier.review", "Review supplier compliance", "Review supplier due diligence, eligibility, and risk evidence.", false),
+        P(SupplierPaymentVerifyPermission, "Verify supplier onboarding payments", "Independently verify a supplier-onboarding payment claim, post the trusted receipt to Finance, and activate the applicant token.", true),
         P("procurement.supplier.approve", "Approve suppliers", "Approve supplier onboarding and AVL decisions.", true),
         P("procurement.purchase-order.create", "Create purchase orders", "Create purchase orders from approved procurement sources.", true),
         P("procurement.purchase-order.approve", "Approve purchase orders", "Approve purchase orders within delegated authority.", true),
@@ -86,7 +89,7 @@ public static class ProcurementAccessControlRegistry
     [
         R("TDC_REQUISITIONER", "TDC Requisitioner", "User-department requester.", [.. Read, "procurement.requisition.create"]),
         R("TDC_USER_DEPARTMENT_HEAD", "TDC User Department Head", "User-department oversight and requisition approval.", [.. Read, "procurement.requisition.create", "procurement.requisition.approve"]),
-        R("TDC_PROCUREMENT_OFFICER", "TDC Procurement Officer", "Requisition processing, sourcing, tender administration, PO creation, supplier and contract follow-up.", [.. Read, "procurement.plan.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.tender.administer", "procurement.supplier.manage", "procurement.purchase-order.create", "procurement.contract.manage"]),
+        R("TDC_PROCUREMENT_OFFICER", "TDC Procurement Officer", "Requisition processing, sourcing, tender administration, PO creation, supplier and contract follow-up.", [.. Read, "procurement.plan.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.tender.administer", "procurement.supplier.manage", SupplierPaymentVerifyPermission, "procurement.purchase-order.create", "procurement.contract.manage"]),
         R("TDC_SENIOR_PROCUREMENT_OFFICER", "TDC Senior Procurement Officer", "Senior operational procurement oversight.", [.. Read, "procurement.plan.manage", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.sourcing.approve", "procurement.tender.administer", "procurement.supplier.manage", "procurement.supplier.review", "procurement.purchase-order.create", "procurement.contract.manage"]),
         R("TDC_HEAD_OF_PROCUREMENT", "TDC Head of Procurement", "Procurement oversight, sourcing approval, reporting, supplier and contract oversight.", [.. AuditRead, "procurement.plan.manage", "procurement.plan.approve", "procurement.calendar.manage", "procurement.calendar.run", "procurement.requisition.process", "procurement.sourcing.manage", "procurement.sourcing.approve", "procurement.tender.administer", "procurement.tender.approve", "procurement.supplier.review", "procurement.supplier.approve", "procurement.purchase-order.approve", "procurement.contract.manage", "procurement.contract.approve"]),
         R("TDC_MANAGING_DIRECTOR", "TDC Managing Director", "Head of Entity and delegated executive approver.", [.. AuditRead, "procurement.plan.approve", "procurement.requisition.approve", "procurement.sourcing.approve", "procurement.tender.approve", "procurement.purchase-order.approve", "procurement.contract.approve", "procurement.inventory.disposal.approve"]),

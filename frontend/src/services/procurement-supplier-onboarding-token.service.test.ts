@@ -41,7 +41,7 @@ describe('supplier-onboarding token API client', () => {
       paymentReference: 'MOMO-001',
       rowVersion: 'AAAA',
     });
-    await service.reconcile('token-1', 'payment-1', 'BANK-001', 'Matched.', 'BBBB');
+    await service.reconcile('token-1', 'payment-1', 'BANK-001', undefined, 'BBBB');
     await service.requestExemption('token-1', {
       reason: 'Approved public-interest exemption.',
       evidence,
@@ -62,5 +62,9 @@ describe('supplier-onboarding token API client', () => {
       '/procurement/supplier-onboarding-tokens/token-1/exemptions',
       '/procurement/supplier-onboarding-tokens/token-1/exemptions/exemption-1/decision',
     ]);
+    expect(api.post.mock.calls[3][1]).toEqual({
+      reconciliationReference: 'BANK-001',
+      rowVersion: 'BBBB',
+    });
   });
 });

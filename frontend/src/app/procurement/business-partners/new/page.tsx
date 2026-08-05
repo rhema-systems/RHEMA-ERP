@@ -574,9 +574,14 @@ export default function NewBusinessPartnerPage() {
                     <Select
                       value={formData.paymentTermId}
                       onValueChange={(value) => handleInputChange('paymentTermId', value)}
+                      disabled={paymentTerms.length === 0}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select payment terms" />
+                        <SelectValue
+                          placeholder={paymentTerms.length > 0
+                            ? 'Select payment terms'
+                            : 'No active payment terms available'}
+                        />
                       </SelectTrigger>
                       <SelectContent>
                         {(paymentTerms || []).map((term) => (
