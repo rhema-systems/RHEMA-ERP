@@ -50,11 +50,14 @@ export interface InventoryRequisitionDto {
   totalQuantity: number;
   totalValue: number;
   requestedByName?: string;
+  requestedById?: string;
+  approvedById?: string;
   approvedByName?: string;
   notes?: string;
   purpose?: string;
   createdAtFormatted: string;
   currentWorkflowStepName?: string;
+  rowVersion: string;
 }
 
 export interface InventoryRequisitionDetailDto extends InventoryRequisitionDto {
@@ -80,7 +83,11 @@ export interface InventoryRequisitionItemDto {
   unitCost: number;
   totalCost: number;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   locationId?: string;
   locationName?: string;
   notes?: string;
@@ -120,7 +127,11 @@ export interface CreateInventoryRequisitionItemDto {
   requestedQuantity: number;
   locationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   notes?: string;
 }
 
@@ -129,7 +140,11 @@ export interface AddRequisitionItemDto {
   requestedQuantity: number;
   locationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   notes?: string;
 }
 
@@ -137,7 +152,11 @@ export interface UpdateRequisitionItemDto {
   requestedQuantity: number;
   locationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
   notes?: string;
 }
 
@@ -146,12 +165,86 @@ export interface IssueRequisitionItemDto {
   issuedQuantity: number;
   locationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
 }
 
 export interface IssueRequisitionDto {
+  idempotencyKey: string;
+  rowVersion: string;
+  receiverUserId: string;
   items: IssueRequisitionItemDto[];
   notes?: string;
+}
+
+export interface InventoryIssueReceiverDto {
+  userId: string;
+  username: string;
+  displayName: string;
+}
+
+export interface InventoryIssueVoucherLineDto {
+  id: string;
+  inventoryRequisitionItemId: string;
+  inventoryItemId: string;
+  itemCode: string;
+  itemName: string;
+  warehouseId: string;
+  locationId?: string;
+  locationCode?: string;
+  quantity: number;
+  unitCost: number;
+  totalValue: number;
+  unitOfMeasure?: string;
+  lotNumber?: string;
+  batchNumber?: string;
+  serialNumber?: string;
+}
+
+export interface InventoryIssueVoucherActionDto {
+  sequence: number;
+  actionType: number;
+  statusAfter: number;
+  actorUserId: string;
+  actorName: string;
+  occurredAtUtc: string;
+  comment: string;
+}
+
+export interface InventoryIssueVoucherDto {
+  id: string;
+  voucherNumber: string;
+  inventoryRequisitionId: string;
+  requisitionNumber: string;
+  status: number;
+  warehouseId: string;
+  warehouseName: string;
+  locationId?: string;
+  locationCode?: string;
+  departmentId: string;
+  departmentName?: string;
+  costCenter?: string;
+  projectId?: string;
+  projectCode?: string;
+  requestedById: string;
+  requestedByName: string;
+  approvedById: string;
+  approvedByName: string;
+  issuedById: string;
+  issuedByName: string;
+  receiverUserId: string;
+  receiverName: string;
+  acknowledgedById?: string;
+  issuedAtUtc: string;
+  acknowledgedAtUtc?: string;
+  notes?: string;
+  receiverComment?: string;
+  rowVersion: string;
+  lines: InventoryIssueVoucherLineDto[];
+  actions: InventoryIssueVoucherActionDto[];
 }
 
 export interface ReturnRequisitionItemDto {
@@ -159,12 +252,35 @@ export interface ReturnRequisitionItemDto {
   returnedQuantity: number;
   locationId?: string;
   lotNumber?: string;
+  batchNumber?: string;
   serialNumber?: string;
+  manufactureDate?: string;
+  expiryDate?: string;
+  inventoryTrackingExceptionId?: string;
 }
 
 export interface ReturnRequisitionDto {
   items: ReturnRequisitionItemDto[];
+  reasonCode: string;
+  reason: string;
   notes?: string;
+  idempotencyKey: string;
+  correlationId?: string;
+  rowVersion: string;
+  evidence: InventoryControlEvidenceRequest[];
+}
+
+export interface InventoryControlEvidenceRequest { centralDocumentVersionId: string; evidenceReference: string; }
+export interface InventoryControlEvidenceDto extends InventoryControlEvidenceRequest { id: string; fileUploadRecordId: string; documentReference: string; versionNumber: string; }
+export interface InventoryReturnVoucherLineDto { id: string; requisitionItemId: string; inventoryItemId: string; itemCode: string; itemName: string; locationId?: string; quantity: number; unitCost: number; totalValue: number; lotNumber?: string; batchNumber?: string; serialNumber?: string; expiryDate?: string; }
+export interface InventoryReturnVoucherActionDto { sequence: number; actionType: string; actorUserId: string; actorName: string; occurredAtUtc: string; comment?: string; }
+export interface InventoryReturnVoucherDto {
+  id: string; voucherNumber: string; inventoryRequisitionId: string; requisitionNumber: string;
+  warehouseId: string; warehouseName: string; status: string; reasonCode: string; reason: string; notes?: string;
+  requestedById: string; requestedByName: string; approvedById?: string; approvedAtUtc?: string;
+  postedById?: string; postedAtUtc?: string; reversedById?: string; reversedAtUtc?: string; reversalReason?: string;
+  totalValue: number; rowVersion: string; lines: InventoryReturnVoucherLineDto[];
+  evidence: InventoryControlEvidenceDto[]; actions: InventoryReturnVoucherActionDto[];
 }
 
 export interface DepartmentDto {
@@ -264,13 +380,74 @@ export const inventoryRequisitionService = {
   },
 
   // Issue requisition
-  issue: async (id: string, dto: IssueRequisitionDto): Promise<void> => {
-    await axios.post(`${API_URL}/inventory/requisitions/${id}/issue`, dto, { headers: getAuthHeaders() });
+  issue: async (id: string, dto: IssueRequisitionDto): Promise<InventoryIssueVoucherDto | undefined> => {
+    const response = await axios.post(`${API_URL}/inventory/requisitions/${id}/issue`, dto, { headers: getAuthHeaders() });
+    return response.data?.voucher;
+  },
+
+  getIssueReceivers: async (): Promise<InventoryIssueReceiverDto[]> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/issue-receivers`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  getIssueVouchers: async (requisitionId: string): Promise<InventoryIssueVoucherDto[]> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/${requisitionId}/issue-vouchers`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  acknowledgeIssueVoucher: async (voucherId: string, rowVersion: string, comment: string): Promise<InventoryIssueVoucherDto> => {
+    const response = await axios.post(`${API_URL}/inventory/requisitions/issue-vouchers/${voucherId}/acknowledge`, {
+      rowVersion,
+      comment,
+      idempotencyKey: crypto.randomUUID(),
+    }, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  downloadIssueVoucher: async (voucherId: string): Promise<Blob> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/issue-vouchers/${voucherId}/download`, {
+      headers: getAuthHeaders(),
+      responseType: 'blob',
+    });
+    return response.data;
   },
 
   // Return requisition items to stock
-  returnItems: async (id: string, dto: ReturnRequisitionDto): Promise<void> => {
-    await axios.post(`${API_URL}/inventory/requisitions/${id}/return`, dto, { headers: getAuthHeaders() });
+  returnItems: async (id: string, dto: ReturnRequisitionDto): Promise<InventoryReturnVoucherDto> => {
+    const response = await axios.post(`${API_URL}/inventory/requisitions/${id}/return`, dto, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  getReturnReasons: async (): Promise<Record<string, string>> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/return-reasons`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  getReturnVouchers: async (requisitionId?: string): Promise<InventoryReturnVoucherDto[]> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/return-vouchers`, { headers: getAuthHeaders(), params: requisitionId ? { requisitionId } : undefined });
+    return response.data;
+  },
+
+  downloadReturnVoucher: async (voucherId: string): Promise<Blob> => {
+    const response = await axios.get(`${API_URL}/inventory/requisitions/return-vouchers/${voucherId}/download`, {
+      headers: getAuthHeaders(), responseType: 'blob',
+    });
+    return response.data;
+  },
+
+  decideReturnVoucher: async (voucher: InventoryReturnVoucherDto, approved: boolean, comment: string): Promise<InventoryReturnVoucherDto> => {
+    const response = await axios.post(`${API_URL}/inventory/requisitions/return-vouchers/${voucher.id}/decision`, { approved, comment, rowVersion: voucher.rowVersion, idempotencyKey: crypto.randomUUID() }, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  postReturnVoucher: async (voucher: InventoryReturnVoucherDto): Promise<InventoryReturnVoucherDto> => {
+    const response = await axios.post(`${API_URL}/inventory/requisitions/return-vouchers/${voucher.id}/post`, { rowVersion: voucher.rowVersion, idempotencyKey: crypto.randomUUID() }, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  reverseReturnVoucher: async (voucher: InventoryReturnVoucherDto, reason: string): Promise<InventoryReturnVoucherDto> => {
+    const response = await axios.post(`${API_URL}/inventory/requisitions/return-vouchers/${voucher.id}/reverse`, { rowVersion: voucher.rowVersion, reason, idempotencyKey: crypto.randomUUID() }, { headers: getAuthHeaders() });
+    return response.data;
   },
 
   // Complete requisition

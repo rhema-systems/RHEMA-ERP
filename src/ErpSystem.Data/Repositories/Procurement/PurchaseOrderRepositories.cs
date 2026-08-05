@@ -350,6 +350,12 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
         var purchaseOrder = await GetByIdAsync(purchaseOrderId);
         if (purchaseOrder != null)
         {
+            var isCancelled = string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+            var wasCancelled = string.Equals(purchaseOrder.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
+            if (isCancelled && !wasCancelled)
+                purchaseOrder.CancelledAtUtc = DateTime.UtcNow;
+            else if (!isCancelled)
+                purchaseOrder.CancelledAtUtc = null;
             purchaseOrder.Status = status;
             await UpdateAsync(purchaseOrder);
         }

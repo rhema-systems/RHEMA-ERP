@@ -68,6 +68,8 @@ public class AllocateWorkOrderToolDto
 
     [StringLength(1000)]
     public string? Notes { get; set; }
+
+    public Guid? NegativeStockOverrideId { get; set; }
 }
 
 /// <summary>

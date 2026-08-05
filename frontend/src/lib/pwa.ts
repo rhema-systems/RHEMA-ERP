@@ -66,7 +66,8 @@ export class PWAManager {
   }
 
   private isMobileSurface() {
-    return window.location.pathname === '/mobile' || window.location.pathname.startsWith('/mobile/')
+    return window.location.pathname === '/mobile' || window.location.pathname.startsWith('/mobile/') ||
+      window.location.pathname === '/inventory/mobile-scanning'
   }
 
   private async unregisterServiceWorkers() {

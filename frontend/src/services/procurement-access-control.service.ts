@@ -2,7 +2,7 @@ import { apiService } from '@/services/api.service';
 import type {
   ProcurementAccessAudit, ProcurementAccessCapabilityDecision, ProcurementAccessCapabilityRequest,
   ProcurementAccessPermission, ProcurementAccessReadiness, ProcurementAccessRole, ProcurementAccessUser,
-  ProcurementAccessWarehouse, ProcurementAccessWorkflow, ProcurementCommittee, ProcurementCommitteeMember,
+  ProcurementAccessWarehouse, ProcurementAccessLocation, ProcurementAccessWorkflow, ProcurementCommittee, ProcurementCommitteeMember,
   ProcurementResponsibilityAssignment, SaveProcurementCommitteeMember, SaveProcurementResponsibilityAssignment,
   UpdateProcurementCommittee,
 } from '@/types/procurement-access-control';
@@ -15,6 +15,7 @@ export const procurementAccessControlService = {
   permissions: () => apiService.get<ProcurementAccessPermission[]>(`${root}/permissions`),
   users: () => apiService.get<ProcurementAccessUser[]>(`${root}/users`),
   warehouses: () => apiService.get<ProcurementAccessWarehouse[]>(`${root}/warehouses`),
+  locations: () => apiService.get<ProcurementAccessLocation[]>(`${root}/locations`),
   assignments: () => apiService.get<ProcurementResponsibilityAssignment[]>(`${root}/assignments`),
   saveAssignment: (id: string | undefined, request: SaveProcurementResponsibilityAssignment) => id
     ? apiService.put<ProcurementResponsibilityAssignment>(`${root}/assignments/${id}`, request)

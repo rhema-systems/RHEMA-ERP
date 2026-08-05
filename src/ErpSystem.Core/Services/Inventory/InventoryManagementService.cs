@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
@@ -22,6 +23,8 @@ public class InventoryManagementService : IInventoryManagementService
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IConsignmentSettlementService _consignmentSettlementService;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IInventoryNegativeStockControlService _negativeStockControls;
     private readonly ILogger<InventoryManagementService> _logger;
 
     public InventoryManagementService(
@@ -32,6 +35,8 @@ public class InventoryManagementService : IInventoryManagementService
         IWarehouseRepository warehouseRepository,
         IConsignmentSettlementService consignmentSettlementService,
         ICurrentUserProvider currentUserProvider,
+        IUnitOfWork unitOfWork,
+        IInventoryNegativeStockControlService negativeStockControls,
         ILogger<InventoryManagementService> logger)
     {
         _itemRepository = itemRepository;
@@ -41,6 +46,8 @@ public class InventoryManagementService : IInventoryManagementService
         _warehouseRepository = warehouseRepository;
         _consignmentSettlementService = consignmentSettlementService;
         _currentUserProvider = currentUserProvider;
+        _unitOfWork = unitOfWork;
+        _negativeStockControls = negativeStockControls;
         _logger = logger;
     }
 
@@ -74,8 +81,14 @@ public class InventoryManagementService : IInventoryManagementService
                 AvailableStock = item.AvailableStock,
                 StandardCost = item.StandardCost,
                 AverageCost = item.AverageCost,
+                Barcode = item.Barcode,
+                AlternateBarcode = item.AlternateBarcode,
+                QRCode = item.QRCode,
                 IsSerialTracked = item.IsSerialTracked,
                 IsLotTracked = item.IsLotTracked,
+                IsBatchTracked = item.IsBatchTracked,
+                IsManufactureDateTracked = item.IsManufactureDateTracked,
+                IsExpirationTracked = item.IsExpirationTracked,
                 Status = item.Status,
                 CategoryName = item.Category?.Name ?? "Uncategorized"
             });
@@ -121,8 +134,14 @@ public class InventoryManagementService : IInventoryManagementService
                 StandardCost = item.StandardCost,
                 AverageCost = item.AverageCost,
                 LastPurchaseCost = item.LastPurchaseCost,
+                Barcode = item.Barcode,
+                AlternateBarcode = item.AlternateBarcode,
+                QRCode = item.QRCode,
                 IsSerialTracked = item.IsSerialTracked,
                 IsLotTracked = item.IsLotTracked,
+                IsBatchTracked = item.IsBatchTracked,
+                IsManufactureDateTracked = item.IsManufactureDateTracked,
+                IsExpirationTracked = item.IsExpirationTracked,
                 Status = item.Status,
                 CategoryName = item.Category?.Name ?? "Uncategorized",
                 PrimarySupplier = item.PrimarySupplier,
@@ -169,22 +188,44 @@ public class InventoryManagementService : IInventoryManagementService
     /// </summary>
     public async Task<InventoryAllocationDto> AllocateForWorkOrderAsync(AllocateInventoryDto request)
     {
+        var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+        if (ownsTransaction) await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
-            // Validate inventory item exists and has sufficient stock
-            var item = await _itemRepository.GetByIdAsync(request.InventoryItemId) ?? throw new ArgumentException($"Inventory item {request.InventoryItemId} not found");
-            if (item.AvailableStock < request.Quantity)
-            {
-                throw new InvalidOperationException($"Insufficient stock. Available: {item.AvailableStock}, Requested: {request.Quantity}");
-            }
-
             // Find best location for allocation
-            var bestLocation = await FindBestAllocationLocationAsync(request.InventoryItemId, request.Quantity) ?? throw new InvalidOperationException("No suitable location found for allocation");
+            var bestLocation = await FindBestAllocationLocationAsync(
+                request.InventoryItemId,
+                request.Quantity,
+                request.NegativeStockOverrideId.HasValue)
+                ?? throw new InvalidOperationException("No suitable location found for allocation");
+            var warehouseId = bestLocation.Location.InventoryWarehouseId;
+            var allocationId = Guid.NewGuid();
+            var decreaseAuthorization = await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = request.InventoryItemId,
+                WarehouseId = warehouseId,
+                LocationId = bestLocation.LocationId,
+                Quantity = request.Quantity,
+                ReferenceType = string.IsNullOrWhiteSpace(request.ReferenceType) ? "InventoryAllocation" : request.ReferenceType,
+                ReferenceNumber = request.ReferenceNumber,
+                ReferenceId = request.ReferenceId ?? allocationId,
+                ReferenceLineId = allocationId,
+                NegativeStockOverrideId = request.NegativeStockOverrideId,
+                DecreaseCurrentStock = false,
+                CorrelationId = $"inventory-allocation:{allocationId:N}"
+            });
+            var item = await _itemRepository.GetByIdAsync(request.InventoryItemId)
+                ?? throw new ArgumentException($"Inventory item {request.InventoryItemId} not found");
+            if (item.AvailableStock < request.Quantity && !decreaseAuthorization.EmergencyOverrideApplied)
+                throw new InvalidOperationException($"Insufficient stock. Available: {item.AvailableStock}, Requested: {request.Quantity}");
 
             // Create allocation record
             var allocation = new InventoryAllocation
             {
+                Id = allocationId,
+                TenantId = _currentUserProvider.TenantId,
                 InventoryItemId = request.InventoryItemId,
+                WarehouseId = warehouseId,
                 LocationId = bestLocation.LocationId,
                 AllocationType = "WorkOrder",
                 ReferenceNumber = request.ReferenceNumber,
@@ -207,6 +248,12 @@ public class InventoryManagementService : IInventoryManagementService
             // Update location quantities
             await UpdateLocationQuantitiesAsync(bestLocation.LocationId, request.InventoryItemId, 0, request.Quantity);
 
+            if (decreaseAuthorization.EmergencyOverrideApplied)
+            {
+                await _unitOfWork.SaveChangesAsync();
+                await _negativeStockControls.ClearMutationContextAsync();
+            }
+
             // Create stock movement record
             await CreateStockMovementAsync(new StockMovement
             {
@@ -225,6 +272,7 @@ public class InventoryManagementService : IInventoryManagementService
                 RunningBalance = item.CurrentStock // This would be calculated properly
             });
 
+            if (ownsTransaction) await _unitOfWork.CommitAsync();
             return new InventoryAllocationDto
             {
                 Id = createdAllocation.Id,
@@ -246,6 +294,7 @@ public class InventoryManagementService : IInventoryManagementService
         }
         catch (Exception ex)
         {
+            if (ownsTransaction && _unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
             _logger.LogError(ex, "Error allocating inventory for work order");
             throw;
         }
@@ -256,6 +305,8 @@ public class InventoryManagementService : IInventoryManagementService
     /// </summary>
     public async Task<bool> ConsumeAllocatedInventoryAsync(Guid allocationId, decimal quantity, Guid userId)
     {
+        var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+        if (ownsTransaction) await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
             var allocation = await _allocationRepository.GetByIdAsync(allocationId) ?? throw new ArgumentException($"Allocation {allocationId} not found");
@@ -263,6 +314,28 @@ public class InventoryManagementService : IInventoryManagementService
             {
                 throw new InvalidOperationException($"Cannot consume more than remaining quantity. Remaining: {allocation.RemainingQuantity}, Requested: {quantity}");
             }
+            var warehouseId = allocation.WarehouseId;
+            if (warehouseId == Guid.Empty && allocation.LocationId.HasValue)
+            {
+                var inventoryLocation = await _locationRepository.GetByLocationAndItemAsync(
+                    allocation.LocationId.Value, allocation.InventoryItemId);
+                warehouseId = inventoryLocation?.Location.InventoryWarehouseId ?? Guid.Empty;
+            }
+            if (warehouseId == Guid.Empty)
+                throw new InvalidOperationException("The allocation has no authoritative warehouse stock scope.");
+            await _negativeStockControls.PrepareDecreaseAsync(new InventoryStockDecreaseRequest
+            {
+                InventoryItemId = allocation.InventoryItemId,
+                WarehouseId = warehouseId,
+                LocationId = allocation.LocationId,
+                Quantity = quantity,
+                ReferenceType = "InventoryAllocationConsumption",
+                ReferenceNumber = allocation.ReferenceNumber ?? $"allocation-{allocation.Id:N}",
+                ReferenceId = allocation.ReferenceId ?? allocation.Id,
+                ReferenceLineId = allocation.Id,
+                DecreaseAvailableStock = false,
+                CorrelationId = $"inventory-allocation:{allocation.Id:N}:consume"
+            });
 
             // Update allocation
             allocation.ConsumedQuantity += quantity;
@@ -302,10 +375,12 @@ public class InventoryManagementService : IInventoryManagementService
                 RunningBalance = (item?.CurrentStock ?? 0) - quantity
             });
 
+            if (ownsTransaction) await _unitOfWork.CommitAsync();
             return true;
         }
         catch (Exception ex)
         {
+            if (ownsTransaction && _unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
             _logger.LogError(ex, "Error consuming allocated inventory");
             throw;
         }
@@ -457,13 +532,18 @@ public class InventoryManagementService : IInventoryManagementService
 
     #region Helper Methods
 
-    private async Task<InventoryLocation?> FindBestAllocationLocationAsync(Guid inventoryItemId, decimal requiredQuantity)
+    private async Task<InventoryLocation?> FindBestAllocationLocationAsync(
+        Guid inventoryItemId,
+        decimal requiredQuantity,
+        bool allowInsufficientQuantity)
     {
         var locations = await _locationRepository.GetByInventoryItemAsync(inventoryItemId);
 
-        // Prefer locations that are picking locations and have sufficient available quantity
+        // An emergency request must still select an exact picking bin so the shared
+        // negative-stock boundary can validate the override against that location.
         return locations
-            .Where(loc => loc.AvailableQuantity >= requiredQuantity && loc.Location.IsPickingLocation)
+            .Where(loc => loc.Location.IsPickingLocation &&
+                (allowInsufficientQuantity || loc.AvailableQuantity >= requiredQuantity))
             .OrderByDescending(loc => loc.AvailableQuantity) // Prefer locations with more stock
             .FirstOrDefault();
     }

@@ -1,10 +1,12 @@
 using System;
 using System.IO;
-using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.UserSecrets;
+
+[assembly: UserSecretsId("10483e62-e5b2-4652-8963-50f9500d3d5d")]
 
 namespace ErpSystem.Data;
 
@@ -14,25 +16,17 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
     {
         var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
 
-        // Try to load configuration from the API project's appsettings.json
-        var basePath = Directory.GetCurrentDirectory();
-        // Assume running in ErpSystem.Data; navigate to Api appsettings
-        var apiAppSettings = Path.GetFullPath(Path.Combine(basePath, "..", "ErpSystem.Api", "appsettings.json"));
-
-        string? connectionString = null;
-        if (File.Exists(apiAppSettings))
-        {
-            var apiDevSettings = Path.ChangeExtension(apiAppSettings.Replace(".json", ".Development.json"), null) + ".json";
-            var config = new ConfigurationBuilder()
-                .SetBasePath(Path.GetDirectoryName(apiAppSettings)!)
-                .AddJsonFile("appsettings.json", optional: false)
-                .AddJsonFile("appsettings.Development.json", optional: true)
-                // Design-time model generation must not depend on a developer-specific
-                // user-secrets file. Environment variables can still override settings.
-                .AddEnvironmentVariables()
-                .Build();
-            connectionString = config.GetConnectionString("DefaultConnection");
-        }
+        var apiDirectory = FindApiDirectory(Directory.GetCurrentDirectory());
+        var config = new ConfigurationBuilder()
+            .SetBasePath(apiDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile("appsettings.Development.json", optional: true)
+            .AddUserSecrets(
+                typeof(DesignTimeDbContextFactory).Assembly,
+                optional: true)
+            .AddEnvironmentVariables()
+            .Build();
+        var connectionString = config.GetConnectionString("DefaultConnection");
 
         // Fallback connection string if none found
         connectionString ??= "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystem;Trusted_Connection=True;TrustServerCertificate=True";
@@ -50,5 +44,28 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
 
         // Create context without tenant filter for migrations
         return new ApplicationDbContext(optionsBuilder.Options);
+    }
+
+    private static string FindApiDirectory(string startDirectory)
+    {
+        for (var directory = new DirectoryInfo(startDirectory);
+             directory != null;
+             directory = directory.Parent)
+        {
+            var candidates = new[]
+            {
+                Path.Combine(directory.FullName, "src", "ErpSystem.Api"),
+                Path.Combine(directory.FullName, "ErpSystem.Api")
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (File.Exists(Path.Combine(candidate, "appsettings.json")))
+                    return candidate;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Unable to locate src/ErpSystem.Api/appsettings.json for design-time database configuration.");
     }
 }

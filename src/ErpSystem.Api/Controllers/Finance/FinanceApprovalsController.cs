@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Inventory;
@@ -8,7 +9,9 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Data;
@@ -30,6 +33,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("FinancePurchaseOrder"),
         Normalize("FinancePurchaseOrderReceipt"),
         Normalize("VendorInvoice"),
+        Normalize("VendorPayment"),
         Normalize("PaymentBatch"),
         Normalize("SupplierReturn"),
         Normalize("Quote"),
@@ -71,6 +75,8 @@ public class FinanceApprovalsController : ControllerBase
     private readonly FinancePurchaseOrderReceiptPostingService _receiptPostingService;
     private readonly ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService _inventoryValuationService;
     private readonly ILogger<FinanceApprovalsController> _logger;
+    private readonly IProcurementInvoicePaymentSodService? _invoicePaymentSod;
+    private readonly IVendorPaymentService? _vendorPaymentService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -84,7 +90,9 @@ public class FinanceApprovalsController : ControllerBase
         FinancePurchaseOrderReceiptPostingService receiptPostingService,
         ILogger<FinanceApprovalsController> logger,
         IVendorInvoiceService? vendorInvoiceService = null,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
+        IVendorPaymentService? vendorPaymentService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -93,18 +101,33 @@ public class FinanceApprovalsController : ControllerBase
         _displayService = displayService;
         _journalEntryService = journalEntryService;
         _invoiceService = invoiceService;
+        _inventoryValuationService = inventoryValuationService;
         _receiptPostingService = receiptPostingService;
         _vendorInvoiceService = vendorInvoiceService;
         _financeAuditService = financeAuditService;
-        _inventoryValuationService = inventoryValuationService;
         _logger = logger;
+        _invoicePaymentSod = invoicePaymentSod;
+        _vendorPaymentService = vendorPaymentService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
 
     [HttpGet("pending")]
-    public async Task<ActionResult<IReadOnlyList<FinanceApprovalQueueItemDto>>> GetPending(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<FinanceApprovalQueueItemDto>>> GetPending(
+        CancellationToken cancellationToken,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100)
     {
+        if (page < 1 || pageSize is < 1 or > 100)
+        {
+            return BadRequest("Page must be at least 1 and pageSize must be between 1 and 100.");
+        }
+        if (page > (int.MaxValue / pageSize) + 1)
+        {
+            return BadRequest("The requested approval page is outside the supported range.");
+        }
+        var skip = (page - 1) * pageSize;
+
         var currentUserId = GetCurrentUserId();
         if (!currentUserId.HasValue)
         {
@@ -115,15 +138,73 @@ public class FinanceApprovalsController : ControllerBase
         var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
         var canApproveByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowApprove)).Succeeded;
+        var canApproveApPayments = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded;
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
 
-        var approvals = await QueryPendingApprovals(tenantId)
+        var currentRoles = roleSet.ToArray();
+        var pageRows = await QueryPendingApprovals(tenantId)
+            .Where(approval =>
+                approval.ApproverId == currentUserId.Value ||
+                (approval.ApproverRole != null && currentRoles.Contains(approval.ApproverRole)))
             .AsNoTracking()
+            .OrderBy(approval => approval.StepInstance.WorkflowInstance.StartedDate ??
+                                 approval.StepInstance.WorkflowInstance.CreatedDate)
+            .ThenBy(approval => approval.Id)
+            .Skip(skip)
+            .Take(pageSize + 1)
             .ToListAsync(cancellationToken);
+        Response.Headers["X-Page"] = page.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Response.Headers["X-Page-Size"] = pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Response.Headers["X-Has-More"] = (pageRows.Count > pageSize).ToString().ToLowerInvariant();
+        var approvals = pageRows
+            .Take(pageSize)
+            .Where(approval => CanActOnApproval(approval, currentUserId.Value, roleSet))
+            .Where(approval => IsFinanceEntity(
+                approval.StepInstance.WorkflowInstance.EntityType.Code ??
+                approval.StepInstance.WorkflowInstance.EntityType.Name))
+            .ToList();
+
+        ProcurementInvoicePaymentSodQueueReadinessDto? queueReadiness = null;
+        string? queueReadinessFailure = null;
+        if (canApproveApPayments && _invoicePaymentSod != null)
+        {
+            var paymentIds = approvals
+                .Where(approval => Normalize(
+                    approval.StepInstance.WorkflowInstance.EntityType.Code ??
+                    approval.StepInstance.WorkflowInstance.EntityType.Name) == Normalize("VendorPayment"))
+                .Select(approval => approval.StepInstance.WorkflowInstance.EntityId)
+                .Distinct()
+                .ToArray();
+            var batchIds = approvals
+                .Where(approval => Normalize(
+                    approval.StepInstance.WorkflowInstance.EntityType.Code ??
+                    approval.StepInstance.WorkflowInstance.EntityType.Name) == Normalize("PaymentBatch"))
+                .Select(approval => approval.StepInstance.WorkflowInstance.EntityId)
+                .Distinct()
+                .ToArray();
+            if (paymentIds.Length > 0 || batchIds.Length > 0)
+            {
+                try
+                {
+                    queueReadiness = await _invoicePaymentSod.GetQueueReadinessAsync(
+                        paymentIds,
+                        batchIds,
+                        HttpContext.TraceIdentifier,
+                        cancellationToken);
+                }
+                catch (Exception exception)
+                {
+                    queueReadinessFailure = exception.Message;
+                    _logger.LogWarning(exception,
+                        "Unable to evaluate the paged Finance payment approval queue SOD readiness.");
+                }
+            }
+        }
 
         var results = new List<FinanceApprovalQueueItemDto>();
-        foreach (var approval in approvals.Where(a => CanActOnApproval(a, currentUserId.Value, roleSet)))
+        foreach (var approval in approvals)
         {
             var instance = approval.StepInstance.WorkflowInstance;
             var entityType = instance.EntityType.Code ?? instance.EntityType.Name;
@@ -135,11 +216,52 @@ public class FinanceApprovalsController : ControllerBase
             var submitterApprovalBlocked =
                 RequiresSubmitterApproverSeparation(entityType) &&
                 instance.InitiatedById == currentUserId.Value;
+            var paymentSodBlocked = false;
+            string? paymentSodReason = null;
+            var isPaymentApproval =
+                string.Equals(Normalize(entityType), Normalize("VendorPayment"), StringComparison.Ordinal) ||
+                string.Equals(Normalize(entityType), Normalize("PaymentBatch"), StringComparison.Ordinal);
+            if (isPaymentApproval)
+            {
+                if (!canApproveApPayments)
+                {
+                    paymentSodBlocked = true;
+                    paymentSodReason = $"Your roles do not include {FinancePermissions.ApproveApPayments}.";
+                }
+                else if (_invoicePaymentSod == null)
+                {
+                    paymentSodBlocked = true;
+                    paymentSodReason = "The authoritative invoice/payment SOD service is unavailable.";
+                }
+                else
+                {
+                    ProcurementInvoicePaymentSodReadinessDto? sod = null;
+                    var readinessFound = Normalize(entityType) == Normalize("VendorPayment")
+                        ? queueReadiness?.Payments.TryGetValue(instance.EntityId, out sod) == true
+                        : queueReadiness?.Batches.TryGetValue(instance.EntityId, out sod) == true;
+                    if (!string.IsNullOrWhiteSpace(queueReadinessFailure))
+                    {
+                        paymentSodBlocked = true;
+                        paymentSodReason = queueReadinessFailure;
+                    }
+                    else if (!readinessFound || sod == null)
+                    {
+                        paymentSodBlocked = true;
+                        paymentSodReason = "The payment approval source was not found in the current tenant.";
+                    }
+                    else
+                    {
+                        paymentSodBlocked = !sod.CanApprove;
+                        paymentSodReason = paymentSodBlocked ? sod.Message : null;
+                    }
+                }
+            }
             var approveDisabledReason = GetActionDisabledReason(
                 "approve",
                 FinancePermissions.WorkflowApprove,
                 canApproveByPermission,
-                submitterApprovalBlocked);
+                submitterApprovalBlocked || paymentSodBlocked,
+                paymentSodReason);
             var rejectDisabledReason = GetActionDisabledReason(
                 "reject",
                 FinancePermissions.WorkflowReject,
@@ -148,7 +270,7 @@ public class FinanceApprovalsController : ControllerBase
 
             results.Add(await MapApprovalAsync(
                 approval,
-                canApproveByPermission && !submitterApprovalBlocked,
+                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked,
                 canRejectByPermission && !submitterApprovalBlocked,
                 approveDisabledReason,
                 rejectDisabledReason,
@@ -239,6 +361,71 @@ public class FinanceApprovalsController : ControllerBase
                 detail: "The submitter cannot approve or reject this high-risk finance workflow item.");
         }
 
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            (Normalize(entityType) is "VENDORPAYMENT" or "PAYMENTBATCH") &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Payment approval not permitted",
+                detail: $"Your roles do not include {FinancePermissions.ApproveApPayments}.");
+        }
+
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("PaymentBatch"))
+        {
+            if (_vendorPaymentService == null)
+                return Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Payment batch approval unavailable",
+                    detail: "The authoritative payment batch service is unavailable.");
+            try
+            {
+                var batch = await _vendorPaymentService.ApprovePaymentBatchAsync(instance.EntityId, cancellationToken);
+                return Ok(new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = batch.Status == PaymentBatchStatus.Approved
+                        ? WorkflowInstanceStatus.Completed
+                        : WorkflowInstanceStatus.InProgress,
+                    Message = batch.Status == PaymentBatchStatus.Approved
+                        ? "Payment batch approved."
+                        : "Payment batch approval step recorded."
+                });
+            }
+            catch (ProcurementInvoicePaymentSodBlockedException exception)
+            {
+                return UnprocessableEntity(new { code = exception.Code, message = exception.Message, readiness = exception.Readiness });
+            }
+            catch (VendorPaymentControlException exception)
+            {
+                return UnprocessableEntity(new { code = exception.Code, message = exception.Message });
+            }
+        }
+
+        Guid? invoicePaymentSodControlEventId = null;
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("VendorPayment"))
+        {
+            if (_invoicePaymentSod == null)
+                return Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Payment authorization unavailable",
+                    detail: "The authoritative invoice/payment SOD service is unavailable.");
+            try
+            {
+                var sod = await _invoicePaymentSod.EnforcePaymentApprovalAsync(
+                    instance.EntityId,
+                    HttpContext.TraceIdentifier,
+                    cancellationToken);
+                invoicePaymentSodControlEventId = sod.ControlEventId;
+            }
+            catch (ProcurementInvoicePaymentSodBlockedException exception)
+            {
+                return UnprocessableEntity(new { code = exception.Code, message = exception.Message, readiness = exception.Readiness });
+            }
+        }
+
         var workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
             tenantId,
             entityType,
@@ -246,6 +433,7 @@ public class FinanceApprovalsController : ControllerBase
             currentUserId.Value,
             action,
             comments,
+            invoicePaymentSodControlEventId,
             cancellationToken);
 
         if (!workflowResult.Success)
@@ -263,6 +451,7 @@ public class FinanceApprovalsController : ControllerBase
         Guid currentUserId,
         string action,
         string? comments,
+        Guid? invoicePaymentSodControlEventId,
         CancellationToken cancellationToken)
     {
         async Task<WorkflowExecutionResult> ProcessAndApplyAsync()
@@ -281,7 +470,7 @@ public class FinanceApprovalsController : ControllerBase
 
             if (result.Status == WorkflowInstanceStatus.Completed)
             {
-                await ApplyApprovedOutcomeAsync(tenantId, entityType, entityId, currentUserId, comments, cancellationToken);
+                await ApplyApprovedOutcomeAsync(tenantId, entityType, entityId, currentUserId, comments, invoicePaymentSodControlEventId, cancellationToken);
             }
             else if (result.Status is WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
             {
@@ -598,7 +787,7 @@ public class FinanceApprovalsController : ControllerBase
         return FinanceApprovalFacts.Empty;
     }
 
-    private async Task ApplyApprovedOutcomeAsync(Guid tenantId, string entityType, Guid entityId, Guid userId, string? comments, CancellationToken cancellationToken)
+    private async Task ApplyApprovedOutcomeAsync(Guid tenantId, string entityType, Guid entityId, Guid userId, string? comments, Guid? invoicePaymentSodControlEventId, CancellationToken cancellationToken)
     {
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
@@ -669,6 +858,7 @@ public class FinanceApprovalsController : ControllerBase
             payment.Status = VendorPaymentStatus.Authorized;
             payment.AuthorizedById = userId;
             payment.AuthorizedDate = now;
+            payment.InvoicePaymentSodControlEventId = invoicePaymentSodControlEventId;
             payment.UpdatedAt = now;
             payment.UpdatedBy = _currentUserService.UserName ?? "system";
             await _db.SaveChangesAsync(cancellationToken);
@@ -1492,26 +1682,8 @@ public class FinanceApprovalsController : ControllerBase
         invoice.UpdatedAt = DateTime.UtcNow;
         invoice.UpdatedBy = _currentUserService.UserName ?? "system";
 
-        // Opening-balance AP invoices preserve subledger balances but do not create
-        // inventory receipts; their GL impact is control account vs migration clearing.
-        foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
-        {
-            if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
-            {
-                await _inventoryValuationService.ProcessReceiptAsync(
-                    line.InventoryItemId.Value,
-                    line.WarehouseId.Value,
-                    line.LocationId,
-                    line.Quantity,
-                    line.UnitPrice,
-                    ReferenceType.VendorInvoice,
-                    invoice.InvoiceNumber,
-                    invoice.Id,
-                    line.LotNumber,
-                    line.SerialNumber,
-                    line.ExpirationDate);
-            }
-        }
+        // Inventory is posted only by the governed purchase-receipt/inspection
+        // lifecycle. Workflow approval of an invoice must not post stock again.
 
         await _db.SaveChangesAsync(cancellationToken);
         await RecordVendorInvoiceAuditAsync(
@@ -1770,7 +1942,8 @@ public class FinanceApprovalsController : ControllerBase
         string action,
         string requiredPermission,
         bool hasPermission,
-        bool submitterApprovalBlocked)
+        bool submitterApprovalBlocked,
+        string? controlReason = null)
     {
         if (!hasPermission)
         {
@@ -1779,7 +1952,9 @@ public class FinanceApprovalsController : ControllerBase
 
         if (submitterApprovalBlocked)
         {
-            return $"You cannot {action} this item because you submitted it and separation of duties is required.";
+            return string.IsNullOrWhiteSpace(controlReason)
+                ? $"You cannot {action} this item because you submitted it and separation of duties is required."
+                : controlReason;
         }
 
         return null;

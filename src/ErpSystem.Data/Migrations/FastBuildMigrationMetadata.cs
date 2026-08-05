@@ -117,12 +117,36 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns")] partial class AddProcurementBidderCommunicationsAndSecurityReturns { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260724175059_AddProcurementGhanepsExchangeControls")] partial class AddProcurementGhanepsExchangeControls { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260724203636_AddProcurementSupplierEvidencePacks")] partial class AddProcurementSupplierEvidencePacks { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260725111657_AddProcurementSupplierOnboardingTokens")] partial class AddProcurementSupplierOnboardingTokens { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260726101435_AddProcurementSupplierDueDiligence")] partial class AddProcurementSupplierDueDiligence { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260726174311_AddProcurementSupplierAvlLifecycle")] partial class AddProcurementSupplierAvlLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260726224147_AddProcurementSupplierRiskAndConcentration")] partial class AddProcurementSupplierRiskAndConcentration { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260727005601_AddProcurementSupplierPerformanceScorecards")] partial class AddProcurementSupplierPerformanceScorecards { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260727101510_AddProcurementSupplierMasterChangeRollout")] partial class AddProcurementSupplierMasterChangeRollout { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260727113854_AddProcurementSupplierApplicantAccess")] partial class AddProcurementSupplierApplicantAccess { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728170930_AddEstateGisIntegration")] partial class AddEstateGisIntegration { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728192617_AddDurableFileStorageCleanup")] partial class AddDurableFileStorageCleanup { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728210856_EnforceSupplierApplicantIntegrity")] partial class EnforceSupplierApplicantIntegrity { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728230211_AddEstateLandDemarcations")] partial class AddEstateLandDemarcations { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729022744_AddSupplierEvidenceDmsLinks")] partial class AddSupplierEvidenceDmsLinks { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260729084856_TDC0401FrameworkAgreements")] partial class TDC0401FrameworkAgreements { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729124416_TDC0402FrameworkCallOffs")] partial class TDC0402FrameworkCallOffs { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260730132714_TDC0407ContractActivationGate")] partial class TDC0407ContractActivationGate { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260731140000_TDC0502ReceiptInspectionClosure")] partial class TDC0502ReceiptInspectionClosure { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260801204023_TDC0602InventoryMobileScanning")] partial class TDC0602InventoryMobileScanning { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802002739_TDC0603InventoryTrackingControls")] partial class TDC0603InventoryTrackingControls { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802012523_TDC0604InventoryAccessLocations")] partial class TDC0604InventoryAccessLocations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802023830_TDC0605DirectedWarehouseOperations")] partial class TDC0605DirectedWarehouseOperations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802033223_TDC0606ControlledInventoryIssue")] partial class TDC0606ControlledInventoryIssue { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments")] partial class TDC0607ControlledInventoryReturnsAndAdjustments { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802095353_TDC0608ControlledInventoryTransfers")] partial class TDC0608ControlledInventoryTransfers { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802105457_TDC0609ControlledCycleCounts")] partial class TDC0609ControlledCycleCounts { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802160000_TDC0611ProjectInventoryReservations")] partial class TDC0611ProjectInventoryReservations { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802162449_TDC0612InventoryReplenishment")] partial class TDC0612InventoryReplenishment { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802171742_TDC0613InventoryValuationReconciliation")] partial class TDC0613InventoryValuationReconciliation { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802190244_TDC0615InventoryDisposalLifecycle")] partial class TDC0615InventoryDisposalLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260802202554_TDC0616ItemMasterProfile")] partial class TDC0616ItemMasterProfile { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260803233103_Phase6ReviewInventoryTrackingHardening")] partial class Phase6ReviewInventoryTrackingHardening { }
 
 // [HR-MODULE-PORT] Migrations authored on hrdev. Unlike the hand-written migrations above, these were
 // scaffolded by `dotnet ef migrations add`, so their [Migration] attribute lives in a generated

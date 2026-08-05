@@ -42,8 +42,6 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IInventoryItemRepository _inventoryItemRepository;
     private readonly IWarehouseRepository _warehouseRepository;
     private readonly IProcurementBudgetService _budgetService;
-    private readonly IProcurementBudgetRepository _budgetRepository;
-    private readonly IProcurementPlanItemRepository _planItemRepository;
     private readonly IInventoryValuationService _inventoryValuationService;
     private readonly IProjectService _projectService;
     private readonly IUnitOfWork _unitOfWork;
@@ -55,6 +53,9 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IProcurementPurchaseOrderSourceService _purchaseOrderSources;
     private readonly IProcurementPurchaseOrderComplianceService _purchaseOrderCompliance;
     private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
+    private readonly IProcurementReceiptSourceControlService _receiptSourceControl;
+    private readonly IProcurementReceiptInspectionService _receiptInspection;
+    private readonly IProcurementReceiptDocumentService _receiptDocuments;
     private readonly ILogger<PurchaseOrdersController> _logger;
 
     private const string SpreadToItemCost = "SpreadToItemCost";
@@ -72,8 +73,6 @@ public class PurchaseOrdersController : ControllerBase
         IInventoryItemRepository inventoryItemRepository,
         IWarehouseRepository warehouseRepository,
         IProcurementBudgetService budgetService,
-        IProcurementBudgetRepository budgetRepository,
-        IProcurementPlanItemRepository planItemRepository,
         IInventoryValuationService inventoryValuationService,
         IProjectService projectService,
         IUnitOfWork unitOfWork,
@@ -85,6 +84,9 @@ public class PurchaseOrdersController : ControllerBase
         IProcurementPurchaseOrderSourceService purchaseOrderSources,
         IProcurementPurchaseOrderComplianceService purchaseOrderCompliance,
         IProcurementPurchaseOrderSodService purchaseOrderSod,
+        IProcurementReceiptSourceControlService receiptSourceControl,
+        IProcurementReceiptInspectionService receiptInspection,
+        IProcurementReceiptDocumentService receiptDocuments,
         ILogger<PurchaseOrdersController> logger)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
@@ -95,8 +97,6 @@ public class PurchaseOrdersController : ControllerBase
         _inventoryItemRepository = inventoryItemRepository;
         _warehouseRepository = warehouseRepository;
         _budgetService = budgetService;
-        _budgetRepository = budgetRepository;
-        _planItemRepository = planItemRepository;
         _inventoryValuationService = inventoryValuationService;
         _projectService = projectService;
         _unitOfWork = unitOfWork;
@@ -108,6 +108,9 @@ public class PurchaseOrdersController : ControllerBase
         _purchaseOrderSources = purchaseOrderSources;
         _purchaseOrderCompliance = purchaseOrderCompliance;
         _purchaseOrderSod = purchaseOrderSod;
+        _receiptSourceControl = receiptSourceControl;
+        _receiptInspection = receiptInspection;
+        _receiptDocuments = receiptDocuments;
         _logger = logger;
     }
 
@@ -136,6 +139,38 @@ public class PurchaseOrdersController : ControllerBase
             {
                 code = "PO_SOURCE_FORBIDDEN",
                 message = ex.Message,
+                correlationId
+            });
+        }
+    }
+
+    [HttpGet("{id}/receipt-source-readiness")]
+    public async Task<ActionResult<ProcurementReceiptSourceReadinessDto>>
+        GetReceiptSourceReadiness(Guid id)
+    {
+        var correlationId = CorrelationId();
+        try
+        {
+            return Ok(await _receiptSourceControl.GetReadinessAsync(
+                id,
+                correlationId,
+                HttpContext.RequestAborted));
+        }
+        catch (ProcurementReceiptSourceNotFoundException exception)
+        {
+            return NotFound(new
+            {
+                code = exception.Code,
+                message = exception.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = exception.Message,
                 correlationId
             });
         }
@@ -405,7 +440,13 @@ public class PurchaseOrdersController : ControllerBase
                     InspectionResult = receipt.InspectionResult,
                     InspectionNotes = receipt.InspectionNotes,
                     PurchaseOrderNumber = purchaseOrder.OrderNumber,
-                    SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? ""
+                    SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? "",
+                    ReceiptTolerancePercent = receipt.ReceiptTolerancePercent,
+                    ReceiptSourceIntegrityHash =
+                        receipt.ReceiptSourceIntegrityHash,
+                    ReceiptSourceValidatedAtUtc =
+                        receipt.ReceiptSourceValidatedAtUtc,
+                    RowVersion = Convert.ToBase64String(receipt.RowVersion)
                 }).ToList()
             };
 
@@ -1417,10 +1458,21 @@ public class PurchaseOrdersController : ControllerBase
     /// Receives a purchase order (creates receipt)
     /// </summary>
     [HttpPost("{id}/receive")]
-    public async Task<ActionResult<PurchaseOrderReceiptDto>> ReceivePurchaseOrder(
+    public Task<ActionResult<PurchaseOrderReceiptDto>> ReceivePurchaseOrder(
         Guid id,
         [FromBody] ReceivePurchaseOrderDto receiveDto)
+        => _unitOfWork.ExecuteInStrategyAsync(
+            () => ReceivePurchaseOrderCore(id, receiveDto),
+            HttpContext.RequestAborted);
+
+    private async Task<ActionResult<PurchaseOrderReceiptDto>>
+        ReceivePurchaseOrderCore(
+        Guid id,
+        ReceivePurchaseOrderDto receiveDto)
     {
+        var correlationId = CorrelationId();
+        var ownsReceiptTransaction = false;
+        PurchaseOrder? receiptPurchaseOrder = null;
         try
         {
             if (!ModelState.IsValid)
@@ -1428,24 +1480,139 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var purchaseOrder = await _purchaseOrderRepository.GetPurchaseOrderByIdAsync(id);
+            if (receiveDto.PurchaseOrderId != Guid.Empty &&
+                receiveDto.PurchaseOrderId != id)
+            {
+                return BadRequest(new
+                {
+                    code = "RCV_PURCHASE_ORDER_ROUTE_MISMATCH",
+                    message = "The route purchase order does not match the receipt payload.",
+                    correlationId
+                });
+            }
+
+            if (!_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+                ownsReceiptTransaction = true;
+            }
+
+            var purchaseOrder = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUserService.TenantId &&
+                    item.Id == id &&
+                    !item.IsDeleted)
+                .Include(item => item.BusinessPartner)
+                .SingleOrDefaultAsync(HttpContext.RequestAborted);
             if (purchaseOrder == null)
             {
-                return NotFound($"Purchase order with ID {id} not found");
+                return NotFound(new
+                {
+                    code = "RCV_PURCHASE_ORDER_NOT_FOUND",
+                    message = $"Purchase order with ID {id} was not found.",
+                    correlationId
+                });
+            }
+            receiptPurchaseOrder = purchaseOrder;
+
+            var rawIdempotencyKey =
+                Request.Headers["Idempotency-Key"].FirstOrDefault() ??
+                receiveDto.IdempotencyKey;
+            var idempotencyKey = string.IsNullOrWhiteSpace(rawIdempotencyKey)
+                ? correlationId
+                : rawIdempotencyKey.Trim();
+            if (idempotencyKey.Length > 100)
+            {
+                return BadRequest(new
+                {
+                    code = "RCV_IDEMPOTENCY_KEY_INVALID",
+                    message = "Idempotency-Key cannot exceed 100 characters.",
+                    correlationId
+                });
+            }
+
+            var existingReceipt = await _unitOfWork
+                .Repository<PurchaseOrderReceipt>()
+                .GetQueryable(item =>
+                    item.TenantId == purchaseOrder.TenantId &&
+                    item.PurchaseOrderId == purchaseOrder.Id &&
+                    item.IdempotencyKey == idempotencyKey &&
+                    !item.IsDeleted)
+                .Include(item => item.Items)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(HttpContext.RequestAborted);
+            if (existingReceipt != null)
+            {
+                if (!ReceiptReplayMatches(existingReceipt, receiveDto))
+                {
+                    return Conflict(new
+                    {
+                        code = "RCV_IDEMPOTENCY_PAYLOAD_MISMATCH",
+                        message =
+                            "This receipt idempotency key was already used with a different receipt payload.",
+                        correlationId
+                    });
+                }
+
+                return Ok(new PurchaseOrderReceiptDto
+                {
+                    Id = existingReceipt.Id,
+                    PurchaseOrderId = existingReceipt.PurchaseOrderId,
+                    ReceiptNumber = existingReceipt.ReceiptNumber,
+                    ReceiptDate = existingReceipt.ReceiptDate,
+                    DeliveryNote = existingReceipt.DeliveryNote,
+                    CarrierName = existingReceipt.CarrierName,
+                    TrackingNumber = existingReceipt.TrackingNumber,
+                    Status = existingReceipt.Status,
+                    Notes = existingReceipt.Notes,
+                    RequiresInspection = existingReceipt.RequiresInspection,
+                    PurchaseOrderNumber = purchaseOrder.OrderNumber,
+                    SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? "",
+                    ReceiptTolerancePercent =
+                        existingReceipt.ReceiptTolerancePercent,
+                    ReceiptSourceIntegrityHash =
+                        existingReceipt.ReceiptSourceIntegrityHash,
+                    ReceiptSourceValidatedAtUtc =
+                        existingReceipt.ReceiptSourceValidatedAtUtc,
+                    RowVersion = Convert.ToBase64String(existingReceipt.RowVersion)
+                });
             }
 
             // Allow multiple receipts until fully received/closed.
             // "Partially Received" should still be receiptable.
-            if (!string.Equals(purchaseOrder.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(purchaseOrder.Status, "Partially Received", StringComparison.OrdinalIgnoreCase))
+            if (!ProcurementReceiptSourceRules.IsReceivableStatus(
+                    purchaseOrder.Status,
+                    existingReceipt: false))
             {
                 return BadRequest($"Purchase order cannot be received in current status: {purchaseOrder.Status}");
             }
 
-            await _purchaseOrderSod.EnforceReceiptAsync(
+            await _purchaseOrderSod.EnforceReceiptActionAsync(
                 purchaseOrder,
-                CorrelationId(),
+                ProcurementPurchaseOrderSodRules.CreatePurchaseOrderReceipt,
+                correlationId,
                 HttpContext.RequestAborted);
+
+            var receiptId = Guid.NewGuid();
+            // TDC-0502: purchase-order deliveries are always governed through
+            // the server-owned inspection/acceptance lifecycle. Client values
+            // cannot opt out or pre-accept stock at receipt creation.
+            const bool requiresGovernedInspection = true;
+            var sourceSnapshot =
+                await _receiptSourceControl.EnforceCreateAsync(
+                    purchaseOrder,
+                    receiveDto.Items.Select(item =>
+                        new ProcurementReceiptSourceLineRequest
+                        {
+                            PurchaseOrderItemId = item.PurchaseOrderItemId,
+                            ReceivedQuantity = item.ReceivedQuantity
+                        }).ToList(),
+                    "PurchaseOrderReceipt",
+                    receiptId,
+                    correlationId,
+                    HttpContext.RequestAborted);
 
             // Generate receipt number
             var receiptNumber = await _purchaseOrderReceiptRepository.GenerateReceiptNumberAsync();
@@ -1453,24 +1620,39 @@ public class PurchaseOrdersController : ControllerBase
             // Create receipt
             var receipt = new PurchaseOrderReceipt
             {
-                Id = Guid.NewGuid(),
+                Id = receiptId,
                 PurchaseOrderId = id,
                 ReceiptNumber = receiptNumber,
                 ReceiptDate = DateTime.UtcNow,
                 DeliveryNote = receiveDto.DeliveryNote,
                 CarrierName = receiveDto.CarrierName,
                 TrackingNumber = receiveDto.TrackingNumber,
-                Status = receiveDto.RequiresInspection ? "Pending Inspection" : "Received",
+                Status = "Pending Inspection",
                 ReceivedById = _currentUserService.UserId,
                 InspectedById = receiveDto.InspectedById,
                 Notes = receiveDto.Notes,
-                RequiresInspection = receiveDto.RequiresInspection,
+                RequiresInspection = requiresGovernedInspection,
+                IdempotencyKey = idempotencyKey,
+                CorrelationId = correlationId,
+                ReceiptTolerancePercent = sourceSnapshot.TolerancePercent,
+                ReceiptSourceSnapshotJson = sourceSnapshot.SnapshotJson,
+                ReceiptSourceIntegrityHash = sourceSnapshot.IntegrityHash,
+                ReceiptSourceValidatedAtUtc = sourceSnapshot.ValidatedAtUtc,
                 TenantId = purchaseOrder.TenantId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
             await _purchaseOrderReceiptRepository.CreateReceiptAsync(receipt);
+            var pendingInventoryPostings =
+                new List<(
+                    PurchaseOrderItem PurchaseOrderItem,
+                    decimal Quantity,
+                    Guid WarehouseId,
+                    Guid? LocationId,
+                    string? LotNumber,
+                    string? SerialNumber,
+                    DateTime? ExpirationDate)>();
 
             // Update purchase order items with received quantities and process inventory
             foreach (var itemDto in receiveDto.Items)
@@ -1495,139 +1677,175 @@ public class PurchaseOrdersController : ControllerBase
                     return BadRequest("RejectionReason is required when RejectedQuantity is greater than 0.");
                 }
 
-                var poItem = await _purchaseOrderItemRepository.GetItemByIdAsync(itemDto.PurchaseOrderItemId);
-                if (poItem != null)
+                var poItem = await _unitOfWork.Repository<PurchaseOrderItem>()
+                    .GetQueryable(item =>
+                        item.TenantId == purchaseOrder.TenantId &&
+                        item.PurchaseOrderId == purchaseOrder.Id &&
+                        item.Id == itemDto.PurchaseOrderItemId &&
+                        !item.IsDeleted)
+                    .SingleOrDefaultAsync(HttpContext.RequestAborted);
+                if (poItem == null)
                 {
-                    // PO "ReceivedQuantity" is treated as the quantity actually receipted/accepted against the PO.
-                    // If AcceptedQuantity < ReceivedQuantity (e.g., short-shipped or pending check), we do NOT
-                    // automatically treat the difference as rejected.
-                    var remainingToReceipt = poItem.OrderedQuantity - poItem.ReceivedQuantity;
-
-                    if (remainingToReceipt < 0)
+                    return BadRequest(new
                     {
-                        remainingToReceipt = 0;
+                        code = "RCV_PO_LINE_NOT_FOUND",
+                        message =
+                            "The receipt line does not belong to the governed purchase order.",
+                        correlationId
+                    });
+                }
+
+                var sourceLine = sourceSnapshot.Readiness.Lines
+                    .Single(item =>
+                        item.PurchaseOrderItemId ==
+                        itemDto.PurchaseOrderItemId);
+                // PO "ReceivedQuantity" is treated as the quantity actually
+                // accepted against the PO. A pending inspection does not imply
+                // rejection.
+                var remainingToReceipt = sourceLine.RemainingQuantity;
+
+                if (itemDto.ReceivedQuantity > remainingToReceipt)
+                {
+                    return BadRequest($"ReceivedQuantity ({itemDto.ReceivedQuantity}) cannot exceed remaining quantity to receipt ({remainingToReceipt}).");
+                }
+
+                var effectiveWarehouseId = itemDto.WarehouseId ??
+                                           poItem.WarehouseId ??
+                                           purchaseOrder.DeliveryWarehouseId;
+                var effectiveLocationId = itemDto.LocationId;
+
+                if (effectiveLocationId.HasValue &&
+                    effectiveLocationId.Value != Guid.Empty)
+                {
+                    var location = await _unitOfWork
+                        .Repository<WarehouseLocation>()
+                        .FirstOrDefaultAsync(location =>
+                            location.Id == effectiveLocationId.Value &&
+                            location.TenantId == purchaseOrder.TenantId);
+
+                    if (location == null)
+                    {
+                        return BadRequest($"Invalid LocationId ({effectiveLocationId}). Please select a valid warehouse location.");
                     }
 
-                    if (itemDto.ReceivedQuantity > remainingToReceipt)
+                    effectiveWarehouseId =
+                        location.InventoryWarehouseId;
+                }
+
+                if (!effectiveLocationId.HasValue ||
+                    effectiveLocationId.Value == Guid.Empty)
+                {
+                    return BadRequest("LocationId is required for received items. Please select a storage location for each line item.");
+                }
+
+                if (string.Equals(
+                        purchaseOrder.OrderType,
+                        "Consignment",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!purchaseOrder.DeliveryWarehouseId.HasValue ||
+                        purchaseOrder.DeliveryWarehouseId.Value ==
+                        Guid.Empty)
                     {
-                        return BadRequest($"ReceivedQuantity ({itemDto.ReceivedQuantity}) cannot exceed remaining quantity to receipt ({remainingToReceipt}).");
+                        return BadRequest("Consignment purchase orders must have DeliveryWarehouseId set to a consignment warehouse.");
                     }
 
-                    if (itemDto.AcceptedQuantity > remainingToReceipt)
+                    if (!effectiveWarehouseId.HasValue ||
+                        effectiveWarehouseId.Value == Guid.Empty)
                     {
-                        return BadRequest($"AcceptedQuantity ({itemDto.AcceptedQuantity}) cannot exceed remaining quantity to receipt ({remainingToReceipt}).");
+                        return BadRequest("Warehouse could not be resolved for the selected LocationId.");
                     }
 
-                    // Only accepted quantity reduces PO remaining (supports partial receipts without implying rejection).
-                    poItem.ReceivedQuantity += itemDto.AcceptedQuantity;
-                    poItem.UpdatedAt = DateTime.UtcNow;
-                    await _purchaseOrderItemRepository.UpdateItemAsync(poItem);
-
-                    // Create receipt item
-                    var effectiveWarehouseId = itemDto.WarehouseId ?? poItem.WarehouseId ?? purchaseOrder.DeliveryWarehouseId;
-                    var effectiveLocationId = itemDto.LocationId;
-
-                    // Storage/put-away location should come from the UI (per-line selection).
-                    // If provided, use it to derive the warehouse, since receiving can override the PO-line warehouse.
-                    if (effectiveLocationId.HasValue && effectiveLocationId.Value != Guid.Empty)
+                    if (effectiveWarehouseId.Value !=
+                        purchaseOrder.DeliveryWarehouseId.Value)
                     {
-                        var location = await _unitOfWork.Repository<WarehouseLocation>()
-                            .FirstOrDefaultAsync(l => l.Id == effectiveLocationId.Value && l.TenantId == purchaseOrder.TenantId);
-
-                        if (location == null)
-                        {
-                            return BadRequest($"Invalid LocationId ({effectiveLocationId}). Please select a valid warehouse location.");
-                        }
-
-                        effectiveWarehouseId = location.InventoryWarehouseId;
+                        return BadRequest("Consignment purchase order receipts must be posted to the PO DeliveryWarehouseId (dedicated consignment warehouse).");
                     }
 
-                    // Enforce a put-away location for any non-zero receipt lines (so we can report accurately).
-                    if (!effectiveLocationId.HasValue || effectiveLocationId.Value == Guid.Empty)
+                    var warehouse = await _warehouseRepository
+                        .GetByIdAsync(effectiveWarehouseId.Value);
+                    if (warehouse?.IsConsignmentWarehouse != true)
                     {
-                        return BadRequest("LocationId is required for received items. Please select a storage location for each line item.");
-                    }
-
-                    if (string.Equals(purchaseOrder.OrderType, "Consignment", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!purchaseOrder.DeliveryWarehouseId.HasValue || purchaseOrder.DeliveryWarehouseId.Value == Guid.Empty)
-                        {
-                            return BadRequest("Consignment purchase orders must have DeliveryWarehouseId set to a consignment warehouse.");
-                        }
-
-                        if (!effectiveWarehouseId.HasValue || effectiveWarehouseId.Value == Guid.Empty)
-                        {
-                            return BadRequest("Warehouse could not be resolved for the selected LocationId.");
-                        }
-
-                        if (effectiveWarehouseId.Value != purchaseOrder.DeliveryWarehouseId.Value)
-                        {
-                            return BadRequest("Consignment purchase order receipts must be posted to the PO DeliveryWarehouseId (dedicated consignment warehouse).");
-                        }
-
-                        var wh = await _warehouseRepository.GetByIdAsync(effectiveWarehouseId.Value);
-                        if (wh?.IsConsignmentWarehouse != true)
-                        {
-                            return BadRequest("Selected warehouse is not marked as a consignment warehouse.");
-                        }
-                    }
-                    else
-                    {
-                        // Prevent accidentally receiving owned stock into consignment inventory bins/warehouses.
-                        if (effectiveWarehouseId.HasValue && effectiveWarehouseId.Value != Guid.Empty)
-                        {
-                            var isConsignment = await IsConsignmentWarehouseAsync(effectiveWarehouseId.Value);
-                            if (isConsignment)
-                            {
-                                return BadRequest("This receipt line resolves to a consignment warehouse/bin. Use a Consignment purchase order type to receive consignment stock.");
-                            }
-                        }
-                    }
-
-                    var receiptItem = new PurchaseOrderReceiptItem
-                    {
-                        Id = Guid.NewGuid(),
-                        ReceiptId = receipt.Id,
-                        PurchaseOrderItemId = itemDto.PurchaseOrderItemId,
-                        ReceivedQuantity = itemDto.ReceivedQuantity,
-                        AcceptedQuantity = itemDto.AcceptedQuantity,
-                        RejectedQuantity = itemDto.RejectedQuantity,
-                        UnitOfMeasure = poItem.UnitOfMeasure,
-                        ItemUnitOfMeasureId = poItem.ItemUnitOfMeasureId,
-                        LocationId = effectiveLocationId,
-                        SerialNumber = itemDto.SerialNumber,
-                        LotNumber = itemDto.LotNumber,
-                        ExpirationDate = itemDto.ExpirationDate,
-                        Notes = itemDto.Notes,
-                        RejectionReason = itemDto.RejectionReason,
-                        QualityStatus = itemDto.QualityStatus,
-                        QualityNotes = itemDto.QualityNotes,
-                        TenantId = purchaseOrder.TenantId,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-
-                    await _purchaseOrderReceiptRepository.CreateReceiptItemAsync(receiptItem);
-
-                    // Process inventory receipt if not requiring inspection or if already accepted
-                    if (!receiveDto.RequiresInspection || string.Equals(itemDto.QualityStatus, "Passed", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Only post accepted quantity to inventory; the remainder can be pending (uninspected) without being rejected.
-                        if (itemDto.AcceptedQuantity > 0)
-                        {
-                            await ProcessInventoryReceiptAsync(
-                                poItem,
-                                itemDto.AcceptedQuantity,
-                                effectiveWarehouseId ?? Guid.Empty,
-                                effectiveLocationId,
-                                receiptNumber,
-                                receipt.Id,
-                                itemDto.LotNumber,
-                                itemDto.SerialNumber,
-                                itemDto.ExpirationDate);
-                        }
+                        return BadRequest("Selected warehouse is not marked as a consignment warehouse.");
                     }
                 }
+                else if (effectiveWarehouseId.HasValue &&
+                         effectiveWarehouseId.Value != Guid.Empty)
+                {
+                    var isConsignment = await IsConsignmentWarehouseAsync(
+                        effectiveWarehouseId.Value);
+                    if (isConsignment)
+                    {
+                        return BadRequest("This receipt line resolves to a consignment warehouse/bin. Use a Consignment purchase order type to receive consignment stock.");
+                    }
+                }
+
+                var receiptItem = new PurchaseOrderReceiptItem
+                {
+                    Id = Guid.NewGuid(),
+                    ReceiptId = receipt.Id,
+                    PurchaseOrderItemId = itemDto.PurchaseOrderItemId,
+                    ReceivedQuantity = itemDto.ReceivedQuantity,
+                    AcceptedQuantity = 0,
+                    RejectedQuantity = 0,
+                    OrderedQuantitySnapshot =
+                        sourceLine.OrderedQuantity,
+                    PreviouslyReceiptedQuantitySnapshot =
+                        sourceLine.PreviouslyReceiptedQuantity,
+                    ToleranceQuantitySnapshot =
+                        sourceLine.ToleranceQuantity,
+                    MaximumReceivableQuantitySnapshot =
+                        sourceLine.MaximumReceivableQuantity,
+                    RemainingQuantityBeforeReceiptSnapshot =
+                        sourceLine.RemainingQuantity,
+                    ReceiptLineIntegrityHash =
+                        sourceLine.IntegrityHash,
+                    UnitOfMeasure = poItem.UnitOfMeasure,
+                    ItemUnitOfMeasureId = poItem.ItemUnitOfMeasureId,
+                    LocationId = effectiveLocationId,
+                    SerialNumber = itemDto.SerialNumber,
+                    LotNumber = itemDto.LotNumber,
+                    ExpirationDate = itemDto.ExpirationDate,
+                    Notes = itemDto.Notes,
+                    RejectionReason = null,
+                    QualityStatus = "Pending",
+                    QualityNotes = null,
+                    TenantId = purchaseOrder.TenantId,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await _purchaseOrderReceiptRepository
+                    .CreateReceiptItemAsync(receiptItem);
+
+                // Stock and PO accepted quantities are applied atomically only
+                // after the independent governed inspection is approved.
+            }
+
+            // The inventory posting guard reads the durable governed receipt
+            // rows. Persist them first, but keep the entire operation inside
+            // this serializable transaction so receipt and stock remain atomic.
+            await _unitOfWork.SaveChangesAsync();
+            await _receiptInspection.InitializeAsync(
+                receipt.Id,
+                correlationId,
+                HttpContext.RequestAborted);
+            await _receiptDocuments.EnsureAsync(
+                receipt.Id,
+                correlationId,
+                HttpContext.RequestAborted);
+            foreach (var posting in pendingInventoryPostings)
+            {
+                await ProcessInventoryReceiptAsync(
+                    posting.PurchaseOrderItem,
+                    posting.Quantity,
+                    posting.WarehouseId,
+                    posting.LocationId,
+                    receiptNumber,
+                    receipt.Id,
+                    posting.LotNumber,
+                    posting.SerialNumber,
+                    posting.ExpirationDate);
             }
 
             // Check if purchase order is fully received
@@ -1651,6 +1869,10 @@ public class PurchaseOrdersController : ControllerBase
             // Persist receipt, item quantity updates, and PO status transitions.
             await _unitOfWork.SaveChangesAsync();
             await _projectService.SyncPurchaseReceiptMaterialCostAsync(receipt.Id);
+            if (ownsReceiptTransaction)
+            {
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+            }
 
             // Return the created receipt
             var receiptDto = new PurchaseOrderReceiptDto
@@ -1666,7 +1888,13 @@ public class PurchaseOrdersController : ControllerBase
                 Notes = receipt.Notes,
                 RequiresInspection = receipt.RequiresInspection,
                 PurchaseOrderNumber = purchaseOrder.OrderNumber,
-                SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? ""
+                SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? "",
+                ReceiptTolerancePercent = receipt.ReceiptTolerancePercent,
+                ReceiptSourceIntegrityHash =
+                    receipt.ReceiptSourceIntegrityHash,
+                ReceiptSourceValidatedAtUtc =
+                    receipt.ReceiptSourceValidatedAtUtc,
+                RowVersion = Convert.ToBase64String(receipt.RowVersion)
             };
 
             return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, receiptDto);
@@ -1690,10 +1918,103 @@ public class PurchaseOrdersController : ControllerBase
                 correlationId = CorrelationId()
             });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            if (ownsReceiptTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+            }
+            await _receiptSourceControl.RecordDeniedAsync(
+                receiptPurchaseOrder?.Id ?? id,
+                receiptPurchaseOrder?.OrderNumber ?? id.ToString(),
+                "CreatePurchaseOrderReceipt",
+                ex.Code,
+                ex.Message,
+                correlationId,
+                cancellationToken: HttpContext.RequestAborted);
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            if (ownsReceiptTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+            }
+            await _receiptSourceControl.RecordDeniedAsync(
+                receiptPurchaseOrder?.Id ?? id,
+                receiptPurchaseOrder?.OrderNumber ?? id.ToString(),
+                "CreatePurchaseOrderReceipt",
+                ex.Code,
+                ex.Message,
+                correlationId,
+                new { receiveDto.Items, ex.Readiness },
+                HttpContext.RequestAborted);
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new
+            {
+                code = "RCV_CONCURRENCY_CONFLICT",
+                message =
+                    "The receipt or purchase order changed. Reload the current remaining quantities and retry.",
+                correlationId
+            });
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException?.Message.Contains(
+                "IX_PurchaseOrderReceipts_TenantId_PurchaseOrderId_IdempotencyKey",
+                StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return Conflict(new
+            {
+                code = "RCV_IDEMPOTENCY_CONFLICT",
+                message =
+                    "This receipt idempotency key was already used. Reload the receipt history.",
+                correlationId
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error receiving purchase order {PurchaseOrderId}", id);
             return StatusCode(500, "An error occurred while receiving the purchase order");
+        }
+        finally
+        {
+            if (ownsReceiptTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(
+                        HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back purchase-order receipt transaction");
+                }
+            }
         }
     }
 
@@ -1777,12 +2098,42 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPost("receipts/{receiptId}/complete-inspection")]
     public async Task<IActionResult> CompleteInspectionAndPostToInventory(Guid receiptId)
     {
+        var correlationId = CorrelationId();
+        var ownsReceiptTransaction = false;
         try
         {
-            var receipt = await _purchaseOrderReceiptRepository.GetByIdAsync(receiptId);
+            if (!_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    HttpContext.RequestAborted);
+                ownsReceiptTransaction = true;
+            }
+
+            var receipt = await _unitOfWork.Repository<PurchaseOrderReceipt>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUserService.TenantId &&
+                    item.Id == receiptId &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(HttpContext.RequestAborted);
             if (receipt == null)
             {
                 return NotFound($"Receipt with ID {receiptId} not found");
+            }
+
+            var governedInspectionExists = await _unitOfWork
+                .Repository<ProcurementReceiptInspectionCase>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUserService.TenantId &&
+                    item.PurchaseOrderReceiptId == receipt.Id &&
+                    !item.IsDeleted)
+                .AnyAsync(HttpContext.RequestAborted);
+            if (governedInspectionExists ||
+                !string.IsNullOrWhiteSpace(receipt.ReceiptSourceIntegrityHash))
+            {
+                throw new ProcurementReceiptSourceValidationException(
+                    "RCV_INSPECTION_LIFECYCLE_REQUIRED",
+                    "This governed receipt must be decided and posted through the shared procurement receipt-inspection lifecycle.");
             }
 
             if (receipt.Status != "Pending Inspection" && receipt.Status != "Inspected")
@@ -1790,22 +2141,53 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest($"Receipt cannot be completed in current status: {receipt.Status}");
             }
 
-            var purchaseOrder = await _purchaseOrderRepository.GetPurchaseOrderByIdAsync(receipt.PurchaseOrderId);
+            var purchaseOrder = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUserService.TenantId &&
+                    item.Id == receipt.PurchaseOrderId &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(HttpContext.RequestAborted);
             if (purchaseOrder == null)
             {
                 return NotFound($"Purchase order not found for receipt {receiptId}");
             }
 
-            // Get receipt items using the receipt item repository
-            var allReceiptItems = await _purchaseOrderReceiptItemRepository.GetAllAsync();
-            var receiptItems = allReceiptItems.Where(ri => ri.ReceiptId == receiptId).ToList();
+            var sourceSnapshot =
+                await _receiptSourceControl.RevalidatePurchaseOrderReceiptAsync(
+                    receipt.Id,
+                    "PostPurchaseOrderReceiptToInventory",
+                    correlationId,
+                    HttpContext.RequestAborted);
+            receipt.ReceiptTolerancePercent =
+                sourceSnapshot.TolerancePercent;
+            receipt.ReceiptSourceSnapshotJson =
+                sourceSnapshot.SnapshotJson;
+            receipt.ReceiptSourceIntegrityHash =
+                sourceSnapshot.IntegrityHash;
+            receipt.ReceiptSourceValidatedAtUtc =
+                sourceSnapshot.ValidatedAtUtc;
+
+            var receiptItems = await _unitOfWork
+                .Repository<PurchaseOrderReceiptItem>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUserService.TenantId &&
+                    item.ReceiptId == receiptId &&
+                    !item.IsDeleted)
+                .ToListAsync(HttpContext.RequestAborted);
 
             // Process inventory for accepted items
             foreach (var receiptItem in receiptItems)
             {
                 if (receiptItem.AcceptedQuantity > 0 && receiptItem.QualityStatus == "Passed")
                 {
-                    var poItem = await _purchaseOrderItemRepository.GetItemByIdAsync(receiptItem.PurchaseOrderItemId);
+                    var poItem = await _unitOfWork
+                        .Repository<PurchaseOrderItem>()
+                        .GetQueryable(item =>
+                            item.TenantId == _currentUserService.TenantId &&
+                            item.PurchaseOrderId == purchaseOrder.Id &&
+                            item.Id == receiptItem.PurchaseOrderItemId &&
+                            !item.IsDeleted)
+                        .SingleOrDefaultAsync(HttpContext.RequestAborted);
                     if (poItem != null)
                     {
                         await ProcessInventoryReceiptAsync(
@@ -1829,15 +2211,66 @@ public class PurchaseOrdersController : ControllerBase
             await _purchaseOrderReceiptRepository.UpdateAsync(receipt);
             await _unitOfWork.SaveChangesAsync();
             await _projectService.SyncPurchaseReceiptMaterialCostAsync(receipt.Id);
+            if (ownsReceiptTransaction)
+            {
+                await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
+            }
 
             _logger.LogInformation("Completed inspection and posted receipt {ReceiptNumber} to inventory", receipt.ReceiptNumber);
 
             return NoContent();
         }
+        catch (ProcurementReceiptSourceException ex)
+        {
+            if (ownsReceiptTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+            }
+            await _receiptSourceControl.RecordDeniedAsync(
+                null,
+                receiptId.ToString(),
+                "PostPurchaseOrderReceiptToInventory",
+                ex.Code,
+                ex.Message,
+                correlationId,
+                cancellationToken: HttpContext.RequestAborted);
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error completing inspection for receipt {ReceiptId}", receiptId);
             return StatusCode(500, "An error occurred while completing the inspection");
+        }
+        finally
+        {
+            if (ownsReceiptTransaction && _unitOfWork.HasActiveTransaction)
+            {
+                try
+                {
+                    await _unitOfWork.RollbackAsync(
+                        HttpContext.RequestAborted);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "Failed to roll back inspected receipt posting");
+                }
+            }
         }
     }
 
@@ -1961,7 +2394,13 @@ public class PurchaseOrdersController : ControllerBase
                 InspectionResult = receipt.InspectionResult,
                 InspectionNotes = receipt.InspectionNotes,
                 PurchaseOrderNumber = purchaseOrder.OrderNumber,
-                SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? ""
+                SupplierName = purchaseOrder.BusinessPartner?.PartnerName ?? "",
+                ReceiptTolerancePercent = receipt.ReceiptTolerancePercent,
+                ReceiptSourceIntegrityHash =
+                    receipt.ReceiptSourceIntegrityHash,
+                ReceiptSourceValidatedAtUtc =
+                    receipt.ReceiptSourceValidatedAtUtc,
+                RowVersion = Convert.ToBase64String(receipt.RowVersion)
             }).ToList()
         };
     }
@@ -2472,6 +2911,65 @@ public class PurchaseOrdersController : ControllerBase
         }
     }
 
+    private static bool ReceiptReplayMatches(
+        PurchaseOrderReceipt receipt,
+        ReceivePurchaseOrderDto request)
+    {
+        if (!SameReceiptText(receipt.DeliveryNote, request.DeliveryNote) ||
+            !SameReceiptText(receipt.CarrierName, request.CarrierName) ||
+            !SameReceiptText(receipt.TrackingNumber, request.TrackingNumber) ||
+            !SameReceiptText(receipt.Notes, request.Notes) ||
+            receipt.InspectedById != request.InspectedById)
+        {
+            return false;
+        }
+
+        // Only positive lines are effective receipt operations; creation
+        // deliberately ignores non-positive lines after source validation.
+        var requestedLines = request.Items
+            .Where(item => item.ReceivedQuantity > 0m)
+            .ToList();
+        var storedLines = receipt.Items
+            .Where(item => !item.IsDeleted)
+            .ToList();
+        if (requestedLines.Count != storedLines.Count ||
+            requestedLines.GroupBy(item => item.PurchaseOrderItemId)
+                .Any(group => group.Count() != 1))
+        {
+            return false;
+        }
+
+        var storedByPurchaseOrderItem = storedLines
+            .GroupBy(item => item.PurchaseOrderItemId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        foreach (var requested in requestedLines)
+        {
+            if (!storedByPurchaseOrderItem.TryGetValue(
+                    requested.PurchaseOrderItemId,
+                    out var candidates) ||
+                candidates.Count != 1)
+            {
+                return false;
+            }
+
+            var stored = candidates[0];
+            if (stored.ReceivedQuantity != requested.ReceivedQuantity ||
+                stored.LocationId != requested.LocationId ||
+                stored.ExpirationDate != requested.ExpirationDate ||
+                !SameReceiptText(stored.SerialNumber, requested.SerialNumber) ||
+                !SameReceiptText(stored.LotNumber, requested.LotNumber) ||
+                !SameReceiptText(stored.Notes, requested.Notes))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool SameReceiptText(string? stored, string? requested) =>
+        string.Equals(stored, requested, StringComparison.Ordinal);
+
     /// <summary>
     /// Moves committed budget to utilized when PO is fully received
     /// </summary>
@@ -2479,30 +2977,9 @@ public class PurchaseOrdersController : ControllerBase
     {
         try
         {
-            // Find the plan item linked to this PO to get category and plan info
-            var planItems = await _planItemRepository.GetAllAsync();
-            var planItem = planItems.FirstOrDefault(pi => pi.PurchaseOrderId == purchaseOrder.Id);
-
-            if (planItem == null)
-            {
-                _logger.LogWarning("No plan item found for PO {PONumber}, skipping budget utilization", purchaseOrder.OrderNumber);
-                return;
-            }
-
-            // Find budget linked to the plan
-            var budgets = await _budgetRepository.GetByPlanIdAsync(planItem.ProcurementPlanId);
-            var budget = budgets.FirstOrDefault(b => b.Status == "Active" || b.Status == "Approved");
-
-            if (budget == null)
-            {
-                _logger.LogWarning("No budget found for plan {PlanId}, skipping budget utilization", planItem.ProcurementPlanId);
-                return;
-            }
-
-            // Move from committed to utilized
-            await _budgetService.UtilizeCommittedBudgetAsync(budget.Id, purchaseOrder.TotalAmount, planItem.ItemCategory);
-            _logger.LogInformation("Utilized {Amount} from budget {BudgetCode} for PO {PONumber}, category: {Category}",
-                purchaseOrder.TotalAmount, budget.BudgetCode, purchaseOrder.OrderNumber, planItem.ItemCategory ?? "N/A");
+            await _budgetService.UtilizePurchaseOrderCommittedBudgetAsync(
+                purchaseOrder.Id,
+                purchaseOrder.TotalAmount);
         }
         catch (Exception ex)
         {

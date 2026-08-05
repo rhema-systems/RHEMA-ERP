@@ -46,6 +46,10 @@ import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
+import {
+    VendorPaymentReadinessBadge,
+    VendorPaymentReadinessControl,
+} from '@/components/finance/VendorPaymentReadinessControl';
 
 const paymentSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
@@ -225,7 +229,7 @@ export default function NewVendorPaymentPage() {
     useEffect(() => {
         if (preselectedInvoiceId && outstandingInvoices) {
             const invoice = outstandingInvoices.find(inv => inv.invoiceId === preselectedInvoiceId);
-            if (invoice) {
+            if (invoice?.paymentReadiness?.isPaymentReady) {
                 const discountAmount = Number(invoice.discountAmount) || 0;
                 const netPaymentAmount = Math.max(invoice.balanceAmount - discountAmount, 0);
                 form.setValue('totalAmount', netPaymentAmount);
@@ -257,9 +261,11 @@ export default function NewVendorPaymentPage() {
 
             const paymentAllocations = Object.entries(allocations)
                 .filter(([invoiceId, amount]) =>
-                    amount > 0 ||
+                    (amount > 0 ||
                     Number(discountAllocations[invoiceId]) > 0 ||
-                    Number(withholdingAllocations[invoiceId]) > 0
+                    Number(withholdingAllocations[invoiceId]) > 0) &&
+                    outstandingInvoices?.find((invoice) => invoice.invoiceId === invoiceId)
+                        ?.paymentReadiness?.isPaymentReady === true
                 )
                 .map(([invoiceId, amount]) => ({
                     vendorInvoiceId: invoiceId,
@@ -267,6 +273,20 @@ export default function NewVendorPaymentPage() {
                     discountAmount: Number(discountAllocations[invoiceId]) || 0,
                     withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
                 }));
+
+            const blockedSelection = Object.entries(allocations).find(([invoiceId, amount]) =>
+                (amount > 0 || Number(discountAllocations[invoiceId]) > 0 || Number(withholdingAllocations[invoiceId]) > 0) &&
+                outstandingInvoices?.find((invoice) => invoice.invoiceId === invoiceId)
+                    ?.paymentReadiness?.isPaymentReady !== true
+            );
+            if (blockedSelection) {
+                toast({
+                    title: 'Payment readiness blocked',
+                    description: 'Remove blocked invoices before recording the payment. The server will revalidate all selected invoices.',
+                    variant: 'destructive',
+                });
+                return;
+            }
 
             const totalAllocated = paymentAllocations.reduce((sum, allocation) => sum + allocation.allocatedAmount, 0);
             const totalWithholdingTax = paymentAllocations.reduce((sum, allocation) => sum + (allocation.withholdingTaxAmount || 0), 0);
@@ -350,7 +370,9 @@ export default function NewVendorPaymentPage() {
         const withholdingRate = selectedWithholdingTax ? Number(selectedWithholdingTax.rate || 0) : 0;
 
         // Allocate to oldest invoices first
-        const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
+        const sortedInvoices = outstandingInvoices
+            .filter((invoice) => invoice.paymentReadiness?.isPaymentReady === true)
+            .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
 
         for (const inv of sortedInvoices) {
             if (remaining <= 0) break;
@@ -602,7 +624,7 @@ export default function NewVendorPaymentPage() {
                 <Card className="md:col-span-2">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Allocate to Bills</CardTitle>
-                        <Button variant="outline" size="sm" onClick={handleAutoAllocate} disabled={isSubmitting || !outstandingInvoices || outstandingInvoices.length === 0}>
+                        <Button variant="outline" size="sm" onClick={handleAutoAllocate} disabled={isSubmitting || !outstandingInvoices?.some((invoice) => invoice.paymentReadiness?.isPaymentReady === true)}>
                             Auto Allocate
                         </Button>
                     </CardHeader>
@@ -623,6 +645,11 @@ export default function NewVendorPaymentPage() {
                             </div>
                         ) : (
                             <div className="space-y-4">
+                                <VendorPaymentReadinessControl
+                                    readiness={outstandingInvoices
+                                        .map((invoice) => invoice.paymentReadiness)
+                                        .filter((item): item is NonNullable<typeof item> => Boolean(item))}
+                                />
                                 <div className="flex justify-between items-center bg-muted/50 p-4 rounded-lg font-medium">
                                     <div>
                                         <div>Remaining Cash to Allocate:</div>
@@ -666,6 +693,7 @@ export default function NewVendorPaymentPage() {
                                                 const currentCashAllocation = Number(allocations[inv.invoiceId]) || 0;
                                                 const currentDiscountAllocation = Number(discountAllocations[inv.invoiceId]) || 0;
                                                 const maxWithholdingAllocation = Math.max(inv.balanceAmount - currentCashAllocation - currentDiscountAllocation, 0);
+                                                const isPaymentReady = inv.paymentReadiness?.isPaymentReady === true;
 
                                                 return (
                                                     <tr key={inv.invoiceId} className="border-t">
@@ -674,6 +702,7 @@ export default function NewVendorPaymentPage() {
                                                             {inv.supplierInvoiceNumber && (
                                                                 <span className="text-xs text-muted-foreground">Ref: {inv.supplierInvoiceNumber}</span>
                                                             )}
+                                                            <VendorPaymentReadinessBadge readiness={inv.paymentReadiness} />
                                                             {availableDiscount > 0 && (
                                                                 <span className="text-xs text-emerald-700">
                                                                     Discount available: {formatCurrency(availableDiscount, currentCurrencyCode)}
@@ -701,7 +730,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting}
+                                                                disabled={isSubmitting || !isPaymentReady}
                                                             />
                                                         </td>
                                                         <td className="p-3">
@@ -718,7 +747,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || availableDiscount <= 0}
+                                                                disabled={isSubmitting || !isPaymentReady || availableDiscount <= 0}
                                                             />
                                                         </td>
                                                         <td className="p-3">
@@ -735,7 +764,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || !selectedWithholdingTax}
+                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax}
                                                             />
                                                         </td>
                                                     </tr>

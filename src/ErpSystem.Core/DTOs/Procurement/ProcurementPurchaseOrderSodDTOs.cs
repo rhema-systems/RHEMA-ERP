@@ -13,6 +13,8 @@ public sealed class ProcurementPurchaseOrderSodReadinessDto
     public DateTime EvaluatedAtUtc { get; init; }
     public IReadOnlyList<string> DecisionKeys { get; init; } =
         Array.Empty<string>();
+    public IReadOnlyList<string> ReceiptActionCoverage { get; init; } =
+        Array.Empty<string>();
     public IReadOnlyList<ProcurementPurchaseOrderSodCheckDto> Checks { get; init; } =
         Array.Empty<ProcurementPurchaseOrderSodCheckDto>();
 }

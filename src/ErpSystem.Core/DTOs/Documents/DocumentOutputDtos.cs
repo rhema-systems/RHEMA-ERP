@@ -28,4 +28,6 @@ public static class DocumentTypes
     public const string FinanceCashFlowStatement = "Finance.CashFlowStatement";
     public const string FinanceMultiCurrencyDetail = "Finance.MultiCurrencyDetail";
     public const string FinanceDetailedLedger = "Finance.DetailedLedger";
+    public const string InventoryStoreIssueVoucher = "Inventory.StoreIssueVoucher";
+    public const string InventoryStoreReturnVoucher = "Inventory.StoreReturnVoucher";
 }

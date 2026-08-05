@@ -1,3 +1,7 @@
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
@@ -31,6 +35,7 @@ public class LandedCostService : ILandedCostService
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LandedCostService> _logger;
+    private readonly IInventoryLandedCostFinancePostingService? _financePosting;
 
     public LandedCostService(
         ILandedCostRepository landedCostRepository,
@@ -41,7 +46,8 @@ public class LandedCostService : ILandedCostService
         IPurchaseOrderReceiptRepository purchaseOrderReceiptRepository,
         IBusinessPartnerRepository businessPartnerRepository,
         IUnitOfWork unitOfWork,
-        ILogger<LandedCostService> logger)
+        ILogger<LandedCostService> logger,
+        IInventoryLandedCostFinancePostingService? financePosting = null)
     {
         _landedCostRepository = landedCostRepository;
         _landedCostItemRepository = landedCostItemRepository;
@@ -52,6 +58,7 @@ public class LandedCostService : ILandedCostService
         _businessPartnerRepository = businessPartnerRepository;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _financePosting = financePosting;
     }
 
     public async Task<IEnumerable<LandedCostDto>> GetAllAsync()
@@ -351,6 +358,20 @@ public class LandedCostService : ILandedCostService
                 ItemName = inventoryItem?.Name ?? poItem.ItemDescription,
                 OrderedQuantity = baseOrdered,
                 ReceivedQuantity = baseReceived,
+                PreviouslyReceiptedQuantitySnapshot =
+                    receiptItem.PreviouslyReceiptedQuantitySnapshot *
+                    conversionToBase,
+                ToleranceQuantitySnapshot =
+                    receiptItem.ToleranceQuantitySnapshot *
+                    conversionToBase,
+                MaximumReceivableQuantitySnapshot =
+                    receiptItem.MaximumReceivableQuantitySnapshot *
+                    conversionToBase,
+                RemainingQuantityBeforeReceiptSnapshot =
+                    receiptItem.RemainingQuantityBeforeReceiptSnapshot *
+                    conversionToBase,
+                ReceiptLineIntegrityHash =
+                    receiptItem.ReceiptLineIntegrityHash,
                 AcceptedQuantity = baseAccepted,
                 RejectedQuantity = baseRejected,
                 UnitCost = baseUnitCost,
@@ -402,6 +423,19 @@ public class LandedCostService : ILandedCostService
             ReceivedById = receipt.ReceivedById,
             InspectedById = receipt.InspectedById,
             Notes = string.IsNullOrWhiteSpace(receipt.Notes) ? $"Created from Procurement Receipt {receipt.ReceiptNumber}" : receipt.Notes,
+            IdempotencyKey =
+                $"procurement-receipt:{receipt.Id:N}",
+            IdempotencyRequestHash =
+                BuildReceiptProjectionRequestHash(receipt, grnItems, warehouseId),
+            CorrelationId = receipt.CorrelationId,
+            ReceiptTolerancePercent =
+                receipt.ReceiptTolerancePercent,
+            ReceiptSourceSnapshotJson =
+                receipt.ReceiptSourceSnapshotJson,
+            ReceiptSourceIntegrityHash =
+                receipt.ReceiptSourceIntegrityHash,
+            ReceiptSourceValidatedAtUtc =
+                receipt.ReceiptSourceValidatedAtUtc,
             StockUpdated = true,
             TotalItems = grnItems.Count,
             TotalQuantityReceived = grnItems.Sum(i => i.ReceivedQuantity),
@@ -441,6 +475,20 @@ public class LandedCostService : ILandedCostService
                 revive.ReceivedById = createdGrn.ReceivedById;
                 revive.InspectedById = createdGrn.InspectedById;
                 revive.Notes = createdGrn.Notes;
+                revive.IdempotencyKey =
+                    createdGrn.IdempotencyKey;
+                revive.IdempotencyRequestHash =
+                    createdGrn.IdempotencyRequestHash;
+                revive.CorrelationId =
+                    createdGrn.CorrelationId;
+                revive.ReceiptTolerancePercent =
+                    createdGrn.ReceiptTolerancePercent;
+                revive.ReceiptSourceSnapshotJson =
+                    createdGrn.ReceiptSourceSnapshotJson;
+                revive.ReceiptSourceIntegrityHash =
+                    createdGrn.ReceiptSourceIntegrityHash;
+                revive.ReceiptSourceValidatedAtUtc =
+                    createdGrn.ReceiptSourceValidatedAtUtc;
                 revive.StockUpdated = createdGrn.StockUpdated;
                 revive.TotalItems = createdGrn.TotalItems;
                 revive.TotalQuantityReceived = createdGrn.TotalQuantityReceived;
@@ -516,6 +564,57 @@ public class LandedCostService : ILandedCostService
             }
         }
         return createdGrn;
+    }
+
+    private static string BuildReceiptProjectionRequestHash(
+        PurchaseOrderReceipt receipt,
+        IEnumerable<GoodsReceiptNoteItem> items,
+        Guid warehouseId)
+    {
+        var canonical = new
+        {
+            receipt.Id,
+            receipt.PurchaseOrderId,
+            warehouseId,
+            receipt.ReceiptDate,
+            receipt.DeliveryNote,
+            receipt.CarrierName,
+            receipt.TrackingNumber,
+            receipt.RequiresInspection,
+            receipt.Notes,
+            receipt.ReceiptSourceIntegrityHash,
+            Items = items
+                .OrderBy(item => item.PurchaseOrderItemId)
+                .ThenBy(item => item.InventoryItemId)
+                .ThenBy(item => item.StorageLocationId)
+                .ThenBy(item => item.LotNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.SerialNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.ExpiryDate)
+                .ThenBy(item => item.ReceivedQuantity)
+                .ThenBy(item => item.AcceptedQuantity)
+                .ThenBy(item => item.RejectedQuantity)
+                .ThenBy(item => item.UnitCost)
+                .ThenBy(item => item.Notes, StringComparer.Ordinal)
+                .Select(item => new
+                {
+                    item.PurchaseOrderItemId,
+                    item.InventoryItemId,
+                    item.ReceivedQuantity,
+                    item.AcceptedQuantity,
+                    item.RejectedQuantity,
+                    item.UnitCost,
+                    item.StorageLocationId,
+                    item.LotNumber,
+                    item.SerialNumber,
+                    item.ExpiryDate,
+                    item.Notes
+                })
+                .ToArray()
+        };
+        var json = JsonSerializer.Serialize(canonical);
+        return Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(json)))
+            .ToLowerInvariant();
     }
 
     private async Task<Guid> ResolveInventoryGrnIdAsync(Guid receiptOrGrnId)
@@ -781,7 +880,24 @@ public class LandedCostService : ILandedCostService
 
     public Task<bool> PostToInventoryAsync(Guid landedCostId, Guid userId)
     {
-        return PostToInventoryOnlyAsync(landedCostId, userId);
+        if (_unitOfWork.HasActiveTransaction)
+            return PostToInventoryOnlyAsync(landedCostId, userId);
+        return _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                var result = await PostToInventoryOnlyAsync(landedCostId, userId);
+                await _unitOfWork.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
     }
 
     private async Task<bool> PostToInventoryOnlyAsync(Guid landedCostId, Guid userId)
@@ -793,7 +909,10 @@ public class LandedCostService : ILandedCostService
             throw new InvalidOperationException("Cannot post a cancelled landed cost");
 
         if (string.Equals(landedCost.Status, "Posted", StringComparison.OrdinalIgnoreCase))
+        {
+            await PostFinanceAsync(landedCost.Id);
             return true;
+        }
 
         if (!string.Equals(landedCost.Status, "Allocated", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(landedCost.Status, "Approved", StringComparison.OrdinalIgnoreCase))
@@ -1131,7 +1250,16 @@ public class LandedCostService : ILandedCostService
         await _landedCostRepository.UpdateAsync(landedCost);
 
         await _unitOfWork.SaveChangesAsync();
+        await PostFinanceAsync(landedCost.Id);
         return true;
+    }
+
+    private Task<InventoryFinancePostingResult> PostFinanceAsync(Guid landedCostId)
+    {
+        if (_financePosting is null)
+            throw new InvalidOperationException(
+                "Inventory landed-cost Finance posting is not configured. The valuation transaction was rolled back.");
+        return _financePosting.PostLandedCostAsync(landedCostId);
     }
 
     private async Task CreateValueAdjustmentMovementAsync(

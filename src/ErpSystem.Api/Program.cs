@@ -17,6 +17,29 @@ using Serilog;
 using Serilog.Events;
 using Syncfusion.Licensing;
 
+// Apply pending migrations without starting the web host or running seeders.
+// This is the controlled test/deployment database update entry point.
+if (args.Length > 0 && args[0] == "apply-migrations")
+{
+    // Migration-only deployments must keep ASP.NET Core's Production default
+    // when ASPNETCORE_ENVIRONMENT is absent. Development is a convenience for
+    // explicit seed commands only and could select the wrong database here.
+    var tempBuilder = WebApplication.CreateBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider
+            .GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+    }
+
+    Console.WriteLine("Database migrations completed successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
@@ -337,6 +360,8 @@ builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
 
 // Add Purchase Receipt (PO GRN) PDF service
 builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptDocumentService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>());
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();

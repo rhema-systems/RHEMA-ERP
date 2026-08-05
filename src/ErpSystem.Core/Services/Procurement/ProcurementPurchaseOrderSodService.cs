@@ -94,9 +94,23 @@ public sealed class ProcurementPurchaseOrderSodService :
     public async Task<ProcurementPurchaseOrderSodReadinessDto> EnforceReceiptAsync(
         PurchaseOrder purchaseOrder,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await EnforceReceiptActionAsync(
+            purchaseOrder,
+            ProcurementPurchaseOrderSodRules.CreatePurchaseOrderReceipt,
+            correlationId,
+            cancellationToken);
+
+    public async Task<ProcurementPurchaseOrderSodReadinessDto>
+        EnforceReceiptActionAsync(
+            PurchaseOrder purchaseOrder,
+            string receiptAction,
+            string correlationId,
+            CancellationToken cancellationToken = default)
     {
         EnsurePurchaseOrder(purchaseOrder);
+        var action = ProcurementPurchaseOrderSodRules.NormalizeReceiptAction(
+            receiptAction);
         var correlation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(
             "procurement.inventory.receive",
@@ -109,8 +123,8 @@ public sealed class ProcurementPurchaseOrderSodService :
             "Receive",
             correlation,
             cancellationToken);
-        await RecordAsync(readiness, "Receive", correlation, cancellationToken);
-        await PublishAsync(readiness, "Receive", cancellationToken);
+        await RecordAsync(readiness, action, correlation, cancellationToken);
+        await PublishAsync(readiness, action, cancellationToken);
         if (!readiness.CanReceive)
         {
             throw new ProcurementPurchaseOrderSodBlockedException(
@@ -244,6 +258,8 @@ public sealed class ProcurementPurchaseOrderSodService :
                 : "One or more PO segregation-of-duties actions are prohibited for the current actor.",
             EvaluatedAtUtc = DateTime.UtcNow,
             DecisionKeys = DecisionKeys,
+            ReceiptActionCoverage =
+                ProcurementPurchaseOrderSodRules.ReceiptActionCoverage,
             Checks = checks
         };
     }
@@ -346,10 +362,12 @@ public sealed class ProcurementPurchaseOrderSodService :
         string correlationId,
         CancellationToken cancellationToken)
     {
-        var check = action == "Receive"
+        var isReceiptAction =
+            ProcurementPurchaseOrderSodRules.IsReceiptAction(action);
+        var check = isReceiptAction
             ? readiness.Checks.Single(item => item.Key == "receipt")
             : readiness.Checks.Single(item => item.Key == "approval");
-        var allowed = action == "Receive"
+        var allowed = isReceiptAction
             ? readiness.CanReceive
             : readiness.CanApprove;
         await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
@@ -366,9 +384,9 @@ public sealed class ProcurementPurchaseOrderSodService :
             Result = allowed
                 ? ProcurementControlEventResult.Allowed
                 : ProcurementControlEventResult.Denied,
-            RuleCode = action == "Receive" ? "RCV-004" : "PO-004",
+            RuleCode = isReceiptAction ? "RCV-004" : "PO-004",
             RuleId = check.RuleId,
-            RuleVersion = "TDC-0405",
+            RuleVersion = isReceiptAction ? "TDC-0503" : "TDC-0405",
             DecisionKeys = DecisionKeys.ToList(),
             SourceType = SourceType,
             SourceId = readiness.PurchaseOrderId,
@@ -405,7 +423,7 @@ public sealed class ProcurementPurchaseOrderSodService :
         string action,
         CancellationToken cancellationToken)
     {
-        var allowed = action == "Receive"
+        var allowed = ProcurementPurchaseOrderSodRules.IsReceiptAction(action)
             ? readiness.CanReceive
             : readiness.CanApprove;
         try
@@ -558,6 +576,7 @@ public sealed class ProcurementPurchaseOrderSodService :
         Message = message,
         EvaluatedAtUtc = source.EvaluatedAtUtc,
         DecisionKeys = source.DecisionKeys,
+        ReceiptActionCoverage = source.ReceiptActionCoverage,
         Checks = checks
     };
 

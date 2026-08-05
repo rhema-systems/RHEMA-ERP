@@ -84,13 +84,14 @@ import {
   Receipt,
   Coins,
   ShieldPlus,
+  ScanLine,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { useAuth } from '../../hooks/use-auth';
 
-interface NavItem {
+export interface NavItem {
   title: string;
   href: string;
   icon: React.ComponentType<any>;
@@ -98,11 +99,12 @@ interface NavItem {
   roles?: string[];
   permissions?: string[];
   accessMode?: 'all' | 'any';
+  navigationSurface?: 'operations' | 'settings';
 }
 
 const ADMINISTRATION_ROLES = ['admin', 'SuperAdmin', 'TenantAdmin'];
 
-const navigationItems: NavItem[] = [
+export const navigationItems: NavItem[] = [
   {
     title: 'Dashboard',
     href: '/dashboard',
@@ -125,10 +127,10 @@ const navigationItems: NavItem[] = [
         href: '/finance/general-ledger',
         icon: FileText,
         children: [
-          { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
+          { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard, navigationSurface: 'settings' },
           { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
           { title: 'Recurring Journals', href: '/finance/recurring-journals', icon: Repeat2 },
-          { title: 'Opening Balances', href: '/finance/opening-balances', icon: Database },
+          { title: 'Opening Balances', href: '/finance/opening-balances', icon: Database, navigationSurface: 'settings' },
           {
             title: 'Journal Approval Queue',
             href: '/finance/journal-entries/approvals',
@@ -141,6 +143,7 @@ const navigationItems: NavItem[] = [
         title: 'Fiscal Management',
         href: '/finance/fiscal',
         icon: Calendar,
+        navigationSurface: 'settings',
         children: [
           { title: 'Fiscal Years', href: '/finance/fiscal-years', icon: Calendar },
           { title: 'Fiscal Periods', href: '/finance/fiscal-periods', icon: Calendar },
@@ -181,7 +184,13 @@ const navigationItems: NavItem[] = [
         icon: FileText,
         children: [
           { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
-          { title: 'Suppliers', href: '/procurement/business-partners?partnerType=Supplier', icon: Users },
+          {
+            title: 'Suppliers',
+            href: '/procurement/business-partners?partnerType=Supplier',
+            icon: Users,
+            permissions: ['Finance.Read', 'Finance.Admin', 'procurement.records.read', 'procurement.supplier.manage', 'procurement.supplier.review'],
+            accessMode: 'any',
+          },
           { title: 'Purchase Orders', href: '/finance/ap/purchase-orders', icon: ShoppingCart },
           { title: 'PO Approval Queue', href: '/finance/ap/purchase-orders/approvals', icon: ShieldCheck, roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'] },
           { title: 'Goods Receipts', href: '/finance/ap/receipts', icon: Package },
@@ -200,6 +209,7 @@ const navigationItems: NavItem[] = [
               { title: 'Cash Requirements', href: '/finance/ap/reports?tab=cash', icon: Banknote },
               { title: 'Supplier Statements', href: '/finance/ap/reports?tab=statements', icon: FileText },
               { title: 'Supplier Detailed Ledger', href: '/finance/ap/reports/supplier-detailed-ledger', icon: FileText },
+              { title: 'Procurement Reconciliation', href: '/finance/ap/reports?tab=procurement-reconciliation', icon: FileText },
             ],
           },
         ],
@@ -210,11 +220,23 @@ const navigationItems: NavItem[] = [
         icon: Users,
         children: [
           { title: 'Dashboard', href: '/finance/ar/dashboard', icon: LayoutDashboard },
-          { title: 'Customer Partners', href: '/procurement/business-partners?partnerType=Customer', icon: Users },
+          {
+            title: 'Customer Partners',
+            href: '/procurement/business-partners?partnerType=Customer',
+            icon: Users,
+            permissions: ['Finance.Read', 'Finance.AR.Invoices.Manage', 'Finance.Admin'],
+            accessMode: 'any',
+          },
           { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
           { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
           { title: 'Deliveries', href: '/sales/deliveries', icon: Truck },
-          { title: 'Customers', href: '/finance/ar/customers', icon: Users },
+          {
+            title: 'Customers',
+            href: '/finance/ar/customers',
+            icon: Users,
+            permissions: ['Finance.Read', 'Finance.AR.Invoices.Manage', 'Finance.Admin'],
+            accessMode: 'any',
+          },
           { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
           { title: 'Customer Returns', href: '/sales/return-orders', icon: RotateCcw },
           { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
@@ -241,7 +263,7 @@ const navigationItems: NavItem[] = [
         href: '/finance/cash',
         icon: CreditCard,
         children: [
-          { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
+          { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building, navigationSurface: 'settings' },
           { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
           { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
           {
@@ -270,7 +292,7 @@ const navigationItems: NavItem[] = [
         href: '/finance/unit-accounting',
         icon: BarChart3,
         children: [
-          { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: BarChart3 },
+          { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: BarChart3, navigationSurface: 'settings' },
           { title: 'Unit Journal Entries', href: '/finance/unit-journal-entries', icon: FileText },
           { title: 'Unit Budgets', href: '/finance/unit-budgets', icon: BarChart3 },
           { title: 'Allocations', href: '/finance/allocations', icon: BarChart3 },
@@ -281,7 +303,13 @@ const navigationItems: NavItem[] = [
         href: '/finance/multi-currency',
         icon: CreditCard,
         children: [
-          { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
+          {
+            title: 'Exchange Rates',
+            href: '/finance/exchange-rates',
+            icon: BarChart3,
+            permissions: ['Finance.Read', 'Finance.FX.Rates.Manage', 'Finance.Admin'],
+            accessMode: 'any',
+          },
           { title: 'Rate Trends', href: '/finance/exchange-rates/trends', icon: TrendingUp },
           { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
         ],
@@ -408,7 +436,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Maintenance Mngt',
+    title: 'Maintenance',
     href: '/maintenance',
     icon: Wrench,
     permissions: ['maintenance.access'],
@@ -435,7 +463,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Fleet Management',
+    title: 'Fleet',
     href: '/maintenance/fleet',
     icon: Truck,
     permissions: ['fleet.access'],
@@ -456,7 +484,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Project Mngt',
+    title: 'Projects',
     href: '/development/projects',
     icon: Briefcase,
     permissions: ['project.access'],
@@ -484,8 +512,96 @@ const navigationItems: NavItem[] = [
     href: '/procurement',
     icon: Briefcase,
     children: [
-      { title: 'Registrations', href: '/administration/procurement/registrations', icon: FileText },
-      { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
+      {
+        title: 'Supplier Management',
+        href: '/procurement/suppliers',
+        icon: Users,
+        children: [
+          {
+            title: 'Business Partners',
+            href: '/procurement/business-partners',
+            icon: Users,
+            permissions: ['procurement.records.read', 'procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Registrations',
+            href: '/administration/procurement/registrations',
+            icon: FileText,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Pending Partners',
+            href: '/administration/procurement/business-partners/pending',
+            icon: Users,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Onboarding Tokens',
+            href: '/administration/procurement/supplier-onboarding-tokens',
+            icon: KeyRound,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Applicant Access',
+            href: '/administration/procurement/supplier-applicant-access',
+            icon: ShieldCheck,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Evidence Packs',
+            href: '/administration/procurement/supplier-evidence-packs',
+            icon: FileCheck,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Eligibility',
+            href: '/administration/procurement/supplier-eligibility',
+            icon: ClipboardCheck,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Due Diligence',
+            href: '/administration/procurement/supplier-due-diligence',
+            icon: ShieldCheck,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Approved Vendor List',
+            href: '/administration/procurement/supplier-avl',
+            icon: ListTree,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Risk & Concentration',
+            href: '/administration/procurement/supplier-risk',
+            icon: TrendingUp,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Performance',
+            href: '/administration/procurement/supplier-performance',
+            icon: Activity,
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.approve'],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Master Changes',
+            href: '/administration/procurement/supplier-master-changes',
+            icon: Building2,
+            permissions: ['procurement.supplier.manage'],
+          },
+        ],
+      },
       {
         title: 'Purchasing',
         href: '/procurement/purchasing',
@@ -567,7 +683,7 @@ const navigationItems: NavItem[] = [
           { title: 'Overview', href: '/procurement/planning', icon: LayoutDashboard },
           { title: 'Procurement Plans', href: '/procurement/planning/plans', icon: Target },
           { title: 'APP Submissions', href: '/procurement/planning/app-submissions', icon: FileCheck },
-          { title: 'Specification Templates', href: '/procurement/planning/specification-templates', icon: BookTemplate },
+          { title: 'Specification Templates', href: '/procurement/planning/specification-templates', icon: BookTemplate, navigationSurface: 'settings' },
           { title: 'Budgets', href: '/procurement/planning/budgets', icon: DollarSign },
           { title: 'Schedules', href: '/procurement/planning/schedules', icon: Calendar },
           { title: 'Annual Calendar', href: '/procurement/planning/calendar', icon: CalendarClock },
@@ -577,8 +693,26 @@ const navigationItems: NavItem[] = [
           { title: 'Reports', href: '/procurement/planning/reports', icon: FileText },
         ],
       },
-      // { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
-      // { title: 'Vendor Management', href: '/procurement/vendors', icon: Users },
+      {
+        title: 'Governance & Controls',
+        href: '/administration/procurement/master-data-changes',
+        icon: ShieldCheck,
+        children: [
+          {
+            title: 'Master Data Changes',
+            href: '/administration/procurement/master-data-changes',
+            icon: FileCheck,
+            permissions: ['procurement.access.manage'],
+          },
+          {
+            title: 'Control Events',
+            href: '/administration/procurement/control-events',
+            icon: Activity,
+            permissions: ['procurement.audit.read', 'audit.read'],
+            accessMode: 'any',
+          },
+        ],
+      },
     ],
   },
   {
@@ -587,12 +721,15 @@ const navigationItems: NavItem[] = [
     icon: Package,
     children: [
       {
-        title: 'Cards',
+        title: 'Items & Catalogue',
         href: '/inventory/cards',
         icon: Package,
+        permissions: ['procurement.inventory.read', 'procurement.inventory.master-data.manage'],
+        accessMode: 'any',
         children: [
           { title: 'Inventory Items', href: '/inventory/items', icon: Package },
           { title: 'Warehouse Items', href: '/inventory/warehouse-items', icon: Building2 },
+          { title: 'Item Identifiers', href: '/inventory/item-identifiers', icon: ScanLine },
           { title: 'Item Suppliers', href: '/inventory/item-suppliers', icon: Users },
           { title: 'Price Lists', href: '/inventory/price-lists', icon: DollarSign },
         ],
@@ -608,6 +745,76 @@ const navigationItems: NavItem[] = [
           { title: 'Inventory Transfers', href: '/inventory/transfers', icon: Package },
           { title: 'Bin Stock', href: '/inventory/bin-stock', icon: FolderTree },
           { title: 'Physical Counts', href: '/inventory/physical-counts', icon: ClipboardCheck },
+          {
+            title: 'Labels & Mobile Scanning',
+            href: '/inventory/mobile-scanning',
+            icon: ScanLine,
+            permissions: [
+              'procurement.inventory.receive',
+              'procurement.inventory.issue',
+              'procurement.inventory.transfer',
+              'procurement.inventory.count',
+            ],
+            accessMode: 'any',
+          },
+            {
+              title: 'Tracking Controls',
+              href: '/inventory/tracking-controls',
+              icon: ShieldCheck,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Negative Stock Controls',
+              href: '/inventory/negative-stock-controls',
+              icon: ShieldCheck,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Project Reservations',
+              href: '/inventory/project-reservations',
+              icon: ShieldCheck,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Replenishment',
+              href: '/inventory/replenishment',
+              icon: BellRing,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Valuation Reconciliation',
+              href: '/inventory/valuation-reconciliation',
+              icon: Scale,
+              permissions: ['Finance.Read'],
+            },
+            {
+              title: 'Ageing & Action Analytics',
+              href: '/inventory/analytics',
+              icon: BarChart3,
+              permissions: ['procurement.inventory.read'],
+            },
+            {
+              title: 'Inventory Disposal',
+              href: '/inventory/disposals',
+              icon: Gavel,
+              permissions: [
+                'procurement.inventory.read',
+                'procurement.inventory.disposal.request',
+                'procurement.inventory.disposal.approve',
+              ],
+              accessMode: 'any',
+            },
+            {
+              title: 'Directed Operations',
+              href: '/inventory/directed-operations',
+              icon: GitBranch,
+              permissions: [
+                'procurement.inventory.receive',
+                'procurement.inventory.issue',
+                'procurement.inventory.transfer',
+              ],
+              accessMode: 'any',
+            },
           { title: 'Valuation', href: '/inventory/valuation', icon: DollarSign },
         ],
       },
@@ -676,12 +883,12 @@ const navigationItems: NavItem[] = [
       { title: 'Forecasts', href: '/sales/forecasts', icon: TrendingUp },
       { title: 'Competitors', href: '/sales/competitors', icon: Swords },
       { title: 'Reports', href: '/sales/reports', icon: BarChart3 },
-      { title: 'Journal Templates', href: '/sales/journal-templates', icon: BookTemplate },
+      { title: 'Journal Templates', href: '/sales/journal-templates', icon: BookTemplate, navigationSurface: 'settings' },
     ],
   },
   {
     // Estate/DMS integration: keep Central DMS visible as a shared workspace, not nested inside another module owner.
-    title: 'Document Mngt',
+    title: 'Documents',
     href: '/document-management',
     icon: BookTemplate,
     children: [
@@ -783,6 +990,7 @@ const navigationItems: NavItem[] = [
         title: 'Workflow Setup',
         href: '/administration/workflow?q=Legal',
         icon: Workflow,
+        navigationSurface: 'settings',
         roles: ['admin', 'SystemAdmin', 'SuperAdmin', 'TenantAdmin', 'WorkflowAdmin'],
       },
     ],
@@ -825,7 +1033,7 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Helpdesk & Complaints',
+    title: 'Helpdesk',
     href: '/helpdesk/helpdesk-complaints',
     icon: HelpCircle,
     children: [
@@ -869,19 +1077,21 @@ const navigationItems: NavItem[] = [
     href: '/reports',
     icon: BarChart3,
     children: [
-      { title: 'Financial Reports', href: '/reports?module=financial', icon: CreditCard },
-      { title: 'Sales Reports', href: '/reports?module=sales', icon: ShoppingCart },
-      { title: 'HR Reports', href: '/reports/hr', icon: UserCheck },
-      { title: 'Inventory Reports', href: '/reports?module=inventory', icon: Package },
-      { title: 'Estate Reports', href: '/reports?module=estate', icon: Home },
-      { title: 'Development Reports', href: '/reports?module=development', icon: Code },
-      { title: 'Operations Reports', href: '/reports?module=operations', icon: BarChart3 },
+      { title: 'Financial Reports', href: '/reports/financial', icon: CreditCard },
+      { title: 'Procurement Reports', href: '/reports/purchasing', icon: ShoppingCart },
+      { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
+      { title: 'Sales Reports', href: '/reports/sales', icon: ShoppingCart },
+      { title: 'HR Reports', href: '/reports/human-resources', icon: UserCheck },
+      { title: 'Estate Reports', href: '/reports/estate', icon: Home },
+      { title: 'Development Reports', href: '/reports/development', icon: Code },
+      { title: 'Operations Reports', href: '/reports/operations', icon: BarChart3 },
     ],
   },
   {
     title: 'Notifications',
     href: '/notifications',
     icon: Bell,
+    navigationSurface: 'settings',
     children: [
       { title: 'Notification Center', href: '/notifications#center', icon: Bell },
       { title: 'Email Campaigns', href: '/notifications#email', icon: Mail },
@@ -893,6 +1103,7 @@ const navigationItems: NavItem[] = [
     title: 'Administration',
     href: '/administration',
     icon: Settings,
+    navigationSurface: 'settings',
     roles: ADMINISTRATION_ROLES,
     permissions: ['Finance.Admin'],
     accessMode: 'any',
@@ -1029,19 +1240,6 @@ const navigationItems: NavItem[] = [
           { title: 'Policy Simulator', href: '/administration/procurement/compliance-simulator', icon: ClipboardCheck },
           { title: 'SOD Controls', href: '/administration/procurement/sod-controls', icon: Swords },
           { title: 'Access & Committees', href: '/administration/procurement/access-controls', icon: Users },
-          { title: 'Master Data Changes', href: '/administration/procurement/master-data-changes', icon: FileCheck },
-          { title: 'Supplier Master Changes', href: '/administration/procurement/supplier-master-changes', icon: Building2 },
-          { title: 'Supplier Evidence Packs', href: '/administration/procurement/supplier-evidence-packs', icon: FileCheck },
-          { title: 'Supplier Onboarding Tokens', href: '/administration/procurement/supplier-onboarding-tokens', icon: KeyRound },
-          { title: 'Supplier Applicant Access', href: '/administration/procurement/supplier-applicant-access', icon: ShieldCheck },
-          { title: 'Supplier Eligibility', href: '/administration/procurement/supplier-eligibility', icon: ClipboardCheck },
-          { title: 'Supplier Due Diligence', href: '/administration/procurement/supplier-due-diligence', icon: ShieldCheck },
-          { title: 'Approved Vendor List', href: '/administration/procurement/supplier-avl', icon: ListTree },
-          { title: 'Supplier Risk & Concentration', href: '/administration/procurement/supplier-risk', icon: TrendingUp },
-          { title: 'Supplier Performance', href: '/administration/procurement/supplier-performance', icon: Activity },
-          { title: 'Control Events', href: '/administration/procurement/control-events', icon: Activity },
-          { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
-          { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
           { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },
           { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
           { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },
@@ -1107,7 +1305,7 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Project Mngt',
+        title: 'Projects',
         href: '/administration/project-management',
         icon: Briefcase,
         permissions: ['admin.project-management'],
@@ -1122,7 +1320,7 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Maintenance Mngt',
+        title: 'Maintenance',
         href: '/administration/maintenance',
         icon: Wrench,
         permissions: ['admin.maintenance'],
@@ -1143,7 +1341,7 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Fleet Management',
+        title: 'Fleet',
         href: '/administration/fleet-management',
         icon: Truck,
         permissions: ['admin.fleet-management'],
@@ -1214,12 +1412,40 @@ const navigationItems: NavItem[] = [
   },
 ];
 
-interface SidebarProps {
-  className?: string;
+export function selectNavigationSurface(
+  items: NavItem[],
+  surface: 'operations' | 'settings',
+  inheritedSurface: 'operations' | 'settings' = 'operations',
+): NavItem[] {
+  return items.reduce<NavItem[]>((selected, item) => {
+    const itemSurface = item.navigationSurface ?? inheritedSurface;
+    const children = item.children
+      ? selectNavigationSurface(item.children, surface, itemSurface)
+      : undefined;
+
+    if (itemSurface !== surface && (!children || children.length === 0)) {
+      return selected;
+    }
+
+    selected.push({
+      ...item,
+      children,
+    });
+    return selected;
+  }, []);
 }
 
-export function Sidebar({ className }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+export const sidebarNavigationItems = selectNavigationSurface(navigationItems, 'operations');
+export const settingsNavigationItems = selectNavigationSurface(navigationItems, 'settings');
+
+interface SidebarProps {
+  className?: string;
+  defaultCollapsed?: boolean;
+}
+
+export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [hoverExpanded, setHoverExpanded] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -1232,6 +1458,7 @@ export function Sidebar({ className }: SidebarProps) {
   const openTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pathname = usePathname() ?? '';
   const { hasAnyRole, hasAnyPermission } = useAuth();
+  const sidebarIsCollapsed = collapsed && !hoverExpanded;
 
   useEffect(() => {
     setMounted(true);
@@ -1295,6 +1522,7 @@ export function Sidebar({ className }: SidebarProps) {
     cancelPendingClose();
     closeTimeoutRef.current = setTimeout(() => {
       clearMenus();
+      setHoverExpanded(false);
     }, delay);
   };
 
@@ -1348,7 +1576,7 @@ export function Sidebar({ className }: SidebarProps) {
     const rect = event.currentTarget.getBoundingClientRect();
     
     // Estimate menu height based on number of children
-    const menuItem = filterNavItems(navigationItems).find(item => item.title === itemTitle);
+    const menuItem = filterNavItems(sidebarNavigationItems).find(item => item.title === itemTitle);
     const childCount = menuItem?.children?.length || 0;
     const estimatedHeight = Math.min(600, (childCount * 40) + 16); // 40px per item + padding
     
@@ -1379,7 +1607,7 @@ export function Sidebar({ className }: SidebarProps) {
     const menuKey = `${parentTitle}-${childTitle}`;
     
     // Estimate menu height based on number of grandchildren
-    const parentItem = filterNavItems(navigationItems).find(item => item.title === parentTitle);
+    const parentItem = filterNavItems(sidebarNavigationItems).find(item => item.title === parentTitle);
     const childItem = parentItem?.children?.find(child => child.title === childTitle);
     const grandChildCount = childItem?.children?.length || 0;
     const estimatedHeight = Math.min(600, (grandChildCount * 40) + 16); // 40px per item + padding
@@ -1411,7 +1639,7 @@ export function Sidebar({ className }: SidebarProps) {
     const menuKey = `${parentTitle}-${childTitle}-${grandChildTitle}`;
     
     // Estimate menu height based on number of great-grandchildren (if any)
-    const parentItem = filterNavItems(navigationItems).find(item => item.title === parentTitle);
+    const parentItem = filterNavItems(sidebarNavigationItems).find(item => item.title === parentTitle);
     const childItem = parentItem?.children?.find(child => child.title === childTitle);
     const grandChildItem = childItem?.children?.find(grandChild => grandChild.title === grandChildTitle);
     const greatGrandChildCount = grandChildItem?.children?.length || 0;
@@ -1476,6 +1704,19 @@ export function Sidebar({ className }: SidebarProps) {
     scheduleMenuClose();
   };
 
+  const handleSidebarMouseEnter = () => {
+    cancelPendingClose();
+    if (collapsed) {
+      setHoverExpanded(true);
+    }
+  };
+
+  const toggleSidebar = () => {
+    setCollapsed(previous => !previous);
+    setHoverExpanded(false);
+    clearMenus();
+  };
+
   const toggleSection = (title: string) => {
     const newExpanded = new Set(expandedSections);
     if (newExpanded.has(title)) {
@@ -1528,16 +1769,17 @@ export function Sidebar({ className }: SidebarProps) {
     <div className="relative">
       <div
         ref={sidebarRef}
+        onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
         className={cn(
-          'flex h-full flex-col bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-r border-slate-200/50 dark:border-slate-800/50 transition-all duration-300',
-          collapsed ? 'w-16' : 'w-72',
+          'flex h-full flex-col bg-white/95 dark:bg-[#181818]/95 backdrop-blur-xl border-r border-slate-200/50 dark:border-neutral-800/70 transition-all duration-300',
+          sidebarIsCollapsed ? 'w-16' : 'w-64',
           className
         )}
       >
         {/* Header */}
-        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/50 dark:border-slate-800/50">
-          {!collapsed && (
+        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/50 dark:border-neutral-800/70">
+          {!sidebarIsCollapsed && (
             <div className="flex items-center space-x-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600">
                 <Building2 className="h-5 w-5 text-white" />
@@ -1550,7 +1792,8 @@ export function Sidebar({ className }: SidebarProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleSidebar}
+            aria-label={collapsed ? 'Keep sidebar expanded' : 'Collapse sidebar'}
             className="h-8 w-8 p-0"
           >
             {collapsed ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
@@ -1559,7 +1802,7 @@ export function Sidebar({ className }: SidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0 overflow-y-auto p-2">
-        {filterNavItems(navigationItems).map((item) => {
+        {filterNavItems(sidebarNavigationItems).map((item) => {
           const Icon = item.icon;
           const hasChildren = item.children && item.children.length > 0;
           const itemIsActive = isActive(item.href);
@@ -1578,7 +1821,7 @@ export function Sidebar({ className }: SidebarProps) {
                     openMainItemMenu(item.title, e);
                   }}
                   className={cn(
-                    'flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                    'flex w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
                     itemIsActive
                       ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
                       : 'text-slate-700 dark:text-slate-300'
@@ -1586,9 +1829,9 @@ export function Sidebar({ className }: SidebarProps) {
                 >
                   <div className="flex items-center space-x-4">
                     <Icon className="h-6 w-6 flex-shrink-0" />
-                    {!collapsed && <span>{item.title}</span>}
+                    {!sidebarIsCollapsed && <span>{item.title}</span>}
                   </div>
-                  {!collapsed && hasChildren && (
+                  {!sidebarIsCollapsed && hasChildren && (
                     <ChevronRight className="h-5 w-5" />
                   )}
                 </button>
@@ -1596,14 +1839,14 @@ export function Sidebar({ className }: SidebarProps) {
                 <Link
                     href={item.href}
                     className={cn(
-                      'flex items-center space-x-4 rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      'flex items-center space-x-4 rounded-xl px-4 py-3 text-sm font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
                       itemIsActive
                         ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
                     <Icon className="h-6 w-6 flex-shrink-0" />
-                    {!collapsed && <span>{item.title}</span>}
+                    {!sidebarIsCollapsed && <span>{item.title}</span>}
                   </Link>
                 )}
             </div>
@@ -1617,7 +1860,7 @@ export function Sidebar({ className }: SidebarProps) {
         <div
           data-sidebar-flyout="true"
           className="fixed z-40"
-          style={getBridgeStyle(collapsed ? 64 : 288, hoveredItem)}
+          style={getBridgeStyle(sidebarIsCollapsed ? 64 : 256, hoveredItem)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />
@@ -1627,7 +1870,7 @@ export function Sidebar({ className }: SidebarProps) {
       {hoveredItem && menuPositions[hoveredItem] && (
         <div
           data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+              className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[hoveredItem].x,
             top: menuPositions[hoveredItem].y,
@@ -1637,7 +1880,7 @@ export function Sidebar({ className }: SidebarProps) {
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         >
-          {filterNavItems(navigationItems)
+          {filterNavItems(sidebarNavigationItems)
             .find(item => item.title === hoveredItem)
             ?.children?.map((child) => {
               const ChildIcon = child.icon;
@@ -1659,7 +1902,7 @@ export function Sidebar({ className }: SidebarProps) {
                         cancelPendingOpen();
                         openChildItemMenu(hoveredItem, child.title, e);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
+                      className="w-full flex items-center gap-3 px-4 py-2 text-[13px] text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       <ChildIcon className="h-4 w-4 flex-shrink-0" />
                       <span className="flex-1">{child.title}</span>
@@ -1670,7 +1913,7 @@ export function Sidebar({ className }: SidebarProps) {
                       href={child.href}
                       onClick={clearMenus}
                       className={cn(
-                        'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                        'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                         childIsActive
                           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                           : 'text-slate-700 dark:text-slate-300'
@@ -1701,7 +1944,7 @@ export function Sidebar({ className }: SidebarProps) {
       {hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`] && (
         <div
           data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+              className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[`${hoveredItem}-${hoveredChild}`].x,
             top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
@@ -1711,7 +1954,7 @@ export function Sidebar({ className }: SidebarProps) {
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         >
-          {filterNavItems(navigationItems)
+          {filterNavItems(sidebarNavigationItems)
             .find(item => item.title === hoveredItem)
             ?.children?.find(child => child.title === hoveredChild)
             ?.children?.map((grandchild) => {
@@ -1733,7 +1976,7 @@ export function Sidebar({ className }: SidebarProps) {
                         cancelPendingOpen();
                         openGrandChildItemMenu(hoveredItem, hoveredChild, grandchild.title, e);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
+                      className="w-full flex items-center gap-3 px-4 py-2 text-[13px] text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
                     >
                       <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
                       <span className="flex-1">{grandchild.title}</span>
@@ -1744,7 +1987,7 @@ export function Sidebar({ className }: SidebarProps) {
                       href={grandchild.href}
                       onClick={clearMenus}
                       className={cn(
-                        'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                        'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                         grandchildIsActive
                           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                           : 'text-slate-600 dark:text-slate-400'
@@ -1775,7 +2018,7 @@ export function Sidebar({ className }: SidebarProps) {
       {hoveredGrandChild && hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`] && (
         <div
           data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+              className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x,
             top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y,
@@ -1785,7 +2028,7 @@ export function Sidebar({ className }: SidebarProps) {
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         >
-          {filterNavItems(navigationItems)
+          {filterNavItems(sidebarNavigationItems)
             .find(item => item.title === hoveredItem)
             ?.children?.find(child => child.title === hoveredChild)
             ?.children?.find(grandchild => grandchild.title === hoveredGrandChild)
@@ -1799,7 +2042,7 @@ export function Sidebar({ className }: SidebarProps) {
                   href={greatGrandchild.href}
                   onClick={clearMenus}
                   className={cn(
-                    'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                    'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                     greatGrandchildIsActive
                       ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                       : 'text-slate-500 dark:text-slate-500'

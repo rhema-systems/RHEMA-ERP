@@ -35,8 +35,10 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
     private IGenericRepository<Permission> Permissions => _unitOfWork.Repository<Permission>();
     private IGenericRepository<UserTenant> UserTenants => _unitOfWork.Repository<UserTenant>();
     private IGenericRepository<Warehouse> Warehouses => _unitOfWork.Repository<Warehouse>();
+    private IGenericRepository<WarehouseLocation> WarehouseLocations => _unitOfWork.Repository<WarehouseLocation>();
     private IGenericRepository<ProcurementResponsibilityAssignment> Assignments => _unitOfWork.Repository<ProcurementResponsibilityAssignment>();
     private IGenericRepository<ProcurementResponsibilityWarehouse> AssignmentWarehouses => _unitOfWork.Repository<ProcurementResponsibilityWarehouse>();
+    private IGenericRepository<ProcurementResponsibilityLocation> AssignmentLocations => _unitOfWork.Repository<ProcurementResponsibilityLocation>();
     private IGenericRepository<ProcurementCommittee> Committees => _unitOfWork.Repository<ProcurementCommittee>();
     private IGenericRepository<ProcurementCommitteeMember> CommitteeMembers => _unitOfWork.Repository<ProcurementCommitteeMember>();
     private IGenericRepository<WorkflowDefinition> WorkflowDefinitions => _unitOfWork.Repository<WorkflowDefinition>();
@@ -132,6 +134,23 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             }).ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ProcurementAccessLocationOptionDto>> GetLocationsAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureAdministrator();
+        return await WarehouseLocations.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.Warehouse)
+            .AsNoTracking().OrderBy(item => item.Warehouse.Code).ThenBy(item => item.LocationCode)
+            .Select(item => new ProcurementAccessLocationOptionDto
+            {
+                LocationId = item.Id,
+                WarehouseId = item.WarehouseId,
+                WarehouseCode = item.Warehouse.Code,
+                Code = item.LocationCode,
+                Name = item.Name ?? item.LocationCode,
+                IsActive = item.IsActive
+            }).ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<ProcurementResponsibilityAssignmentDto>> GetAssignmentsAsync(CancellationToken cancellationToken = default)
     {
         EnsureAdministrator();
@@ -163,11 +182,20 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             throw new ProcurementAccessValidationException("WAREHOUSE_SCOPE_REQUIRED", "A warehouse-scoped role requires All or Restricted warehouse access.");
         if (!warehouseRole && request.WarehouseScopeMode != ProcurementWarehouseScopeMode.None)
             throw new ProcurementAccessValidationException("WAREHOUSE_SCOPE_NOT_APPLICABLE", "This role does not accept a warehouse scope.");
+        if (warehouseRole && request.LocationScopeMode == ProcurementLocationScopeMode.None)
+            throw new ProcurementAccessValidationException("LOCATION_SCOPE_REQUIRED", "A warehouse-scoped role requires All or Restricted location access.");
+        if (!warehouseRole && request.LocationScopeMode != ProcurementLocationScopeMode.None)
+            throw new ProcurementAccessValidationException("LOCATION_SCOPE_NOT_APPLICABLE", "This role does not accept a location scope.");
         var requestedWarehouseIds = request.WarehouseIds.Distinct().ToList();
+        var requestedLocationIds = request.LocationIds.Distinct().ToList();
         if (request.WarehouseScopeMode == ProcurementWarehouseScopeMode.Restricted && requestedWarehouseIds.Count == 0)
             throw new ProcurementAccessValidationException("WAREHOUSE_REQUIRED", "Restricted scope requires at least one warehouse.");
         if (request.WarehouseScopeMode != ProcurementWarehouseScopeMode.Restricted && requestedWarehouseIds.Count > 0)
             throw new ProcurementAccessValidationException("WAREHOUSE_SCOPE_INVALID", "Warehouse IDs are accepted only for Restricted scope.");
+        if (request.LocationScopeMode == ProcurementLocationScopeMode.Restricted && requestedLocationIds.Count == 0)
+            throw new ProcurementAccessValidationException("LOCATION_REQUIRED", "Restricted location scope requires at least one warehouse location.");
+        if (request.LocationScopeMode != ProcurementLocationScopeMode.Restricted && requestedLocationIds.Count > 0)
+            throw new ProcurementAccessValidationException("LOCATION_SCOPE_INVALID", "Location IDs are accepted only for Restricted scope.");
         if (requestedWarehouseIds.Count > 0)
         {
             var warehouseCount = await Warehouses.GetQueryable(item =>
@@ -175,6 +203,19 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 .CountAsync(cancellationToken);
             if (warehouseCount != requestedWarehouseIds.Count)
                 throw new ProcurementAccessNotFoundException("One or more selected warehouses do not belong to the current tenant.");
+        }
+        var requestedLocations = new List<WarehouseLocation>();
+        if (requestedLocationIds.Count > 0)
+        {
+            requestedLocations = await WarehouseLocations.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.IsActive && requestedLocationIds.Contains(item.Id))
+                .AsNoTracking().ToListAsync(cancellationToken);
+            if (requestedLocations.Count != requestedLocationIds.Count)
+                throw new ProcurementAccessNotFoundException("One or more selected locations do not belong to the current tenant.");
+            if (request.WarehouseScopeMode == ProcurementWarehouseScopeMode.Restricted &&
+                requestedLocations.Any(item => !requestedWarehouseIds.Contains(item.InventoryWarehouseId)))
+                throw new ProcurementAccessValidationException("LOCATION_WAREHOUSE_SCOPE_INVALID",
+                    "Every restricted location must belong to one of the assignment's restricted warehouses.");
         }
 
         var duplicate = await Assignments.GetQueryable(item =>
@@ -189,7 +230,8 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         {
             assignment = await Assignments.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId && item.Id == id.Value && !item.IsDeleted)
-                .Include(item => item.Warehouses).SingleOrDefaultAsync(cancellationToken)
+                .Include(item => item.Warehouses).Include(item => item.Locations)
+                .SingleOrDefaultAsync(cancellationToken)
                 ?? throw new ProcurementAccessNotFoundException("Responsibility assignment was not found.");
             EnsureRowVersion(assignment.RowVersion, request.RowVersion);
             before = AssignmentAuditShape(assignment);
@@ -199,6 +241,13 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 scope.DeletedAt = DateTime.UtcNow;
                 scope.DeletedBy = _currentUser.Username;
                 await AssignmentWarehouses.UpdateAsync(scope);
+            }
+            foreach (var scope in assignment.Locations.Where(item => !item.IsDeleted))
+            {
+                scope.IsDeleted = true;
+                scope.DeletedAt = DateTime.UtcNow;
+                scope.DeletedBy = _currentUser.Username;
+                await AssignmentLocations.UpdateAsync(scope);
             }
         }
         else
@@ -218,6 +267,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         assignment.RoleId = configuredRole.RoleId;
         assignment.RoleName = roleDefinition.Code;
         assignment.WarehouseScopeMode = request.WarehouseScopeMode;
+        assignment.LocationScopeMode = request.LocationScopeMode;
         assignment.EffectiveFrom = EnsureUtc(request.EffectiveFrom);
         assignment.EffectiveTo = request.EffectiveTo.HasValue ? EnsureUtc(request.EffectiveTo.Value) : null;
         assignment.IsActive = request.IsActive;
@@ -241,8 +291,23 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             });
         }
 
+        foreach (var location in requestedLocations)
+        {
+            await AssignmentLocations.AddAsync(new ProcurementResponsibilityLocation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _currentUser.TenantId,
+                AssignmentId = assignment.Id,
+                WarehouseId = location.InventoryWarehouseId,
+                WarehouseLocationId = location.Id,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUser.Username,
+                CreatedById = _currentUser.UserId
+            });
+        }
+
         await AddAuditAsync(id.HasValue ? "ASSIGNMENT_UPDATED" : "ASSIGNMENT_CREATED", "ProcurementResponsibilityAssignment",
-            assignment.Id, before, AssignmentAuditShape(assignment, requestedWarehouseIds), correlationId, cancellationToken);
+            assignment.Id, before, AssignmentAuditShape(assignment, requestedWarehouseIds, requestedLocationIds), correlationId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var saved = (await LoadAssignmentsAsync(cancellationToken)).Single(item => item.Id == assignment.Id);
         return MapAssignment(saved);
@@ -444,6 +509,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 item.TenantId == _currentUser.TenantId && item.UserId == _currentUser.UserId && !item.IsDeleted && item.IsActive &&
                 item.EffectiveFrom <= now && (!item.EffectiveTo.HasValue || item.EffectiveTo >= now))
             .Include(item => item.Warehouses.Where(scope => !scope.IsDeleted))
+            .Include(item => item.Locations.Where(scope => !scope.IsDeleted))
             .AsNoTracking().ToListAsync(cancellationToken);
         var roleNames = assignments.Select(item => item.RoleName).Distinct().ToList();
         var permittedRoles = await Permissions.GetQueryable(item =>
@@ -478,6 +544,38 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             }
         }
 
+        if (matches.Count > 0 && request.RequireLocationScope && !request.LocationId.HasValue)
+        {
+            matches = matches.Where(item => item.LocationScopeMode == ProcurementLocationScopeMode.All).ToList();
+            if (matches.Count == 0)
+            {
+                code = "ACCESS_LOCATION_REQUIRED";
+                message = "An explicit assigned warehouse location is required for this operation.";
+            }
+        }
+        else if (matches.Count > 0 && request.LocationId.HasValue)
+        {
+            var location = await WarehouseLocations.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && item.Id == request.LocationId.Value &&
+                    !item.IsDeleted && item.IsActive)
+                .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+                ?? throw new ProcurementAccessNotFoundException("The selected location does not belong to the current tenant.");
+            if (!request.WarehouseId.HasValue ||
+                (location.WarehouseId != request.WarehouseId.Value &&
+                 (!location.IsConsignmentBin || location.ConsignmentWarehouseId != request.WarehouseId.Value)))
+                throw new ProcurementAccessValidationException("LOCATION_WAREHOUSE_MISMATCH",
+                    "The selected location does not belong to the requested warehouse.");
+            matches = matches.Where(item => item.LocationScopeMode == ProcurementLocationScopeMode.All ||
+                                            (item.LocationScopeMode == ProcurementLocationScopeMode.Restricted &&
+                                             item.Locations.Any(scope => scope.WarehouseLocationId == request.LocationId.Value)))
+                .ToList();
+            if (matches.Count == 0)
+            {
+                code = "ACCESS_LOCATION_DENIED";
+                message = "The current actor is not assigned to the requested warehouse location.";
+            }
+        }
+
         if (matches.Count > 0 && !string.IsNullOrWhiteSpace(request.CommitteeCode))
         {
             var committee = await Committees.GetQueryable(item =>
@@ -506,6 +604,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             TenantId = _currentUser.TenantId,
             PermissionCode = permission.Code,
             WarehouseId = request.WarehouseId,
+            LocationId = request.LocationId,
             CommitteeCode = request.CommitteeCode?.Trim(),
             MatchedAssignmentIds = matches.Select(item => item.Id).ToList(),
             MatchedRoles = matches.Select(item => item.RoleName).Distinct().ToList(),
@@ -517,7 +616,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             if (!decision.Allowed)
             {
                 await AddAuditAsync("DENIED", "ProcurementAccessCapability", Guid.Empty, null,
-                    new { decision.Code, decision.PermissionCode, decision.WarehouseId, decision.CommitteeCode, request.SourceType, request.SourceReference, decision.Message },
+                    new { decision.Code, decision.PermissionCode, decision.WarehouseId, decision.LocationId, decision.CommitteeCode, request.SourceType, request.SourceReference, decision.Message },
                     correlationId, cancellationToken, request.SourceReference);
             }
             await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
@@ -532,7 +631,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 SourceType = request.SourceType,
                 SourceReference = request.SourceReference,
                 Reason = decision.Message,
-                InputValues = new { request.WarehouseId, request.CommitteeCode, Permission = permission.Code },
+                InputValues = new { request.WarehouseId, request.LocationId, request.RequireLocationScope, request.CommitteeCode, Permission = permission.Code },
                 ResultValues = new { decision.Allowed, decision.Code, decision.MatchedAssignmentIds, decision.MatchedRoles },
                 CorrelationId = correlationId,
                 OccurredAtUtc = decision.EvaluatedAtUtc
@@ -625,6 +724,8 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         Assignments.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .Include(item => item.User).Include(item => item.Role)
             .Include(item => item.Warehouses.Where(scope => !scope.IsDeleted)).ThenInclude(scope => scope.Warehouse)
+            .Include(item => item.Locations.Where(scope => !scope.IsDeleted)).ThenInclude(scope => scope.WarehouseLocation)
+            .Include(item => item.Locations.Where(scope => !scope.IsDeleted)).ThenInclude(scope => scope.Warehouse)
             .AsNoTracking().OrderBy(item => item.User.FirstName).ThenBy(item => item.RoleName).ToListAsync(cancellationToken);
 
     private async Task<(Guid RoleId, string RoleName)?> ResolveConfiguredRoleAsync(string roleName, CancellationToken cancellationToken)
@@ -683,6 +784,16 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             Name = scope.Warehouse.Name,
             IsActive = scope.Warehouse.IsActive
         }).ToList(),
+        LocationScopeMode = item.LocationScopeMode,
+        Locations = item.Locations.Where(scope => !scope.IsDeleted).Select(scope => new ProcurementAccessLocationOptionDto
+        {
+            LocationId = scope.WarehouseLocationId,
+            WarehouseId = scope.WarehouseId,
+            WarehouseCode = scope.Warehouse.Code,
+            Code = scope.WarehouseLocation.LocationCode,
+            Name = scope.WarehouseLocation.Name ?? scope.WarehouseLocation.LocationCode,
+            IsActive = scope.WarehouseLocation.IsActive
+        }).ToList(),
         EffectiveFrom = item.EffectiveFrom,
         EffectiveTo = item.EffectiveTo,
         IsActive = item.IsActive,
@@ -727,13 +838,18 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         };
     }
 
-    private static object AssignmentAuditShape(ProcurementResponsibilityAssignment item, IReadOnlyList<Guid>? warehouses = null) => new
+    private static object AssignmentAuditShape(
+        ProcurementResponsibilityAssignment item,
+        IReadOnlyList<Guid>? warehouses = null,
+        IReadOnlyList<Guid>? locations = null) => new
     {
         item.UserId,
         item.RoleId,
         item.RoleName,
         item.WarehouseScopeMode,
         WarehouseIds = warehouses ?? item.Warehouses.Where(scope => !scope.IsDeleted).Select(scope => scope.WarehouseId).ToList(),
+        item.LocationScopeMode,
+        LocationIds = locations ?? item.Locations.Where(scope => !scope.IsDeleted).Select(scope => scope.WarehouseLocationId).ToList(),
         item.EffectiveFrom,
         item.EffectiveTo,
         item.IsActive,

@@ -122,6 +122,12 @@ public interface IProcurementBudgetService
     Task UtilizeCommittedBudgetAsync(Guid budgetId, decimal amount, string? category = null);
 
     /// <summary>
+    /// Resolve the budget linked to a purchase order and move its committed amount to utilized.
+    /// Returns false when the purchase order is not linked to an active/approved procurement budget.
+    /// </summary>
+    Task<bool> UtilizePurchaseOrderCommittedBudgetAsync(Guid purchaseOrderId, decimal amount);
+
+    /// <summary>
     /// Get available budgets for linking (Active/Approved) for a department and fiscal year
     /// </summary>
     Task<IEnumerable<ProcurementBudgetDto>> GetAvailableBudgetsForLinkingAsync(Guid departmentId, int fiscalYear);

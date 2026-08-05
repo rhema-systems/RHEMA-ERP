@@ -45,6 +45,7 @@ namespace ErpSystem.Core.Interfaces
         IQueryable<T> GetQueryable();
         IQueryable<T> GetQueryable(Expression<Func<T, bool>> predicate);
         IQueryable<T> GetQueryableIncludingDeleted(Expression<Func<T, bool>> predicate);
+        IReadOnlyCollection<T> GetAddedEntities();
         Task<IEnumerable<TResult>> GetProjectedAsync<TResult>(Expression<Func<T, TResult>> projection);
         Task<IEnumerable<TResult>> GetProjectedAsync<TResult>(Expression<Func<T, bool>> predicate, Expression<Func<T, TResult>> projection);
 

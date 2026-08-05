@@ -5,6 +5,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance;
@@ -213,6 +214,29 @@ public class VendorInvoice : TenantEntity
 
     [MaxLength(2000)]
     public string? MatchingNotes { get; set; }
+
+    /// <summary>
+    /// Immutable TDC-0504 control-event lineage for the latest server-derived
+    /// three-way evaluation. PO-linked invoices cannot enter approval without it.
+    /// </summary>
+    public Guid? MatchingControlEventId { get; set; }
+
+    [MaxLength(64)]
+    public string? MatchingSnapshotHash { get; set; }
+
+    public DateTime? MatchingEvaluatedAtUtc { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal MatchingPriceTolerancePercent { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal MatchingQuantityTolerancePercent { get; set; }
+
+    /// <summary>
+    /// Optional independently approved AP-006 exception event. TDC-0504 only
+    /// consumes this trusted outcome; TDC-0507 owns its request/approval/report lifecycle.
+    /// </summary>
+    public Guid? MatchExceptionControlEventId { get; set; }
 
     // ── Status & Approval ───────────────────────────────────────────────
 
@@ -466,6 +490,13 @@ public class VendorPayment : TenantEntity
     public Guid? AuthorizedById { get; set; }
     public DateTime? AuthorizedDate { get; set; }
 
+    /// <summary>
+    /// Immutable AP-004/TDC-0506 decision proving that the payment approver
+    /// was independent of every allocated invoice processor.
+    /// </summary>
+    public Guid? InvoicePaymentSodControlEventId { get; set; }
+    public virtual ProcurementControlEvent? InvoicePaymentSodControlEvent { get; set; }
+
     public DateTime? ClearedDate { get; set; }
 
     // ── Batch Link ──────────────────────────────────────────────────────
@@ -533,6 +564,19 @@ public class VendorPaymentAllocation : TenantEntity
     public Guid? ApplicationJournalEntryId { get; set; }
     public Guid? ApplicationPostingEventId { get; set; }
 
+    /// <summary>
+    /// Immutable AP-003 decision lineage captured immediately before the
+    /// positive settlement mutation. Reversals deliberately do not require a
+    /// new readiness decision because they release rather than consume funds.
+    /// </summary>
+    public Guid? PaymentReadinessControlEventId { get; set; }
+    public virtual ProcurementControlEvent? PaymentReadinessControlEvent { get; set; }
+
+    [MaxLength(64)]
+    public string? PaymentReadinessSnapshotHash { get; set; }
+
+    public DateTime? PaymentReadinessEvaluatedAtUtc { get; set; }
+
     // ── Multi-tenant ────────────────────────────────────────────────────
 
     public Guid TenantId { get; set; }
@@ -587,6 +631,12 @@ public class PaymentBatch : TenantEntity
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
 
+    /// <summary>
+    /// Immutable AP-004/TDC-0506 decision for the exact batch invoice set.
+    /// </summary>
+    public Guid? InvoicePaymentSodControlEventId { get; set; }
+    public virtual ProcurementControlEvent? InvoicePaymentSodControlEvent { get; set; }
+
     public Guid? ProcessedById { get; set; }
     public DateTime? ProcessedDate { get; set; }
 
@@ -601,6 +651,7 @@ public class PaymentBatch : TenantEntity
     // ── Navigation ──────────────────────────────────────────────────────
 
     public virtual ICollection<PaymentBatchItem> Items { get; set; } = new List<PaymentBatchItem>();
+    public virtual ICollection<PaymentBatchInvoice> Invoices { get; set; } = new List<PaymentBatchInvoice>();
 }
 
 /// <summary>
@@ -629,6 +680,190 @@ public class PaymentBatchItem : TenantEntity
 
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;
+
+    public virtual ICollection<PaymentBatchInvoice> Invoices { get; set; } = new List<PaymentBatchInvoice>();
+}
+
+/// <summary>
+/// Controlled AP-006/TDC-0507 exception lifecycle for a specific immutable
+/// three-way-match snapshot.
+/// </summary>
+public enum VendorInvoiceMatchExceptionStatus
+{
+    PendingApproval = 1,
+    Approved = 2,
+    Rejected = 3,
+    Cancelled = 4,
+    Expired = 5
+}
+
+public enum VendorInvoiceMatchExceptionEvidenceKind
+{
+    WorkflowEvidenceDocument = 1,
+    CentralDocument = 2
+}
+
+public enum VendorInvoiceMatchCorrectiveActionStatus
+{
+    Planned = 1,
+    Completed = 2
+}
+
+/// <summary>
+/// Locks a payment batch to the exact invoice set selected at creation. Batch
+/// approval and processing revalidate these rows and never discover additional
+/// supplier invoices dynamically.
+/// </summary>
+public class PaymentBatchInvoice : TenantEntity
+{
+    [Required]
+    public Guid PaymentBatchId { get; set; }
+    public virtual PaymentBatch PaymentBatch { get; set; } = null!;
+
+    [Required]
+    public Guid PaymentBatchItemId { get; set; }
+    public virtual PaymentBatchItem PaymentBatchItem { get; set; } = null!;
+
+    [Required]
+    public Guid VendorPaymentId { get; set; }
+    public virtual VendorPayment VendorPayment { get; set; } = null!;
+
+    [Required]
+    public Guid VendorInvoiceId { get; set; }
+    public virtual VendorInvoice VendorInvoice { get; set; } = null!;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Amount { get; set; }
+
+    [MaxLength(50)]
+    public string Status { get; set; } = "Pending";
+
+    [MaxLength(500)]
+    public string? FailureReason { get; set; }
+
+    public Guid PaymentReadinessControlEventId { get; set; }
+    public virtual ProcurementControlEvent PaymentReadinessControlEvent { get; set; } = null!;
+
+    [Required, MaxLength(64)]
+    public string PaymentReadinessSnapshotHash { get; set; } = string.Empty;
+
+    public DateTime PaymentReadinessEvaluatedAtUtc { get; set; }
+
+    public Guid TenantId { get; set; }
+    public virtual Tenant Tenant { get; set; } = null!;
+}
+
+#endregion
+
+#region Vendor Invoice Match Exceptions
+
+/// <summary>
+/// Finance-owned exception request that produces the narrow AP-006 control
+/// event already consumed by the mandatory match and payment-readiness gates.
+/// It does not allocate or post a payment.
+/// </summary>
+[Table("VendorInvoiceMatchException")]
+public class VendorInvoiceMatchException : TenantEntity
+{
+    public Guid VendorInvoiceId { get; set; }
+    public virtual VendorInvoice VendorInvoice { get; set; } = null!;
+    public Guid PurchaseOrderId { get; set; }
+    public virtual PurchaseOrder PurchaseOrder { get; set; } = null!;
+    [Range(1, int.MaxValue)] public int Sequence { get; set; }
+    public VendorInvoiceMatchExceptionStatus Status { get; set; } =
+        VendorInvoiceMatchExceptionStatus.PendingApproval;
+
+    [Required, MaxLength(200)] public string VarianceType { get; set; } = string.Empty;
+    [Column(TypeName = "decimal(5,2)")] public decimal PriceTolerancePercent { get; set; }
+    [Column(TypeName = "decimal(5,2)")] public decimal QuantityTolerancePercent { get; set; }
+    [Required, MaxLength(100)] public string RootCauseCategory { get; set; } = string.Empty;
+    [Required, MaxLength(2000)] public string RootCauseDescription { get; set; } = string.Empty;
+    [Required, MaxLength(2000)] public string Justification { get; set; } = string.Empty;
+    [Required, MaxLength(2000)] public string CorrectiveAction { get; set; } = string.Empty;
+    public Guid CorrectiveActionOwnerId { get; set; }
+    [Required, MaxLength(300)] public string CorrectiveActionOwnerName { get; set; } = string.Empty;
+    public DateTime CorrectiveActionDueAtUtc { get; set; }
+    public VendorInvoiceMatchCorrectiveActionStatus CorrectiveActionStatus { get; set; } =
+        VendorInvoiceMatchCorrectiveActionStatus.Planned;
+    public DateTime? CorrectiveActionCompletedAtUtc { get; set; }
+    public Guid? CorrectiveActionCompletedById { get; set; }
+    [MaxLength(2000)] public string? CorrectiveActionCompletionNote { get; set; }
+
+    public DateTime ExpiresAtUtc { get; set; }
+    [Required, MaxLength(64)] public string InvoiceSnapshotHash { get; set; } = string.Empty;
+    [Required, Column(TypeName = "nvarchar(max)")] public string VarianceSnapshotJson { get; set; } = "[]";
+    public Guid? ConfigurationProfileId { get; set; }
+    public int? ConfigurationProfileVersion { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public virtual WorkflowInstance? WorkflowInstance { get; set; }
+    public Guid RequestedById { get; set; }
+    [Required, MaxLength(300)] public string RequestedByName { get; set; } = string.Empty;
+    public DateTime RequestedAtUtc { get; set; }
+    public Guid? FinalApprovedById { get; set; }
+    [MaxLength(300)] public string? FinalApprovedByName { get; set; }
+    public DateTime? FinalApprovedAtUtc { get; set; }
+    public Guid? RejectedById { get; set; }
+    [MaxLength(300)] public string? RejectedByName { get; set; }
+    public DateTime? RejectedAtUtc { get; set; }
+    [MaxLength(2000)] public string? DecisionComment { get; set; }
+    public Guid? ApprovalControlEventId { get; set; }
+    public virtual ProcurementControlEvent? ApprovalControlEvent { get; set; }
+    [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [Required, MaxLength(100)] public string CorrelationId { get; set; } = string.Empty;
+    [Required, MaxLength(64)] public string IntegrityHash { get; set; } = string.Empty;
+    [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public virtual ICollection<VendorInvoiceMatchExceptionVariance> Variances { get; set; } =
+        new List<VendorInvoiceMatchExceptionVariance>();
+    public virtual ICollection<VendorInvoiceMatchExceptionEvidence> Evidence { get; set; } =
+        new List<VendorInvoiceMatchExceptionEvidence>();
+    public virtual ICollection<VendorInvoiceMatchExceptionAction> Actions { get; set; } =
+        new List<VendorInvoiceMatchExceptionAction>();
+}
+
+[Table("VendorInvoiceMatchExceptionVariance")]
+public class VendorInvoiceMatchExceptionVariance : TenantEntity
+{
+    public Guid MatchExceptionId { get; set; }
+    public virtual VendorInvoiceMatchException MatchException { get; set; } = null!;
+    [Required, MaxLength(100)] public string VarianceType { get; set; } = string.Empty;
+    [Required, MaxLength(500)] public string ItemDescription { get; set; } = string.Empty;
+    [Column(TypeName = "decimal(18,4)")] public decimal ActualValue { get; set; }
+    [Column(TypeName = "decimal(18,4)")] public decimal ExpectedValue { get; set; }
+    [Column(TypeName = "decimal(18,4)")] public decimal Variance { get; set; }
+    [Column(TypeName = "decimal(9,4)")] public decimal VariancePercentage { get; set; }
+    [Column(TypeName = "decimal(5,2)")] public decimal ConfiguredTolerancePercent { get; set; }
+}
+
+[Table("VendorInvoiceMatchExceptionEvidence")]
+public class VendorInvoiceMatchExceptionEvidence : TenantEntity
+{
+    public Guid MatchExceptionId { get; set; }
+    public virtual VendorInvoiceMatchException MatchException { get; set; } = null!;
+    [Required, MaxLength(100)] public string RequirementKey { get; set; } = string.Empty;
+    public VendorInvoiceMatchExceptionEvidenceKind ReferenceKind { get; set; }
+    public Guid? WorkflowEvidenceDocumentId { get; set; }
+    public virtual WorkflowEvidenceDocument? WorkflowEvidenceDocument { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public virtual FileUploadRecord? FileUploadRecord { get; set; }
+    [Required, MaxLength(1000)] public string EvidenceReference { get; set; } = string.Empty;
+    [Required, MaxLength(64)] public string EvidenceHash { get; set; } = string.Empty;
+}
+
+[Table("VendorInvoiceMatchExceptionAction")]
+public class VendorInvoiceMatchExceptionAction : TenantEntity
+{
+    public Guid MatchExceptionId { get; set; }
+    public virtual VendorInvoiceMatchException MatchException { get; set; } = null!;
+    [Range(1, int.MaxValue)] public int Sequence { get; set; }
+    [Required, MaxLength(100)] public string Action { get; set; } = string.Empty;
+    public VendorInvoiceMatchExceptionStatus FromStatus { get; set; }
+    public VendorInvoiceMatchExceptionStatus ToStatus { get; set; }
+    public Guid ActorUserId { get; set; }
+    [Required, MaxLength(300)] public string ActorName { get; set; } = string.Empty;
+    [Required, MaxLength(2000)] public string Comment { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+    [Required, MaxLength(64)] public string IntegrityHash { get; set; } = string.Empty;
 }
 
 #endregion

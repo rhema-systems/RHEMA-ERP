@@ -19,6 +19,7 @@ import {
   Users,
   ListTodo,
   LifeBuoy,
+  PackageCheck,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -72,6 +73,11 @@ const menuItems: MenuItem[] = [
     title: 'PO Amendments',
     href: '/external-portal/purchase-order-amendments',
     icon: FileText,
+  },
+  {
+    title: 'Receipt Inspections',
+    href: '/external-portal/receipt-inspections',
+    icon: PackageCheck,
   },
   {
     title: 'My Tasks',

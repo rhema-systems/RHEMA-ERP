@@ -298,6 +298,40 @@ public sealed class ApInvoicePostingMigrationTests
             .WithMessage("Posted vendor invoices cannot be deleted. Use a reversal, credit note, or adjustment.");
     }
 
+    [Fact]
+    [Trait("Batch", "TDC-0508")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PostedApInvoice_ShouldVoidWithOneBalancedIdempotentReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var posted = await service.PostAsync(fixture.Invoice.Id);
+
+        var first = await service.VoidAsync(fixture.Invoice.Id, "incorrect supplier invoice");
+        var second = await service.VoidAsync(fixture.Invoice.Id, "idempotent retry");
+
+        first.Status.Should().Be(VendorInvoiceStatus.Voided);
+        second.Status.Should().Be(VendorInvoiceStatus.Voided);
+        var original = await db.JournalEntries
+            .Include(item => item.ReversalJournalEntry)
+                .ThenInclude(item => item!.Transactions)
+            .SingleAsync(item => item.Id == posted.JournalEntryId);
+        original.IsReversed.Should().BeTrue();
+        original.ReversalJournalEntryId.Should().NotBeNull();
+        original.ReversalJournalEntry!.IsBalanced.Should().BeTrue();
+        original.ReversalJournalEntry.TotalDebitAmount.Should().Be(original.TotalCreditAmount);
+        original.ReversalJournalEntry.TotalCreditAmount.Should().Be(original.TotalDebitAmount);
+        original.ReversalJournalEntry.Transactions.Sum(item => item.DebitAmount)
+            .Should().Be(original.Transactions.Sum(item => item.CreditAmount));
+        original.ReversalJournalEntry.Transactions.Sum(item => item.CreditAmount)
+            .Should().Be(original.Transactions.Sum(item => item.DebitAmount));
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorInvoice" && item.PostingAction == "Reverse")).Should().Be(1);
+        (await db.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ApInvoiceReversed)).Should().Be(1);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

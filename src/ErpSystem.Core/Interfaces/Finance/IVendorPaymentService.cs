@@ -34,6 +34,12 @@ public interface IVendorPaymentService
     Task<VendorPaymentDto> CreateAsync(VendorPaymentCreateDto dto, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Freezes a manually prepared payment's invoice set and starts the shared
+    /// VendorPayment authorization workflow.
+    /// </summary>
+    Task<VendorPaymentDto> SubmitForAuthorizationAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Posts an approved or processed vendor payment to the General Ledger through the central finance posting engine.
     /// </summary>
     Task<VendorPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
@@ -65,7 +71,19 @@ public interface IVendorPaymentService
     /// Gets outstanding (not fully paid) invoices for a specific supplier.
     /// Used when creating payments or allocating funds.
     /// </summary>
-    Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(Guid supplierId, CancellationToken cancellationToken = default);
+    Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(
+        Guid supplierId,
+        int pageNumber = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the current tenant-scoped AP-003 payment readiness without
+    /// mutating the invoice or recording a control event.
+    /// </summary>
+    Task<VendorPaymentInvoiceReadinessDto> GetInvoicePaymentReadinessAsync(
+        Guid invoiceId,
+        CancellationToken cancellationToken = default);
 
     // ── Payment Status ──────────────────────────────────────────────────
 

@@ -20,6 +20,28 @@ public sealed class LegacyPostingPathLockdownTests
     }
 
     [Fact]
+    [Trait("Category", "Deployment")]
+    public void MigrationOnlyCommand_ShouldPreserveAspNetCoreProductionDefault()
+    {
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Program.cs"));
+        var migrationStart = program.IndexOf(
+            "if (args.Length > 0 && args[0] == \"apply-migrations\")",
+            StringComparison.Ordinal);
+        var seedStart = program.IndexOf(
+            "// Check for seed command",
+            migrationStart,
+            StringComparison.Ordinal);
+        migrationStart.Should().BeGreaterThanOrEqualTo(0);
+        seedStart.Should().BeGreaterThan(migrationStart);
+
+        var migrationCommand = program[migrationStart..seedStart];
+        migrationCommand.Should().Contain("WebApplication.CreateBuilder(args)");
+        migrationCommand.Should().NotContain("CreateSeedBuilder(args)");
+        migrationCommand.Should().NotContain("Environment.SetEnvironmentVariable");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
     [Trait("Category", "Architecture")]
     public void NormalRuntime_ShouldNotDependOnLegacySubledgerPostingService()
@@ -62,6 +84,24 @@ public sealed class LegacyPostingPathLockdownTests
         controller.Should().Contain("PostingEngineBypassRejected");
         controller.Should().Contain("Legacy generic GL post-to-ledger endpoint is disabled");
         controller.Should().NotContain("_glService.PostJournalEntryAsync");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    public void VendorInvoiceApproval_ShouldNotCreateInventoryReceipts()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP",
+            "VendorInvoiceService.cs"));
+        var approvals = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Controllers", "Finance",
+            "FinanceApprovalsController.cs"));
+
+        service.Should().NotContain("ProcessReceiptAsync(");
+        approvals.Should().NotContain("ProcessReceiptAsync(");
+        service.Should().Contain(
+            "Inventory is posted only by the governed purchase-receipt/inspection");
     }
 
     [Fact]

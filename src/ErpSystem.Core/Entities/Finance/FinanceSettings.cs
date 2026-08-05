@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 
 namespace ErpSystem.Core.Entities.Finance
@@ -232,5 +233,19 @@ namespace ErpSystem.Core.Entities.Finance
         /// If true, subledger journals must go through the approval workflow before posting
         /// </summary>
         public bool RequireSubledgerJournalApproval { get; set; } = false;
+
+        /// <summary>
+        /// Maximum unit-price variance allowed for PO-linked AP invoice matching.
+        /// </summary>
+        [Range(typeof(decimal), "0", "100")]
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal ApInvoicePriceTolerancePercent { get; set; } = 1m;
+
+        /// <summary>
+        /// Maximum cumulative invoice quantity over the accepted receipt quantity.
+        /// </summary>
+        [Range(typeof(decimal), "0", "100")]
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal ApInvoiceQuantityTolerancePercent { get; set; } = 1m;
     }
 }

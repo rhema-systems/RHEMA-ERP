@@ -62,11 +62,40 @@ namespace ErpSystem.Api.Controllers
         /// Get the enterprise business dashboard aggregate used by the main dashboard page.
         /// </summary>
         [HttpGet("enterprise")]
-        public async Task<ActionResult<EnterpriseDashboardDto>> GetEnterpriseDashboard()
+        [Authorize(Policy = "InternalOnly")]
+        public async Task<ActionResult<EnterpriseDashboardDto>> GetEnterpriseDashboard(
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] Guid? warehouseId = null,
+            [FromQuery] Guid? locationId = null)
         {
+            if (startDate.HasValue != endDate.HasValue)
+            {
+                return BadRequest("startDate and endDate must be supplied together.");
+            }
+
+            if (startDate.HasValue && endDate.HasValue)
+            {
+                if (startDate.Value.Date > endDate.Value.Date)
+                {
+                    return BadRequest("startDate cannot be later than endDate.");
+                }
+
+                if ((endDate.Value.Date - startDate.Value.Date).TotalDays > 3660)
+                {
+                    return BadRequest("The dashboard date range cannot exceed 10 years.");
+                }
+            }
+
+            if (locationId.HasValue && !warehouseId.HasValue)
+            {
+                return BadRequest("warehouseId is required when locationId is supplied.");
+            }
+
             try
             {
-                var data = await _enterpriseDashboardService.GetEnterpriseDashboardAsync();
+                var data = await _enterpriseDashboardService.GetEnterpriseDashboardAsync(
+                    startDate, endDate, warehouseId, locationId);
                 return Ok(data);
             }
             catch (Exception ex)
