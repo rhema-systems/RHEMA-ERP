@@ -17,6 +17,7 @@ import { organizationLevelService } from '@/services/hr/organization-level.servi
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
+import { benefitPolicyService } from '@/services/hr/benefits.service';
 
 const toIntOrNull = (v: string) => (v && v.trim() ? Number(v) : null);
 const toStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
@@ -67,6 +68,14 @@ export default function EditEmployeePositionPage() {
     queryFn: () => skillService.getActive(),
   });
 
+  // Only active policies can be newly entitled. An existing entitlement to a since-deactivated
+  // policy still round-trips through the form because the value is held in form state, not
+  // resolved from this list.
+  const { data: benefitPolicies } = useQuery({
+    queryKey: ['hr', 'benefit-policies', 'active'],
+    queryFn: () => benefitPolicyService.getActive(),
+  });
+
   // A position can't report to itself.
   const reportsToOptions = useMemo(
     () => (positions ?? []).filter((p) => p.id !== id),
@@ -102,6 +111,13 @@ export default function EditEmployeePositionPage() {
           requiredLevel: r.requiredLevel,
           isRequired: r.isRequired,
           priority: r.priority,
+        })),
+        positionBenefits: values.positionBenefits.map((b) => ({
+          policyId: b.policyId,
+          // '' means "no expiry" / "use the policy's own valuation" — both must go as null,
+          // not as an empty string the model binder would reject.
+          expiryDate: b.expiryDate ? b.expiryDate : null,
+          positionAmount: b.positionAmount ? Number(b.positionAmount) : null,
         })),
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'employee-positions'] });
@@ -140,6 +156,7 @@ export default function EditEmployeePositionPage() {
           staffLevels={staffLevels ?? []}
           salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
+          benefitPolicies={benefitPolicies ?? []}
           defaultValues={{
             title: position.title,
             code: position.code ?? '',
@@ -166,6 +183,15 @@ export default function EditEmployeePositionPage() {
               requiredLevel: r.requiredLevel,
               isRequired: r.isRequired,
               priority: r.priority,
+            })),
+            // Loading these back is not cosmetic: the server syncs entitlements to whatever the
+            // save sends, so an edit that started blank would delete every one of them.
+            positionBenefits: (position.positionBenefits ?? []).map((b) => ({
+              policyId: b.policyId,
+              expiryDate: b.expiryDate ?? '',
+              positionAmount: b.positionAmount === null || b.positionAmount === undefined
+                ? ''
+                : String(b.positionAmount),
             })),
           }}
           onSubmit={handleSubmit}

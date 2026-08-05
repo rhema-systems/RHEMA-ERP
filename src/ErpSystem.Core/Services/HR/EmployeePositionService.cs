@@ -183,8 +183,8 @@ public class EmployeePositionService : IEmployeePositionService
         position.NoticePeriodMonths = updateDto.NoticePeriodMonths;
         position.IsActive = updateDto.IsActive;
 
-        SyncSkillRequirements(position, updateDto.SkillRequirements);
-        SyncPositionBenefits(position, updateDto.PositionBenefits);
+        await SyncSkillRequirementsAsync(position, updateDto.SkillRequirements);
+        await SyncPositionBenefitsAsync(position, updateDto.PositionBenefits);
 
         // Don't call UpdateAsync (which calls _dbSet.Update) — the entity graph is already
         // tracked by EF. Calling Update() forces all navigation entities (including newly
@@ -271,7 +271,7 @@ public class EmployeePositionService : IEmployeePositionService
         };
     }
 
-    private void SyncSkillRequirements(EmployeePosition position, ICollection<CreatePositionSkillRequirementDto> desired)
+    private async Task SyncSkillRequirementsAsync(EmployeePosition position, ICollection<CreatePositionSkillRequirementDto> desired)
     {
         desired ??= new List<CreatePositionSkillRequirementDto>();
 
@@ -281,9 +281,10 @@ public class EmployeePositionService : IEmployeePositionService
             .Select(g => g.First())
             .ToList();
 
-        // Include soft-deleted entries so we can re-activate them instead of inserting
-        // duplicates (which would violate the unique index on TenantId+PositionId+SkillId).
-        var allBySkillId = position.SkillRequirements
+        // Read through a filter-ignoring query for the same reason as the benefits sync: an
+        // Include cannot see soft-deleted rows, so removing a skill and adding it back would hit
+        // the unique index on TenantId+PositionId+SkillId instead of reviving the row.
+        var allBySkillId = (await _positionRepository.GetSkillRequirementsIncludingDeletedAsync(position.Id))
             .GroupBy(x => x.SkillId)
             .ToDictionary(g => g.Key, g => g.First());
 
@@ -318,7 +319,7 @@ public class EmployeePositionService : IEmployeePositionService
         }
 
         var desiredSkillIds = desiredDistinct.Select(x => x.SkillId).ToHashSet();
-        foreach (var entity in position.SkillRequirements.Where(x => !x.IsDeleted))
+        foreach (var entity in allBySkillId.Values.Where(x => !x.IsDeleted))
         {
             if (!desiredSkillIds.Contains(entity.SkillId))
             {
@@ -328,7 +329,7 @@ public class EmployeePositionService : IEmployeePositionService
         }
     }
 
-    private void SyncPositionBenefits(EmployeePosition position, ICollection<CreateEmployeePositionBenefitDto> desired)
+    private async Task SyncPositionBenefitsAsync(EmployeePosition position, ICollection<CreateEmployeePositionBenefitDto> desired)
     {
         desired ??= new List<CreateEmployeePositionBenefitDto>();
 
@@ -338,9 +339,12 @@ public class EmployeePositionService : IEmployeePositionService
             .Select(g => g.First())
             .ToList();
 
-        // Include soft-deleted entries so we can re-activate them instead of inserting
-        // duplicates (which would violate the unique index on TenantId+PositionId+PolicyId).
-        var allByPolicyId = position.PositionBenefits
+        // Soft-deleted entries are re-activated rather than re-inserted, which would violate the
+        // unique index on TenantId+PositionId+PolicyId. They have to be read through a
+        // filter-ignoring query: position.PositionBenefits comes from an Include, and the global
+        // soft-delete filter applies to included navigations, so a removed entitlement is simply
+        // absent there — making re-adding one a 500 rather than a revival.
+        var allByPolicyId = (await _positionRepository.GetBenefitsIncludingDeletedAsync(position.Id))
             .GroupBy(x => x.PolicyId)
             .ToDictionary(g => g.Key, g => g.First());
 
@@ -373,7 +377,7 @@ public class EmployeePositionService : IEmployeePositionService
         }
 
         var desiredPolicyIds = desiredDistinct.Select(x => x.PolicyId).ToHashSet();
-        foreach (var entity in position.PositionBenefits.Where(x => !x.IsDeleted))
+        foreach (var entity in allByPolicyId.Values.Where(x => !x.IsDeleted))
         {
             if (!desiredPolicyIds.Contains(entity.PolicyId))
             {

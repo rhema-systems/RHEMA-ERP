@@ -17,6 +17,7 @@ import { organizationLevelService } from '@/services/hr/organization-level.servi
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
+import { benefitPolicyService } from '@/services/hr/benefits.service';
 
 const toIntOrNull = (v: string) => (v && v.trim() ? Number(v) : null);
 
@@ -57,6 +58,14 @@ export default function NewEmployeePositionPage() {
     queryFn: () => skillService.getActive(),
   });
 
+  // Only active policies can be newly entitled. An existing entitlement to a since-deactivated
+  // policy still round-trips through the form because the value is held in form state, not
+  // resolved from this list.
+  const { data: benefitPolicies } = useQuery({
+    queryKey: ['hr', 'benefit-policies', 'active'],
+    queryFn: () => benefitPolicyService.getActive(),
+  });
+
   const handleSubmit = async (values: EmployeePositionFormValues) => {
     setSubmitting(true);
     try {
@@ -85,6 +94,13 @@ export default function NewEmployeePositionPage() {
           requiredLevel: r.requiredLevel,
           isRequired: r.isRequired,
           priority: r.priority,
+        })),
+        positionBenefits: values.positionBenefits.map((b) => ({
+          policyId: b.policyId,
+          // '' means "no expiry" / "use the policy's own valuation" — both must go as null,
+          // not as an empty string the model binder would reject.
+          expiryDate: b.expiryDate ? b.expiryDate : null,
+          positionAmount: b.positionAmount ? Number(b.positionAmount) : null,
         })),
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'employee-positions'] });
@@ -121,6 +137,7 @@ export default function NewEmployeePositionPage() {
           staffLevels={staffLevels ?? []}
           salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
+          benefitPolicies={benefitPolicies ?? []}
           defaultValues={emptyEmployeePosition}
           onSubmit={handleSubmit}
           submitting={submitting}

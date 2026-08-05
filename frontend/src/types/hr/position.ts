@@ -22,6 +22,36 @@ export interface PositionSkillRequirement {
   priority: number;
 }
 
+/**
+ * Mirrors EmployeePositionBenefitDto (read). A position-level benefit ENTITLEMENT: everyone
+ * holding the position is entitled to the policy, and `POST .../employee-benefit-enrollments/
+ * reconcile` turns these into actual enrolments for each employee.
+ */
+export interface PositionBenefit {
+  id: string;
+  positionId: string;
+  policyId: string;
+  policyName: string;
+  /** DateOnly. Past this date the entitlement confers nothing and reconcile skips it. */
+  expiryDate?: string | null;
+  /** Overrides the policy's own valuation for holders of this position when set. */
+  positionAmount?: number | null;
+  isActive: boolean;
+}
+
+/**
+ * Mirrors CreateEmployeePositionBenefitDto (write).
+ *
+ * ⚠ Sent as the complete set on every position save. The server syncs to what it receives, so
+ * an omitted or empty array removes every entitlement the position had — the edit form must
+ * load the existing ones back in, not start blank.
+ */
+export interface PositionBenefitInput {
+  policyId: string;
+  expiryDate?: string | null;
+  positionAmount?: number | null;
+}
+
 // Mirrors CreatePositionSkillRequirementDto (write).
 export interface PositionSkillRequirementInput {
   skillId: string;
@@ -30,8 +60,8 @@ export interface PositionSkillRequirementInput {
   priority: number;
 }
 
-// Mirrors EmployeePositionDto. Position benefits are still deferred (built with
-// the Benefits area); skill requirements + staff level are managed here.
+// Mirrors EmployeePositionDto. Skill requirements, staff level and benefit entitlements are
+// all managed here.
 export interface EmployeePosition {
   id: string;
   title: string;
@@ -61,9 +91,10 @@ export interface EmployeePosition {
   isActive: boolean;
   employeeCount: number;
   skillRequirements: PositionSkillRequirement[];
+  positionBenefits: PositionBenefit[];
 }
 
-// Mirrors CreateEmployeePositionDto (position benefits omitted — deferred).
+// Mirrors CreateEmployeePositionDto.
 export interface CreateEmployeePositionRequest {
   title: string;
   code: string;
@@ -85,6 +116,7 @@ export interface CreateEmployeePositionRequest {
   requiresGuarantor: boolean;
   requiresLicense: boolean;
   skillRequirements: PositionSkillRequirementInput[];
+  positionBenefits: PositionBenefitInput[];
 }
 
 // Mirrors UpdateEmployeePositionDto (adds isActive).

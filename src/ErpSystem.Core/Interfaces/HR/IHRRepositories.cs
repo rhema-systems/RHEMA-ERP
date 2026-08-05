@@ -267,6 +267,20 @@ public interface IEmployeePositionRepository : IGenericRepository<EmployeePositi
     void TrackBenefit(EmployeePositionBenefit benefit);
     /// <summary>Explicitly marks a new skill requirement as Added so EF Core inserts rather than updates it.</summary>
     void TrackSkillRequirement(PositionSkillRequirement requirement);
+
+    /// <summary>
+    /// A position's benefit entitlements <b>including soft-deleted ones</b>, tracked so they can be
+    /// revived. The ordinary include cannot serve this: the global soft-delete filter applies to
+    /// included navigations too, so a removed row is invisible to a later save — which then tries to
+    /// insert a duplicate and violates the unique index on (TenantId, PositionId, PolicyId).
+    /// </summary>
+    Task<IReadOnlyList<EmployeePositionBenefit>> GetBenefitsIncludingDeletedAsync(Guid positionId);
+
+    /// <summary>
+    /// A position's skill requirements <b>including soft-deleted ones</b>, for the same reason as
+    /// <see cref="GetBenefitsIncludingDeletedAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<PositionSkillRequirement>> GetSkillRequirementsIncludingDeletedAsync(Guid positionId);
 }
 
 /// <summary>

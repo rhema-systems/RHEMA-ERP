@@ -30,6 +30,14 @@ import type { StaffLevelListItem } from '@/types/hr/staff-level';
 import type { SalaryGrade } from '@/types/hr/salary';
 import type { Skill } from '@/types/hr/skill';
 
+/** Just what the picker needs — the full BenefitPolicy type is not required here. */
+export interface BenefitPolicySummary {
+  id: string;
+  policyName: string;
+  policyCode?: string | null;
+  isMandatory?: boolean;
+}
+
 const NONE = 'none';
 const workModes = ['OnSite', 'Remote', 'Hybrid'] as const;
 const skillLevels = ['Beginner', 'Intermediate', 'Advanced', 'Expert', 'Master'] as const;
@@ -70,6 +78,15 @@ export const employeePositionSchema = z.object({
       priority: z.coerce.number().int().min(1),
     }),
   ),
+  positionBenefits: z.array(
+    z.object({
+      policyId: z.string().min(1, 'Select a benefit policy'),
+      // '' = no expiry. Kept as text so an empty date input stays empty rather than
+      // collapsing to an epoch date.
+      expiryDate: z.string().optional().or(z.literal('')),
+      positionAmount: z.string().optional().or(z.literal('')),
+    }),
+  ),
 });
 
 export type EmployeePositionFormValues = z.infer<typeof employeePositionSchema>;
@@ -96,6 +113,7 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   requiresLicense: false,
   isActive: true,
   skillRequirements: [],
+  positionBenefits: [],
 };
 
 interface EmployeePositionFormProps {
@@ -106,6 +124,8 @@ interface EmployeePositionFormProps {
   /** Defined in Payroll and mirrored into HR — read-only here. */
   salaryGrades: SalaryGrade[];
   skills: Skill[];
+  /** Active benefit policies an entitlement can point at. */
+  benefitPolicies: BenefitPolicySummary[];
   defaultValues: EmployeePositionFormValues;
   onSubmit: (values: EmployeePositionFormValues) => Promise<void>;
   submitting: boolean;
@@ -120,6 +140,7 @@ export function EmployeePositionForm({
   staffLevels,
   salaryGrades,
   skills,
+  benefitPolicies,
   defaultValues,
   onSubmit,
   submitting,
@@ -146,6 +167,12 @@ export function EmployeePositionForm({
     control: form.control,
     name: 'skillRequirements',
   });
+
+  const {
+    fields: benefitFields,
+    append: appendBenefit,
+    remove: removeBenefit,
+  } = useFieldArray({ control: form.control, name: 'positionBenefits' });
 
   // Cascading selection: units are filtered to the chosen level.
   const unitsForLevel = units.filter((u) => u.organizationLevelId === levelId);
@@ -498,6 +525,112 @@ export function EmployeePositionForm({
                     </Button>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-md border p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-semibold">Benefit Entitlements</h4>
+                <p className="text-xs text-muted-foreground">
+                  Policies everyone holding this position is entitled to. Reconciling an
+                  employee&rsquo;s benefits turns these into actual enrolments.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => appendBenefit({ policyId: '', expiryDate: '', positionAmount: '' })}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Add Entitlement
+              </Button>
+            </div>
+
+            {benefitFields.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No benefit entitlements added.</p>
+            ) : (
+              <div className="space-y-3">
+                {benefitFields.map((field, index) => {
+                  // A policy already chosen on another row cannot be chosen again: the server
+                  // keys entitlements on (position, policy) and would silently keep only one.
+                  const takenIds = new Set(
+                    form
+                      .watch('positionBenefits')
+                      .map((b, i) => (i === index ? '' : b.policyId))
+                      .filter(Boolean),
+                  );
+
+                  return (
+                    <div
+                      key={field.id}
+                      className="grid grid-cols-1 gap-3 rounded-md border p-3 sm:grid-cols-[1fr_150px_150px_auto] sm:items-end"
+                    >
+                      <div className="space-y-1">
+                        <Label className="text-xs">Benefit policy</Label>
+                        <Select
+                          value={form.watch(`positionBenefits.${index}.policyId`) || undefined}
+                          onValueChange={(v) =>
+                            form.setValue(`positionBenefits.${index}.policyId`, v, {
+                              shouldValidate: true,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={
+                                benefitPolicies.length ? 'Select a policy' : 'No active policies'
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {benefitPolicies
+                              .filter((p) => !takenIds.has(p.id))
+                              .map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.policyName}
+                                  {p.policyCode ? ` · ${p.policyCode}` : ''}
+                                  {p.isMandatory ? ' · mandatory' : ''}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        {form.formState.errors.positionBenefits?.[index]?.policyId && (
+                          <p className="text-xs text-red-500">
+                            {form.formState.errors.positionBenefits[index]?.policyId?.message}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Amount</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          placeholder="Policy default"
+                          {...form.register(`positionBenefits.${index}.positionAmount`)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Expires</Label>
+                        <Input
+                          type="date"
+                          {...form.register(`positionBenefits.${index}.expiryDate`)}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeBenefit(index)}
+                        aria-label="Remove entitlement"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

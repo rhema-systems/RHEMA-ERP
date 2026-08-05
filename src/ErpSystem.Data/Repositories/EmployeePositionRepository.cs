@@ -126,6 +126,25 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<EmployeePositionBenefit>> GetBenefitsIncludingDeletedAsync(Guid positionId)
+    {
+        // Tracked on purpose — callers revive these rows by clearing IsDeleted.
+        return await _context.Set<EmployeePositionBenefit>()
+            .IgnoreQueryFilters()
+            .Where(b => b.PositionId == positionId)
+            .ToListAsync();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PositionSkillRequirement>> GetSkillRequirementsIncludingDeletedAsync(Guid positionId)
+    {
+        return await _context.Set<PositionSkillRequirement>()
+            .IgnoreQueryFilters()
+            .Where(r => r.PositionId == positionId)
+            .ToListAsync();
+    }
+
+    /// <inheritdoc />
     public void TrackSkillRequirement(PositionSkillRequirement requirement)
     {
         _context.Set<PositionSkillRequirement>().Add(requirement);

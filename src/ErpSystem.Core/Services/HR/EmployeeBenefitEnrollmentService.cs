@@ -330,10 +330,22 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
 
         var created = 0;
 
+        var todayForExpiry = DateOnly.FromDateTime(DateTime.UtcNow);
+
         foreach (var positionBenefit in positionBenefits)
         {
             var policy = positionBenefit.BenefitPolicy;
             if (policy is null || !policy.IsActive || policy.TenantId != tenantId)
+            {
+                continue;
+            }
+
+            // An entitlement past its expiry date no longer confers anything. Skipping it here
+            // stops reconcile creating new enrollments from it and stops it refreshing the value
+            // of ones it created earlier; existing enrollments are deliberately left in place
+            // rather than terminated, since ending someone's cover is a decision for the status
+            // transition, not a side effect of a sync that is safe to run repeatedly.
+            if (positionBenefit.ExpiryDate is { } expiry && expiry < todayForExpiry)
             {
                 continue;
             }
