@@ -457,6 +457,11 @@ export const navigationItems: NavItem[] = [
         icon: Users,
         children: [
           {
+            title: 'Supplier Application Portal',
+            href: '/supplier-application',
+            icon: Globe2,
+          },
+          {
             title: 'Business Partners',
             href: '/procurement/business-partners',
             icon: Users,
@@ -1019,6 +1024,7 @@ export const navigationItems: NavItem[] = [
       { title: 'Financial Reports', href: '/reports/financial', icon: CreditCard },
       { title: 'Procurement Reports', href: '/reports/purchasing', icon: ShoppingCart },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
+      { title: 'Audit & Compliance Reports', href: '/reports/audit-compliance', icon: ShieldCheck },
       { title: 'Sales Reports', href: '/reports/sales', icon: ShoppingCart },
       { title: 'HR Reports', href: '/reports/human-resources', icon: UserCheck },
       { title: 'Estate Reports', href: '/reports/estate', icon: Home },

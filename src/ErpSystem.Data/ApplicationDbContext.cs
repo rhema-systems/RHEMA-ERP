@@ -4464,9 +4464,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser, Applicati
         {
             entity.ToTable("ReportTemplates");
             entity.HasOne(t => t.Tenant).WithMany().HasForeignKey(t => t.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(t => t.Report).WithMany().HasForeignKey(t => t.ReportId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(t => t.RowVersion).IsRowVersion();
             entity.HasIndex(t => t.TenantId);
+            entity.HasIndex(t => t.ReportId);
+            entity.HasIndex(t => new { t.TenantId, t.TemplateKey, t.Version }).IsUnique();
             entity.HasIndex(t => t.Category);
             entity.HasIndex(t => t.Type);
+            entity.HasIndex(t => new { t.TenantId, t.Status, t.Audience, t.Cadence });
             entity.HasIndex(t => t.UsageCount);
         });
 

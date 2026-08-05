@@ -35,6 +35,16 @@ public sealed class SupplierApplicantTokenIssueDto
     public ProcurementSupplierOnboardingPaymentStatus PaymentStatus { get; set; }
     public decimal TotalAmount { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
+    public bool ResumedExistingApplication { get; set; }
+    public SupplierApplicantSessionDto? RestrictedSession { get; set; }
+}
+
+public sealed class SupplierApplicantTokenDeliveryDto
+{
+    public bool ApplicantAccessFound { get; set; }
+    public bool Delivered { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? FailureMessage { get; set; }
 }
 
 public sealed class StartSupplierApplicantSessionRequest

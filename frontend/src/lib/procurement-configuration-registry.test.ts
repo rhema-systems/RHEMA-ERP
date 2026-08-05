@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDecisionFormValue,
   displayDecisionFormField,
+  normalizeDecisionFormValue,
   procurementDecisionFormRegistry,
   procurementDecisionOwnerOptions,
   updateDecisionFormField,
@@ -71,6 +72,21 @@ describe('procurement decision form registry', () => {
       mode: 'paid',
       currencyCode: 'GHS',
       paymentChannels: [],
+      receiptNumberFormat: 'SUP-REC-{YYYY}-{######}',
+    });
+    expect(createDecisionFormValue('DEC-007')).not.toHaveProperty('effectiveTo');
+    expect(definition.fields.find(field => field.key === 'receiptNumberFormat'))
+      .toMatchObject({ placeholder: 'SUP-REC-{YYYY}-{######}' });
+  });
+
+  it('omits blank optional dates before sending a decision to the API', () => {
+    expect(normalizeDecisionFormValue('DEC-007', {
+      effectiveFrom: '2026-08-04',
+      effectiveTo: '',
+      receiptNumberFormat: 'SUP-REC-{SEQ}',
+    })).toEqual({
+      effectiveFrom: '2026-08-04',
+      receiptNumberFormat: 'SUP-REC-{SEQ}',
     });
   });
 

@@ -92,6 +92,14 @@ public class ReportSchedule : TenantEntity
 
 public class ReportTemplate : TenantEntity
 {
+    public Guid? ReportId { get; set; }
+
+    [Required]
+    [MaxLength(80)]
+    public string TemplateKey { get; set; } = string.Empty;
+
+    public int Version { get; set; } = 1;
+
     [Required]
     [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
@@ -107,12 +115,42 @@ public class ReportTemplate : TenantEntity
     [MaxLength(20)]
     public string Type { get; set; } = string.Empty;
 
+    [Required]
+    [MaxLength(20)]
+    public string Audience { get; set; } = "Finance";
+
+    [Required]
+    [MaxLength(20)]
+    public string Cadence { get; set; } = "AdHoc";
+
+    [Required]
+    [MaxLength(20)]
+    public string Status { get; set; } = "Draft";
+
+    [Required]
+    [MaxLength(10)]
+    public string DefaultOutputFormat { get; set; } = "Online";
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? OutputFormats { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? SavedFilters { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? GenerationMetadata { get; set; }
+
     [MaxLength(20)]
     public string? ChartType { get; set; }
 
     public bool IsCustom { get; set; } = false;
     public DateTime? LastUsed { get; set; }
     public int UsageCount { get; set; } = 0;
+    public DateTime? LastGeneratedAt { get; set; }
+    public Guid? LastGeneratedBy { get; set; }
+
+    [MaxLength(10)]
+    public string? LastGenerationFormat { get; set; }
 
     [Column(TypeName = "nvarchar(max)")]
     public string? Tags { get; set; } // JSON array as string
@@ -122,6 +160,11 @@ public class ReportTemplate : TenantEntity
 
     [Column(TypeName = "nvarchar(max)")]
     public string? Configuration { get; set; } // JSON string
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public virtual Report? Report { get; set; }
 }
 
 public class ReportExecution : TenantEntity

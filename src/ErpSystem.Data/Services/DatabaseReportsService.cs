@@ -363,8 +363,13 @@ public class DatabaseReportsService : IReportsService
                     ExecutionTime = sampleExecutionTime,
                     TotalRows = sampleResult.TotalRows,
                     Status = "success",
-                    Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
-                    ResultMetadata = JsonSerializer.Serialize(new { ResultHash = Guid.NewGuid().ToString(), IsSampleData = true }),
+                    Parameters = SerializeExecutionParameters(executeReportDto),
+                    ResultMetadata = JsonSerializer.Serialize(new
+                    {
+                        ResultHash = Guid.NewGuid().ToString(),
+                        IsSampleData = true,
+                        Template = executeReportDto.TemplateContext
+                    }),
                     CreatedBy = userId.ToString()
                 };
 
@@ -397,6 +402,11 @@ public class DatabaseReportsService : IReportsService
             result.ReportName = report.Name;
             result.ExecutedAt = endTime;
             result.ExecutionTime = executionTime;
+            if (executeReportDto.TemplateContext is not null)
+            {
+                result.Metadata ??= new ReportMetadataDto();
+                result.Metadata.TemplateGeneration = executeReportDto.TemplateContext;
+            }
 
             // Simple execution logging - create a single record after successful execution
             var executionLog = new ReportExecution
@@ -408,13 +418,14 @@ public class DatabaseReportsService : IReportsService
                 ExecutionTime = executionTime,
                 TotalRows = result.TotalRows,
                 Status = "success",
-                Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
+                Parameters = SerializeExecutionParameters(executeReportDto),
                 ResultMetadata = JsonSerializer.Serialize(new
                 {
                     ResultHash = Guid.NewGuid().ToString(),
                     SystemReportCode = systemProvider?.ResolveCode(report.Query),
                     result.Metadata?.DataAsOf,
-                    result.Metadata?.Parameters
+                    result.Metadata?.Parameters,
+                    Template = executeReportDto.TemplateContext
                 }),
                 CreatedBy = userId.ToString()
             };
@@ -442,7 +453,10 @@ public class DatabaseReportsService : IReportsService
                     TotalRows = 0,
                     Status = "failed",
                     ErrorMessage = ex.Message,
-                    Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
+                    Parameters = SerializeExecutionParameters(executeReportDto),
+                    ResultMetadata = executeReportDto.TemplateContext is null
+                        ? null
+                        : JsonSerializer.Serialize(new { Template = executeReportDto.TemplateContext }),
                     CreatedBy = userId.ToString()
                 };
 
@@ -491,7 +505,8 @@ public class DatabaseReportsService : IReportsService
                 IncludeMetadata = false,
                 Page = 1,
                 PageSize = 1000,
-                MaxRows = 1000
+                MaxRows = 1000,
+                TemplateContext = exportReportDto.TemplateContext
             };
 
             var reportResult = await ExecuteReportAsync(reportId, executeDto, tenantId, userId, isAdminUser);
@@ -522,7 +537,7 @@ public class DatabaseReportsService : IReportsService
                 FileSize = content.Length,
                 ExportedAt = DateTime.UtcNow,
                 Status = "completed",
-                Parameters = exportReportDto.Parameters != null ? JsonSerializer.Serialize(exportReportDto.Parameters) : null,
+                Parameters = SerializeExportParameters(exportReportDto),
                 CreatedBy = userId.ToString()
             };
 
@@ -531,6 +546,9 @@ public class DatabaseReportsService : IReportsService
 
             return new ReportExportResultDto
             {
+                ReportId = reportId,
+                Status = "completed",
+                ExportedAt = export.ExportedAt,
                 Data = content,
                 ContentType = GetContentType(normalizedFormat),
                 FileName = fileName,
@@ -712,10 +730,20 @@ public class DatabaseReportsService : IReportsService
 
             var template = new ReportTemplate
             {
+                ReportId = createTemplateDto.ReportId,
+                TemplateKey = createTemplateDto.TemplateKey.Trim().ToUpperInvariant(),
+                Version = 1,
                 Name = createTemplateDto.Name,
                 Description = createTemplateDto.Description,
                 Category = createTemplateDto.Category,
                 Type = createTemplateDto.Type,
+                Audience = createTemplateDto.Audience,
+                Cadence = createTemplateDto.Cadence,
+                Status = "Draft",
+                DefaultOutputFormat = createTemplateDto.DefaultOutputFormat,
+                OutputFormats = JsonSerializer.Serialize(createTemplateDto.OutputFormats),
+                SavedFilters = createTemplateDto.SavedFilters != null ? JsonSerializer.Serialize(createTemplateDto.SavedFilters) : null,
+                GenerationMetadata = createTemplateDto.GenerationMetadata != null ? JsonSerializer.Serialize(createTemplateDto.GenerationMetadata) : null,
                 ChartType = createTemplateDto.ChartType,
                 IsCustom = createTemplateDto.IsCustom,
                 Tags = createTemplateDto.Tags != null ? JsonSerializer.Serialize(createTemplateDto.Tags) : null,
@@ -818,10 +846,27 @@ public class DatabaseReportsService : IReportsService
         return new ReportTemplateDto
         {
             Id = template.Id,
+            ReportId = template.ReportId,
+            ReportName = template.Report?.Name,
+            TemplateKey = template.TemplateKey,
+            Version = template.Version,
             Name = template.Name,
             Description = template.Description,
             Category = template.Category,
             Type = template.Type,
+            Audience = template.Audience,
+            Cadence = template.Cadence,
+            Status = template.Status,
+            DefaultOutputFormat = template.DefaultOutputFormat,
+            OutputFormats = !string.IsNullOrEmpty(template.OutputFormats)
+                ? JsonSerializer.Deserialize<List<string>>(template.OutputFormats) ?? []
+                : [],
+            SavedFilters = !string.IsNullOrEmpty(template.SavedFilters)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(template.SavedFilters)
+                : null,
+            GenerationMetadata = !string.IsNullOrEmpty(template.GenerationMetadata)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(template.GenerationMetadata)
+                : null,
             ChartType = template.ChartType,
             IsCustom = template.IsCustom,
             CreatedBy = template.CreatedBy ?? "Unknown",
@@ -834,7 +879,11 @@ public class DatabaseReportsService : IReportsService
             PreviewImage = template.PreviewImage,
             Configuration = !string.IsNullOrEmpty(template.Configuration)
                 ? JsonSerializer.Deserialize<Dictionary<string, object>>(template.Configuration)
-                : null
+                : null,
+            LastGeneratedAt = template.LastGeneratedAt,
+            LastGeneratedBy = template.LastGeneratedBy,
+            LastGenerationFormat = template.LastGenerationFormat,
+            RowVersion = Convert.ToBase64String(template.RowVersion)
         };
     }
 
@@ -1025,6 +1074,26 @@ public class DatabaseReportsService : IReportsService
             _ => "application/octet-stream"
         };
     }
+
+    private static string? SerializeExecutionParameters(ExecuteReportDto request) =>
+        request.TemplateContext is null
+            ? request.Parameters is null ? null : JsonSerializer.Serialize(request.Parameters)
+            : JsonSerializer.Serialize(new
+            {
+                Filters = request.Parameters,
+                Template = request.TemplateContext
+            });
+
+    private static string? SerializeExportParameters(ExportReportDto request) =>
+        request.TemplateContext is null
+            ? request.Parameters is null ? null : JsonSerializer.Serialize(request.Parameters)
+            : JsonSerializer.Serialize(new
+            {
+                Filters = request.Parameters,
+                Template = request.TemplateContext,
+                request.IncludeCharts,
+                request.IncludeHeaders
+            });
 
     private static string SanitizeExportFileName(string reportName)
     {

@@ -452,7 +452,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         return new ProcurementSupplierOnboardingTokenIssueResultDto
         {
             Token = Map(entity),
-            PlaintextToken = tokenValue
+            PlaintextToken = free || !systemEvent ? tokenValue : null
         };
     }
 
@@ -474,6 +474,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         if (entity.Status == ProcurementSupplierOnboardingTokenStatus.Expired)
             throw Conflict("SUPPLIER_ONBOARDING_TOKEN_TERMINAL",
                 "A token cannot be reissued after the linked application is Approved or Rejected.");
+        if (entity.FeeMode == ProcurementSupplierOnboardingFeeMode.Paid &&
+            entity.Status == ProcurementSupplierOnboardingTokenStatus.AwaitingPayment)
+            throw Conflict("SUPPLIER_ONBOARDING_TOKEN_PAYMENT_REQUIRED",
+                "A paid application token cannot be generated or reissued before trusted payment verification or approved exemption.");
 
         var tokenValue = GenerateTokenValue();
         var before = Snapshot(entity);
@@ -634,7 +638,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         return new ProcurementSupplierOnboardingTokenIssueResultDto { Token = Map(entity) };
     }
 
-    public async Task<ProcurementSupplierOnboardingTokenDto> ReconcilePaymentAsync(
+    public async Task<ProcurementSupplierOnboardingTokenIssueResultDto> ReconcilePaymentAsync(
         Guid tokenId,
         Guid paymentId,
         ReconcileProcurementSupplierOnboardingPaymentRequest request,
@@ -650,7 +654,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 "The token payment was not found.");
         if (IsReplay(payment.LastOperation, payment.LastOperationCorrelationId,
                 "Verified", correlation))
-            return Map(entity);
+            return new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = Map(entity)
+            };
         EnsureRowVersion(payment.RowVersion, request.RowVersion);
         if (payment.Status is not (
                 ProcurementSupplierOnboardingPaymentStatus.Pending or
@@ -660,10 +667,22 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         await EnsureIndependentActorAsync(payment.CreatedById, entity.TokenReference,
             correlation, cancellationToken);
 
+        var applicantBound = await ApplicantAccesses.GetQueryable(item =>
+                item.TenantId == entity.TenantId && item.TokenId == entity.Id &&
+                !item.IsDeleted)
+            .AnyAsync(cancellationToken);
         var before = PaymentSnapshot(payment);
         var now = DateTime.UtcNow;
+        var tokenValue = applicantBound ? GenerateTokenValue() : null;
         await ExecuteAsync(async () =>
         {
+            var revokedApplicantSessions = tokenValue is null
+                ? []
+                : await RevokeActiveApplicantSessionsAsync(
+                    entity,
+                    "Payment verified; sign in with the newly delivered application token.",
+                    now,
+                    cancellationToken);
             payment.ReconciledAtUtc = now;
             payment.ReconciledById = _currentUser.UserId;
             payment.ReconciliationReference = request.ReconciliationReference.Trim();
@@ -721,19 +740,35 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             entity.Status = ProcurementSupplierOnboardingTokenStatus.Active;
             entity.PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.Reconciled;
             entity.ActivatedAtUtc ??= now;
+            if (tokenValue is not null)
+            {
+                entity.TokenHashSha256 = Hash(tokenValue);
+                entity.TokenLastFour = tokenValue[^4..];
+                entity.Generation++;
+            }
             Touch(entity, "PaymentVerified", correlation, now);
             Capture(entity);
             await Payments.UpdateAsync(payment);
             await Tokens.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordEventAsync(entity, "PaymentVerified",
-                ProcurementControlEventResult.Succeeded, before, PaymentSnapshot(payment),
+                ProcurementControlEventResult.Succeeded, before, new
+                {
+                    Payment = PaymentSnapshot(payment),
+                    TokenGeneration = entity.Generation,
+                    TokenLastFour = entity.TokenLastFour,
+                    RevokedApplicantSessions = revokedApplicantSessions
+                },
                 request.Notes, [], correlation, now, cancellationToken);
         }, cancellationToken);
         await PublishNotificationAsync(
             "procurement.supplier-onboarding-token.payment-verified",
             entity, cancellationToken);
-        return Map(entity);
+        return new ProcurementSupplierOnboardingTokenIssueResultDto
+        {
+            Token = Map(entity),
+            PlaintextToken = tokenValue
+        };
     }
 
     public async Task<ProcurementSupplierOnboardingTokenDto> RequestExemptionAsync(
@@ -830,7 +865,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         return Map(entity);
     }
 
-    public async Task<ProcurementSupplierOnboardingTokenDto> DecideExemptionAsync(
+    public async Task<ProcurementSupplierOnboardingTokenIssueResultDto> DecideExemptionAsync(
         Guid tokenId,
         Guid exemptionId,
         DecideProcurementSupplierOnboardingExemptionRequest request,
@@ -847,7 +882,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         var action = request.Approve ? "ExemptionApproved" : "ExemptionRejected";
         if (IsReplay(exemption.LastOperation, exemption.LastOperationCorrelationId,
                 action, correlation))
-            return Map(entity);
+            return new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = Map(entity)
+            };
         EnsureRowVersion(exemption.RowVersion, request.RowVersion);
         EnsureEvidence(request.Evidence);
         if (exemption.Status != ProcurementSupplierOnboardingExemptionStatus.PendingApproval)
@@ -873,8 +911,14 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             throw Conflict("SUPPLIER_ONBOARDING_EXEMPTION_WORKFLOW_NOT_REJECTED",
                 "Only a Cancelled or Failed shared workflow permits exemption rejection.");
 
+        var applicantBound = request.Approve &&
+            await ApplicantAccesses.GetQueryable(item =>
+                    item.TenantId == entity.TenantId && item.TokenId == entity.Id &&
+                    !item.IsDeleted)
+                .AnyAsync(cancellationToken);
         var before = ExemptionSnapshot(exemption);
         var now = DateTime.UtcNow;
+        var tokenValue = applicantBound ? GenerateTokenValue() : null;
         exemption.Status = request.Approve
             ? ProcurementSupplierOnboardingExemptionStatus.Approved
             : ProcurementSupplierOnboardingExemptionStatus.Rejected;
@@ -890,11 +934,24 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             entity.Status = ProcurementSupplierOnboardingTokenStatus.Active;
             entity.PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.Exempt;
             entity.ActivatedAtUtc ??= now;
+            if (tokenValue is not null)
+            {
+                entity.TokenHashSha256 = Hash(tokenValue);
+                entity.TokenLastFour = tokenValue[^4..];
+                entity.Generation++;
+            }
         }
         Touch(entity, action, correlation, now);
         Capture(entity);
         await ExecuteAsync(async () =>
         {
+            var revokedApplicantSessions = tokenValue is null
+                ? []
+                : await RevokeActiveApplicantSessionsAsync(
+                    entity,
+                    "Exemption approved; sign in with the newly delivered application token.",
+                    now,
+                    cancellationToken);
             await Exemptions.UpdateAsync(exemption);
             await Tokens.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -902,7 +959,13 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 request.Approve
                     ? ProcurementControlEventResult.Succeeded
                     : ProcurementControlEventResult.Rejected,
-                before, ExemptionSnapshot(exemption), request.Comment,
+                before, new
+                {
+                    Exemption = ExemptionSnapshot(exemption),
+                    TokenGeneration = entity.Generation,
+                    TokenLastFour = request.Approve ? entity.TokenLastFour : null,
+                    RevokedApplicantSessions = revokedApplicantSessions
+                }, request.Comment,
                 request.Evidence, correlation, now, cancellationToken);
         }, cancellationToken);
         await PublishNotificationAsync(
@@ -910,7 +973,38 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 ? "procurement.supplier-onboarding-token.exemption-approved"
                 : "procurement.supplier-onboarding-token.exemption-rejected",
             entity, cancellationToken);
-        return Map(entity);
+        return new ProcurementSupplierOnboardingTokenIssueResultDto
+        {
+            Token = Map(entity),
+            PlaintextToken = tokenValue
+        };
+    }
+
+    private async Task<List<Guid>> RevokeActiveApplicantSessionsAsync(
+        ProcurementSupplierOnboardingToken entity,
+        string reason,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var sessions = await ApplicantSessions.GetQueryable(item =>
+                item.TenantId == entity.TenantId &&
+                !item.IsDeleted &&
+                item.Status == ProcurementSupplierApplicantSessionStatus.Active &&
+                item.ApplicantAccess.TenantId == entity.TenantId &&
+                !item.ApplicantAccess.IsDeleted &&
+                item.ApplicantAccess.TokenId == entity.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var session in sessions)
+        {
+            session.Status = ProcurementSupplierApplicantSessionStatus.Revoked;
+            session.RevokedAtUtc = now;
+            session.RevocationReason = reason;
+            Touch(session, now);
+            Capture(session);
+            await ApplicantSessions.UpdateAsync(session);
+        }
+
+        return sessions.Select(item => item.SessionReference).ToList();
     }
 
     public async Task ExpireForTerminalRegistrationAsync(

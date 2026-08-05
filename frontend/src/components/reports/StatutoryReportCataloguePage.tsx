@@ -46,7 +46,7 @@ import { inventoryManagementService } from '@/services/inventoryManagementServic
 import { ReportResult, reportsService } from '@/services/reports';
 import { ReportModuleNavigator } from './ReportModuleNavigator';
 
-type CatalogueMode = 'procurement' | 'inventory';
+type CatalogueMode = 'procurement' | 'inventory' | 'compliance';
 type ExportFormat = 'pdf' | 'xlsx' | 'csv';
 
 interface CatalogueItem {
@@ -79,6 +79,17 @@ const inventoryCatalogue: CatalogueItem[] = [
   { code: 'disposal-register', title: 'Disposal Register', description: 'Review governed disposal recommendations, approvals and completion.', group: 'Valuation and compliance', icon: Trash2 },
 ];
 
+const complianceCatalogue: CatalogueItem[] = [
+  { code: 'opening-register', title: 'Opening Register', description: 'Review tender and RFQ opening entries, late submissions, participant sign-off and integrity evidence.', group: 'Sourcing integrity', icon: FileSpreadsheet },
+  { code: 'committee-signoff-register', title: 'Committee Sign-off', description: 'Review committee quorum, signed attendance, score sheets and meeting evidence.', group: 'Sourcing integrity', icon: BookOpenCheck },
+  { code: 'due-diligence-register', title: 'Supplier Due Diligence', description: 'Review supplier checks, outcomes, evidence and approval history.', group: 'Supplier and Finance compliance', icon: ShieldCheck },
+  { code: 'matching-exception-register', title: 'Matching Exceptions', description: 'Review invoice matching exceptions, corrective actions, approvals and expiry.', group: 'Supplier and Finance compliance', icon: AlertTriangle },
+  { code: 'po-payment-register', title: 'Purchase Order Payments', description: 'Trace purchase-order invoice allocations, readiness controls and Finance posting references.', group: 'Supplier and Finance compliance', icon: Scale },
+  { code: 'inventory-adjustment-register', title: 'Inventory Adjustments', description: 'Review scoped adjustment quantities, values, approvals, evidence and Finance references.', group: 'Inventory controls', icon: ClipboardCheck },
+  { code: 'override-exception-register', title: 'Overrides and Exceptions', description: 'Review procurement control events and authorised negative-stock overrides.', group: 'Inventory controls', icon: SlidersHorizontal },
+  { code: 'disposal-compliance-register', title: 'Disposal Compliance', description: 'Review governed inventory disposals, committee controls, evidence and completion.', group: 'Inventory controls', icon: Trash2 },
+];
+
 const supplierFilterReports = new Set(['contract-register', 'supplier-performance', 'award-notification']);
 const inventoryAnalyticsReports = new Set([
   'balance-register',
@@ -93,6 +104,20 @@ const inventoryStatusReports = new Set([
   'valuation-gl-register',
   'slow-non-moving-register',
   'disposal-register',
+]);
+const complianceStatusReports = new Set([
+  'opening-register',
+  'committee-signoff-register',
+  'due-diligence-register',
+  'matching-exception-register',
+  'po-payment-register',
+  'inventory-adjustment-register',
+  'disposal-compliance-register',
+]);
+const complianceWarehouseReports = new Set([
+  'inventory-adjustment-register',
+  'override-exception-register',
+  'disposal-compliance-register',
 ]);
 
 function displayValue(value: unknown, dataType?: string, format?: string) {
@@ -121,17 +146,19 @@ export function StatutoryReportCataloguePage({
   const { hasAnyRole, hasPermission } = useAuth();
   const { toast } = useToast();
   const isInventory = mode === 'inventory';
-  const catalogue = isInventory ? inventoryCatalogue : procurementCatalogue;
-  const moduleName = isInventory ? 'Inventory' : 'Procurement';
-  const modulePath = isInventory ? '/reports/inventory' : '/reports/purchasing';
+  const isCompliance = mode === 'compliance';
+  const catalogue = isInventory ? inventoryCatalogue : isCompliance ? complianceCatalogue : procurementCatalogue;
+  const moduleName = isInventory ? 'Inventory' : isCompliance ? 'Audit & Compliance' : 'Procurement';
+  const modulePath = isInventory ? '/reports/inventory' : isCompliance ? '/reports/audit-compliance' : '/reports/purchasing';
   const catalogueItem = reportCode ? catalogue.find(item => item.code === reportCode) : undefined;
   const selectedCode = reportCode ?? '';
   const showStatus = isInventory
     ? inventoryStatusReports.has(selectedCode)
-    : !!selectedCode;
-  const showFiscalYear = !isInventory && selectedCode === 'app-vs-actual';
-  const showSupplier = !isInventory && supplierFilterReports.has(selectedCode);
-  const showWarehouse = isInventory && selectedCode !== 'valuation-gl-register';
+    : isCompliance ? complianceStatusReports.has(selectedCode) : !!selectedCode;
+  const showFiscalYear = !isInventory && !isCompliance && selectedCode === 'app-vs-actual';
+  const showSupplier = !isInventory && !isCompliance && supplierFilterReports.has(selectedCode);
+  const showWarehouse = (isInventory && selectedCode !== 'valuation-gl-register') ||
+    (isCompliance && complianceWarehouseReports.has(selectedCode));
   const showCategory = isInventory && inventoryAnalyticsReports.has(selectedCode);
   const showMovementType = isInventory && selectedCode === 'movement-register';
   const showFiscalPeriod = isInventory && selectedCode === 'valuation-gl-register';
@@ -279,7 +306,7 @@ export function StatutoryReportCataloguePage({
     return (
       <Card className="border-amber-200 bg-amber-50">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> {isInventory ? 'Inventory' : 'Procurement'} reports</CardTitle>
+          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> {moduleName} reports</CardTitle>
           <CardDescription>An active tenant responsibility granting procurement.reports.read is required.</CardDescription>
         </CardHeader>
       </Card>

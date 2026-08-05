@@ -297,7 +297,7 @@ export default function SupplierApplicantPortalPage() {
               Restricted supplier applicant portal
             </div>
             <p className="text-xs text-slate-500">
-              Application, documents, payment and status only
+              Payment, application, documents and status only
             </p>
           </div>
           <div className="flex gap-2">
@@ -336,22 +336,24 @@ export default function SupplierApplicantPortalPage() {
           <Alert className="border-amber-300 bg-amber-50">
             <AlertDescription>
               The effective configuration requires a trusted provider or cashier to
-              verify payment before application editing and document submission are
-              unlocked.
+              verify payment before application editing, document submission and
+              status tracking are unlocked.
             </AlertDescription>
           </Alert>
         )}
 
-        <Tabs defaultValue={portal?.paymentOnly ? 'payment' : 'application'}>
+        <Tabs defaultValue="payment">
           <TabsList className="grid w-full grid-cols-4 md:w-[620px]">
+            <TabsTrigger value="payment">Payment</TabsTrigger>
             <TabsTrigger value="application" disabled={portal?.paymentOnly}>
               Application
             </TabsTrigger>
             <TabsTrigger value="documents" disabled={portal?.paymentOnly}>
               Documents
             </TabsTrigger>
-            <TabsTrigger value="status">Status</TabsTrigger>
-            <TabsTrigger value="payment">Payment</TabsTrigger>
+            <TabsTrigger value="status" disabled={portal?.paymentOnly}>
+              Status
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="application">

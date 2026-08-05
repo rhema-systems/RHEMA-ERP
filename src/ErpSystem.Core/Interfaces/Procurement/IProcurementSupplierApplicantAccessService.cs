@@ -12,6 +12,11 @@ public interface IProcurementSupplierApplicantAccessService
         StartSupplierApplicantSessionRequest request,
         string correlationId,
         CancellationToken cancellationToken = default);
+    Task<SupplierApplicantTokenDeliveryDto> DeliverApplicationTokenAsync(
+        Guid tokenId,
+        string plaintextToken,
+        string correlationId,
+        CancellationToken cancellationToken = default);
     Task<SupplierApplicantSessionDto> ValidateSessionAsync(
         Guid sessionReference,
         string correlationId,

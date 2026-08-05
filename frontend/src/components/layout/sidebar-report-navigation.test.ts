@@ -23,6 +23,7 @@ describe('main Reports navigation', () => {
       ['Financial Reports', '/reports/financial'],
       ['Procurement Reports', '/reports/purchasing'],
       ['Inventory Reports', '/reports/inventory'],
+      ['Audit & Compliance Reports', '/reports/audit-compliance'],
       ['Sales Reports', '/reports/sales'],
       ['HR Reports', '/reports/human-resources'],
       ['Estate Reports', '/reports/estate'],
@@ -77,6 +78,7 @@ describe('navigation surfaces', () => {
       'Governance & Controls',
     ]);
     expect(findByTitle(sidebarNavigationItems, 'Supplier Management')?.children?.map(item => item.title)).toEqual([
+      'Supplier Application Portal',
       'Business Partners',
       'Registrations',
       'Pending Partners',

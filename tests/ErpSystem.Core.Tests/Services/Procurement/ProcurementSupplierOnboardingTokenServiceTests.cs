@@ -104,6 +104,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RegistrationId = fixture.Registration.Id
             },
             "issue-paid");
+        var paymentSession = await fixture.SeedApplicantSessionAsync(issued.Token.Id);
         var submitted = await fixture.Service.RecordPaymentAsync(
             issued.Token.Id,
             new RecordProcurementSupplierOnboardingPaymentRequest
@@ -157,10 +158,12 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             },
             "verify-payment");
 
-        verified.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
-        verified.PaymentStatus.Should()
+        verified.Token.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
+        verified.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
-        verified.Payments.Should().ContainSingle(item =>
+        verified.PlaintextToken.Should().NotBeNullOrWhiteSpace();
+        verified.Token.Generation.Should().Be(2);
+        verified.Token.Payments.Should().ContainSingle(item =>
             item.ReceiptNumber == "SUP-ONB-2026-00001" &&
             item.PostingEventId == fixture.PostingEventId &&
             item.JournalEntryId == fixture.JournalEntryId &&
@@ -174,7 +177,11 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         fixture.PostedRequest.Lines.Should().Contain(item =>
             item.TransactionTag == "SupplierOnboardingFee" &&
             item.AccountId == fixture.RevenueAccount!.Id);
-        verificationReplay.Payments.Should().ContainSingle();
+        verificationReplay.Token.Payments.Should().ContainSingle();
+        verificationReplay.PlaintextToken.Should().BeNull();
+        (await fixture.Context.ProcurementSupplierApplicantSessions
+                .SingleAsync(item => item.Id == paymentSession.Id))
+            .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Revoked);
         fixture.FinancePostCount.Should().Be(1,
             "verification replays must not create duplicate Finance postings");
     }
@@ -403,10 +410,10 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             },
             "approve-exemption");
 
-        approved.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
-        approved.PaymentStatus.Should()
+        approved.Token.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
+        approved.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Exempt);
-        approved.Exemptions.Should().ContainSingle(item =>
+        approved.Token.Exemptions.Should().ContainSingle(item =>
             item.Status == ProcurementSupplierOnboardingExemptionStatus.Approved);
     }
 
@@ -466,9 +473,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             },
             "reconcile-payment");
 
-        reconciled.PaymentStatus.Should()
+        reconciled.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
-        replay.Payments.Should().ContainSingle(item =>
+        replay.Token.Payments.Should().ContainSingle(item =>
             item.ReconciliationReference == "BANK-RECON-001" &&
             item.Status == ProcurementSupplierOnboardingPaymentStatus.Reconciled);
     }

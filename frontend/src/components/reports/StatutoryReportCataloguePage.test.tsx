@@ -31,6 +31,18 @@ vi.mock('@tanstack/react-query', () => ({
         isFavorite: false,
         tags: ['balance-register'],
       },
+      {
+        id: '33333333-3333-3333-3333-333333333333',
+        name: 'Opening Register',
+        description: 'Published report',
+        type: 'compliance',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-04T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['opening-register'],
+      },
     ] : [],
     isLoading: false,
     isError: false,
@@ -75,7 +87,7 @@ vi.mock('@/services/finance/finance-data.service', () => ({
   financeDataService: { getFiscalPeriods: vi.fn().mockResolvedValue([]) },
 }));
 
-function renderCatalogue(reportCode?: string, mode: 'procurement' | 'inventory' = 'procurement') {
+function renderCatalogue(reportCode?: string, mode: 'procurement' | 'inventory' | 'compliance' = 'procurement') {
   return render(<StatutoryReportCataloguePage mode={mode} reportCode={reportCode} />);
 }
 
@@ -128,5 +140,16 @@ describe('StatutoryReportCataloguePage navigation', () => {
     expect(screen.queryByLabelText('Status / classification')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Slow-moving days')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Expiry warning days')).not.toBeInTheDocument();
+  });
+
+  it('exposes the dedicated audit and compliance catalogue through the shared report shell', async () => {
+    renderCatalogue(undefined, 'compliance');
+
+    expect(await screen.findByRole('heading', { name: 'Audit & Compliance reports' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Sourcing integrity' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Opening Register/ })).toHaveAttribute(
+      'href',
+      '/reports/audit-compliance/opening-register',
+    );
   });
 });

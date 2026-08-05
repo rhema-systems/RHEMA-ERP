@@ -174,6 +174,31 @@ if (args.Length > 0 && args[0] == "seed-workflows")
     return;
 }
 
+// Seed only the prerequisites needed to exercise supplier onboarding end to end.
+// This never creates an applicant, token, payment, registration, or supplier record.
+if (args.Length > 0 && args[0] == "seed-supplier-onboarding-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seeder = scope.ServiceProvider.GetRequiredService<ProcurementSupplierOnboardingTestSeeder>();
+        await seeder.SeedAsync();
+    }
+
+    Console.WriteLine("Supplier-onboarding E2E prerequisites seeded successfully.");
+    return;
+}
+
 // Check for development database rebuild command.
 // This bypasses the current migration chain and recreates the schema directly from the EF model.
 if (args.Length > 0 && args[0] == "rebuild-db")
@@ -235,7 +260,7 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
     return;
 }
 

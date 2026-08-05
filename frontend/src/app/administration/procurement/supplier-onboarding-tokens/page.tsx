@@ -566,13 +566,56 @@ export default function SupplierOnboardingTokensPage() {
               <div><Label>{action === 'reissue' ? 'Rotation reason' : 'Exemption reason'}</Label><Textarea value={reason} onChange={(event) => setReason(event.target.value)} /></div>
             )}
             {action === 'reconcile' && (
-              <div><Label>Trusted provider or cashier reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} /></div>
+              <Alert className="border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+                <ShieldCheck className="h-4 w-4" />
+                <AlertTitle>Independent payment verification required</AlertTitle>
+                <AlertDescription>
+                  Confirm becomes available after both audit fields below are completed.
+                  Use evidence obtained independently from the provider, bank, POS or
+                  official cashier record—not an unverified reference supplied only by
+                  the applicant.
+                </AlertDescription>
+              </Alert>
+            )}
+            {action === 'reconcile' && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-verification-reference">
+                  Provider transaction / cashier receipt reference <span aria-hidden="true">*</span>
+                </Label>
+                <Input
+                  id="payment-verification-reference"
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value)}
+                  placeholder="MoMo transaction ID, bank reference, POS or cashier receipt no."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter the independently verifiable transaction or official receipt
+                  reference used to match this payment.
+                </p>
+              </div>
             )}
             {(action === 'exemption' || action === 'approve-exemption' || action === 'reject-exemption') && (
               <div><Label>Shared evidence reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Document or external evidence reference" /></div>
             )}
-            {(action === 'reconcile' || action === 'approve-exemption' || action === 'reject-exemption') && (
-              <div><Label>{action === 'reconcile' ? 'Verification notes' : 'Independent decision comment'}</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
+            {action === 'reconcile' && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-verification-note">
+                  Payment verification note <span aria-hidden="true">*</span>
+                </Label>
+                <Textarea
+                  id="payment-verification-note"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="How the amount, payer, date and settlement or receipt were independently confirmed"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required audit evidence explaining what was checked before the token
+                  is activated and the Finance posting is created.
+                </p>
+              </div>
+            )}
+            {(action === 'approve-exemption' || action === 'reject-exemption') && (
+              <div><Label>Independent decision comment</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
             )}
           </div>
           <DialogFooter>

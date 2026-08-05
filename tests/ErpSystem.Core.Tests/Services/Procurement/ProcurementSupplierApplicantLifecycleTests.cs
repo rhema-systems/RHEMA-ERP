@@ -21,6 +21,85 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementSupplierApplicantLifecycleTests
 {
     [Fact]
+    public async Task PaidVerifiedApplicationWithholdsTokenAndCreatesOnlyPaymentSession()
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SeedSystemActor();
+
+        var issued = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "paid-applicant@example.test",
+                CompanyName = "Paid Applicant Limited",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Services
+            },
+            "paid-verified-application");
+
+        issued.PlaintextToken.Should().BeNull();
+        issued.TokenStatus.Should()
+            .Be(ProcurementSupplierOnboardingTokenStatus.AwaitingPayment);
+        issued.RestrictedSession.Should().NotBeNull();
+        issued.RestrictedSession!.PaymentOnly.Should().BeTrue();
+        issued.RestrictedSession.TokenId.Should().Be(issued.TokenId);
+        (await fixture.Context.ProcurementSupplierApplicantSessions.CountAsync())
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReverifiedPaidContactResumesOneApplicationAndRotatesRestrictedSession()
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SeedSystemActor();
+
+        var first = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Sms,
+                Contact = "024 123 4567",
+                CompanyName = "Recoverable Supplier Limited",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Services
+            },
+            "paid-recovery-first");
+        first.RestrictedSession.Should().NotBeNull();
+        var firstSession = first.RestrictedSession!;
+
+        var resumed = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Sms,
+                Contact = "+233 24 123 4567",
+                CompanyName = "A changed name must not create a duplicate",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
+            },
+            "paid-recovery-second");
+
+        resumed.ResumedExistingApplication.Should().BeTrue();
+        resumed.RegistrationId.Should().Be(first.RegistrationId);
+        resumed.TokenId.Should().Be(first.TokenId);
+        resumed.PlaintextToken.Should().BeNull();
+        resumed.RestrictedSession.Should().NotBeNull();
+        resumed.RestrictedSession!.PaymentOnly.Should().BeTrue();
+        resumed.RestrictedSession.SessionReference.Should()
+            .NotBe(firstSession.SessionReference);
+        (await fixture.Context.BusinessPartnerRegistrations.CountAsync()).Should().Be(1);
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.CountAsync()).Should().Be(1);
+        (await fixture.Context.ProcurementSupplierOnboardingTokens.CountAsync()).Should().Be(1);
+
+        var sessions = await fixture.Context.ProcurementSupplierApplicantSessions
+            .OrderBy(item => item.IssuedAtUtc)
+            .ToListAsync();
+        sessions.Should().HaveCount(2);
+        sessions.Single(item => item.SessionReference == firstSession.SessionReference)
+            .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Revoked);
+        sessions.Single(item => item.SessionReference == resumed.RestrictedSession.SessionReference)
+            .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Active);
+    }
+
+    [Fact]
     public async Task VerifiedContactMigratesRetainedDraftWithoutReplacingAuditOwner()
     {
         await using var fixture = new Fixture();
@@ -146,20 +225,6 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             .SingleAsync(item => item.Id == issued.RegistrationId);
         registration.ApplicantEmail.Should().Be(expectedEmail);
         registration.ApplicantPhone.Should().Be(expectedPhone);
-
-        var duplicate = () => fixture.Service.CreateVerifiedApplicationAsync(
-            new VerifyAndIssueSupplierApplicantTokenRequest
-            {
-                TenantId = fixture.TenantId,
-                Channel = channel,
-                Contact = contact,
-                CompanyName = "Duplicate Applicant",
-                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
-            },
-            "duplicate-contact");
-        (await duplicate.Should()
-                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
-            .Which.Code.Should().Be("SUPPLIER_APPLICANT_ACTIVE_APPLICATION_EXISTS");
 
         var firstSession = await fixture.Service.StartSessionAsync(
             new StartSupplierApplicantSessionRequest
@@ -494,6 +559,7 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
 
     private sealed class Fixture : IAsyncDisposable
     {
+        private readonly bool _paid;
         private Guid _currentTenantId;
         private Guid _currentUserId;
         private bool _external;
@@ -517,8 +583,9 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         public ApplicationDbContext Context { get; }
         public ProcurementSupplierApplicantAccessService Service { get; }
 
-        public Fixture()
+        public Fixture(bool paid = false)
         {
+            _paid = paid;
             _currentTenantId = TenantId;
             _currentUserId = ActorId;
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -846,7 +913,9 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     new ProcurementSupplierOnboardingTokenIssueResultDto
                     {
                         Token = _tokens[registrationId],
-                        PlaintextToken = "one-time-application-token"
+                        PlaintextToken = _paid
+                            ? null
+                            : "one-time-application-token"
                     });
             _tokenService.Setup(item => item.ValidateApplicantTokenAsync(
                     It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -866,15 +935,24 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             TokenReference = $"TOK-{registrationId:N}"[..20],
             TokenHashSha256 = new string('d', 64),
             TokenLastFour = "1234",
-            Status = ProcurementSupplierOnboardingTokenStatus.Active,
-            PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.NotRequired,
+            Generation = 1,
+            Status = _paid
+                ? ProcurementSupplierOnboardingTokenStatus.AwaitingPayment
+                : ProcurementSupplierOnboardingTokenStatus.Active,
+            PaymentStatus = _paid
+                ? ProcurementSupplierOnboardingPaymentStatus.Pending
+                : ProcurementSupplierOnboardingPaymentStatus.NotRequired,
             IssuedAtUtc = DateTime.UtcNow,
             SourceConfigurationProfileId = Guid.NewGuid(),
             SourceConfigurationProfileCode = "TDC-PROCUREMENT",
             SourceConfigurationProfileVersion = 1,
             SourceConfigurationDecisionId = Guid.NewGuid(),
-            FeeMode = ProcurementSupplierOnboardingFeeMode.Free,
+            FeeMode = _paid
+                ? ProcurementSupplierOnboardingFeeMode.Paid
+                : ProcurementSupplierOnboardingFeeMode.Free,
             FeeType = "Supplier application token",
+            FeeAmount = _paid ? 100m : 0m,
+            TotalAmount = _paid ? 100m : 0m,
             CurrencyCode = "GHS",
             ReceiptNumberFormat = "SUP-{#####}",
             ExemptionRule = "Controlled",
