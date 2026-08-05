@@ -5075,7 +5075,7 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.Type).HasConversion<int>();
 
             entity.HasOne(x => x.JobDescription)
-                .WithMany()
+                .WithMany(x => x.Qualifications)
                 .HasForeignKey(x => x.JobDescriptionId)
                 .OnDelete(DeleteBehavior.Restrict);
 
@@ -5100,7 +5100,7 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.RequiredLevel).HasConversion<int>();
 
             entity.HasOne(x => x.JobDescription)
-                .WithMany()
+                .WithMany(x => x.Competencies)
                 .HasForeignKey(x => x.JobDescriptionId)
                 .OnDelete(DeleteBehavior.Restrict);
 
@@ -7667,7 +7667,7 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.Status).HasConversion<int>();
 
             entity.HasOne(x => x.Employee)
-                .WithMany()
+                .WithMany(e => e.OnboardingPlans)
                 .HasForeignKey(x => x.EmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
@@ -7791,7 +7791,7 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.Status).HasConversion<int>();
 
             entity.HasOne(x => x.Employee)
-                .WithMany()
+                .WithMany(e => e.ProbationPeriods)
                 .HasForeignKey(x => x.EmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
 

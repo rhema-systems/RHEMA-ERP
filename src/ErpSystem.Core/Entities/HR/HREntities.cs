@@ -290,10 +290,6 @@ public class Employee : TenantEntity
     public virtual Location? Location { get; set; }
     public virtual OrganizationLevel? OrganizationLevel { get; set; }
     public virtual OrganizationUnit? OrganizationUnit { get; set; }
-    public virtual EmployeeContractDetail? CurrentTerms { get; set; }
-    public virtual ProbationPeriod? Probation { get; set; }
-    public virtual OnboardingPlan? OnboardingPlan { get; set; }
-
     // Related Collections
     public virtual ICollection<EmployeeContact> Contacts { get; set; } = new List<EmployeeContact>();
     public virtual ICollection<EmployeeEmergencyContact> EmergencyContacts { get; set; } = new List<EmployeeEmergencyContact>();
@@ -302,6 +298,43 @@ public class Employee : TenantEntity
     public virtual ICollection<EmployeeIdentificationCard> IdentificationCards { get; set; } = new List<EmployeeIdentificationCard>();
     public virtual ICollection<EmployeeWorkHistory> WorkHistories { get; set; } = new List<EmployeeWorkHistory>();
     public virtual ICollection<EmployeeContractDetail> ContractDetails { get; set; } = new List<EmployeeContractDetail>();
+    public virtual ICollection<ProbationPeriod> ProbationPeriods { get; set; } = new List<ProbationPeriod>();
+    public virtual ICollection<OnboardingPlan> OnboardingPlans { get; set; } = new List<OnboardingPlan>();
+
+    // CurrentTerms / Probation / OnboardingPlan are [NotMapped] accessors over the collections
+    // above. As mapped reference navigations they had no inverse to pair with — the one-to-many
+    // was already owned by ContractDetails / ProbationPeriod.Employee / OnboardingPlan.Employee —
+    // so EF built a second relationship for each and put a shadow FK (EmployeeId1) on the
+    // dependent, duplicating the column EmployeeId already carries.
+
+    /// <summary>
+    /// The currently active contract terms, i.e. the one <see cref="EmployeeContractDetail.IsCurrent"/>
+    /// marks. In-memory only — read <see cref="ContractDetails"/> (Include it first) rather than
+    /// projecting this in a LINQ-to-Entities query.
+    /// </summary>
+    [NotMapped]
+    public EmployeeContractDetail? CurrentTerms =>
+        ContractDetails.FirstOrDefault(c => c.IsCurrent);
+
+    /// <summary>
+    /// The probation period still running, if any. An employee may accumulate several over a
+    /// career (re-hire, role change), so this deliberately picks the active one rather than
+    /// assuming there is only ever one. In-memory only, as with <see cref="CurrentTerms"/>.
+    /// </summary>
+    [NotMapped]
+    public ProbationPeriod? Probation =>
+        ProbationPeriods.FirstOrDefault(p => p.Status == ProbationStatus.Active);
+
+    /// <summary>
+    /// The onboarding plan still in flight, if any; falls back to the most recently started plan
+    /// once they have all closed out. In-memory only, as with <see cref="CurrentTerms"/>.
+    /// </summary>
+    [NotMapped]
+    public OnboardingPlan? OnboardingPlan =>
+        OnboardingPlans.FirstOrDefault(p => p.Status == OnboardingStatus.NotStarted
+                                         || p.Status == OnboardingStatus.InProgress
+                                         || p.Status == OnboardingStatus.Overdue)
+        ?? OnboardingPlans.OrderByDescending(p => p.StartDate).FirstOrDefault();
     public virtual ICollection<EmployeeSkill> Skills { get; set; } = new List<EmployeeSkill>();
     public virtual ICollection<ExpatriateAssignment> ExpatriateAssignments { get; set; } = new List<ExpatriateAssignment>();
     public virtual ICollection<EmployeePositionHistory> PositionHistories { get; set; } = new List<EmployeePositionHistory>();
