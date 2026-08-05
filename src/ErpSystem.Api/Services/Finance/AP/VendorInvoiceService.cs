@@ -209,6 +209,12 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var invoiceNumber = await GenerateInvoiceNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
+            var invoiceWht = await ResolveInvoiceWhtAsync(
+                dto.WithholdingTaxId,
+                dto.WithholdingTaxRate,
+                dto.InvoiceDate,
+                dto.IsOpeningBalance,
+                cancellationToken);
 
             var invoice = new VendorInvoice
             {
@@ -228,9 +234,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentTermId = paymentTerm?.Id,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
                 EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
-                WithholdingTaxRate = dto.WithholdingTaxRate,
-                WithholdingTaxId = dto.WithholdingTaxId,
-                WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+                // Invoice WHT is an expected payment-time classification. The selected tenant tax
+                // owns the rate and account; request values cannot silently override statutory setup.
+                WithholdingTaxRate = invoiceWht.Rate,
+                WithholdingTaxId = invoiceWht.TaxId,
+                WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId,
                 WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
                 WithholdingCertificateDate = dto.WithholdingCertificateDate,
                 MatchingType = dto.MatchingType,
@@ -295,11 +303,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.PaidAmount = 0;
             invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
 
-            // WHT calculation
-            if (invoice.WithholdingTaxRate > 0)
-            {
-                invoice.WithholdingTaxAmount = invoice.SubTotal * (invoice.WithholdingTaxRate / 100);
-            }
+            // This is an invoice estimate only. The actual liability and annual threshold are
+            // recalculated from allocations when the supplier payment is created.
+            invoice.WithholdingTaxAmount = decimal.Round(
+                invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
+                2,
+                MidpointRounding.AwayFromZero);
 
             // Early payment discount amount
             if (invoice.EarlyPaymentDiscountPercentage > 0)
@@ -339,6 +348,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
                 ? dto.InvoiceDate.AddDays(paymentTerm.DiscountDays)
                 : dto.EarlyPaymentDiscountDueDate;
+            var invoiceWht = await ResolveInvoiceWhtAsync(
+                dto.WithholdingTaxId,
+                dto.WithholdingTaxRate,
+                dto.InvoiceDate,
+                dto.IsOpeningBalance,
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.SupplierInvoiceNumber = dto.SupplierInvoiceNumber;
@@ -352,9 +367,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.PaymentTermId = paymentTerm?.Id;
             invoice.EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage;
             invoice.EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate;
-            invoice.WithholdingTaxRate = dto.WithholdingTaxRate;
-            invoice.WithholdingTaxId = dto.WithholdingTaxId;
-            invoice.WithholdingTaxAccountId = dto.WithholdingTaxAccountId;
+            invoice.WithholdingTaxRate = invoiceWht.Rate;
+            invoice.WithholdingTaxId = invoiceWht.TaxId;
+            invoice.WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId;
             invoice.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
             invoice.WithholdingCertificateDate = dto.WithholdingCertificateDate;
             invoice.MatchingType = dto.MatchingType;
@@ -427,8 +442,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.TotalAmount = subtotal + totalTax;
             invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
 
-            if (invoice.WithholdingTaxRate > 0)
-                invoice.WithholdingTaxAmount = invoice.SubTotal * (invoice.WithholdingTaxRate / 100);
+            // Assign zero explicitly when WHT is removed so a draft edit cannot retain a stale
+            // deduction from the invoice's previous configured category.
+            invoice.WithholdingTaxAmount = decimal.Round(
+                invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
+                2,
+                MidpointRounding.AwayFromZero);
 
             if (invoice.EarlyPaymentDiscountPercentage > 0)
                 invoice.EarlyPaymentDiscountAmount = invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100);
@@ -2206,6 +2225,60 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             return paymentTerm;
         }
+
+        /// <summary>
+        /// Resolves the AP invoice's expected payment-time WHT classification from tenant setup.
+        /// Threshold application is intentionally deferred to VendorPaymentService because the
+        /// Ghana annual supplier aggregate is triggered by payment, not invoice capture.
+        /// </summary>
+        private async Task<InvoiceWhtResolution> ResolveInvoiceWhtAsync(
+            Guid? taxId,
+            decimal requestedRate,
+            DateTime invoiceDate,
+            bool isOpeningBalance,
+            CancellationToken cancellationToken)
+        {
+            if (isOpeningBalance || !taxId.HasValue || taxId.Value == Guid.Empty)
+            {
+                if (!isOpeningBalance && requestedRate > 0m)
+                {
+                    throw new InvalidOperationException("Select a configured purchase WHT tax instead of supplying a standalone invoice WHT rate.");
+                }
+                return new InvoiceWhtResolution(null, 0m, null);
+            }
+
+            var tax = await _unitOfWork.Repository<Tax>().FirstOrDefaultAsync(item =>
+                item.TenantId == TenantId && !item.IsDeleted && item.IsActive && item.Id == taxId.Value
+                && item.Category == TaxCategory.Withholding
+                && (item.Applicability == TaxApplicability.Purchases || item.Applicability == TaxApplicability.Both));
+            if (tax == null)
+            {
+                throw new InvalidOperationException("The selected invoice tax is not an active purchase WHT configuration for this tenant.");
+            }
+
+            var effectiveRate = tax.EffectiveFrom.Date <= invoiceDate.Date
+                ? tax.Rate
+                : await _unitOfWork.Repository<TaxRateHistory>()
+                    .GetQueryable(history =>
+                        history.TenantId == TenantId && !history.IsDeleted && history.TaxId == tax.Id
+                        && history.EffectiveFrom <= invoiceDate
+                        && (!history.EffectiveTo.HasValue || history.EffectiveTo.Value >= invoiceDate))
+                    .OrderByDescending(history => history.EffectiveFrom)
+                    .Select(history => (decimal?)history.Rate)
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (!effectiveRate.HasValue)
+            {
+                throw new InvalidOperationException($"WHT tax {tax.Code} is not effective on {invoiceDate:yyyy-MM-dd}.");
+            }
+            if (!tax.TaxPayableAccountId.HasValue)
+            {
+                throw new InvalidOperationException($"WHT tax {tax.Code} has no payable account configured.");
+            }
+
+            return new InvoiceWhtResolution(tax.Id, effectiveRate.Value, tax.TaxPayableAccountId);
+        }
+
+        private sealed record InvoiceWhtResolution(Guid? TaxId, decimal Rate, Guid? TaxPayableAccountId);
 
         private sealed record TaxPostingBuildResult(
             List<FinancePostingLineDto> Lines,

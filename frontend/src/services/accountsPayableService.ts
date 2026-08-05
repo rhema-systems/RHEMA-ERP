@@ -1,11 +1,16 @@
 import { apiService } from './api.service';
+import { DOCUMENT_TYPES, documentOutputService } from './document-output.service';
 import type {
     VendorInvoice,
     VendorInvoiceCreateRequest,
     VendorInvoiceUpdateRequest,
     VendorPayment,
     VendorPaymentCreateRequest,
+    SubmitVendorPaymentRequest,
+    VendorPaymentControl,
     VendorPaymentAllocationCreateRequest,
+    ReverseVendorPaymentRequest,
+    VendorPaymentTrace,
     PaymentBatch,
     PaymentBatchCreateRequest,
     ApAgingReport,
@@ -151,8 +156,32 @@ class AccountsPayableService {
         return apiService.post<VendorPayment>(`${this.baseUrl}/payments`, data);
     }
 
+    /**
+     * Freezes the applicable evidence/authority policy and starts maker-checker approval. This is
+     * intentionally distinct from posting: only the completed workflow may authorize posting.
+     */
+    public async submitPayment(id: string, request: SubmitVendorPaymentRequest): Promise<VendorPayment> {
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/submit`, request);
+    }
+
+    public async getPaymentControl(id: string): Promise<VendorPaymentControl> {
+        return apiService.get<VendorPaymentControl>(`${this.baseUrl}/payments/${id}/control`);
+    }
+
     public async postPayment(id: string): Promise<VendorPayment> {
         return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/post`, {});
+    }
+
+    public async getPaymentTrace(id: string): Promise<VendorPaymentTrace> {
+        return apiService.get<VendorPaymentTrace>(`${this.baseUrl}/payments/${id}/trace`);
+    }
+
+    /**
+     * Creates a linked compensating posting. The API keeps the original payment and journal
+     * immutable, so the UI intentionally calls this "reverse" rather than "void" or "delete".
+     */
+    public async reversePayment(id: string, request: ReverseVendorPaymentRequest): Promise<VendorPayment> {
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/reverse`, request);
     }
 
     public async allocatePayment(paymentId: string, data: VendorPaymentAllocationCreateRequest): Promise<any> {
@@ -247,6 +276,30 @@ class AccountsPayableService {
             supplierIds: query.supplierIds ?? [],
             showSupplierCurrency: query.showSupplierCurrency === true,
         });
+    }
+
+    /**
+     * Downloads the controlled supplier statement through the shared document-output pipeline.
+     * PDF and XLSX therefore receive the same period, supplier selection and currency basis as
+     * the on-screen detailed ledger instead of rebuilding balances in the browser.
+     */
+    public async downloadSupplierStatementDocument(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+        format: 'pdf' | 'xlsx';
+    }): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeApSupplierStatement,
+            {
+                fromDate: query.fromDate,
+                toDate: query.toDate,
+                supplierIds: query.supplierIds ?? [],
+                showSupplierCurrency: query.showSupplierCurrency === true,
+            },
+            { format: query.format }
+        );
     }
 
     public async getApSummary(): Promise<ApSummaryStats> {

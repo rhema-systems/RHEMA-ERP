@@ -114,6 +114,22 @@ public class CustomerPayment : BusinessEntity
     // GL Posting
     public Guid? JournalEntryId { get; set; }
 
+    /// <summary>
+    /// Durable lineage for a controlled posted-receipt reversal. The original receipt, journal,
+    /// cash/liquidity entry, and allocations remain in history; these links identify the immutable
+    /// compensating records created to remove their financial and operational effect.
+    /// </summary>
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? ReversalCashTransactionId { get; set; }
+    public Guid? ReversalLiquidityAccountEntryId { get; set; }
+    public DateTime? ReversalDate { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    public Guid? ReversedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReversalReason { get; set; }
+
     // Multi-tenant
 
 

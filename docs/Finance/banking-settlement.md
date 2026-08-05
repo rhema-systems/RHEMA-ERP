@@ -93,6 +93,15 @@ percentage limits.
 7. Final approval posts automatically when the tenant setting is enabled. If automatic
    posting is disabled, a user with journal-posting permission uses **Post deposit**.
 8. The resulting `CashTransaction` is eligible for bank reconciliation.
+9. After the bank acknowledges the physical deposit, an authorized user records the
+   bank confirmation reference and date, with optional acknowledgement evidence.
+10. The deposit register and detail page show reconciliation status derived from that
+    existing `CashTransaction` and its `BankReconciliation`.
+
+Bank confirmation does not post another journal and does not mark a transaction as
+reconciled. It records the bank's acknowledgement of the deposit as a separate
+operational control. Reconciliation remains the accounting comparison to the imported
+bank statement and continues to use the existing reconciliation workflow.
 
 The seeded development account is:
 
@@ -109,6 +118,24 @@ files are accepted up to 10 MB. Evidence reuses the
 existing file-upload records and virus-scan state used elsewhere in Finance. The
 banking link stores document type, primary-evidence flag, uploader, and timestamp.
 Attachments are frozen once a deposit is submitted.
+
+## Bank confirmation
+
+Only a posted deposit can be bank-confirmed. The confirmation reference and date are
+required; the date cannot precede the physical deposit date or be in the future. The
+reference is unique within the tenant and destination bank account so that one bank
+acknowledgement cannot be attributed to two deposits.
+
+The submitter cannot confirm their own deposit. The command also uses the deposit row
+version so a stale browser cannot overwrite newer data. An exact retry is idempotent,
+but a completed confirmation cannot be replaced with different values. PDF, PNG, JPG,
+and JPEG acknowledgement evidence is optional and reuses tenant-owned, validated
+Finance upload records.
+
+The seeded TDC `Chief Accountant` baseline receives
+`Finance.Banking.Deposits.Confirm`. Confirmation writes the retained confirmer,
+timestamp, reference, date, notes and evidence link, and emits the
+`BankDepositConfirmed` Finance audit event.
 
 ## Returned cheques
 
@@ -132,6 +159,26 @@ template from that screen, enter the bank's transaction date, description, refer
 debit/credit, and balance columns, then import it. Posted deposits and returned cheques
 appear in the book-side matching queue as one transaction per bank statement movement.
 
+Deposit reconciliation indicators are projections of the canonical bank-facing
+`CashTransaction` and its reconciliation record. The deposit entity deliberately does
+not store a second reconciliation status, preventing the deposit register and the
+reconciliation workspace from drifting apart.
+
+## Controlled payment slips and official receipts
+
+Posted Finance cash/bank payments and posted AR customer payments now use the shared
+controlled-document pipeline instead of the browser print command. The first PDF is an
+Original. Every later copy requires the dedicated replacement permission and a reason
+of at least 20 characters, is watermarked `REPLACEMENT COPY` on every page, and retains
+its issuer, timestamp, copy number, reason, exact PDF SHA-256 hash, source transaction,
+and journal link in the append-only issue register.
+
+Issuing a slip or receipt never posts another journal. Reversed or bounced source
+documents remain printable as historical evidence but carry a prominent adverse-status
+notice. See
+`docs/Finance/tdc-controlled-payment-slips-and-receipts.md` for source eligibility,
+permissions, audit events, UI behavior, and deployment evidence.
+
 ## Key implementation points
 
 - Domain: `BankingSettlement.cs`, `CustomerPayment.cs`, and `FinanceSettings.cs`
@@ -141,6 +188,8 @@ appear in the book-side matching queue as one transaction per bank statement mov
 - Tenant settings: Finance Settings -> Banking & Settlement Controls
 - UI: liquidity accounts, deposits, returned cheques, and bank reconciliation under
   Finance -> Cash & Bank
+- Detailed control note: `docs/Finance/tdc-bank-deposit-confirmation-and-reconciliation-control.md`
+- Controlled document note: `docs/Finance/tdc-controlled-payment-slips-and-receipts.md`
 
 When adding a new payment source, post it to the correct liquidity GL first and register
 an immutable `LiquidityAccountEntry` against the source document. Never manufacture a

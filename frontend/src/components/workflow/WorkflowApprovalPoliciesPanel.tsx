@@ -19,6 +19,8 @@ import {
   WorkflowApprovalType,
   WorkflowAssignmentType,
   WorkflowDefinitionLifecycleStatus,
+  WorkflowConditionType,
+  WorkflowLogicalOperator,
   WorkflowRejectionHandling,
   type SaveWorkflowApprovalPolicyRequest,
   type WorkflowApprovalPolicySetDto,
@@ -35,6 +37,9 @@ const emptyForm = (): SaveWorkflowApprovalPolicyRequest => ({
     approverRules: [], minApprovalsRequired: 1,
     rejectionHandling: WorkflowRejectionHandling.StopWorkflow,
     preventInitiatorApproval: true, requireDistinctApprovers: true, conflictRules: [],
+    evidenceRequirements: [], allowEvidenceException: false,
+    evidenceExceptionApproverRole: 'Managing Director', minimumExceptionReasonLength: 30,
+    requiresManagingDirectorApproval: false, managingDirectorApproverRole: 'Managing Director',
   },
 });
 
@@ -42,6 +47,7 @@ export function WorkflowApprovalPoliciesPanel({ entityTypes }: { entityTypes: Wo
   const [policies, setPolicies] = React.useState<WorkflowApprovalPolicySetDto[]>([]);
   const [form, setForm] = React.useState<SaveWorkflowApprovalPolicyRequest>(emptyForm());
   const [roles, setRoles] = React.useState('');
+  const [evidenceLines, setEvidenceLines] = React.useState('');
   const [editingId, setEditingId] = React.useState<string>();
   const [open, setOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -55,7 +61,15 @@ export function WorkflowApprovalPoliciesPanel({ entityTypes }: { entityTypes: Wo
   const edit = (policy?: WorkflowApprovalPolicySetDto) => {
     setEditingId(policy?.id);
     setForm(policy ? { ...policy, approvalConfig: { ...policy.approvalConfig } } : emptyForm());
-    setRoles(policy?.approvalConfig.approverRules.map(rule => rule.role).filter(Boolean).join(', ') || '');
+    const executiveRole = policy?.approvalConfig.managingDirectorApproverRole;
+    // The conditional executive rule is edited through its dedicated control. Omitting it from
+    // the ordinary role list prevents a cloned TDC policy from becoming an unconditional MD step.
+    setRoles(policy?.approvalConfig.approverRules
+      .filter(rule => !(rule.condition && rule.role === executiveRole))
+      .map(rule => rule.role).filter(Boolean).join(', ') || '');
+    setEvidenceLines(policy?.approvalConfig.evidenceRequirements?.map(requirement =>
+      [requirement.requirementKey, requirement.documentName, requirement.documentType || '', requirement.minimumDocuments, requirement.requireVerification ? 'yes' : 'no'].join(' | ')
+    ).join('\n') || '');
     setOpen(true);
   };
 
@@ -65,17 +79,63 @@ export function WorkflowApprovalPoliciesPanel({ entityTypes }: { entityTypes: Wo
       toast.error('Code, name, entity type, and at least one approver role are required.');
       return;
     }
-    const sequential = form.approvalConfig.activationMode === WorkflowApprovalActivationMode.Sequential;
+    const parsedEvidenceLines = evidenceLines.split('\n').map(line => line.trim()).filter(Boolean);
+    const invalidEvidenceLine = parsedEvidenceLines.findIndex(line => {
+      const [requirementKey, documentName] = line.split('|').map(value => value.trim());
+      return !requirementKey || !documentName;
+    });
+    if (invalidEvidenceLine >= 0) {
+      toast.error(`Evidence line ${invalidEvidenceLine + 1} needs a key and document name.`);
+      return;
+    }
+    const evidenceRequirements = parsedEvidenceLines.map(line => {
+      const [requirementKey, documentName, documentType, minimumDocuments, requireVerification] = line.split('|').map(value => value.trim());
+      return {
+        requirementKey,
+        documentName,
+        documentType: documentType || undefined,
+        minimumDocuments: Math.max(Number(minimumDocuments) || 1, 1),
+        requireVerification: !['no', 'false', '0'].includes((requireVerification || 'yes').toLowerCase()),
+      };
+    });
+    const executiveRequired = Boolean(
+      form.approvalConfig.requiresManagingDirectorApproval || form.approvalConfig.allowEvidenceException
+    );
+    const executiveRole = form.approvalConfig.managingDirectorApproverRole?.trim() || 'Managing Director';
+    const sequential = executiveRequired || form.approvalConfig.activationMode === WorkflowApprovalActivationMode.Sequential;
+    const ordinaryRules = roleList.filter(role => role.toLowerCase() !== executiveRole.toLowerCase()).map((role, index) => ({
+      assignmentType: WorkflowAssignmentType.Role,
+      role,
+      priority: roleList.length - index,
+      approvalGroup: sequential ? index + 1 : 1,
+    }));
+    if (ordinaryRules.length === 0) {
+      toast.error('At least one ordinary approver role is required before the executive stage.');
+      return;
+    }
     const request: SaveWorkflowApprovalPolicyRequest = {
       ...form,
       approvalConfig: {
         ...form.approvalConfig,
-        approverRules: roleList.map((role, index) => ({
-          assignmentType: WorkflowAssignmentType.Role,
-          role,
-          priority: roleList.length - index,
-          approvalGroup: sequential ? index + 1 : 1,
-        })),
+        activationMode: sequential ? WorkflowApprovalActivationMode.Sequential : WorkflowApprovalActivationMode.Parallel,
+        evidenceRequirements,
+        managingDirectorApproverRole: executiveRole,
+        evidenceExceptionApproverRole: form.approvalConfig.evidenceExceptionApproverRole?.trim() || executiveRole,
+        minimumExceptionReasonLength: Math.max(form.approvalConfig.minimumExceptionReasonLength || 30, 20),
+        approverRules: executiveRequired ? [
+          ...ordinaryRules,
+          {
+            assignmentType: WorkflowAssignmentType.Role,
+            role: executiveRole,
+            priority: 1,
+            approvalGroup: ordinaryRules.length + 1,
+            condition: {
+              conditionType: WorkflowConditionType.Expression,
+              expression: 'requiresManagingDirectorApproval == true',
+              logicalOperator: WorkflowLogicalOperator.And,
+            },
+          },
+        ] : ordinaryRules,
       },
     };
     try {
@@ -114,7 +174,7 @@ export function WorkflowApprovalPoliciesPanel({ entityTypes }: { entityTypes: Wo
         </TableRow>)}</TableBody>
       </Table>
     </div>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>{editingId ? 'Edit Approval Policy Draft' : 'New Approval Policy'}</DialogTitle></DialogHeader>
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle>{editingId ? 'Edit Approval Policy Draft' : 'New Approval Policy'}</DialogTitle></DialogHeader>
       <div className="grid gap-4 md:grid-cols-2">
         <div><Label>Code</Label><Input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} /></div>
         <div><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
@@ -130,6 +190,26 @@ export function WorkflowApprovalPoliciesPanel({ entityTypes }: { entityTypes: Wo
         <div><Label>Approval rule</Label><Select value={String(form.approvalConfig.approvalType)} onValueChange={value => setForm({ ...form, approvalConfig: { ...form.approvalConfig, approvalType: Number(value) as WorkflowApprovalType } })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="0">Any / minimum</SelectItem><SelectItem value="1">All</SelectItem><SelectItem value="2">Consensus</SelectItem><SelectItem value="3">Majority</SelectItem></SelectContent></Select></div>
         <div className="flex items-center justify-between border p-3"><Label>Prevent initiator approval</Label><Switch checked={form.approvalConfig.preventInitiatorApproval} onCheckedChange={checked => setForm({ ...form, approvalConfig: { ...form.approvalConfig, preventInitiatorApproval: checked } })} /></div>
         <div className="flex items-center justify-between border p-3"><Label>Distinct approvers</Label><Switch checked={form.approvalConfig.requireDistinctApprovers} onCheckedChange={checked => setForm({ ...form, approvalConfig: { ...form.approvalConfig, requireDistinctApprovers: checked } })} /></div>
+        <div className="flex items-center justify-between border p-3">
+          <div><Label>Require Managing Director</Label><p className="text-xs text-muted-foreground">Adds a conditional final authority stage.</p></div>
+          <Switch checked={Boolean(form.approvalConfig.requiresManagingDirectorApproval)} onCheckedChange={checked => setForm({ ...form, approvalConfig: { ...form.approvalConfig, requiresManagingDirectorApproval: checked } })} />
+        </div>
+        <div className="flex items-center justify-between border p-3">
+          <div><Label>Allow evidence exception</Label><p className="text-xs text-muted-foreground">Exceptions still require executive approval.</p></div>
+          <Switch checked={Boolean(form.approvalConfig.allowEvidenceException)} onCheckedChange={checked => setForm({ ...form, approvalConfig: { ...form.approvalConfig, allowEvidenceException: checked } })} />
+        </div>
+        <div><Label>Executive approver role</Label><Input value={form.approvalConfig.managingDirectorApproverRole || ''} onChange={e => setForm({ ...form, approvalConfig: { ...form.approvalConfig, managingDirectorApproverRole: e.target.value, evidenceExceptionApproverRole: e.target.value } })} /></div>
+        <div><Label>Minimum exception reason</Label><Input type="number" min={20} value={form.approvalConfig.minimumExceptionReasonLength ?? 30} onChange={e => setForm({ ...form, approvalConfig: { ...form.approvalConfig, minimumExceptionReasonLength: Number(e.target.value) || 30 } })} /></div>
+        <div className="md:col-span-2">
+          <Label>Evidence requirements</Label>
+          <Textarea
+            className="mt-1 min-h-28 font-mono text-xs"
+            value={evidenceLines}
+            onChange={e => setEvidenceLines(e.target.value)}
+            placeholder={'payment-support | Approved payment supporting pack | PaymentSupport | 1 | yes'}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">One per line: key | document name | document type | minimum documents | verification yes/no.</p>
+        </div>
         <div className="md:col-span-2"><Label>Description</Label><Textarea value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
       </div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={saving} onClick={save}>{saving ? 'Saving...' : 'Save Draft'}</Button></DialogFooter>
     </DialogContent></Dialog>

@@ -294,15 +294,43 @@ public class VendorPaymentDto
     public string? TransactionReference { get; set; }
     public decimal WithholdingTaxRate { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
+    public decimal WithholdingTaxBaseAmount { get; set; }
+    public decimal WithholdingTaxCumulativeBefore { get; set; }
+    public decimal? WithholdingTaxThresholdAmount { get; set; }
+    public bool WithholdingTaxThresholdApplied { get; set; }
+    public string? WithholdingTaxCalculationNote { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
     public decimal DiscountTaken { get; set; }
     public VendorPaymentStatus Status { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? AppliedApprovalPolicySetId { get; set; }
+    public string? AppliedApprovalPolicyCode { get; set; }
+    public string? ApprovalControlSnapshotHash { get; set; }
+    public bool IsExceptionalPayment { get; set; }
+    public string? ExceptionalPaymentReason { get; set; }
+    public bool RequiresManagingDirectorApproval { get; set; }
+    public Guid? ManagingDirectorApprovedById { get; set; }
+    public DateTime? ManagingDirectorApprovedAt { get; set; }
+    public bool EvidenceExceptionRequested { get; set; }
+    public string? EvidenceExceptionReason { get; set; }
+    public Guid? EvidenceExceptionRequestedById { get; set; }
+    public DateTime? EvidenceExceptionRequestedAt { get; set; }
+    public Guid? EvidenceExceptionApprovedById { get; set; }
+    public DateTime? EvidenceExceptionApprovedAt { get; set; }
     public Guid? PaymentBatchId { get; set; }
     public string? PaymentBatchNumber { get; set; }
     public Guid? JournalEntryId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversalDate { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    public Guid? ReversedById { get; set; }
+    public string? ReversalReason { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
@@ -332,6 +360,7 @@ public class VendorPaymentCreateDto
 
     public decimal WithholdingTaxRate { get; set; }
     public decimal? WithholdingTaxAmount { get; set; }
+    public decimal? WithholdingTaxBaseAmount { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
     public string? WithholdingCertificateNumber { get; set; }
@@ -343,6 +372,107 @@ public class VendorPaymentCreateDto
     /// Optional: allocations to create immediately with the payment.
     /// </summary>
     public List<VendorPaymentAllocationCreateDto>? Allocations { get; set; }
+}
+
+/// <summary>
+/// Submits a direct vendor payment into the configured maker-checker route. Exceptional-payment
+/// and evidence-exception decisions are explicit command data because silently deriving either
+/// from free-form notes would make the authority decision impossible to audit reliably.
+/// </summary>
+public sealed class SubmitVendorPaymentDto
+{
+    public bool IsExceptionalPayment { get; set; }
+
+    [MaxLength(1000)]
+    public string? ExceptionalPaymentReason { get; set; }
+
+    public bool RequestEvidenceException { get; set; }
+
+    [MaxLength(1000)]
+    public string? EvidenceExceptionReason { get; set; }
+}
+
+/// <summary>
+/// Evidence/control readiness for a direct AP payment. The UI consumes this read model instead of
+/// reconstructing policy rules from workflow JSON or guessing whether an uploaded file is usable.
+/// </summary>
+public sealed class VendorPaymentControlDto
+{
+    public Guid PaymentId { get; set; }
+    public string? PolicyCode { get; set; }
+    public Guid? PolicySetId { get; set; }
+    public string? PolicySnapshotHash { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public string? WorkflowStatus { get; set; }
+    public Guid? CurrentStepInstanceId { get; set; }
+    public string? CurrentStepName { get; set; }
+    public bool IsExceptionalPayment { get; set; }
+    public bool RequiresManagingDirectorApproval { get; set; }
+    public bool ManagingDirectorApprovalCompleted { get; set; }
+    public bool EvidenceExceptionRequested { get; set; }
+    public bool EvidenceExceptionApproved { get; set; }
+    public bool EvidenceRequirementsSatisfied { get; set; }
+    public bool CanSubmit { get; set; }
+    public int MinimumExceptionReasonLength { get; set; } = 30;
+    public List<VendorPaymentEvidenceRequirementStatusDto> EvidenceRequirements { get; set; } = new();
+    public List<VendorPaymentEvidenceDocumentDto> EvidenceDocuments { get; set; } = new();
+    public List<string> BlockingReasons { get; set; } = new();
+}
+
+public sealed class VendorPaymentEvidenceRequirementStatusDto
+{
+    public string RequirementKey { get; set; } = string.Empty;
+    public string DocumentName { get; set; } = string.Empty;
+    public string? DocumentType { get; set; }
+    public int MinimumDocuments { get; set; }
+    public bool RequireVerification { get; set; }
+    public int CurrentDocumentCount { get; set; }
+    public int VerifiedDocumentCount { get; set; }
+    public bool IsSatisfied { get; set; }
+}
+
+public sealed class VendorPaymentEvidenceDocumentDto
+{
+    public Guid Id { get; set; }
+    public string AttachmentId { get; set; } = string.Empty;
+    public string? RequirementKey { get; set; }
+    public string? DocumentName { get; set; }
+    public string? DocumentType { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string VerificationStatus { get; set; } = string.Empty;
+    public string MalwareScanStatus { get; set; } = string.Empty;
+    public DateTime UploadedAt { get; set; }
+    public Guid UploadedById { get; set; }
+    public Guid? VerifiedById { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? VerificationNotes { get; set; }
+    public string Sha256 { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Command used to reverse a posted AP payment. The date is optional because the tenant's Finance
+/// reversal policy is authoritative; when supplied it is treated as the user's preferred date and
+/// must still satisfy that policy and the fiscal-period controls.
+/// </summary>
+public sealed class ReverseVendorPaymentDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+
+    public DateTime? ReversalDate { get; set; }
+}
+
+/// <summary>
+/// Complete source-to-ledger trace for one vendor payment. The trace deliberately exposes stable
+/// identifiers alongside display values so auditors and support staff can reconcile API output to
+/// database and report evidence without relying on labels alone.
+/// </summary>
+public sealed class VendorPaymentTraceDto
+{
+    public VendorPaymentDto Payment { get; set; } = new();
+    public List<FinancePostingTraceDto> Postings { get; set; } = new();
+    public List<FinanceAuditTraceDto> AuditEvents { get; set; } = new();
 }
 
 public class VendorPaymentQueryDto
@@ -599,11 +729,19 @@ public class SupplierStatementDto
 public class SupplierStatementLineDto
 {
     public DateTime Date { get; set; }
-    public string TransactionType { get; set; } = string.Empty; // Invoice, Payment, CreditNote
+    public string TransactionType { get; set; } = string.Empty;
     public string DocumentNumber { get; set; } = string.Empty;
     public string? Reference { get; set; }
-    public decimal Debit { get; set; }   // Invoices (increase payable)
-    public decimal Credit { get; set; }  // Payments (decrease payable)
+    /// <summary>
+    /// Debit movement in the AP control-account convention. Payments, discounts, WHT and
+    /// supplier credits reduce the payable through this column.
+    /// </summary>
+    public decimal Debit { get; set; }
+    /// <summary>
+    /// Credit movement in the AP control-account convention. Supplier invoices and other
+    /// liability-increasing adjustments appear in this column.
+    /// </summary>
+    public decimal Credit { get; set; }
     public decimal RunningBalance { get; set; }
 }
 

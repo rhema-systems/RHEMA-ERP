@@ -204,6 +204,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
                 TransactionTag = "Reversal"
             })
             .ToList();
+        var resolvedReversalDate = reversalDate?.Date
+            ?? await ResolveDefaultReversalDateAsync(tenantId, cancellationToken);
 
         return new FinanceReversalPlanDto
         {
@@ -211,10 +213,35 @@ public sealed class FinancePostingEngine : IFinancePostingEngine
             OriginalPostingEventId = postingEvent.Id,
             OriginalJournalEntryId = postingEvent.JournalEntryId!.Value,
             PostingAction = "Reverse",
-            ReversalDate = (reversalDate ?? DateTime.UtcNow).Date,
+            ReversalDate = resolvedReversalDate,
             Reason = reason.Trim(),
             ReversalLines = lines
         };
+    }
+
+    private async Task<DateTime> ResolveDefaultReversalDateAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        // A missing date must never silently mean an accounting date in a closed calendar
+        // period. Source services with richer tenant policies pass an explicit date; older
+        // reversal callers receive the same safe current-open-period fallback here at the final
+        // posting boundary.
+        var period = await _context.FiscalPeriods
+            .AsNoTracking()
+            .Where(item =>
+                item.TenantId == tenantId &&
+                item.IsOpen &&
+                !item.IsClosed &&
+                !item.IsLocked &&
+                !item.IsDeleted)
+            .OrderByDescending(item => item.StartDate)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("No open fiscal period is available for the Finance reversal.");
+        var today = DateTime.UtcNow.Date;
+        if (today < period.StartDate.Date)
+            return period.StartDate.Date;
+        return today > period.EndDate.Date ? period.EndDate.Date : today;
     }
 
     private async Task<JournalEntry> ApplyExistingJournalPostingAsync(

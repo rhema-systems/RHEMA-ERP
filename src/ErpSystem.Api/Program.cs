@@ -509,6 +509,27 @@ if (!skipStartupInitialization)
         }
     }
 
+    if (databaseInitializationSucceeded)
+    {
+        app.Logger.LogInformation("Starting baseline Finance close-template seeding...");
+        try
+        {
+            // Close templates are tenant-owned configuration, so migrations cannot cover tenants
+            // created later. Startup reconciliation is a missing-only safety net; provisioning is
+            // still the primary installation path and custom active templates are preserved.
+            await SeedFinanceCloseTemplateBaselineAsync(app);
+            app.Logger.LogInformation("Baseline Finance close-template seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Baseline Finance close-template seeding failed");
+            if (failFastOnDatabaseInitializationError)
+            {
+                throw;
+            }
+        }
+    }
+
     // Seed demo/basic data in Development, or on an explicitly opted-in non-production test host.
     if (seedDevelopmentData && developmentDataSeedingPermitted && databaseInitializationSucceeded)
     {
@@ -637,6 +658,13 @@ async Task SeedPaymentTermBaselineAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<PaymentTermBaselineSeeder>();
+    await seeder.SeedAllActiveTenantsAsync();
+}
+
+async Task SeedFinanceCloseTemplateBaselineAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<FinanceCloseTemplateBaselineSeeder>();
     await seeder.SeedAllActiveTenantsAsync();
 }
 

@@ -66,6 +66,19 @@ namespace ErpSystem.Core.DTOs.Finance
         
         /// <summary>Date when period was closed</summary>
         public DateTime? ClosedDate { get; set; }
+
+        /// <summary>
+        /// Latest approved numbered close cycle that can be rendered as a signed evidence pack.
+        /// This remains populated after a reopen so Finance can retrieve the superseded historical
+        /// certificate while the next close cycle is still being worked.
+        /// </summary>
+        public Guid? LatestClosePackCycleId { get; set; }
+
+        /// <summary>
+        /// Latest controlled reopen decision. The period list exposes it so makers cannot create
+        /// duplicate requests and higher-tier reviewers can act from the existing Finance screen.
+        /// </summary>
+        public FinancePeriodReopenRequestDto? LatestReopenRequest { get; set; }
         
         /// <summary>TRUE if trial balance validated</summary>
         public bool TrialBalanceValidated { get; set; }

@@ -945,6 +945,52 @@ public class SimpleWorkflowService : IWorkflowService
             context["submittedById"] = returnedCheque.SubmittedById;
         }
 
+        if (IsEntityType(entityTypeRecord, "VendorPayment", "Vendor Payment"))
+        {
+            var payment = await _unitOfWork.Repository<VendorPayment>()
+                .FirstOrDefaultAsync(
+                    item => item.TenantId == tenantId && item.Id == entityId,
+                    item => item.Supplier,
+                    item => item.BankAccount)
+                ?? throw new InvalidOperationException("Vendor payment not found");
+            var tenantCurrency = await _unitOfWork.Repository<Tenant>()
+                .GetQueryable(item => item.Id == tenantId && !item.IsDeleted)
+                .Select(item => item.BaseCurrency)
+                .FirstOrDefaultAsync();
+            var baseCurrencyCode = string.IsNullOrWhiteSpace(tenantCurrency)
+                ? payment.CurrencyCode
+                : tenantCurrency.Trim().ToUpperInvariant();
+
+            // Approval thresholds operate on functional-currency equivalent values. The original
+            // transaction amount/currency remain separate context fields for display and audit.
+            context["module"] = "Finance";
+            context["category"] = payment.PaymentMethod.ToString();
+            context["paymentNumber"] = payment.PaymentNumber;
+            context["paymentDate"] = payment.PaymentDate;
+            context["status"] = payment.Status.ToString();
+            context["amount"] = decimal.Round(
+                payment.TotalAmount * (payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate),
+                2,
+                MidpointRounding.AwayFromZero);
+            context["totalAmount"] = context["amount"];
+            context["currencyCode"] = baseCurrencyCode;
+            context["transactionAmount"] = payment.TotalAmount;
+            context["transactionCurrencyCode"] = payment.CurrencyCode;
+            context["exchangeRate"] = payment.ExchangeRate;
+            context["paymentMethod"] = payment.PaymentMethod.ToString();
+            context["supplierId"] = payment.SupplierId;
+            context["supplierName"] = payment.Supplier?.Name ?? string.Empty;
+            context["bankAccountId"] = payment.BankAccountId ?? Guid.Empty;
+            context["bankAccountName"] = payment.BankAccount?.AccountName ?? string.Empty;
+            context["submittedById"] = payment.SubmittedById ?? Guid.Empty;
+            context["isExceptionalPayment"] = payment.IsExceptionalPayment;
+            context["evidenceExceptionRequested"] = payment.EvidenceExceptionRequested;
+            context["requiresManagingDirectorApproval"] = payment.RequiresManagingDirectorApproval;
+            context["appliedApprovalPolicySetId"] = payment.AppliedApprovalPolicySetId ?? Guid.Empty;
+            context["appliedApprovalPolicyCode"] = payment.AppliedApprovalPolicyCode ?? string.Empty;
+            context["approvalControlSnapshotHash"] = payment.ApprovalControlSnapshotHash ?? string.Empty;
+        }
+
         if (IsEntityType(entityTypeRecord, "ExchangeRate", "Exchange Rate"))
         {
             var rate = await _unitOfWork.Repository<ExchangeRate>()

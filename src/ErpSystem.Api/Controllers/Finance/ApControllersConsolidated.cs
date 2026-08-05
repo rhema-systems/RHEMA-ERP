@@ -233,6 +233,24 @@ namespace ErpSystem.Api.Controllers.Finance
             return payment == null ? NotFound() : Ok(payment);
         }
 
+        /// <summary>
+        /// Retrieves the complete source-to-ledger trace for a payment, including allocations,
+        /// posting events, journals, reversals, and Finance audit history.
+        /// </summary>
+        [HttpGet("{id}/trace")]
+        public async Task<ActionResult<VendorPaymentTraceDto>> GetTrace(Guid id)
+        {
+            try
+            {
+                var trace = await _paymentService.GetTraceAsync(id);
+                return trace == null ? NotFound() : Ok(trace);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+        }
+
         /// <summary>Creates a new vendor payment with optional invoice allocations.</summary>
         [HttpPost]
         public async Task<ActionResult<VendorPaymentDto>> Create([FromBody] VendorPaymentCreateDto dto)
@@ -242,10 +260,45 @@ namespace ErpSystem.Api.Controllers.Finance
                 var payment = await _paymentService.CreateAsync(dto);
                 return CreatedAtAction(nameof(GetById), new { id = payment.Id }, payment);
             }
+            // Scope rules live in the service so they protect background and API callers alike.
+            // Convert a deliberate scope denial to HTTP 403 rather than misreporting it as input validation.
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
         // ── Allocations ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Submits a direct payment into its configured evidence and maker-checker workflow. Batch
+        /// payments deliberately continue through the batch endpoint so one payment cannot acquire
+        /// a second, conflicting approval source.
+        /// </summary>
+        [HttpPost("{id}/submit")]
+        public async Task<ActionResult<VendorPaymentDto>> Submit(
+            Guid id,
+            [FromBody] SubmitVendorPaymentDto dto)
+        {
+            try { return Ok(await _paymentService.SubmitAsync(id, dto)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// Returns the payment's applied evidence/authority policy and live evidence readiness.
+        /// The endpoint is bank-scope protected by the payment service.
+        /// </summary>
+        [HttpGet("{id}/control")]
+        public async Task<ActionResult<VendorPaymentControlDto>> GetControl(Guid id)
+        {
+            try
+            {
+                var control = await _paymentService.GetControlAsync(id);
+                return control == null ? NotFound() : Ok(control);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+        }
 
         /// <summary>Allocates a payment against one or more outstanding vendor invoices.</summary>
         [HttpPost("{id}/allocate")]
@@ -253,20 +306,54 @@ namespace ErpSystem.Api.Controllers.Finance
             Guid id, [FromBody] List<VendorPaymentAllocationCreateDto> allocations)
         {
             try { return Ok(await _paymentService.AllocatePaymentAsync(id, allocations)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
         /// <summary>Retrieves all allocations for a specific vendor payment.</summary>
         [HttpGet("{id}/allocations")]
         public async Task<ActionResult<List<VendorPaymentAllocationDto>>> GetAllocations(Guid id)
-            => Ok(await _paymentService.GetPaymentAllocationsAsync(id));
+        {
+            try { return Ok(await _paymentService.GetPaymentAllocationsAsync(id)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+        }
 
         /// <summary>Posts an authorized vendor payment to the general ledger through the central finance posting engine.</summary>
         [HttpPost("{id}/post")]
         public async Task<ActionResult<VendorPaymentDto>> Post(Guid id)
         {
             try { return Ok(await _paymentService.PostAsync(id)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// Reverses a posted payment through a compensating journal. The dedicated reversal
+        /// permission and Finance data scope are both required; ordinary payment processing
+        /// permission is intentionally insufficient for this high-risk correction.
+        /// </summary>
+        [HttpPost("{id}/reverse")]
+        [Authorize(Policy = FinancePermissions.ReverseApPayments)]
+        public async Task<ActionResult<VendorPaymentDto>> ReversePayment(
+            Guid id,
+            [FromBody] ReverseVendorPaymentDto dto)
+        {
+            try
+            {
+                return Ok(await _paymentService.ReversePaymentAsync(id, dto));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         /// <summary>Reverses a specific payment allocation with a mandatory reason.</summary>
@@ -274,6 +361,7 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<IActionResult> ReverseAllocation(Guid allocationId, [FromBody] string reason)
         {
             try { await _paymentService.ReverseAllocationAsync(allocationId, reason); return Ok(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -289,6 +377,7 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<VendorPaymentDto>> ClearPayment(Guid id, [FromBody] DateTime clearedDate)
         {
             try { return Ok(await _paymentService.ClearPaymentAsync(id, clearedDate)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -297,6 +386,7 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<VendorPaymentDto>> VoidPayment(Guid id, [FromBody] string reason)
         {
             try { return Ok(await _paymentService.VoidPaymentAsync(id, reason)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

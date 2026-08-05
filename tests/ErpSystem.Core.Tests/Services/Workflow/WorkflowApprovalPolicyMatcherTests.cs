@@ -41,6 +41,27 @@ public class WorkflowApprovalPolicyMatcherTests
             context with { Amount = 250_000m }).Should().BeNull();
     }
 
+    [Fact]
+    public void Select_chooses_combined_high_value_cash_control_over_each_broader_payment_policy()
+    {
+        // TDC payment controls intentionally overlap: base, method-specific, amount-specific, and
+        // the combined high-value cash rule. Priority must select the combined rule so neither the
+        // cash-custody evidence nor executive authority is lost at the intersection.
+        var context = new WorkflowApprovalPolicyContext(
+            Guid.NewGuid(), "Vendor Payment", DateTime.UtcNow, "Finance", "Cash",
+            Amount: 125_000m, CurrencyCode: "GHS");
+        var standard = FinancePaymentPolicy("TDC-AP-PAYMENT-BASE", 100);
+        var cash = FinancePaymentPolicy("TDC-AP-PAYMENT-CASH", 200, category: "Cash");
+        var high = FinancePaymentPolicy("TDC-AP-PAYMENT-HIGH", 300, minimum: 100_000m);
+        var highCash = FinancePaymentPolicy("TDC-AP-PAYMENT-HIGH-CASH", 400, "Cash", 100_000m);
+
+        var selected = WorkflowApprovalPolicyMatcher.Select(
+            new[] { standard, cash, high, highCash },
+            context);
+
+        selected.Should().BeSameAs(highCash);
+    }
+
     private static WorkflowApprovalPolicyContext Context(
         decimal amount,
         string category,
@@ -59,6 +80,25 @@ public class WorkflowApprovalPolicyMatcherTests
             EntityType = "PurchaseOrder",
             Module = "Procurement",
             Category = category,
+            Priority = priority,
+            ApprovalConfiguration = "{}"
+        };
+
+    private static WorkflowApprovalPolicySet FinancePaymentPolicy(
+        string code,
+        int priority,
+        string? category = null,
+        decimal? minimum = null)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = code,
+            Name = code,
+            EntityType = "Vendor Payment",
+            Module = "Finance",
+            Category = category,
+            MinimumAmount = minimum,
+            CurrencyCode = "GHS",
             Priority = priority,
             ApprovalConfiguration = "{}"
         };

@@ -106,6 +106,128 @@ public class LiquidityAccountEntry : TenantEntity
 }
 
 /// <summary>
+/// A physical-cash custody window around an existing CashTill liquidity account.
+///
+/// This is intentionally an operational control record, not another cash ledger. Expected cash
+/// is recalculated from immutable liquidity entries and posted deposits created between OpenedAt
+/// and ActivityCutoffAt; the stored totals are closure evidence snapshots only.
+/// </summary>
+public class CashierTillSession : TenantEntity
+{
+    [Required, MaxLength(50)]
+    public string SessionNumber { get; set; } = string.Empty;
+
+    [Required]
+    public Guid LiquidityAccountId { get; set; }
+    public virtual LiquidityAccount LiquidityAccount { get; set; } = null!;
+
+    public DateTime BusinessDate { get; set; }
+
+    [Required, MaxLength(3)]
+    public string Currency { get; set; } = "GHS";
+
+    [Required]
+    public Guid CashierUserId { get; set; }
+
+    [Required, MaxLength(200)]
+    public string CashierName { get; set; } = string.Empty;
+
+    public CashierTillSessionStatus Status { get; set; } = CashierTillSessionStatus.Open;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal OpeningFloatAmount { get; set; }
+
+    [MaxLength(1000)]
+    public string? OpeningNotes { get; set; }
+
+    public Guid? OpeningEvidenceFileId { get; set; }
+    public virtual FileUploadRecord? OpeningEvidenceFile { get; set; }
+
+    public DateTime OpenedAt { get; set; }
+    public Guid OpenedById { get; set; }
+
+    /// <summary>
+    /// UTC boundary frozen when the cashier submits the count. Activity after this instant belongs
+    /// to a later session and cannot silently change an amount already awaiting approval.
+    /// </summary>
+    public DateTime? ActivityCutoffAt { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TransactionMovementAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DepositedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ExpectedClosingAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal CountedClosingAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VarianceAmount { get; set; }
+
+    /// <summary>
+    /// Tenant policy is snapshotted at submission so a later settings change cannot alter the
+    /// approval basis of an already-counted session.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VarianceApprovalThresholdAmount { get; set; }
+
+    public int CustodyEntryCount { get; set; }
+
+    [MaxLength(1000)]
+    public string? VarianceReason { get; set; }
+
+    public Guid? ClosingEvidenceFileId { get; set; }
+    public virtual FileUploadRecord? ClosingEvidenceFile { get; set; }
+
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public Guid? ReviewedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReviewComments { get; set; }
+
+    public DateTime? ClosedAt { get; set; }
+
+    /// <summary>
+    /// A correction/reopen never mutates the closed source. It creates a linked replacement
+    /// session, retaining the original count and approval evidence for audit.
+    /// </summary>
+    public Guid? CorrectsSessionId { get; set; }
+    public virtual CashierTillSession? CorrectsSession { get; set; }
+
+    [MaxLength(1000)]
+    public string? CorrectionReason { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public virtual ICollection<CashierTillCountLine> CountLines { get; set; } = new List<CashierTillCountLine>();
+}
+
+/// <summary>
+/// Immutable-at-review denomination snapshot supporting a reproducible physical cash count.
+/// LineAmount is stored rather than calculated at read time so the submitted evidence is stable.
+/// </summary>
+public class CashierTillCountLine : TenantEntity
+{
+    [Required]
+    public Guid CashierTillSessionId { get; set; }
+    public virtual CashierTillSession CashierTillSession { get; set; } = null!;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal Denomination { get; set; }
+
+    public int Quantity { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal LineAmount { get; set; }
+}
+
+/// <summary>
 /// One bank-facing settlement footprint. A posted batch creates exactly one bank transaction
 /// for NetAmount, which remains compatible with one-to-one bank reconciliation matching.
 /// </summary>
@@ -148,6 +270,26 @@ public class BankDepositBatch : TenantEntity
     public Guid? ApprovedById { get; set; }
     public DateTime? PostedAt { get; set; }
     public Guid? PostedById { get; set; }
+
+    /// <summary>
+    /// Bank acknowledgement is captured after the approved deposit has posted. It must not be
+    /// inferred from the preparer's slip reference because a lodged slip and bank acceptance are
+    /// distinct evidence points in TDC's cash-to-bank chain.
+    /// </summary>
+    public BankDepositConfirmationStatus ConfirmationStatus { get; set; } = BankDepositConfirmationStatus.Pending;
+
+    [MaxLength(100)]
+    public string? BankConfirmationReference { get; set; }
+
+    public DateTime? BankConfirmationDate { get; set; }
+    public DateTime? BankConfirmedAt { get; set; }
+    public Guid? BankConfirmedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? BankConfirmationNotes { get; set; }
+
+    public Guid? BankConfirmationEvidenceFileId { get; set; }
+    public virtual FileUploadRecord? BankConfirmationEvidenceFile { get; set; }
 
     [MaxLength(1000)]
     public string? RejectionReason { get; set; }

@@ -69,6 +69,7 @@ public static class FinanceDocumentTypes
     public const string BankTransfer = "BankTransfer";
     public const string BankDeposit = "BankDeposit";
     public const string LiquidityEntry = "LiquidityEntry";
+    public const string CashTillSession = "CashTillSession";
     public const string ReturnedCheque = "ReturnedCheque";
     public const string CurrencyRevaluation = "CurrencyRevaluation";
     public const string YearEndClose = "YearEndClose";
@@ -118,6 +119,7 @@ public static class DocumentSequenceDefaults
             Finance(tenantId, FinanceDocumentTypes.BankTransfer, "Bank Transfer", "TRF-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Bank and cash transfers."),
             Finance(tenantId, FinanceDocumentTypes.BankDeposit, "Bank Deposit", "DEP-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Approved settlements from liquidity accounts into bank accounts."),
             Finance(tenantId, FinanceDocumentTypes.LiquidityEntry, "Liquidity Entry", "LQE-{YYYY}{MM}-{#####}", 5, DocumentSequenceResetPolicies.Monthly, true, "Operational settlement subledger entries."),
+            Finance(tenantId, FinanceDocumentTypes.CashTillSession, "Cashier Till Session", "TILL-{YYYY}{MM}{DD}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Physical cash custody, denomination count, and independent closure."),
             Finance(tenantId, FinanceDocumentTypes.ReturnedCheque, "Returned Cheque", "RCH-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Returned customer cheque cases."),
             Finance(tenantId, FinanceDocumentTypes.CurrencyRevaluation, "Currency Revaluation", "REV-{YYYY}{MM}{DD}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Multi-currency revaluation journals."),
             Finance(tenantId, FinanceDocumentTypes.YearEndClose, "Year-end Close", "YE-CLOSE-{YYYY}-{###}", 3, DocumentSequenceResetPolicies.Yearly, false, "Fiscal year closing journals."),

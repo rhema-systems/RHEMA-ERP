@@ -161,6 +161,13 @@ public sealed class BankingSettlementController : ControllerBase
     public async Task<ActionResult<BankDepositDto>> PostDeposit(Guid id, CancellationToken cancellationToken)
         => Ok(await _service.PostDepositAsync(id, cancellationToken));
 
+    [HttpPost("deposits/{id:guid}/confirm")]
+    public async Task<ActionResult<BankDepositDto>> ConfirmDeposit(
+        Guid id,
+        [FromBody] ConfirmBankDepositDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.ConfirmDepositAsync(id, dto, cancellationToken));
+
     [HttpGet("returned-cheques")]
     public async Task<ActionResult<IReadOnlyList<ReturnedChequeCaseDto>>> GetReturnedCheques(
         [FromQuery] ReturnedChequeCaseStatus? status = null,

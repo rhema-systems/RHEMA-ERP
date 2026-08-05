@@ -110,6 +110,7 @@ public static class FinancePermissionPolicyMap
             "Allocation" => AllocationPolicy(action),
             "VendorInvoice" => VendorInvoicePolicy(action),
             "VendorPayment" => VendorPaymentPolicy(action),
+            "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
             "PaymentBatch" => PaymentBatchPolicy(action),
             "ApReports" => One(FinancePermissions.RunFinanceReports),
             "Invoice" => ArInvoicePolicy(action),
@@ -121,6 +122,7 @@ public static class FinancePermissionPolicyMap
             "Budget" => BudgetPolicy(action),
             "CapitalProjects" => CapitalProjectsPolicy(action),
             "CashReports" => One(FinancePermissions.RunFinanceReports),
+            "CashierTill" => CashierTillPolicy(action),
             "CashTransaction" => CashTransactionPolicy(action),
             "Currencies" => CurrencyPolicy(action, methods),
             "Customer" => CustomerPolicy(action, methods),
@@ -197,7 +199,11 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> VendorPaymentPolicy(string action)
         => action switch
         {
-            "Create" or "Update" or "Allocate" or "Post" or "ReverseAllocation" or "ClearPayment" or "VoidPayment" => One(FinancePermissions.ProcessApPayments),
+            "ReversePayment" => One(FinancePermissions.ReverseApPayments),
+            "GetControl" => One(FinancePermissions.ViewFinance),
+            // Submission is an operational maker action. Workflow assignment and the Finance
+            // approval endpoint separately enforce who may perform the checker/MD decisions.
+            "Create" or "Update" or "Submit" or "Allocate" or "Post" or "ReverseAllocation" or "ClearPayment" or "VoidPayment" => One(FinancePermissions.ProcessApPayments),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ProcessApPayments)
         };
 
@@ -226,6 +232,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> ArPaymentPolicy(string action)
         => action switch
         {
+            "ReversePayment" => One(FinancePermissions.ReverseArPayments),
             "Create" or "Update" or "Allocate" or "Post" or "ClearPayment" or "BouncedPayment" or "CreateCreditNote" => One(FinancePermissions.ReceiveCustomerPayments),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ReceiveCustomerPayments)
         };
@@ -267,6 +274,16 @@ public static class FinancePermissionPolicyMap
             "Return" => One(FinancePermissions.WorkflowRequestChanges),
             "Cancel" => One(FinancePermissions.WorkflowCancel),
             "Post" => One(FinancePermissions.WorkflowPostAfterApproval),
+            "Reverse" => One(FinancePermissions.ReverseCashBankTransactions),
+            _ => One(FinancePermissions.ViewFinance)
+        };
+
+    private static IReadOnlyList<string> CashierTillPolicy(string action)
+        => action switch
+        {
+            "OpenSession" or "SubmitCount" => One(FinancePermissions.OperateCashTills),
+            "ApproveClosure" or "ReturnForRecount" => One(FinancePermissions.ReviewCashTillClosures),
+            "ReopenAsCorrection" => One(FinancePermissions.ReopenCashTillSessions),
             _ => One(FinancePermissions.ViewFinance)
         };
 
@@ -329,8 +346,12 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> FiscalPeriodPolicy(string action)
         => action switch
         {
+            "EvaluatePeriodCloseWorkspace" or "PreparePeriodClose" or "UpdateFinanceCloseTask" or
             "ClosePeriod" or "CloseFiscalYear" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
-            "ReopenPeriod" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
+            "RequestPeriodReopen" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
+            "ReviewPeriodReopen" => One(FinancePermissions.ApproveAccountingPeriodReopens),
+            "CreateFinanceCloseTemplateVersion" or "UpdateFinanceCloseTemplateDraft" or
+            "ApproveFinanceCloseTemplate" => One(FinancePermissions.AdministerFinance),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.AdministerFinance)
         };
 
@@ -416,6 +437,7 @@ public static class FinancePermissionPolicyMap
             "SubmitDeposit" or "CancelDeposit" => One(FinancePermissions.SubmitBankDeposits),
             "ApproveDeposit" or "RejectDeposit" or "ReturnDeposit" => One(FinancePermissions.ApproveBankDeposits),
             "PostDeposit" => One(FinancePermissions.WorkflowPostAfterApproval),
+            "ConfirmDeposit" => One(FinancePermissions.ConfirmBankDeposits),
             "CreateReturnedCheque" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
                 One(FinancePermissions.ManageReturnedCheques),
             "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ApproveBankDeposits),
@@ -474,9 +496,18 @@ public static class FinancePermissionPolicyMap
             : One(FinancePermissions.ManageTaxConfiguration);
 
     private static IReadOnlyList<string> WithholdingTaxCertificatePolicy(string action)
-        => string.Equals(action, "GenerateApCertificate", StringComparison.OrdinalIgnoreCase)
-            ? One(FinancePermissions.ManageTaxConfiguration)
-            : One(FinancePermissions.RunFinanceReports);
+        => action switch
+        {
+            // Issuance and remittance state changes are statutory lifecycle decisions. Keep
+            // them behind the existing tax-administration permission instead of inventing a
+            // second authorization vocabulary for the same Finance control owners.
+            "GenerateApCertificate" or "ReissueApCertificate" or "CancelApCertificate"
+                or "CreateRemittance" or "SubmitRemittance" or "MarkRemittancePaid" or "CancelRemittance"
+                => One(FinancePermissions.ManageTaxConfiguration),
+            "ExportRegister" => One(FinancePermissions.ExportFinanceReports),
+            "CalculateApWithholding" => One(FinancePermissions.ViewFinance),
+            _ => One(FinancePermissions.RunFinanceReports)
+        };
 
     private static IReadOnlyList<string> UnitAccountPolicy(string action, IReadOnlyCollection<string> methods)
     {

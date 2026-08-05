@@ -40,7 +40,7 @@ import { cashManagementDataService } from '@/services/finance/cash-management-da
 import { financeService } from '@/services/finance.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { PaymentMethodType } from '@/types/cash-management';
-import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
+import { TaxApplicability, TaxCategory, type Tax, type WhtCalculationResult } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
@@ -109,6 +109,8 @@ export default function NewVendorPaymentPage() {
     const [allocations, setAllocations] = useState<Record<string, number>>({});
     const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
     const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
+    const [withholdingCalculation, setWithholdingCalculation] = useState<WhtCalculationResult | null>(null);
+    const [isCalculatingWithholding, setIsCalculatingWithholding] = useState(false);
 
     const { data: suppliersData } = useQuery({
         queryKey: ['business-partners', 'ap-suppliers'],
@@ -207,6 +209,7 @@ export default function NewVendorPaymentPage() {
         if (!selectedWithholdingTax) {
             form.setValue('withholdingTaxRate', 0);
             form.setValue('withholdingTaxAccountId', undefined);
+            setWithholdingCalculation(null);
             return;
         }
 
@@ -297,6 +300,27 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
+            let verifiedWithholding: WhtCalculationResult | null = null;
+            const withholdingTaxableBase = paymentAllocations.reduce((sum, allocation) =>
+                sum + allocation.allocatedAmount + (allocation.discountAmount || 0) + (allocation.withholdingTaxAmount || 0), 0);
+            if (data.withholdingTaxId) {
+                verifiedWithholding = await taxDataService.calculateApWithholding({
+                    taxId: data.withholdingTaxId,
+                    supplierId: data.supplierId,
+                    paymentDate: data.paymentDate.toISOString(),
+                    taxableBase: withholdingTaxableBase,
+                });
+                if (Math.abs(roundMoney(verifiedWithholding.withholdingAmount - totalWithholdingTax)) > 0.01) {
+                    setWithholdingCalculation(verifiedWithholding);
+                    toast({
+                        title: 'WHT changed',
+                        description: `Configured threshold/rate requires ${formatCurrency(verifiedWithholding.withholdingAmount, currentCurrencyCode)}. Use Auto Allocate to refresh the invoice WHT split.`,
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+            }
+
             const overSettledInvoice = outstandingInvoices?.find((invoice) => {
                 const invoiceSettlement =
                     (Number(allocations[invoice.invoiceId]) || 0) +
@@ -318,6 +342,7 @@ export default function NewVendorPaymentPage() {
                 ...data,
                 paymentDate: data.paymentDate.toISOString(),
                 withholdingTaxAmount: totalWithholdingTax,
+                withholdingTaxBaseAmount: verifiedWithholding?.taxableBase ?? 0,
                 allocations: paymentAllocations.length > 0 ? paymentAllocations : undefined,
             });
 
@@ -341,35 +366,77 @@ export default function NewVendorPaymentPage() {
     const totalBillSettlement = totalAllocated + totalDiscounts + totalWithholdingTax;
     const remainingAmount = currentAmount - totalAllocated;
 
-    const handleAutoAllocate = () => {
+    const handleAutoAllocate = async () => {
         if (!outstandingInvoices) return;
-        let remaining = currentAmount;
-        const newAllocations: Record<string, number> = {};
-        const newDiscountAllocations: Record<string, number> = {};
-        const newWithholdingAllocations: Record<string, number> = {};
-        const withholdingRate = selectedWithholdingTax ? Number(selectedWithholdingTax.rate || 0) : 0;
-
-        // Allocate to oldest invoices first
-        const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
-
-        for (const inv of sortedInvoices) {
-            if (remaining <= 0) break;
-            const discountAmount = Number(inv.discountAmount) || 0;
-            const withholdingAmount = withholdingRate > 0 ? roundMoney(inv.balanceAmount * (withholdingRate / 100)) : 0;
-            const netBalance = Math.max(inv.balanceAmount - discountAmount - withholdingAmount, 0);
-            const allocateAmount = Math.min(remaining, netBalance);
-            newAllocations[inv.invoiceId] = allocateAmount;
-            if (discountAmount > 0 && allocateAmount >= netBalance) {
-                newDiscountAllocations[inv.invoiceId] = discountAmount;
+        const buildAllocation = (withholdingRate: number) => {
+            let remaining = currentAmount;
+            const cash: Record<string, number> = {};
+            const discounts: Record<string, number> = {};
+            const withholding: Record<string, number> = {};
+            const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
+            for (const inv of sortedInvoices) {
+                if (remaining <= 0) break;
+                const discountAmount = Number(inv.discountAmount) || 0;
+                const withholdingAmount = withholdingRate > 0 ? roundMoney(inv.balanceAmount * (withholdingRate / 100)) : 0;
+                const netBalance = Math.max(inv.balanceAmount - discountAmount - withholdingAmount, 0);
+                const allocateAmount = Math.min(remaining, netBalance);
+                cash[inv.invoiceId] = allocateAmount;
+                if (discountAmount > 0 && allocateAmount >= netBalance) discounts[inv.invoiceId] = discountAmount;
+                if (withholdingAmount > 0 && allocateAmount >= netBalance) withholding[inv.invoiceId] = withholdingAmount;
+                remaining -= allocateAmount;
             }
-            if (withholdingAmount > 0 && allocateAmount >= netBalance) {
-                newWithholdingAllocations[inv.invoiceId] = withholdingAmount;
+            return { cash, discounts, withholding };
+        };
+
+        setIsCalculatingWithholding(true);
+        try {
+            const configuredRate = selectedWithholdingTax ? Number(selectedWithholdingTax.rate || 0) : 0;
+            let next = buildAllocation(configuredRate);
+            if (selectedWithholdingTax && selectedSupplierId) {
+                const taxableBase = Object.keys(next.cash).reduce((sum, invoiceId) =>
+                    sum + (next.cash[invoiceId] || 0) + (next.discounts[invoiceId] || 0) + (next.withholding[invoiceId] || 0), 0);
+                const calculation = await taxDataService.calculateApWithholding({
+                    taxId: selectedWithholdingTax.id,
+                    supplierId: selectedSupplierId,
+                    paymentDate: form.getValues('paymentDate').toISOString(),
+                    taxableBase,
+                });
+                // A below-threshold result must not leave the browser's provisional percentage
+                // deductions in place. Rebuild cash allocation with zero WHT in that case. The
+                // rebuild can settle a slightly larger taxable base, so ask the server once more;
+                // this closes the edge case where that larger base is the amount that crosses the
+                // supplier's annual threshold.
+                next = buildAllocation(calculation.thresholdApplied ? calculation.taxRate : 0);
+                let finalCalculation = calculation;
+                if (!calculation.thresholdApplied) {
+                    const rebuiltTaxableBase = Object.keys(next.cash).reduce((sum, invoiceId) =>
+                        sum + (next.cash[invoiceId] || 0) + (next.discounts[invoiceId] || 0) + (next.withholding[invoiceId] || 0), 0);
+                    if (Math.abs(rebuiltTaxableBase - taxableBase) > 0.01) {
+                        finalCalculation = await taxDataService.calculateApWithholding({
+                            taxId: selectedWithholdingTax.id,
+                            supplierId: selectedSupplierId,
+                            paymentDate: form.getValues('paymentDate').toISOString(),
+                            taxableBase: rebuiltTaxableBase,
+                        });
+                        next = buildAllocation(finalCalculation.thresholdApplied ? finalCalculation.taxRate : 0);
+                    }
+                }
+                setWithholdingCalculation(finalCalculation);
+            } else {
+                setWithholdingCalculation(null);
             }
-            remaining -= allocateAmount;
+            setAllocations(next.cash);
+            setDiscountAllocations(next.discounts);
+            setWithholdingAllocations(next.withholding);
+        } catch (error: any) {
+            toast({
+                title: 'WHT calculation failed',
+                description: error?.message || 'Unable to apply the configured WHT threshold.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsCalculatingWithholding(false);
         }
-        setAllocations(newAllocations);
-        setDiscountAllocations(newDiscountAllocations);
-        setWithholdingAllocations(newWithholdingAllocations);
     };
 
     return (
@@ -524,10 +591,17 @@ export default function NewVendorPaymentPage() {
                                     </SelectContent>
                                 </Select>
                                 {selectedWithholdingTax && (
-                                    <div className="text-xs text-muted-foreground">
-                                        {selectedWithholdingTax.taxPayableAccountId
-                                            ? `Posting to configured WHT payable account at ${Number(selectedWithholdingTax.rate || 0)}%.`
-                                            : 'This tax has no payable account configured; posting will be blocked until it is set.'}
+                                    <div className="space-y-1 text-xs text-muted-foreground">
+                                        <div>
+                                            {selectedWithholdingTax.taxPayableAccountId
+                                                ? `Posting to configured WHT payable account at ${Number(selectedWithholdingTax.rate || 0)}%.`
+                                                : 'This tax has no payable account configured; posting will be blocked until it is set.'}
+                                        </div>
+                                        {withholdingCalculation && (
+                                            <div className={withholdingCalculation.thresholdApplied ? 'text-emerald-700' : 'text-amber-700'}>
+                                                {withholdingCalculation.calculationNote}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -602,7 +676,8 @@ export default function NewVendorPaymentPage() {
                 <Card className="md:col-span-2">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Allocate to Bills</CardTitle>
-                        <Button variant="outline" size="sm" onClick={handleAutoAllocate} disabled={isSubmitting || !outstandingInvoices || outstandingInvoices.length === 0}>
+                        <Button variant="outline" size="sm" onClick={handleAutoAllocate} disabled={isSubmitting || isCalculatingWithholding || !outstandingInvoices || outstandingInvoices.length === 0}>
+                            {isCalculatingWithholding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Auto Allocate
                         </Button>
                     </CardHeader>

@@ -95,6 +95,7 @@
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
+    <Compile Include="Services\Finance\FinanceAccessScopeServiceTests.cs" />
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
     <Compile Include="Services\Finance\JournalBatchServiceTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSqlServerReleaseGateTests.cs" />
@@ -109,10 +110,18 @@
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
+    <Compile Include="Services\Finance\CashierTillControlTests.cs" />
+    <Compile Include="Services\Finance\CashBankControlledDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\BankReconciliationPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingPeriodClosePostingDateTests.cs" />
+    <Compile Include="Services\Finance\FinanceCloseAlertServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceClosePackDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\ApPaymentVoucherDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\ApSupplierStatementDocumentBuilderTests.cs" />
+    <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
     <Compile Include="Services\Finance\GhanaStatutoryTaxEngineTests.cs" />
+    <Compile Include="Services\Finance\WhtComplianceLifecycleTests.cs" />
     <Compile Include="Services\Finance\FxFunctionalCurrencyGovernanceTests.cs" />
     <Compile Include="Services\Finance\FxRealizedUnrealizedRevaluationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />

@@ -259,6 +259,9 @@ public class FinanceDataSeeder
     private async Task SeedPaymentTermsAsync(Guid tenantId, DateTime baseDate)
     {
         await PaymentTermBaselineSeeder.SeedTenantBaselineAsync(_context, tenantId);
+        // Development Finance fixtures should exercise the same approved close templates as a
+        // tenant created through the API; this avoids demo-only checklist behavior.
+        await FinanceCloseTemplateBaselineSeeder.SeedTenantBaselineAsync(_context, tenantId);
 
         _logger.LogInformation("Payment terms seeded");
     }
@@ -1255,6 +1258,31 @@ public class FinanceDataSeeder
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
                 Balance = 185000m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1130-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1130",
+                AccountNumber = "1130",
+                AccountName = "Withholding Tax Receivable",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Current Assets",
+                AccountSubCategory = "Tax Receivables",
+                Description = "Control account for WHT and withholding VAT suffered on TDC customer receipts pending statutory credit/offset.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -2341,6 +2369,17 @@ public class FinanceDataSeeder
                 Name = "Card Settlement Clearing (GHS)",
                 Type = LiquidityAccountType.CardSettlementClearing,
                 GLAccountId = Guid.Parse("00000005-1023-0000-0000-000000000001")
+            },
+            new
+            {
+                // TDC begins with one controlled main cashier till. It shares the existing cash
+                // control GL account with undeposited cash while retaining separate physical
+                // custody sessions and liquidity entries; this avoids inventing a second ledger.
+                Id = Guid.Parse("00000007-1024-0000-0000-000000000001"),
+                Code = "TILL-MAIN-GHS",
+                Name = "TDC Main Cashier Till (GHS)",
+                Type = LiquidityAccountType.CashTill,
+                GLAccountId = Guid.Parse("00000005-1020-0000-0000-000000000001")
             }
         };
 
@@ -2626,6 +2665,27 @@ public class FinanceDataSeeder
         
         // 1.6 WHT 3% (Goods)
         var whtGoods = await GetOrCreateTaxAsync(tenantId, "WHT-GOODS", "Withholding Tax (Goods)", 3.0m, TaxApplicability.Purchases, TaxCategory.Withholding, false, baseDate, systemUserId, 2000m);
+
+        // 1.7 WHT 5% (Works). GRA currently applies the same GH¢2,000 annual
+        // supplier threshold to resident goods, works and entity-service payments.
+        var whtWorks = await GetOrCreateTaxAsync(tenantId, "WHT-WORKS", "Withholding Tax (Works)", 5.0m, TaxApplicability.Purchases, TaxCategory.Withholding, false, baseDate, systemUserId, 2000m);
+
+        // AR receipts record tax suffered by TDC rather than calculating a payable deduction.
+        // Separate sales-side configurations keep account direction explicit and avoid exposing
+        // an AP payable tax accidentally on the customer receipt screen.
+        var whtReceivable = await GetOrCreateTaxAsync(tenantId, "WHT-REC-SERV", "WHT Receivable (Services)", 7.5m, TaxApplicability.Sales, TaxCategory.Withholding, false, baseDate, systemUserId);
+        var vatWithholdingReceivable = await GetOrCreateTaxAsync(tenantId, "VAT-WHT-REC", "VAT Withholding Receivable", 7.0m, TaxApplicability.Sales, TaxCategory.VatWithholding, false, baseDate, systemUserId);
+
+        var taxPayableAccountId = Guid.Parse("00000005-2200-0000-0000-000000000001");
+        var taxReceivableAccountId = Guid.Parse("00000005-1130-0000-0000-000000000001");
+        foreach (var purchaseWht in new[] { whtServices, whtGoods, whtWorks })
+        {
+            // Preserve tenant overrides. These are baseline defaults only for installations that
+            // have not yet mapped a statutory control account.
+            purchaseWht.TaxPayableAccountId ??= taxPayableAccountId;
+        }
+        whtReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
+        vatWithholdingReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
 
         await _context.SaveChangesAsync();
 

@@ -100,6 +100,11 @@ public class PostedLiquidityPaymentCandidateDto
 public class RegisterPostedLiquidityPaymentDto
 {
     public Guid AccountTransactionId { get; set; }
+    /// <summary>
+    /// Optional when more than one operational liquidity account shares the posted GL control
+    /// account (for example, undeposited cash and a named physical till).
+    /// </summary>
+    public Guid? LiquidityAccountId { get; set; }
     public LiquidityEntryType EntryType { get; set; } = LiquidityEntryType.OtherPayment;
 }
 
@@ -122,6 +127,20 @@ public class CreateBankDepositDto
 
 public class UpdateBankDepositDto : CreateBankDepositDto
 {
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Records the bank's acknowledgement of a deposit that has already passed approval and posting.
+/// The reference is mandatory; a controlled file is optional because some banks confirm directly
+/// on the original primary deposit slip while others issue a separate advice.
+/// </summary>
+public class ConfirmBankDepositDto
+{
+    public string BankConfirmationReference { get; set; } = string.Empty;
+    public DateTime BankConfirmationDate { get; set; }
+    public Guid? ConfirmationEvidenceFileId { get; set; }
+    public string? Notes { get; set; }
     public string RowVersion { get; set; } = string.Empty;
 }
 
@@ -187,6 +206,22 @@ public class BankDepositDto
     public DateTime? PostedAt { get; set; }
     public Guid? JournalEntryId { get; set; }
     public Guid? CashTransactionId { get; set; }
+    public BankDepositConfirmationStatus ConfirmationStatus { get; set; }
+    public string? BankConfirmationReference { get; set; }
+    public DateTime? BankConfirmationDate { get; set; }
+    public DateTime? BankConfirmedAt { get; set; }
+    public Guid? BankConfirmedById { get; set; }
+    public string? BankConfirmationNotes { get; set; }
+    public BankingAttachmentDto? BankConfirmationEvidence { get; set; }
+    /// <summary>
+    /// Reconciliation facts are projected from the canonical bank-facing cash transaction and
+    /// its reconciliation rather than persisted again on the deposit batch.
+    /// </summary>
+    public bool IsReconciled { get; set; }
+    public Guid? BankReconciliationId { get; set; }
+    public ReconciliationStatus? ReconciliationStatus { get; set; }
+    public DateTime? ReconciledAt { get; set; }
+    public DateTime? ReconciliationApprovedAt { get; set; }
     public string? RejectionReason { get; set; }
     public string? CancellationReason { get; set; }
     public IReadOnlyList<BankDepositAllocationDto> Allocations { get; set; } = Array.Empty<BankDepositAllocationDto>();

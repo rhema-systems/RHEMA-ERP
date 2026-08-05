@@ -72,6 +72,7 @@ import {
   KeyRound,
   PackageCheck,
   Layers3,
+  WalletCards,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -232,6 +233,7 @@ const navigationItems: NavItem[] = [
         children: [
           { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
           { title: 'Liquidity Accounts', href: '/finance/cash/liquidity-accounts', icon: Banknote },
+          { title: 'Cashier Till Sessions', href: '/finance/cash/till-sessions', icon: WalletCards },
           { title: 'Banking Deposits', href: '/finance/cash/deposits', icon: FileCheck },
           { title: 'Returned Cheques', href: '/finance/cash/returned-cheques', icon: RotateCcw },
           { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
@@ -295,6 +297,7 @@ const navigationItems: NavItem[] = [
               { title: 'VAT Reconciliation', href: '/finance/tax/reports/vat-reconciliation', icon: Scale },
               { title: 'WHT Summary', href: '/finance/tax/reports/withholding-tax', icon: FileCheck },
               { title: 'WHT Certificates', href: '/finance/tax/reports/wht-certificates', icon: FileText },
+              { title: 'WHT Remittances', href: '/finance/tax/reports/wht-remittances', icon: FileCheck },
             ],
           },
         ],
@@ -857,10 +860,12 @@ const navigationItems: NavItem[] = [
             icon: Settings,
             children: [
               { title: 'Finance Settings', href: '/administration/finance/settings', icon: Settings },
+              { title: 'Finance Access Scopes', href: '/administration/finance/access-scopes', icon: ShieldCheck, permissions: ['Finance.AccessScopes.Manage'] },
               { title: 'Chart of Accounts Setup', href: '/administration/finance/accounts', icon: CreditCard },
               { title: 'Account Segments', href: '/administration/finance/account-segments', icon: FolderTree },
               { title: 'Account Generator', href: '/administration/finance/account-generator', icon: FileText },
               { title: 'Fiscal Calendar Setup', href: '/administration/finance/fiscal-calendar', icon: Calendar },
+              { title: 'Close Templates', href: '/administration/finance/close-templates', icon: ClipboardList },
             ],
           },
           {

@@ -191,6 +191,18 @@ namespace ErpSystem.Core.Entities.Finance
         public decimal? MaximumDepositDeductionPercentage { get; set; }
         public int BankStatementMatchDateToleranceDays { get; set; } = 3;
         public int ChequeClearingPeriodDays { get; set; } = 3;
+
+        /// <summary>
+        /// Absolute physical-count variance above which the reviewer must explicitly confirm the
+        /// exception. GHS 100 is the conservative TDC development baseline and remains configurable.
+        /// </summary>
+        public decimal CashTillVarianceApprovalThreshold { get; set; } = 100m;
+
+        /// <summary>
+        /// TDC's maker-checker baseline requires a user other than the cashier to close every till,
+        /// including a zero-variance count. This avoids treating a clean count as self-certified.
+        /// </summary>
+        public bool RequireIndependentCashTillClosure { get; set; } = true;
         public Guid? ReturnedChequeBankChargeAccountId { get; set; }
         public virtual Account? ReturnedChequeBankChargeAccount { get; set; }
         public ReturnedChequeChargeTreatment DefaultReturnedChequeChargeTreatment { get; set; } =
@@ -261,5 +273,34 @@ namespace ErpSystem.Core.Entities.Finance
         /// If true, subledger journals must go through the approval workflow before posting
         /// </summary>
         public bool RequireSubledgerJournalApproval { get; set; } = false;
+
+        // ── Finance correction and data-scope controls ─────────────────────────────
+
+        /// <summary>
+        /// Governs which fiscal date is used by source-document reversals. TDC's safe default is
+        /// the current open period so a correction does not rewrite a previously reported period.
+        /// </summary>
+        public FinanceReversalDatePolicy ReversalDatePolicy { get; set; } =
+            FinanceReversalDatePolicy.CurrentOpenPeriod;
+
+        /// <summary>
+        /// Minimum narrative required for a posted Finance reversal. Twenty characters is long
+        /// enough to discourage labels such as "error" while remaining practical for operations.
+        /// </summary>
+        public int MinimumReversalReasonLength { get; set; } = 20;
+
+        /// <summary>
+        /// Activates Finance data-scope enforcement after administrators have prepared grants.
+        /// This is intentionally an explicit switch: it lets TDC configure and review assignments
+        /// before fail-closed enforcement is enabled for non-administrators.
+        /// </summary>
+        public bool EnforceFinanceAccessScopes { get; set; } = false;
+
+        /// <summary>
+        /// Makes due or incomplete fixed-asset depreciation a mandatory period-close blocker.
+        /// TDC defaults this to true for stronger month-end control, while the explicit setting
+        /// resolves FIN-LIM-0034 by allowing an authorised tenant policy decision when needed.
+        /// </summary>
+        public bool RequireDepreciationBeforePeriodClose { get; set; } = true;
     }
 }

@@ -13,6 +13,7 @@ export enum TaxApplicability {
 export enum TaxCategory {
     Standard = 'Standard',
     Withholding = 'Withholding',
+    VatWithholding = 'VatWithholding',
     Levy = 'Levy',
     Excise = 'Excise'
 }
@@ -184,6 +185,7 @@ export interface WHTSummaryEntry {
 }
 
 export interface WhtCertificate {
+    certificateId?: string | null;
     vendorPaymentId: string;
     paymentNumber: string;
     paymentStatus: string;
@@ -203,8 +205,31 @@ export interface WhtCertificate {
     taxAccountName?: string | null;
     certificateNumber?: string | null;
     certificateDate?: string | null;
-    certificateStatus: 'Missing' | 'Generated' | 'NumberOnly' | string;
+    certificateStatus: 'Missing' | 'Issued' | 'Superseded' | 'Cancelled' | string;
+    versionNumber: number;
+    issuedAtUtc?: string | null;
+    issuedByName?: string | null;
+    lifecycleReason?: string | null;
+    cancelledAtUtc?: string | null;
+    cancellationReason?: string | null;
     journalEntryId?: string | null;
+    remittanceId?: string | null;
+    remittanceNumber?: string | null;
+    remittanceStatus: string;
+    versions: WhtCertificateVersion[];
+}
+
+export interface WhtCertificateVersion {
+    certificateId: string;
+    certificateNumber: string;
+    versionNumber: number;
+    status: string;
+    issueDate: string;
+    issuedAtUtc: string;
+    issuedByName: string;
+    lifecycleReason?: string | null;
+    cancelledAtUtc?: string | null;
+    cancellationReason?: string | null;
 }
 
 export interface WhtCertificateQuery {
@@ -220,6 +245,85 @@ export interface WhtCertificateQuery {
 export interface GenerateWhtCertificateDto {
     certificateNumber?: string;
     certificateDate?: string;
+}
+
+export interface WhtCalculationRequest {
+    taxId: string;
+    supplierId: string;
+    paymentDate: string;
+    taxableBase: number;
+    excludeVendorPaymentId?: string;
+}
+
+export interface WhtCalculationResult {
+    taxId: string;
+    taxCode: string;
+    taxName: string;
+    taxRate: number;
+    taxableBase: number;
+    cumulativeBefore: number;
+    cumulativeAfter: number;
+    thresholdAmount?: number | null;
+    remainingBeforeThreshold: number;
+    thresholdApplied: boolean;
+    withholdingAmount: number;
+    taxPayableAccountId?: string | null;
+    calculationNote: string;
+}
+
+export interface WhtRemittanceLiability {
+    vendorPaymentId: string;
+    paymentNumber: string;
+    paymentDate: string;
+    supplierId: string;
+    supplierName: string;
+    supplierTin?: string | null;
+    currencyCode: string;
+    taxCode?: string | null;
+    taxableBase: number;
+    withholdingAmount: number;
+    certificateId?: string | null;
+    certificateNumber?: string | null;
+    journalEntryId?: string | null;
+}
+
+export interface WhtRemittance {
+    id: string;
+    remittanceNumber: string;
+    periodFrom: string;
+    periodTo: string;
+    dueDate: string;
+    currencyCode: string;
+    status: 'Draft' | 'Submitted' | 'Paid' | 'Cancelled' | string;
+    totalWithholdingAmount: number;
+    lineCount: number;
+    submissionReference?: string | null;
+    submittedAtUtc?: string | null;
+    submittedByName?: string | null;
+    paymentReference?: string | null;
+    paymentDate?: string | null;
+    authorityReceiptReference?: string | null;
+    paidAtUtc?: string | null;
+    paidByName?: string | null;
+    notes?: string | null;
+    cancelledAtUtc?: string | null;
+    cancellationReason?: string | null;
+    lines: WhtRemittanceLine[];
+}
+
+export interface WhtRemittanceLine {
+    id: string;
+    vendorPaymentId: string;
+    certificateId?: string | null;
+    paymentNumber: string;
+    paymentDate: string;
+    supplierId: string;
+    supplierName: string;
+    supplierTin?: string | null;
+    taxCode?: string | null;
+    taxableBase: number;
+    withholdingAmount: number;
+    journalEntryId?: string | null;
 }
 
 export interface FinancePagedResult<T> {

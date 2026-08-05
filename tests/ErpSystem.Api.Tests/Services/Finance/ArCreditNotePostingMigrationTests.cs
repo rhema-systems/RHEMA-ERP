@@ -643,6 +643,8 @@ public sealed class ArCreditNotePostingMigrationTests
             tenantSettings.Object,
             Mock.Of<ILogger<PaymentService>>(),
             numbering.Object,
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
 

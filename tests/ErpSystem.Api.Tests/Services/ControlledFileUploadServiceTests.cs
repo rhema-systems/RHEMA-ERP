@@ -2,6 +2,7 @@ using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -520,6 +521,36 @@ public sealed class ControlledFileUploadServiceTests
             .IsDeleted.Should().BeFalse();
         storage.Verify(item => item.DeleteFileAsync(
             It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteRejectsFileReferencedByActiveFinanceCloseEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = Database();
+        var record = FileRecord(tenantId);
+        record.Category = ControlledFileUploadCategories.FinanceCloseEvidence;
+        db.FileUploadRecords.Add(record);
+        db.FinanceCloseEvidenceAttachments.Add(new FinanceCloseEvidenceAttachment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinanceCloseCycleId = Guid.NewGuid(),
+            FinanceCloseTaskId = Guid.NewGuid(),
+            FileUploadRecordId = record.Id,
+            EvidenceType = FinanceCloseEvidenceTypes.SupportingDocument
+        });
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var service = Service(db, storage.Object, Mock.Of<IFileVirusScanService>());
+
+        var act = () => service.DeleteAsync(tenantId, record.Id, actorId);
+
+        (await act.Should().ThrowAsync<ControlledFileUploadException>())
+            .Which.Code.Should().Be("FILE_RECORD_REFERENCED_BY_FINANCE_CLOSE_EVIDENCE");
+        (await db.FileUploadRecords.IgnoreQueryFilters().SingleAsync()).IsDeleted.Should().BeFalse();
+        storage.Verify(item => item.DeleteFileAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

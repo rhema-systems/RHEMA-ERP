@@ -84,6 +84,31 @@ public sealed class ApPaymentPostingMigrationTests
         var (service, subledgerPostingMock) = CreateService(db, tenantId);
 
         var initialPosting = await service.PostAsync(fixture.Payment.Id);
+        // Advance application is a new accounting event dated when the application occurs. Keep
+        // this regression test calendar-independent by opening the current month when it differs
+        // from the seeded July source-document period.
+        var today = DateTime.UtcNow.Date;
+        if (today < new DateTime(2026, 7, 1) || today > new DateTime(2026, 7, 31))
+        {
+            db.FiscalPeriods.Add(new FiscalPeriod
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                FiscalYearId = Guid.NewGuid(),
+                PeriodName = today.ToString("MMMM yyyy"),
+                PeriodCode = today.ToString("yyyy-MM"),
+                PeriodNumber = today.Month,
+                PeriodType = PeriodType.Monthly,
+                StartDate = new DateTime(today.Year, today.Month, 1),
+                EndDate = new DateTime(today.Year, today.Month, 1).AddMonths(1).AddDays(-1),
+                PeriodDays = DateTime.DaysInMonth(today.Year, today.Month),
+                PeriodStatus = "Open",
+                IsOpen = true,
+                IsClosed = false,
+                IsLocked = false
+            });
+            await db.SaveChangesAsync();
+        }
         var application = await service.AllocatePaymentAsync(fixture.Payment.Id, new List<VendorPaymentAllocationCreateDto>
         {
             new() { VendorInvoiceId = fixture.Invoice.Id, AllocatedAmount = 100m }
@@ -314,7 +339,101 @@ public sealed class ApPaymentPostingMigrationTests
         await reverse.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
         await voidPayment.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posted vendor payments cannot be voided by mutation until AP payment reversal posting is implemented.");
+            .WithMessage("Posted vendor payments cannot be voided by mutation. Use the posted-payment reversal workflow.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PostedApPayment_ShouldReverseThroughPostingEngineAndRestoreInvoiceSettlement()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var posted = await service.PostAsync(fixture.Payment.Id);
+        var reversalDate = new DateTime(2026, 7, 20);
+        const string reversalReason = "Duplicate supplier payment identified during AP review.";
+
+        var reversed = await service.ReversePaymentAsync(fixture.Payment.Id, new ReverseVendorPaymentDto
+        {
+            Reason = reversalReason,
+            ReversalDate = reversalDate
+        });
+
+        reversed.Status.Should().Be(VendorPaymentStatus.Reversed);
+        reversed.JournalEntryId.Should().Be(posted.JournalEntryId);
+        reversed.ReversalJournalEntryId.Should().NotBeNull();
+        reversed.ReversalPostingEventId.Should().NotBeNull();
+        reversed.ReversalDate.Should().Be(reversalDate);
+        reversed.ReversalReason.Should().Be(reversalReason);
+        reversed.AllocatedAmount.Should().Be(0m);
+
+        var originalJournal = await db.JournalEntries
+            .Include(journal => journal.Transactions)
+            .SingleAsync(journal => journal.Id == posted.JournalEntryId);
+        var reversalJournal = await db.JournalEntries
+            .Include(journal => journal.Transactions)
+            .SingleAsync(journal => journal.Id == reversed.ReversalJournalEntryId);
+
+        // The reversal is a linked compensating journal; the original evidence is retained and
+        // every line is inverted rather than being edited or deleted.
+        originalJournal.IsReversed.Should().BeTrue();
+        originalJournal.ReversalJournalEntryId.Should().Be(reversalJournal.Id);
+        reversalJournal.OriginalJournalEntryId.Should().Be(originalJournal.Id);
+        reversalJournal.Transactions.Should().HaveCount(originalJournal.Transactions.Count);
+        foreach (var originalLine in originalJournal.Transactions)
+        {
+            var reversedLine = reversalJournal.Transactions.Single(line =>
+                line.OriginalTransactionId == originalLine.Id);
+            reversedLine.DebitAmount.Should().Be(originalLine.CreditAmount);
+            reversedLine.CreditAmount.Should().Be(originalLine.DebitAmount);
+        }
+
+        var invoice = await db.Set<VendorInvoice>().SingleAsync(item => item.Id == fixture.Invoice.Id);
+        invoice.PaidAmount.Should().Be(0m);
+        invoice.Status.Should().Be(VendorInvoiceStatus.Approved);
+
+        var allocations = await db.Set<VendorPaymentAllocation>()
+            .Where(item => item.VendorPaymentId == fixture.Payment.Id)
+            .OrderBy(item => item.IsReversal)
+            .ToListAsync();
+        allocations.Should().HaveCount(2);
+        allocations.Single(item => item.IsReversal).OriginalAllocationId.Should().Be(fixture.Allocation.Id);
+        allocations.Single(item => item.IsReversal).AllocatedAmount.Should().Be(-fixture.Allocation.AllocatedAmount);
+
+        (await db.AuditLogs.CountAsync(a =>
+            a.Action == FinanceAuditEvents.ApPaymentReversed &&
+            a.TenantId == tenantId)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task DuplicateApPaymentReversal_ShouldReturnExistingCompensatingPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        await service.PostAsync(fixture.Payment.Id);
+        var command = new ReverseVendorPaymentDto
+        {
+            Reason = "Duplicate supplier payment identified during AP review.",
+            ReversalDate = new DateTime(2026, 7, 20)
+        };
+
+        var first = await service.ReversePaymentAsync(fixture.Payment.Id, command);
+        var second = await service.ReversePaymentAsync(fixture.Payment.Id, command);
+
+        second.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
+        second.ReversalPostingEventId.Should().Be(first.ReversalPostingEventId);
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id &&
+            item.PostingAction == "Reverse")).Should().Be(1);
+        (await db.Set<VendorPaymentAllocation>().CountAsync(item =>
+            item.VendorPaymentId == fixture.Payment.Id && item.IsReversal)).Should().Be(1);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -355,6 +474,11 @@ public sealed class ApPaymentPostingMigrationTests
             Mock.Of<ILogger<VendorPaymentService>>(),
             Mock.Of<IDocumentNumberingService>(),
             Mock.Of<IWorkflowService>(),
+            // Existing posting tests run with access-scope enforcement disabled. The no-op mock
+            // isolates those posting assertions while dedicated scope tests exercise fail-closed
+            // enforcement separately.
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
 

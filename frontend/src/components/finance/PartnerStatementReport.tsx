@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, ChevronsUpDown, Download, Loader2, Play, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Download, FileSpreadsheet, FileText, Loader2, Play, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -34,6 +34,9 @@ interface PartnerStatementReportProps {
     partnersLoading?: boolean;
     loadReport: (params: StatementReportParams) => Promise<DetailedLedgerReport>;
     downloadCsv: (params: StatementReportParams) => Promise<Blob>;
+    downloadPdf?: (params: StatementReportParams) => Promise<void>;
+    downloadXlsx?: (params: StatementReportParams) => Promise<void>;
+    canExport?: boolean;
 }
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
@@ -78,6 +81,9 @@ export function PartnerStatementReport({
     partnersLoading = false,
     loadReport,
     downloadCsv,
+    downloadPdf,
+    downloadXlsx,
+    canExport = true,
 }: PartnerStatementReportProps) {
     const [fromDate, setFromDate] = useState(() => isoDate(firstDayOfMonth()));
     const [toDate, setToDate] = useState(() => isoDate(new Date()));
@@ -85,7 +91,7 @@ export function PartnerStatementReport({
     const [showPartnerCurrency, setShowPartnerCurrency] = useState(false);
     const [report, setReport] = useState<DetailedLedgerReport | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [isExporting, setIsExporting] = useState(false);
+    const [exportingFormat, setExportingFormat] = useState<'csv' | 'pdf' | 'xlsx' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [partnerPickerOpen, setPartnerPickerOpen] = useState(false);
 
@@ -129,7 +135,7 @@ export function PartnerStatementReport({
     };
 
     const exportCsv = async () => {
-        setIsExporting(true);
+        setExportingFormat('csv');
         setError(null);
         try {
             const blob = await downloadCsv(reportParams());
@@ -138,7 +144,24 @@ export function PartnerStatementReport({
             console.error(`Failed to export ${title}`, err);
             setError(`Failed to export ${title.toLowerCase()}.`);
         } finally {
-            setIsExporting(false);
+            setExportingFormat(null);
+        }
+    };
+
+    const exportControlledDocument = async (
+        formatName: 'PDF' | 'XLSX',
+        download: (params: StatementReportParams) => Promise<void>
+    ) => {
+        const format = formatName.toLowerCase() as 'pdf' | 'xlsx';
+        setExportingFormat(format);
+        setError(null);
+        try {
+            await download(reportParams());
+        } catch (err) {
+            console.error(`Failed to export ${title} as ${formatName}`, err);
+            setError(`Failed to export ${title.toLowerCase()} as ${formatName}.`);
+        } finally {
+            setExportingFormat(null);
         }
     };
 
@@ -151,14 +174,38 @@ export function PartnerStatementReport({
                             <CardTitle>{title}</CardTitle>
                             <CardDescription>{description}</CardDescription>
                         </div>
-                        <Button
-                            variant="outline"
-                            onClick={exportCsv}
-                            disabled={isExporting || partnersLoading}
-                        >
-                            {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                            Download CSV
-                        </Button>
+                        {canExport && (
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    variant="outline"
+                                    onClick={exportCsv}
+                                    disabled={exportingFormat !== null || partnersLoading}
+                                >
+                                    {exportingFormat === 'csv' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                                    CSV
+                                </Button>
+                                {downloadPdf && (
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => exportControlledDocument('PDF', downloadPdf)}
+                                        disabled={exportingFormat !== null || partnersLoading}
+                                    >
+                                        {exportingFormat === 'pdf' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                                        PDF
+                                    </Button>
+                                )}
+                                {downloadXlsx && (
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => exportControlledDocument('XLSX', downloadXlsx)}
+                                        disabled={exportingFormat !== null || partnersLoading}
+                                    >
+                                        {exportingFormat === 'xlsx' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                                        Excel
+                                    </Button>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-4">

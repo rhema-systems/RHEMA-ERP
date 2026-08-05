@@ -55,6 +55,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? MaximumDepositDeductionPercentage { get; set; }
         public int BankStatementMatchDateToleranceDays { get; set; } = 3;
         public int ChequeClearingPeriodDays { get; set; } = 3;
+        public decimal CashTillVarianceApprovalThreshold { get; set; } = 100m;
+        public bool RequireIndependentCashTillClosure { get; set; } = true;
         public Guid? ReturnedChequeBankChargeAccountId { get; set; }
         public ReturnedChequeChargeTreatment DefaultReturnedChequeChargeTreatment { get; set; } =
             ReturnedChequeChargeTreatment.CustomerRecoverable;
@@ -66,6 +68,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public string ApSettlementQuoteSide { get; set; } = "Selling";
         public string ClosingQuoteSide { get; set; } = "Mid";
         public bool RequireExchangeRateOverrideApproval { get; set; } = true;
+        public FinanceReversalDatePolicy ReversalDatePolicy { get; set; } =
+            FinanceReversalDatePolicy.CurrentOpenPeriod;
+        public int MinimumReversalReasonLength { get; set; } = 20;
+        public bool EnforceFinanceAccessScopes { get; set; }
+        public bool RequireDepreciationBeforePeriodClose { get; set; } = true;
     }
 
     public class UpdateFinanceSettingsDto
@@ -105,6 +112,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal? MaximumDepositDeductionPercentage { get; set; }
         public int? BankStatementMatchDateToleranceDays { get; set; }
         public int? ChequeClearingPeriodDays { get; set; }
+        public decimal? CashTillVarianceApprovalThreshold { get; set; }
+        public bool? RequireIndependentCashTillClosure { get; set; }
         public Guid? ReturnedChequeBankChargeAccountId { get; set; }
         public ReturnedChequeChargeTreatment? DefaultReturnedChequeChargeTreatment { get; set; }
         public bool? DirectionalExchangeRatePolicyEnabled { get; set; }
@@ -115,5 +124,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? ApSettlementQuoteSide { get; set; }
         public string? ClosingQuoteSide { get; set; }
         public bool? RequireExchangeRateOverrideApproval { get; set; }
+        public FinanceReversalDatePolicy? ReversalDatePolicy { get; set; }
+        public int? MinimumReversalReasonLength { get; set; }
+        public bool? EnforceFinanceAccessScopes { get; set; }
+        public bool? RequireDepreciationBeforePeriodClose { get; set; }
     }
 }

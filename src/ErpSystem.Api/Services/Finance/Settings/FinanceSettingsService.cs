@@ -6,6 +6,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -95,6 +96,13 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.ApSettlementQuoteSide,
                 settings.ClosingQuoteSide,
                 settings.RequireExchangeRateOverrideApproval
+            };
+            var beforeControlPolicy = new
+            {
+                settings.ReversalDatePolicy,
+                settings.MinimumReversalReasonLength,
+                settings.EnforceFinanceAccessScopes,
+                settings.RequireDepreciationBeforePeriodClose
             };
 
             // Check if COA type can be changed
@@ -266,6 +274,14 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.BankStatementMatchDateToleranceDays = Math.Clamp(dto.BankStatementMatchDateToleranceDays.Value, 0, 30);
             if (dto.ChequeClearingPeriodDays.HasValue)
                 settings.ChequeClearingPeriodDays = Math.Clamp(dto.ChequeClearingPeriodDays.Value, 0, 90);
+            if (dto.CashTillVarianceApprovalThreshold.HasValue)
+            {
+                if (dto.CashTillVarianceApprovalThreshold.Value < 0m)
+                    throw new InvalidOperationException("Cash-till variance approval threshold cannot be negative.");
+                settings.CashTillVarianceApprovalThreshold = dto.CashTillVarianceApprovalThreshold.Value;
+            }
+            if (dto.RequireIndependentCashTillClosure.HasValue)
+                settings.RequireIndependentCashTillClosure = dto.RequireIndependentCashTillClosure.Value;
             if (dto.ReturnedChequeBankChargeAccountId.HasValue)
                 settings.ReturnedChequeBankChargeAccountId = dto.ReturnedChequeBankChargeAccountId;
             if (dto.DefaultReturnedChequeChargeTreatment.HasValue)
@@ -289,6 +305,55 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 if (!dto.RequireExchangeRateOverrideApproval.Value)
                     throw new InvalidOperationException("Exchange-rate policy overrides must retain approval and reason controls.");
                 settings.RequireExchangeRateOverrideApproval = true;
+            }
+
+            if (dto.ReversalDatePolicy.HasValue)
+            {
+                if (!Enum.IsDefined(dto.ReversalDatePolicy.Value))
+                    throw new InvalidOperationException("A valid Finance reversal-date policy is required.");
+                settings.ReversalDatePolicy = dto.ReversalDatePolicy.Value;
+            }
+
+            if (dto.MinimumReversalReasonLength.HasValue)
+            {
+                if (dto.MinimumReversalReasonLength.Value is < 10 or > 500)
+                {
+                    throw new InvalidOperationException(
+                        "Minimum Finance reversal reason length must be between 10 and 500 characters.");
+                }
+                settings.MinimumReversalReasonLength = dto.MinimumReversalReasonLength.Value;
+            }
+
+            if (dto.EnforceFinanceAccessScopes.HasValue)
+            {
+                if (dto.EnforceFinanceAccessScopes.Value && !settings.EnforceFinanceAccessScopes)
+                {
+                    // Enabling fail-closed data scopes before grants exist would lock every
+                    // non-administrator out of Finance. Require deliberate scope preparation first.
+                    var now = DateTime.UtcNow;
+                    var preparedGrantExists = await _context.Set<FinanceAccessScopeGrant>().AnyAsync(item =>
+                        item.TenantId == tenantId &&
+                        item.IsActive &&
+                        !item.IsDeleted &&
+                        item.EffectiveFrom <= now &&
+                        (!item.EffectiveTo.HasValue || item.EffectiveTo >= now) &&
+                        (item.ScopeType == FinanceAccessScopeType.Tenant ||
+                         (item.ScopeType == FinanceAccessScopeType.BankAccount && item.ScopeValue != null)));
+                    if (!preparedGrantExists)
+                    {
+                        throw new InvalidOperationException(
+                            "Create and review at least one active Finance access-scope grant before enabling enforcement.");
+                    }
+                }
+                settings.EnforceFinanceAccessScopes = dto.EnforceFinanceAccessScopes.Value;
+            }
+
+            if (dto.RequireDepreciationBeforePeriodClose.HasValue)
+            {
+                // TDC's default remains mandatory. The explicit setting is retained because
+                // FIN-LIM-0034 calls for a configurable close blocker, not an unchangeable flag.
+                // Every change is included in the Finance control-policy audit below.
+                settings.RequireDepreciationBeforePeriodClose = dto.RequireDepreciationBeforePeriodClose.Value;
             }
 
             await _context.SaveChangesAsync();
@@ -334,6 +399,24 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     settings,
                     beforeValues: beforeFxPolicy,
                     afterValues: afterFxPolicy);
+            }
+
+            var afterControlPolicy = new
+            {
+                settings.ReversalDatePolicy,
+                settings.MinimumReversalReasonLength,
+                settings.EnforceFinanceAccessScopes,
+                settings.RequireDepreciationBeforePeriodClose
+            };
+
+            if (!Equals(beforeControlPolicy, afterControlPolicy))
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.FinanceControlPolicyChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforeControlPolicy,
+                    afterValues: afterControlPolicy);
             }
 
             var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
@@ -463,6 +546,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 MaximumDepositDeductionPercentage = settings.MaximumDepositDeductionPercentage,
                 BankStatementMatchDateToleranceDays = settings.BankStatementMatchDateToleranceDays,
                 ChequeClearingPeriodDays = settings.ChequeClearingPeriodDays,
+                CashTillVarianceApprovalThreshold = settings.CashTillVarianceApprovalThreshold,
+                RequireIndependentCashTillClosure = settings.RequireIndependentCashTillClosure,
                 ReturnedChequeBankChargeAccountId = settings.ReturnedChequeBankChargeAccountId,
                 DefaultReturnedChequeChargeTreatment = settings.DefaultReturnedChequeChargeTreatment,
                 DirectionalExchangeRatePolicyEnabled = settings.DirectionalExchangeRatePolicyEnabled,
@@ -473,6 +558,10 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 ApSettlementQuoteSide = settings.ApSettlementQuoteSide.ToString(),
                 ClosingQuoteSide = settings.ClosingQuoteSide.ToString(),
                 RequireExchangeRateOverrideApproval = settings.RequireExchangeRateOverrideApproval,
+                ReversalDatePolicy = settings.ReversalDatePolicy,
+                MinimumReversalReasonLength = settings.MinimumReversalReasonLength,
+                EnforceFinanceAccessScopes = settings.EnforceFinanceAccessScopes,
+                RequireDepreciationBeforePeriodClose = settings.RequireDepreciationBeforePeriodClose,
                 TransactionsExist = transactionsExist
             };
         }

@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.Cash;
@@ -35,19 +36,22 @@ public sealed class BankingSettlementService : IBankingSettlementService
     private readonly IDocumentNumberingService _numbering;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IFinancePostingEngine _postingEngine;
+    private readonly IFinanceAuditService? _audit;
 
     public BankingSettlementService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
         IDocumentNumberingService numbering,
         IWorkflowIntegrationService workflow,
-        IFinancePostingEngine postingEngine)
+        IFinancePostingEngine postingEngine,
+        IFinanceAuditService? audit = null)
     {
         _context = context;
         _currentUser = currentUser;
         _numbering = numbering;
         _workflow = workflow;
         _postingEngine = postingEngine;
+        _audit = audit;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -381,7 +385,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 item => item.TenantId == tenantId
                         && item.GLAccountId == line.AccountId
                         && item.IsActive
-                        && item.AccountType != LiquidityAccountType.Bank,
+                        && item.AccountType != LiquidityAccountType.Bank
+                        && (!dto.LiquidityAccountId.HasValue || item.Id == dto.LiquidityAccountId.Value),
                 cancellationToken)
             ?? throw new InvalidOperationException(
                 "The GL line does not credit an active non-bank liquidity control account.");
@@ -389,6 +394,22 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException(
                 "The posted payment and liquidity account must use the same currency in this release.");
+        }
+        if (liquidityAccount.AccountType == LiquidityAccountType.CashTill)
+        {
+            // A posted expense can reduce physical cash only while the current user owns the till.
+            // The session window then picks up the immutable entry by CreatedAt for closing count.
+            var hasCashierCustody = await _context.CashierTillSessions.AnyAsync(
+                session => session.TenantId == tenantId &&
+                           session.LiquidityAccountId == liquidityAccount.Id &&
+                           session.CashierUserId == UserId &&
+                           session.Status == CashierTillSessionStatus.Open,
+                cancellationToken);
+            if (!hasCashierCustody)
+            {
+                throw new InvalidOperationException(
+                    "Open this cash till under your cashier session before registering a payment against it.");
+            }
         }
 
         var amount = line.CreditAmount - line.DebitAmount;
@@ -759,6 +780,91 @@ public sealed class BankingSettlementService : IBankingSettlementService
         await PostDepositAsync(deposit, cancellationToken);
         return await GetDepositAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the posted deposit.");
+    }
+
+    public async Task<BankDepositDto> ConfirmDepositAsync(
+        Guid id,
+        ConfirmBankDepositDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var deposit = await LoadDepositForActionAsync(id, cancellationToken);
+        if (deposit.Status != BankDepositStatus.Posted)
+        {
+            throw new InvalidOperationException("Only a posted bank deposit can receive bank confirmation.");
+        }
+
+        var reference = RequireText(dto.BankConfirmationReference, "Bank confirmation reference", 100);
+        var confirmationDate = dto.BankConfirmationDate.Date;
+        var notes = Clean(dto.Notes);
+
+        // A safe client retry returns the existing result, but a different value cannot overwrite
+        // retained bank evidence. Metadata correction should be explicit rather than silently
+        // changing an already-audited acknowledgement.
+        if (deposit.ConfirmationStatus == BankDepositConfirmationStatus.Confirmed)
+        {
+            if (string.Equals(deposit.BankConfirmationReference, reference, StringComparison.OrdinalIgnoreCase) &&
+                deposit.BankConfirmationDate == confirmationDate &&
+                deposit.BankConfirmationEvidenceFileId == dto.ConfirmationEvidenceFileId)
+            {
+                return await GetDepositAsync(id, cancellationToken)
+                    ?? throw new InvalidOperationException("Failed to reload the confirmed deposit.");
+            }
+            throw new InvalidOperationException("Bank confirmation has already been recorded for this deposit.");
+        }
+
+        SetRowVersion(deposit, dto.RowVersion);
+        EnsureMakerChecker(deposit.SubmittedById, "confirm");
+        if (confirmationDate < deposit.DepositDate.Date)
+        {
+            throw new InvalidOperationException("Bank confirmation date cannot precede the physical deposit date.");
+        }
+        if (confirmationDate > DateTime.UtcNow.Date)
+        {
+            throw new InvalidOperationException("Bank confirmation date cannot be in the future.");
+        }
+        if (await _context.BankDepositBatches.AnyAsync(
+                item => item.TenantId == TenantId &&
+                        item.BankAccountId == deposit.BankAccountId &&
+                        item.Id != deposit.Id &&
+                        item.BankConfirmationReference == reference,
+                cancellationToken))
+        {
+            throw new InvalidOperationException("This bank confirmation reference is already linked to another deposit for the account.");
+        }
+
+        FileUploadRecord? evidence = null;
+        if (dto.ConfirmationEvidenceFileId.HasValue)
+        {
+            evidence = await GetValidFileAsync(dto.ConfirmationEvidenceFileId.Value, cancellationToken);
+        }
+
+        var now = DateTime.UtcNow;
+        deposit.ConfirmationStatus = BankDepositConfirmationStatus.Confirmed;
+        deposit.BankConfirmationReference = reference;
+        deposit.BankConfirmationDate = confirmationDate;
+        deposit.BankConfirmationEvidenceFileId = evidence?.Id;
+        deposit.BankConfirmationNotes = notes;
+        deposit.BankConfirmedAt = now;
+        deposit.BankConfirmedById = UserId;
+        StampModified(deposit);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordDepositAuditAsync(
+            FinanceAuditEvents.BankDepositConfirmed,
+            deposit,
+            new
+            {
+                deposit.BankConfirmationReference,
+                deposit.BankConfirmationDate,
+                deposit.BankConfirmationEvidenceFileId,
+                deposit.BankConfirmedAt,
+                deposit.BankConfirmedById
+            },
+            notes,
+            cancellationToken);
+
+        return await GetDepositAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to reload the confirmed deposit.");
     }
 
     public async Task<IReadOnlyList<ReturnedChequeCaseDto>> GetReturnedChequesAsync(
@@ -1492,6 +1598,9 @@ public sealed class BankingSettlementService : IBankingSettlementService
         => _context.BankDepositBatches
             .AsNoTracking()
             .Include(item => item.BankAccount)
+            .Include(item => item.BankConfirmationEvidenceFile)
+            .Include(item => item.CashTransaction)
+            .ThenInclude(item => item!.Reconciliation)
             .Include(item => item.Allocations)
             .ThenInclude(item => item.LiquidityAccountEntry)
             .ThenInclude(item => item.LiquidityAccount)
@@ -1532,7 +1641,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             RowVersion = Convert.ToBase64String(item.RowVersion)
         };
 
-    private static BankDepositDto MapDeposit(BankDepositBatch item)
+    private BankDepositDto MapDeposit(BankDepositBatch item)
         => new()
         {
             Id = item.Id,
@@ -1556,6 +1665,27 @@ public sealed class BankingSettlementService : IBankingSettlementService
             PostedAt = item.PostedAt,
             JournalEntryId = item.JournalEntryId,
             CashTransactionId = item.CashTransactionId,
+            ConfirmationStatus = item.ConfirmationStatus,
+            BankConfirmationReference = item.BankConfirmationReference,
+            BankConfirmationDate = item.BankConfirmationDate,
+            BankConfirmedAt = item.BankConfirmedAt,
+            BankConfirmedById = item.BankConfirmedById,
+            BankConfirmationNotes = item.BankConfirmationNotes,
+            BankConfirmationEvidence = item.BankConfirmationEvidenceFile == null
+                ? null
+                : MapAttachment(
+                    item.BankConfirmationEvidenceFile.Id,
+                    item.BankConfirmationEvidenceFile,
+                    "BankConfirmation",
+                    true),
+            // Do not persist a duplicate reconciliation flag/status on BankDepositBatch. The
+            // CashTransaction is the existing bank-facing owner and the reconciliation service is
+            // the only lifecycle allowed to update these facts.
+            IsReconciled = item.CashTransaction?.IsReconciled == true,
+            BankReconciliationId = item.CashTransaction?.ReconciliationId,
+            ReconciliationStatus = item.CashTransaction?.Reconciliation?.Status,
+            ReconciledAt = item.CashTransaction?.Reconciliation?.ReconciledAt,
+            ReconciliationApprovedAt = item.CashTransaction?.Reconciliation?.ApprovedAt,
             RejectionReason = item.RejectionReason,
             CancellationReason = item.CancellationReason,
             Allocations = item.Allocations.Select(allocation => new BankDepositAllocationDto
@@ -1576,7 +1706,10 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 Notes = allocation.Notes
             }).OrderBy(value => value.EntryDate).ToArray(),
             Attachments = item.Attachments.Select(MapAttachment).ToArray(),
-            RowVersion = Convert.ToBase64String(item.RowVersion)
+            RowVersion = Convert.ToBase64String(
+                item.RowVersion.Length == 0 && !_context.Database.IsRelational()
+                    ? [0]
+                    : item.RowVersion)
         };
 
     private async Task<IReadOnlyList<ReturnedChequeCaseDto>> MapReturnedChequesAsync(
@@ -1791,15 +1924,20 @@ public sealed class BankingSettlementService : IBankingSettlementService
         try
         {
             var bytes = Convert.FromBase64String(rowVersion);
-            switch (entity)
+            if (_context.Database.IsRelational())
             {
-                case LiquidityAccount account:
-                    _context.Entry(account).Property(item => item.RowVersion).OriginalValue = bytes;
-                    break;
-                case BankDepositBatch deposit:
-                    _context.Entry(deposit).Property(item => item.RowVersion).OriginalValue = bytes;
-                    break;
+                switch (entity)
+                {
+                    case LiquidityAccount account:
+                        _context.Entry(account).Property(item => item.RowVersion).OriginalValue = bytes;
+                        break;
+                    case BankDepositBatch deposit:
+                        _context.Entry(deposit).Property(item => item.RowVersion).OriginalValue = bytes;
+                        break;
+                }
             }
+            // Non-relational providers cannot emulate SQL Server-generated rowversion. Parsing
+            // still validates the command contract; relational release gates own concurrency.
         }
         catch (FormatException)
         {
@@ -1812,6 +1950,31 @@ public sealed class BankingSettlementService : IBankingSettlementService
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.UserName;
         entity.LastModifiedById = UserId;
+    }
+
+    private async Task RecordDepositAuditAsync(
+        string eventType,
+        BankDepositBatch deposit,
+        object afterValues,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        if (_audit == null)
+        {
+            return;
+        }
+        await _audit.RecordAsync(new FinanceAuditEventDto
+        {
+            TenantId = TenantId,
+            EventType = eventType,
+            SourceModule = "CashBank",
+            SourceDocumentType = DepositWorkflowEntityType,
+            SourceDocumentId = deposit.Id,
+            Resource = "Finance.BankDeposit",
+            ResourceId = deposit.Id.ToString(),
+            AfterValues = afterValues,
+            Comment = comment
+        }, cancellationToken);
     }
 
     private static string NormalizeCurrency(string? value)

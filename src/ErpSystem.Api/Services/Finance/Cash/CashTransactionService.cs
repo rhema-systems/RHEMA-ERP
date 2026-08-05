@@ -1,8 +1,11 @@
 using System.Data;
+using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Documents;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Api.Services.Finance;
@@ -20,9 +23,12 @@ public class CashTransactionService : ICashTransactionService
     private readonly ITenantSettingsService _tenantSettingsService;
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IFinanceAccessScopeService _financeAccessScopeService;
+    private readonly IFinanceReversalPolicyService _financeReversalPolicyService;
     private readonly IFinancePostingEngine? _financePostingEngine;
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowIntegrationService? _workflowIntegrationService;
+    private readonly IFinanceControlledDocumentIssueService? _controlledDocumentIssueService;
 
     public CashTransactionService(
         ApplicationDbContext context,
@@ -30,17 +36,23 @@ public class CashTransactionService : ICashTransactionService
         ITenantSettingsService tenantSettingsService,
         IDocumentNumberingService documentNumberingService,
         ICurrentUserService currentUserService,
+        IFinanceAccessScopeService financeAccessScopeService,
+        IFinanceReversalPolicyService financeReversalPolicyService,
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
-        IWorkflowIntegrationService? workflowIntegrationService = null)
+        IWorkflowIntegrationService? workflowIntegrationService = null,
+        IFinanceControlledDocumentIssueService? controlledDocumentIssueService = null)
     {
         _context = context;
         _tenantSettingsService = tenantSettingsService;
         _documentNumberingService = documentNumberingService;
         _currentUserService = currentUserService;
+        _financeAccessScopeService = financeAccessScopeService;
+        _financeReversalPolicyService = financeReversalPolicyService;
         _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
         _workflowIntegrationService = workflowIntegrationService;
+        _controlledDocumentIssueService = controlledDocumentIssueService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -48,8 +60,14 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto?> GetByIdAsync(Guid id)
     {
         var tenantId = TenantId;
-        return await _context.Set<CashTransaction>()
-            .Where(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted)
+        var permittedBankAccountIds = await _financeAccessScopeService
+            .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read);
+        var query = _context.Set<CashTransaction>()
+            .Where(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted);
+        if (permittedBankAccountIds != null)
+            query = query.Where(t => permittedBankAccountIds.Contains(t.BankAccountId));
+
+        var result = await query
             .Select(t => new CashTransactionDto
             {
                 Id = t.Id,
@@ -60,10 +78,18 @@ public class CashTransactionService : ICashTransactionService
                 BankAccountName = t.BankAccount.AccountName,
                 ToBankAccountId = t.ToBankAccountId,
                 ToBankAccountName = t.ToBankAccount != null ? t.ToBankAccount.AccountName : null,
+                TransferPairId = t.TransferPairId,
+                TransferLeg = t.TransferLeg,
                 Amount = t.Amount,
                 Currency = t.Currency,
                 ExchangeRate = t.ExchangeRate,
+                ExchangeRateId = t.ExchangeRateId,
+                ExchangeRateSource = t.ExchangeRateSource,
+                ExchangeRateDate = t.ExchangeRateDate,
+                ExchangeRateQuoteSide = t.ExchangeRateQuoteSide.HasValue ? t.ExchangeRateQuoteSide.Value.ToString() : null,
                 BaseAmount = t.BaseAmount,
+                TransferCrossRate = t.TransferCrossRate,
+                TransferFxGainLossBaseAmount = t.TransferFxGainLossBaseAmount,
                 PaymentMethodId = t.PaymentMethodId,
                 PaymentMethodName = t.PaymentMethod != null ? t.PaymentMethod.Name : null,
                 ReferenceNumber = t.ReferenceNumber,
@@ -91,9 +117,30 @@ public class CashTransactionService : ICashTransactionService
                 CancellationReason = t.CancellationReason,
                 JournalEntryId = t.JournalEntryId,
                 PostedDate = t.PostedDate,
+                IsReversed = t.IsReversed,
+                ReversalOfCashTransactionId = t.ReversalOfCashTransactionId,
+                ReversalCashTransactionId = t.ReversalCashTransactionId,
+                ReversalJournalEntryId = t.ReversalJournalEntryId,
+                ReversalPostingEventId = t.ReversalPostingEventId,
+                ReversalDate = t.ReversalDate,
+                ReversedAt = t.ReversedAt,
+                ReversedById = t.ReversedById,
+                ReversalReason = t.ReversalReason,
                 CreatedAt = t.CreatedAt
             })
             .FirstOrDefaultAsync();
+
+        if (result != null && result.TransactionType == CashTransactionType.Payment && _controlledDocumentIssueService != null)
+        {
+            // Detail responses expose issue history from the shared append-only register so the
+            // UI can offer either the one original or a reason-backed replacement—not a blind
+            // browser print that bypasses document controls.
+            result.PaymentSlipIssuance = await _controlledDocumentIssueService.GetSummaryAsync(
+                DocumentTypes.FinanceCashBankPaymentSlip,
+                result.Id);
+        }
+
+        return result;
     }
 
     public async Task<IEnumerable<CashTransactionDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
@@ -101,6 +148,13 @@ public class CashTransactionService : ICashTransactionService
         var tenantId = TenantId;
         var query = _context.Set<CashTransaction>()
             .Where(t => t.TenantId == tenantId && !t.IsDeleted);
+
+        // Lists are filtered rather than rejected so a scoped cashier sees a coherent register
+        // for the bank accounts assigned to them without learning that other accounts exist.
+        var permittedBankAccountIds = await _financeAccessScopeService
+            .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read);
+        if (permittedBankAccountIds != null)
+            query = query.Where(t => permittedBankAccountIds.Contains(t.BankAccountId));
 
         if (fromDate.HasValue)
             query = query.Where(t => t.TransactionDate >= fromDate.Value);
@@ -127,7 +181,16 @@ public class CashTransactionService : ICashTransactionService
                 ApprovalStatusName = t.ApprovalStatus.ToString(),
                 WorkflowInstanceId = t.WorkflowInstanceId,
                 JournalEntryId = t.JournalEntryId,
-                PostedDate = t.PostedDate
+                PostedDate = t.PostedDate,
+                IsReversed = t.IsReversed,
+                ReversalOfCashTransactionId = t.ReversalOfCashTransactionId,
+                ReversalCashTransactionId = t.ReversalCashTransactionId,
+                ReversalJournalEntryId = t.ReversalJournalEntryId,
+                ReversalPostingEventId = t.ReversalPostingEventId,
+                ReversalDate = t.ReversalDate,
+                ReversedAt = t.ReversedAt,
+                ReversedById = t.ReversedById,
+                ReversalReason = t.ReversalReason
             })
             .OrderByDescending(t => t.TransactionDate)
             .ToListAsync();
@@ -139,6 +202,9 @@ public class CashTransactionService : ICashTransactionService
         DateTime? toDate = null)
     {
         var tenantId = TenantId;
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            bankAccountId,
+            FinanceAccessLevel.Read);
         var query = _context.Set<CashTransaction>()
             .Where(t => t.TenantId == tenantId && t.BankAccountId == bankAccountId && !t.IsDeleted);
 
@@ -165,7 +231,16 @@ public class CashTransactionService : ICashTransactionService
                 ApprovalStatusName = t.ApprovalStatus.ToString(),
                 WorkflowInstanceId = t.WorkflowInstanceId,
                 JournalEntryId = t.JournalEntryId,
-                PostedDate = t.PostedDate
+                PostedDate = t.PostedDate,
+                IsReversed = t.IsReversed,
+                ReversalOfCashTransactionId = t.ReversalOfCashTransactionId,
+                ReversalCashTransactionId = t.ReversalCashTransactionId,
+                ReversalJournalEntryId = t.ReversalJournalEntryId,
+                ReversalPostingEventId = t.ReversalPostingEventId,
+                ReversalDate = t.ReversalDate,
+                ReversedAt = t.ReversedAt,
+                ReversedById = t.ReversedById,
+                ReversalReason = t.ReversalReason
             })
             .OrderByDescending(t => t.TransactionDate)
             .ToListAsync();
@@ -174,6 +249,9 @@ public class CashTransactionService : ICashTransactionService
     public async Task<IEnumerable<CashTransactionDto>> GetUnreconciledAsync(Guid bankAccountId)
     {
         var tenantId = TenantId;
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            bankAccountId,
+            FinanceAccessLevel.Read);
         return await _context.Set<CashTransaction>()
             .Where(t => t.TenantId == tenantId && t.BankAccountId == bankAccountId && !t.IsReconciled && !t.IsDeleted)
             .Select(t => new CashTransactionDto
@@ -191,7 +269,16 @@ public class CashTransactionService : ICashTransactionService
                 ApprovalStatus = t.ApprovalStatus,
                 ApprovalStatusName = t.ApprovalStatus.ToString(),
                 WorkflowInstanceId = t.WorkflowInstanceId,
-                JournalEntryId = t.JournalEntryId
+                JournalEntryId = t.JournalEntryId,
+                IsReversed = t.IsReversed,
+                ReversalOfCashTransactionId = t.ReversalOfCashTransactionId,
+                ReversalCashTransactionId = t.ReversalCashTransactionId,
+                ReversalJournalEntryId = t.ReversalJournalEntryId,
+                ReversalPostingEventId = t.ReversalPostingEventId,
+                ReversalDate = t.ReversalDate,
+                ReversedAt = t.ReversedAt,
+                ReversedById = t.ReversedById,
+                ReversalReason = t.ReversalReason
             })
             .OrderBy(t => t.TransactionDate)
             .ToListAsync();
@@ -200,6 +287,9 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto)
     {
         var tenantId = TenantId;
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            dto.BankAccountId,
+            FinanceAccessLevel.Operate);
         await ValidateBankAccountAsync(dto.BankAccountId, tenantId, "receipt");
         await ValidatePaymentMethodAsync(dto.PaymentMethodId, tenantId, dto.ReferenceNumber, dto.BankAccountId, "receipt");
         if (dto.GLAccountId.HasValue)
@@ -260,6 +350,9 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto)
     {
         var tenantId = TenantId;
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            dto.BankAccountId,
+            FinanceAccessLevel.Operate);
         await ValidateBankAccountAsync(dto.BankAccountId, tenantId, "payment");
         await ValidatePaymentMethodAsync(dto.PaymentMethodId, tenantId, dto.ReferenceNumber, dto.BankAccountId, "payment");
         if (dto.GLAccountId.HasValue)
@@ -318,132 +411,166 @@ public class CashTransactionService : ICashTransactionService
         return await GetByIdAsync(transaction.Id) ?? throw new Exception("Failed to create payment");
     }
 
+    public async Task<BankTransferPreviewDto> PreviewTransferAsync(
+        CreateBankTransferDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        ValidateTransferRequestBasics(dto);
+
+        // Preview is not merely a currency calculator: it reveals controlled bank balances,
+        // account names, approved rate sources and the projected GL outcome. Require operating
+        // scope over both sides just as capture does so the preview cannot become a scope bypass.
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            dto.FromBankAccountId,
+            FinanceAccessLevel.Operate,
+            cancellationToken);
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            dto.ToBankAccountId,
+            FinanceAccessLevel.Operate,
+            cancellationToken);
+
+        var plan = await ResolveBankTransferPlanAsync(
+            dto,
+            allowDerivedDestinationAmount: true,
+            cancellationToken);
+        return MapBankTransferPreview(plan);
+    }
+
     public async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(CreateBankTransferDto dto)
     {
-        if (dto.Amount <= 0m)
-        {
-            throw new InvalidOperationException("Transfer amount must be greater than zero.");
-        }
-
-        if (dto.FromBankAccountId == dto.ToBankAccountId)
-        {
-            throw new InvalidOperationException("Source and destination bank accounts must be different.");
-        }
+        ArgumentNullException.ThrowIfNull(dto);
+        ValidateTransferRequestBasics(dto);
 
         var tenantId = TenantId;
-        // Document numbering joins the ambient transaction, so the transfer creation
-        // transaction must provide the serializable boundary for concurrent numbers.
+        // A transfer changes two controlled cash positions; access to only one side is not enough
+        // to preview, capture, approve, post, reconcile, or later correct the accounting command.
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            dto.FromBankAccountId,
+            FinanceAccessLevel.Operate);
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            dto.ToBankAccountId,
+            FinanceAccessLevel.Operate);
+
+        var transferPairId = dto.TransferPairId.GetValueOrDefault();
+        if (transferPairId == Guid.Empty)
+        {
+            transferPairId = Guid.NewGuid();
+        }
+
+        // Number allocation and the pair-id uniqueness guard share one serializable boundary.
+        // A client retry therefore either sees the committed pair or creates it once; it cannot
+        // consume a second number while the first request is still being committed.
         await using var dbTransaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
 
-        var baseCurrencyCode = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync());
-        var fromBankAccount = await _context.BankAccounts
-            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == dto.FromBankAccountId && !a.IsDeleted)
-            ?? throw new InvalidOperationException("Source bank account not found.");
-        var toBankAccount = await _context.BankAccounts
-            .FirstOrDefaultAsync(a => a.TenantId == tenantId && a.Id == dto.ToBankAccountId && !a.IsDeleted)
-            ?? throw new InvalidOperationException("Destination bank account not found.");
-
-        ValidateTransferAccount(fromBankAccount, "Source");
-        ValidateTransferAccount(toBankAccount, "Destination");
-
-        if (fromBankAccount.GLAccountId == toBankAccount.GLAccountId)
+        var existingPair = await LoadTransferPairAsync(transferPairId, cancellationToken: default);
+        if (existingPair != null)
         {
-            throw new InvalidOperationException("Source and destination bank accounts must be linked to different GL accounts.");
+            EnsureTransferRetryMatches(existingPair.Value.Outgoing, existingPair.Value.Incoming, dto);
+            await RecordCashBankAuditAsync(
+                FinanceAuditEvents.CashBankCrossCurrencyTransferDuplicateCapture,
+                existingPair.Value.Outgoing,
+                afterValues: new
+                {
+                    TransferPairId = transferPairId,
+                    existingPair.Value.Outgoing.Id,
+                    IncomingTransactionId = existingPair.Value.Incoming.Id
+                },
+                comment: "Duplicate bank-transfer capture returned the existing operational pair.",
+                cancellationToken: default);
+            await dbTransaction.CommitAsync();
+            return (MapCashTransactionDto(existingPair.Value.Outgoing), MapCashTransactionDto(existingPair.Value.Incoming));
         }
 
-        var fromCurrencyCode = NormalizeCurrency(fromBankAccount.Currency);
-        var toCurrencyCode = NormalizeCurrency(toBankAccount.Currency);
-        if (!string.Equals(fromCurrencyCode, toCurrencyCode, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Cross-currency bank transfers are not supported by this endpoint yet.");
-        }
+        // Creation requires Finance to confirm the destination amount for a cross-currency
+        // transfer. The preview may calculate an indicative amount, but the committed source
+        // must retain the actual amount expected to arrive at the destination bank.
+        var plan = await ResolveBankTransferPlanAsync(
+            dto,
+            allowDerivedDestinationAmount: false,
+            cancellationToken: default);
 
-        var exchangeRate = ResolveExchangeRate(fromCurrencyCode, baseCurrencyCode, dto.ExchangeRate);
-        var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
-        if (baseAmount <= 0m)
-        {
-            throw new InvalidOperationException("Transfer base amount must be greater than zero.");
-        }
-
-        await ValidateGLAccountAsync(fromBankAccount.GLAccountId!.Value, tenantId, "source");
-        await ValidateGLAccountAsync(toBankAccount.GLAccountId!.Value, tenantId, "destination");
+        await ValidateGLAccountAsync(plan.FromBankAccount.GLAccountId!.Value, tenantId, "source");
+        await ValidateGLAccountAsync(plan.ToBankAccount.GLAccountId!.Value, tenantId, "destination");
 
         var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.BankTransfer, dto.TransactionDate);
         var description = string.IsNullOrWhiteSpace(dto.Description)
-            ? $"Bank transfer from {fromBankAccount.AccountName} to {toBankAccount.AccountName}"
+            ? $"Bank transfer from {plan.FromBankAccount.AccountName} to {plan.ToBankAccount.AccountName}"
             : dto.Description.Trim();
 
-        var fromTransaction = new CashTransaction
-        {
-            TenantId = tenantId,
-            TransactionNumber = $"{transactionNumber}-OUT",
-            TransactionDate = dto.TransactionDate,
-            TransactionType = CashTransactionType.Transfer,
-            BankAccountId = dto.FromBankAccountId,
-            ToBankAccountId = dto.ToBankAccountId,
-            Amount = dto.Amount,
-            Currency = fromCurrencyCode,
-            ExchangeRate = exchangeRate,
-            BaseAmount = baseAmount,
-            ReferenceNumber = dto.ReferenceNumber,
-            Description = description,
-            IsReconciled = false,
-            IsPosted = false,
-            ApprovalStatus = CashTransactionApprovalStatus.Captured
-        };
-
-        var toTransaction = new CashTransaction
-        {
-            TenantId = tenantId,
-            TransactionNumber = $"{transactionNumber}-IN",
-            TransactionDate = dto.TransactionDate,
-            TransactionType = CashTransactionType.Transfer,
-            BankAccountId = dto.ToBankAccountId,
-            ToBankAccountId = dto.FromBankAccountId,
-            Amount = dto.Amount,
-            Currency = toCurrencyCode,
-            ExchangeRate = exchangeRate,
-            BaseAmount = baseAmount,
-            ReferenceNumber = dto.ReferenceNumber,
-            Description = description,
-            IsReconciled = false,
-            IsPosted = false,
-            ApprovalStatus = CashTransactionApprovalStatus.Captured
-        };
+        var fromTransaction = CreateTransferLeg(
+            plan,
+            transferPairId,
+            BankTransferLeg.Outgoing,
+            $"{transactionNumber}-OUT",
+            plan.FromBankAccount.Id,
+            plan.ToBankAccount.Id,
+            plan.SourceAmount,
+            plan.SourceCurrency,
+            plan.SourceRate,
+            plan.SourceBaseAmount,
+            dto,
+            description);
+        var toTransaction = CreateTransferLeg(
+            plan,
+            transferPairId,
+            BankTransferLeg.Incoming,
+            $"{transactionNumber}-IN",
+            plan.ToBankAccount.Id,
+            plan.FromBankAccount.Id,
+            plan.DestinationAmount,
+            plan.DestinationCurrency,
+            plan.DestinationRate,
+            plan.DestinationBaseAmount,
+            dto,
+            description);
 
         _context.Set<CashTransaction>().AddRange(fromTransaction, toTransaction);
         await _context.SaveChangesAsync();
 
         await RecordCashBankAuditAsync(
-            FinanceAuditEvents.CashBankTransactionCaptured,
+            plan.IsCrossCurrency
+                ? FinanceAuditEvents.CashBankCrossCurrencyTransferCaptured
+                : FinanceAuditEvents.CashBankTransactionCaptured,
             fromTransaction,
             afterValues: new
-                {
-                    fromTransaction.Id,
-                    sourceTransactionNumber = fromTransaction.TransactionNumber,
-                    fromTransaction.TransactionType,
-                    fromTransaction.BankAccountId,
-                    fromTransaction.ToBankAccountId,
-                    toTransactionId = toTransaction.Id,
-                    destinationTransactionNumber = toTransaction.TransactionNumber,
-                    Amount = dto.Amount,
-                    Currency = fromCurrencyCode,
-                    BaseAmount = baseAmount
-                },
-            comment: "Bank transfer captured as an unposted operational transaction pair.",
+            {
+                fromTransaction.Id,
+                TransferPairId = transferPairId,
+                sourceTransactionNumber = fromTransaction.TransactionNumber,
+                fromTransaction.BankAccountId,
+                fromTransaction.ToBankAccountId,
+                toTransactionId = toTransaction.Id,
+                destinationTransactionNumber = toTransaction.TransactionNumber,
+                plan.SourceAmount,
+                plan.SourceCurrency,
+                plan.SourceBaseAmount,
+                SourceExchangeRateId = plan.SourceRate.ExchangeRateId,
+                SourceExchangeRate = plan.SourceRate.Rate,
+                plan.DestinationAmount,
+                plan.DestinationCurrency,
+                plan.DestinationBaseAmount,
+                DestinationExchangeRateId = plan.DestinationRate.ExchangeRateId,
+                DestinationExchangeRate = plan.DestinationRate.Rate,
+                plan.CrossRate,
+                plan.RealizedFxGainLossBaseAmount,
+                plan.RealizedFxOutcome
+            },
+            comment: plan.IsCrossCurrency
+                ? "Cross-currency bank transfer captured with approved rate snapshots and projected realised FX."
+                : "Bank transfer captured as an unposted operational transaction pair.",
             cancellationToken: default);
 
         await dbTransaction.CommitAsync();
 
         var fromDto = await GetByIdAsync(fromTransaction.Id) ?? throw new Exception("Failed to create transfer");
         var toDto = await GetByIdAsync(toTransaction.Id) ?? throw new Exception("Failed to create transfer");
-
         return (fromDto, toDto);
     }
 
     public async Task<CashTransactionDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var transaction = await LoadCashTransactionForWorkflowAsync(id, cancellationToken);
+        var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Operate, cancellationToken);
         if (transaction.IsPosted || transaction.ApprovalStatus == CashTransactionApprovalStatus.Posted)
         {
             throw new InvalidOperationException("Posted cash/bank transactions cannot be submitted.");
@@ -496,7 +623,7 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<CashTransactionDto> ApproveAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default)
     {
-        var transaction = await LoadCashTransactionForWorkflowAsync(id, cancellationToken);
+        var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Approve, cancellationToken);
         if (transaction.ApprovalStatus != CashTransactionApprovalStatus.Submitted)
         {
             throw new InvalidOperationException("Only submitted cash/bank transactions can be approved.");
@@ -539,7 +666,7 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<CashTransactionDto> RejectAsync(Guid id, string? reason = null, CancellationToken cancellationToken = default)
     {
-        var transaction = await LoadCashTransactionForWorkflowAsync(id, cancellationToken);
+        var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Approve, cancellationToken);
         if (transaction.ApprovalStatus != CashTransactionApprovalStatus.Submitted)
         {
             throw new InvalidOperationException("Only submitted cash/bank transactions can be rejected.");
@@ -582,7 +709,7 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<CashTransactionDto> ReturnAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default)
     {
-        var transaction = await LoadCashTransactionForWorkflowAsync(id, cancellationToken);
+        var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Approve, cancellationToken);
         if (transaction.ApprovalStatus != CashTransactionApprovalStatus.Submitted)
         {
             throw new InvalidOperationException("Only submitted cash/bank transactions can be returned for changes.");
@@ -630,7 +757,7 @@ public class CashTransactionService : ICashTransactionService
             throw new InvalidOperationException("A cancellation reason is required.");
         }
 
-        var transaction = await LoadCashTransactionForWorkflowAsync(id, cancellationToken);
+        var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Operate, cancellationToken);
         if (transaction.IsPosted || transaction.ApprovalStatus == CashTransactionApprovalStatus.Posted)
         {
             throw new InvalidOperationException("Posted cash/bank transactions cannot be cancelled by mutation.");
@@ -685,6 +812,7 @@ public class CashTransactionService : ICashTransactionService
 
         var requestedTransaction = await LoadCashTransactionForPostingAsync(id, cancellationToken);
         var sourceTransaction = await ResolvePostingSourceTransactionAsync(requestedTransaction, cancellationToken);
+        await EnsureTransactionAccessAsync(sourceTransaction, FinanceAccessLevel.Operate, cancellationToken);
         var wasAlreadyLinked = sourceTransaction.JournalEntryId.HasValue;
 
         await EnforceCashBankPostingEligibilityAsync(sourceTransaction, cancellationToken);
@@ -775,6 +903,35 @@ public class CashTransactionService : ICashTransactionService
                     cancellationToken: cancellationToken);
             }
 
+            if (sourceTransaction.TransactionType == CashTransactionType.Transfer &&
+                sourceTransaction.TransferPairId.HasValue &&
+                !string.Equals(sourceTransaction.Currency, linkedTransferLeg?.Currency, StringComparison.OrdinalIgnoreCase))
+            {
+                // The generic posting event remains useful to shared cash/bank reporting. This
+                // additional event makes the FX valuation and gain/loss decision independently
+                // searchable during TDC review without introducing a second posting event.
+                await RecordCashBankAuditAsync(
+                    FinanceAuditEvents.CashBankCrossCurrencyTransferPosted,
+                    sourceTransaction,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        sourceTransaction.TransferPairId,
+                        SourceAmount = sourceTransaction.Amount,
+                        SourceCurrency = sourceTransaction.Currency,
+                        SourceBaseAmount = sourceTransaction.BaseAmount,
+                        DestinationAmount = linkedTransferLeg?.Amount,
+                        DestinationCurrency = linkedTransferLeg?.Currency,
+                        DestinationBaseAmount = linkedTransferLeg?.BaseAmount,
+                        sourceTransaction.TransferCrossRate,
+                        sourceTransaction.TransferFxGainLossBaseAmount,
+                        postingResult.JournalEntryNumber
+                    },
+                    comment: "Cross-currency transfer posted once through the central Finance posting engine.",
+                    cancellationToken: cancellationToken);
+            }
+
             await dbTransaction.CommitAsync(cancellationToken);
 
             return await GetByIdAsync(id) ?? await GetByIdAsync(sourceTransaction.Id) ?? throw new Exception("Failed to load posted cash/bank transaction");
@@ -783,6 +940,25 @@ public class CashTransactionService : ICashTransactionService
         {
             await dbTransaction.RollbackAsync(cancellationToken);
             _context.ChangeTracker.Clear();
+
+            if (sourceTransaction.TransactionType == CashTransactionType.Transfer &&
+                sourceTransaction.TransferPairId.HasValue &&
+                sourceTransaction.ToBankAccount != null &&
+                !string.Equals(sourceTransaction.Currency, sourceTransaction.ToBankAccount.Currency, StringComparison.OrdinalIgnoreCase))
+            {
+                await RecordCashBankAuditAsync(
+                    FinanceAuditEvents.CashBankCrossCurrencyTransferPostingBlocked,
+                    sourceTransaction,
+                    afterValues: new
+                    {
+                        sourceTransaction.TransferPairId,
+                        sourceTransaction.TransferFxGainLossBaseAmount,
+                        error = ex.Message
+                    },
+                    reason: ex.Message,
+                    comment: "Cross-currency transfer posting failed before any ledger or bank-balance change committed.",
+                    cancellationToken: cancellationToken);
+            }
 
             await RecordCashBankAuditAsync(
                 FinanceAuditEvents.CashBankTransactionPostingFailed,
@@ -800,12 +976,342 @@ public class CashTransactionService : ICashTransactionService
         }
     }
 
+    public async Task<CashTransactionTraceDto?> GetTraceAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var requested = await LoadCashTransactionForPostingOrNullAsync(id, cancellationToken);
+        if (requested == null)
+            return null;
+
+        var traceSourceCandidate = requested.ReversalOfCashTransactionId.HasValue
+            ? await LoadCashTransactionForPostingAsync(
+                requested.ReversalOfCashTransactionId.Value,
+                cancellationToken)
+            : requested;
+        var source = await ResolvePostingSourceTransactionAsync(traceSourceCandidate, cancellationToken);
+        await EnsureTransactionAccessAsync(source, FinanceAccessLevel.Read, cancellationToken);
+        var linkedTransferLeg = source.TransactionType == CashTransactionType.Transfer
+            ? await FindLinkedTransferLegAsync(source, cancellationToken)
+            : null;
+
+        var originalIds = new[] { source.Id, linkedTransferLeg?.Id }
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .ToArray();
+        var related = await _context.Set<CashTransaction>()
+            .AsNoTracking()
+            .Include(item => item.BankAccount)
+            .Include(item => item.ToBankAccount)
+            .Include(item => item.PaymentMethod)
+            .Include(item => item.Cheque)
+            .Where(item =>
+                item.TenantId == TenantId &&
+                !item.IsDeleted &&
+                (originalIds.Contains(item.Id) ||
+                 (item.ReversalOfCashTransactionId.HasValue &&
+                  originalIds.Contains(item.ReversalOfCashTransactionId.Value))))
+            .OrderBy(item => item.TransactionDate)
+            .ThenBy(item => item.TransactionNumber)
+            .ToListAsync(cancellationToken);
+
+        var sourceDocumentType = GetCashBankSourceDocumentType(source);
+        var postingEvents = await _context.FinancePostingEvents
+            .AsNoTracking()
+            .Include(item => item.JournalEntry)
+                .ThenInclude(item => item!.Transactions)
+                    .ThenInclude(item => item.Account)
+            .Where(item =>
+                item.TenantId == TenantId &&
+                !item.IsDeleted &&
+                item.SourceDocumentType == sourceDocumentType &&
+                item.SourceDocumentId == source.Id)
+            .OrderBy(item => item.PostingDate)
+            .ThenBy(item => item.RequestedAt)
+            .ToListAsync(cancellationToken);
+        var auditEvents = await _context.Set<AuditLog>()
+            .AsNoTracking()
+            .Where(item =>
+                item.TenantId == TenantId &&
+                item.Resource == "Finance.CashTransaction" &&
+                item.ResourceId == source.Id.ToString())
+            .OrderBy(item => item.Timestamp)
+            .ToListAsync(cancellationToken);
+
+        var trace = new CashTransactionTraceDto
+        {
+            Transaction = MapCashTransactionDto(requested),
+            RelatedTransactions = related
+                .Where(item => item.Id != requested.Id)
+                .Select(MapCashTransactionDto)
+                .ToList(),
+            Postings = postingEvents.Select(MapPostingTrace).ToList(),
+            AuditEvents = auditEvents.Select(item => new FinanceAuditTraceDto
+            {
+                AuditLogId = item.Id,
+                EventType = item.Action,
+                Timestamp = item.Timestamp,
+                UserId = item.UserId,
+                Username = item.Username,
+                BeforeValuesJson = item.OldValues,
+                DetailsJson = item.NewValues
+            }).ToList()
+        };
+
+        await RecordCashBankAuditAsync(
+            FinanceAuditEvents.CashBankTransactionTraceViewed,
+            source,
+            afterValues: new
+            {
+                RelatedTransactionCount = trace.RelatedTransactions.Count,
+                PostingCount = trace.Postings.Count,
+                AuditEventCount = trace.AuditEvents.Count
+            },
+            comment: "Cash/bank source-to-ledger trace viewed.",
+            cancellationToken: cancellationToken);
+
+        return trace;
+    }
+
+    public async Task<CashTransactionDto> ReverseAsync(
+        Guid id,
+        ReverseCashTransactionDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        if (_financePostingEngine == null)
+            throw new InvalidOperationException("Central finance posting engine is not configured for cash/bank transaction reversal.");
+
+        var requested = await LoadCashTransactionForPostingAsync(id, cancellationToken);
+        var initialSource = await ResolvePostingSourceTransactionAsync(requested, cancellationToken);
+        await EnsureTransactionAccessAsync(initialSource, FinanceAccessLevel.Approve, cancellationToken);
+
+        // A retry of an already committed correction must not become dependent on today's open
+        // periods or a later settings change. Return the stored lineage before evaluating a new
+        // reversal policy; the in-transaction check below still handles concurrent requests.
+        if (initialSource.IsReversed &&
+            initialSource.ReversalCashTransactionId.HasValue &&
+            initialSource.ReversalJournalEntryId.HasValue &&
+            initialSource.ReversalPostingEventId.HasValue)
+        {
+            return await GetByIdAsync(id) ?? MapCashTransactionDto(requested);
+        }
+
+        var policy = await _financeReversalPolicyService.ResolveAsync(
+            initialSource.TransactionDate,
+            dto.Reason,
+            dto.ReversalDate,
+            cancellationToken);
+
+        var initialJournalEntryId = initialSource.JournalEntryId;
+        var transactionStarted = false;
+        try
+        {
+            // The GL reversal, both transfer legs (when applicable), bank-balance snapshots, and
+            // immutable lineage are one accounting command. Serializable isolation prevents a
+            // reconciliation from consuming a source leg midway through that correction.
+            await using var dbTransaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            transactionStarted = true;
+
+            var reloadedRequested = await LoadCashTransactionForPostingAsync(id, cancellationToken);
+            var source = await ResolvePostingSourceTransactionAsync(reloadedRequested, cancellationToken);
+            var linkedTransferLeg = source.TransactionType == CashTransactionType.Transfer
+                ? await FindLinkedTransferLegAsync(source, cancellationToken)
+                : null;
+
+            // A committed retry returns the existing correction. This is intentionally checked
+            // before the remaining eligibility rules, while the posting engine's deterministic
+            // key independently protects against concurrent duplicate journals.
+            if (source.IsReversed &&
+                source.ReversalCashTransactionId.HasValue &&
+                source.ReversalJournalEntryId.HasValue &&
+                source.ReversalPostingEventId.HasValue)
+            {
+                await dbTransaction.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                return await GetByIdAsync(id) ?? MapCashTransactionDto(reloadedRequested);
+            }
+
+            if (source.ReversalOfCashTransactionId.HasValue)
+                throw new InvalidOperationException("A compensating cash/bank transaction cannot itself be reversed.");
+            if (!source.IsPosted ||
+                source.ApprovalStatus != CashTransactionApprovalStatus.Posted ||
+                !source.JournalEntryId.HasValue)
+            {
+                throw new InvalidOperationException("Only a posted cash/bank transaction can be reversed.");
+            }
+            if (source.TransactionType is not CashTransactionType.Receipt and
+                not CashTransactionType.Payment and
+                not CashTransactionType.Transfer)
+            {
+                throw new InvalidOperationException("This cash/bank transaction type has a dedicated correction workflow.");
+            }
+            if (source.IsReconciled || source.ReconciliationId.HasValue)
+                throw new InvalidOperationException("Remove the transaction from bank reconciliation before reversing it.");
+
+            if (source.TransactionType == CashTransactionType.Transfer)
+            {
+                if (linkedTransferLeg == null ||
+                    !linkedTransferLeg.IsPosted ||
+                    linkedTransferLeg.JournalEntryId != source.JournalEntryId)
+                {
+                    throw new InvalidOperationException("The posted bank transfer pair is incomplete or has inconsistent journal lineage.");
+                }
+                if (linkedTransferLeg.IsReconciled || linkedTransferLeg.ReconciliationId.HasValue)
+                    throw new InvalidOperationException("Remove both bank-transfer legs from reconciliation before reversing the transfer.");
+                if (linkedTransferLeg.ReversalOfCashTransactionId.HasValue)
+                    throw new InvalidOperationException("A compensating bank-transfer pair cannot itself be reversed.");
+            }
+
+            var sourceDocumentType = GetCashBankSourceDocumentType(source);
+            var originalPosting = await _context.FinancePostingEvents
+                .SingleOrDefaultAsync(item =>
+                    item.TenantId == TenantId &&
+                    !item.IsDeleted &&
+                    item.SourceDocumentType == sourceDocumentType &&
+                    item.SourceDocumentId == source.Id &&
+                    item.PostingAction == "Post" &&
+                    item.PostingStatus == "Posted",
+                    cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "This transaction was not posted by the Cash/Bank workflow. Reverse it from its owning Finance subledger instead.");
+            if (originalPosting.JournalEntryId != source.JournalEntryId)
+                throw new InvalidOperationException("Cash/bank source and posting-event journal links are inconsistent.");
+
+            var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
+                originalPosting.Id,
+                policy.Reason,
+                policy.ReversalDate,
+                cancellationToken);
+            var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+            {
+                SourceModule = "CASHBANK",
+                SourceDocumentType = sourceDocumentType,
+                SourceDocumentId = source.Id,
+                SourceDocumentTenantId = source.TenantId,
+                PostingAction = "Reverse",
+                SourceDocumentReference = source.TransactionNumber,
+                Description = $"Reverse {source.TransactionNumber}: {policy.Reason}",
+                PostingDate = policy.ReversalDate,
+                JournalType = $"{GetCashBankJournalType(source)} Reversal",
+                BookClassification = "IFRS",
+                FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
+                ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
+                ReversalReason = policy.Reason,
+                ReversalType = "SourceDocument",
+                IdempotencyKey = $"CASHBANK:{sourceDocumentType}:{source.TenantId:N}:{source.Id:N}:Reverse",
+                ReturnExistingOnDuplicate = true,
+                Lines = reversalPlan.ReversalLines.ToList()
+            }, cancellationToken);
+
+            var now = DateTime.UtcNow;
+            var reversedBy = GetCurrentUserGuid();
+            IReadOnlyList<CashTransaction> corrections;
+            if (source.TransactionType == CashTransactionType.Transfer)
+            {
+                corrections = await CreateTransferReversalPairAsync(
+                    source,
+                    linkedTransferLeg!,
+                    reversalResult,
+                    policy,
+                    now,
+                    reversedBy,
+                    cancellationToken);
+
+                // The original transfer reduced the source bank and increased the destination.
+                // The correction restores those same operational snapshots in the opposite order.
+                await AdjustBankBalanceSnapshotAsync(source.TenantId, source.BankAccountId, source.Amount, decrease: false, cancellationToken);
+                await AdjustBankBalanceSnapshotAsync(linkedTransferLeg!.TenantId, linkedTransferLeg.BankAccountId, linkedTransferLeg.Amount, decrease: true, cancellationToken);
+            }
+            else
+            {
+                var correction = await CreateReceiptOrPaymentReversalAsync(
+                    source,
+                    reversalResult,
+                    policy,
+                    now,
+                    reversedBy,
+                    cancellationToken);
+                corrections = new[] { correction };
+                await AdjustBankBalanceSnapshotAsync(
+                    source.TenantId,
+                    source.BankAccountId,
+                    source.Amount,
+                    decrease: source.TransactionType == CashTransactionType.Receipt,
+                    cancellationToken);
+            }
+
+            ApplyReversalLineage(source, corrections.Single(item => item.ReversalOfCashTransactionId == source.Id), reversalResult, policy, now, reversedBy);
+            if (linkedTransferLeg != null)
+            {
+                ApplyReversalLineage(
+                    linkedTransferLeg,
+                    corrections.Single(item => item.ReversalOfCashTransactionId == linkedTransferLeg.Id),
+                    reversalResult,
+                    policy,
+                    now,
+                    reversedBy);
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await RecordCashBankAuditAsync(
+                FinanceAuditEvents.CashBankTransactionReversed,
+                source,
+                postingEventId: reversalResult.PostingEventId,
+                journalEntryId: reversalResult.JournalEntryId,
+                beforeValues: new
+                {
+                    IsReversed = false,
+                    JournalEntryId = initialJournalEntryId,
+                    source.IsReconciled
+                },
+                afterValues: new
+                {
+                    source.IsReversed,
+                    source.ReversalCashTransactionId,
+                    source.ReversalJournalEntryId,
+                    source.ReversalPostingEventId,
+                    source.ReversalDate,
+                    CorrectionTransactionIds = corrections.Select(item => item.Id).ToArray()
+                },
+                reason: policy.Reason,
+                comment: "Posted cash/bank transaction reversed through linked compensating ledger and operational entries.",
+                cancellationToken: cancellationToken);
+
+            await dbTransaction.CommitAsync(cancellationToken);
+            transactionStarted = false;
+            return await GetByIdAsync(id) ?? MapCashTransactionDto(reloadedRequested);
+        }
+        catch (Exception ex)
+        {
+            if (transactionStarted)
+            {
+                // A database rollback does not reset EF's tracked entity states. Clearing them
+                // prevents the subsequent failure-audit save from leaking any failed correction.
+                _context.ChangeTracker.Clear();
+            }
+
+            await RecordCashBankAuditAsync(
+                FinanceAuditEvents.CashBankTransactionReversalFailed,
+                initialSource,
+                afterValues: new { TransactionId = id, ReversalDate = policy.ReversalDate, error = ex.Message },
+                reason: policy.Reason,
+                comment: "Cash/bank reversal failed before its compensating entries could commit.",
+                cancellationToken: cancellationToken);
+            throw;
+        }
+    }
+
     public async Task DeleteAsync(Guid id)
     {
         var tenantId = TenantId;
         var transaction = await _context.Set<CashTransaction>()
             .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted)
             ?? throw new Exception("Transaction not found");
+
+        await EnsureTransactionAccessAsync(transaction, FinanceAccessLevel.Operate, default);
 
         if (transaction.IsReconciled)
         {
@@ -829,6 +1335,8 @@ public class CashTransactionService : ICashTransactionService
             .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted)
             ?? throw new Exception("Transaction not found");
 
+        await EnsureTransactionAccessAsync(transaction, FinanceAccessLevel.Operate, default);
+
         var reconciliationBelongsToTenant = await _context.Set<BankReconciliation>()
             .AnyAsync(r => r.TenantId == tenantId && r.Id == reconciliationId && !r.IsDeleted);
         if (!reconciliationBelongsToTenant)
@@ -842,12 +1350,37 @@ public class CashTransactionService : ICashTransactionService
         await _context.SaveChangesAsync();
     }
 
-    private async Task<CashTransaction> LoadCashTransactionForWorkflowAsync(Guid id, CancellationToken cancellationToken)
+    private async Task<CashTransaction> LoadCashTransactionForWorkflowAsync(
+        Guid id,
+        FinanceAccessLevel requiredLevel,
+        CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
-        return await _context.Set<CashTransaction>()
+        var transaction = await _context.Set<CashTransaction>()
             .FirstOrDefaultAsync(t => t.TenantId == tenantId && t.Id == id && !t.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Cash/bank transaction was not found for this tenant.");
+
+        await EnsureTransactionAccessAsync(transaction, requiredLevel, cancellationToken);
+        return transaction;
+    }
+
+    private async Task EnsureTransactionAccessAsync(
+        CashTransaction transaction,
+        FinanceAccessLevel requiredLevel,
+        CancellationToken cancellationToken)
+    {
+        await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+            transaction.BankAccountId,
+            requiredLevel,
+            cancellationToken);
+
+        if (transaction.TransactionType == CashTransactionType.Transfer && transaction.ToBankAccountId.HasValue)
+        {
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                transaction.ToBankAccountId.Value,
+                requiredLevel,
+                cancellationToken);
+        }
     }
 
     private async Task EnforceCashBankPostingEligibilityAsync(CashTransaction transaction, CancellationToken cancellationToken)
@@ -1024,6 +1557,25 @@ public class CashTransactionService : ICashTransactionService
 
         if (IsIncomingTransferLeg(transaction))
         {
+            if (transaction.TransferPairId.HasValue)
+            {
+                var pairedSource = await _context.Set<CashTransaction>()
+                    .Include(t => t.BankAccount)
+                    .Include(t => t.ToBankAccount)
+                    .FirstOrDefaultAsync(
+                        t => t.TenantId == transaction.TenantId
+                            && !t.IsDeleted
+                            && t.TransferPairId == transaction.TransferPairId
+                            && t.TransferLeg == BankTransferLeg.Outgoing,
+                        cancellationToken);
+
+                return pairedSource
+                    ?? throw new InvalidOperationException("Transfer source transaction was not found for this tenant.");
+            }
+
+            // Development rows created before explicit pair lineage used the human-readable
+            // suffix as their only link. Retain this narrow diagnostic path until dev databases
+            // are reseeded; every newly captured transfer uses TransferPairId and TransferLeg.
             var sourceNumber = transaction.TransactionNumber[..^3] + "-OUT";
             var source = await _context.Set<CashTransaction>()
                 .Include(t => t.BankAccount)
@@ -1052,6 +1604,25 @@ public class CashTransactionService : ICashTransactionService
             return null;
         }
 
+        if (sourceTransaction.TransferPairId.HasValue)
+        {
+            var oppositeLeg = sourceTransaction.TransferLeg == BankTransferLeg.Incoming
+                ? BankTransferLeg.Outgoing
+                : BankTransferLeg.Incoming;
+            return await _context.Set<CashTransaction>()
+                .Include(t => t.BankAccount)
+                .Include(t => t.ToBankAccount)
+                .FirstOrDefaultAsync(
+                    t => t.TenantId == sourceTransaction.TenantId
+                        && !t.IsDeleted
+                        && t.Id != sourceTransaction.Id
+                        && t.TransferPairId == sourceTransaction.TransferPairId
+                        && t.TransferLeg == oppositeLeg,
+                    cancellationToken);
+        }
+
+        // See ResolvePostingSourceTransactionAsync: suffix matching exists only to make already
+        // seeded development rows diagnosable. It is not the lineage mechanism for new rows.
         var destinationNumber = IsOutgoingTransferLeg(sourceTransaction)
             ? sourceTransaction.TransactionNumber[..^4] + "-IN"
             : null;
@@ -1133,7 +1704,7 @@ public class CashTransactionService : ICashTransactionService
         {
             CashTransactionType.Receipt => await BuildReceiptLinesAsync(transaction, description, transactionCurrency, exchangeRate, tenantId, cancellationToken),
             CashTransactionType.Payment => await BuildPaymentLinesAsync(transaction, description, transactionCurrency, exchangeRate, tenantId, cancellationToken),
-            CashTransactionType.Transfer => await BuildTransferLinesAsync(transaction, description, transactionCurrency, exchangeRate, tenantId, cancellationToken),
+            CashTransactionType.Transfer => await BuildTransferLinesAsync(transaction, description, baseCurrencyCode, tenantId, cancellationToken),
             _ => throw new InvalidOperationException("Unsupported cash/bank transaction type.")
         };
 
@@ -1214,8 +1785,7 @@ public class CashTransactionService : ICashTransactionService
     private async Task<IReadOnlyList<FinancePostingLineDto>> BuildTransferLinesAsync(
         CashTransaction transaction,
         string description,
-        string transactionCurrency,
-        decimal exchangeRate,
+        string functionalCurrency,
         Guid tenantId,
         CancellationToken cancellationToken)
     {
@@ -1254,14 +1824,84 @@ public class CashTransactionService : ICashTransactionService
             throw new InvalidOperationException("Transfer source and destination bank accounts must be linked to different GL accounts.");
         }
 
+        var destinationLeg = await FindLinkedTransferLegAsync(transaction, cancellationToken)
+            ?? throw new InvalidOperationException("Transfer destination transaction was not found for this tenant.");
+
+        if (!IsIncomingTransferLeg(destinationLeg)
+            || destinationLeg.BankAccountId != transaction.ToBankAccountId.Value
+            || destinationLeg.ToBankAccountId != transaction.BankAccountId)
+        {
+            throw new InvalidOperationException("Transfer destination lineage is inconsistent with the source transaction.");
+        }
+
+        if (destinationLeg.Amount <= 0m || destinationLeg.BaseAmount <= 0m)
+        {
+            throw new InvalidOperationException("Transfer destination amount must be greater than zero.");
+        }
+
+        var sourceCurrency = NormalizeCurrency(transaction.Currency);
+        var destinationCurrency = NormalizeCurrency(destinationLeg.Currency);
+        if (!string.Equals(sourceCurrency, NormalizeCurrency(transaction.BankAccount.Currency), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(destinationCurrency, NormalizeCurrency(transaction.ToBankAccount.Currency), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Transfer leg currencies must match their respective bank-account currencies.");
+        }
+
+        // The captured rate snapshots are immutable evidence. Recompute the signed difference
+        // before posting so a partial/manual edit cannot silently change which FX account is hit.
+        var realizedFxGainLoss = RoundMoney(destinationLeg.BaseAmount - transaction.BaseAmount);
+        if (RoundMoney(transaction.TransferFxGainLossBaseAmount) != realizedFxGainLoss
+            || RoundMoney(destinationLeg.TransferFxGainLossBaseAmount) != realizedFxGainLoss)
+        {
+            throw new InvalidOperationException("Transfer realised FX snapshot no longer agrees with the captured leg valuations.");
+        }
+
         await ValidatePostingAccountAsync(transaction.BankAccount.GLAccountId!.Value, tenantId, "transfer source bank account", cancellationToken);
         await ValidatePostingAccountAsync(transaction.ToBankAccount.GLAccountId.Value, tenantId, "transfer destination bank account", cancellationToken);
 
-        return new List<FinancePostingLineDto>
+        var lines = new List<FinancePostingLineDto>
         {
-            CreatePostingLine(transaction.ToBankAccount.GLAccountId.Value, description, debitAmount: transaction.BaseAmount, creditAmount: 0m, transaction, transactionCurrency, exchangeRate, 1, "CashBankTransfer.Destination"),
-            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, transactionCurrency, exchangeRate, 2, "CashBankTransfer.Source")
+            CreatePostingLine(destinationLeg.BankAccount.GLAccountId!.Value, description, debitAmount: destinationLeg.BaseAmount, creditAmount: 0m, destinationLeg, destinationCurrency, ResolveExchangeRate(destinationCurrency, functionalCurrency, destinationLeg.ExchangeRate), 1, "CashBankTransfer.Destination"),
+            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, sourceCurrency, ResolveExchangeRate(sourceCurrency, functionalCurrency, transaction.ExchangeRate), 2, "CashBankTransfer.Source")
         };
+
+        if (realizedFxGainLoss != 0m)
+        {
+            var settings = await _context.FinanceSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("Finance settings must be configured before posting a cross-currency bank transfer.");
+
+            // Positive difference: the destination value exceeds the source value, so credit
+            // realised gain. Negative difference: debit realised loss for the shortfall.
+            var gain = realizedFxGainLoss > 0m;
+            var fxAccountId = gain
+                ? settings.RealizedFxGainAccountId
+                : settings.RealizedFxLossAccountId;
+            if (!fxAccountId.HasValue)
+            {
+                throw new InvalidOperationException(
+                    $"A realised FX {(gain ? "gain" : "loss")} account must be configured in Finance Settings before posting this transfer.");
+            }
+
+            await ValidatePostingAccountAsync(
+                fxAccountId.Value,
+                tenantId,
+                gain ? "realised FX gain" : "realised FX loss",
+                cancellationToken);
+
+            lines.Add(CreateFunctionalPostingLine(
+                fxAccountId.Value,
+                $"Realised FX {(gain ? "gain" : "loss")} - {description}",
+                debitAmount: gain ? 0m : Math.Abs(realizedFxGainLoss),
+                creditAmount: gain ? realizedFxGainLoss : 0m,
+                functionalCurrency,
+                transaction,
+                lineNumber: 3,
+                transactionTag: gain ? "CashBankTransfer.RealizedFxGain" : "CashBankTransfer.RealizedFxLoss"));
+        }
+
+        return lines;
     }
 
     private static FinancePostingLineDto CreatePostingLine(
@@ -1283,9 +1923,10 @@ public class CashTransactionService : ICashTransactionService
             CreditAmount = RoundMoney(creditAmount),
             TransactionCurrency = transactionCurrency,
             ForeignCurrencyAmount = transaction.Amount,
+            ExchangeRateId = transaction.ExchangeRateId,
             ExchangeRate = exchangeRate,
-            ExchangeRateSource = "CashBankTransaction",
-            ExchangeRateDate = transaction.TransactionDate.Date,
+            ExchangeRateSource = transaction.ExchangeRateSource ?? "CashBankTransaction",
+            ExchangeRateDate = transaction.ExchangeRateDate?.Date ?? transaction.TransactionDate.Date,
             SourceReferenceNumber = string.IsNullOrWhiteSpace(transaction.ReferenceNumber)
                 ? transaction.TransactionNumber
                 : transaction.ReferenceNumber,
@@ -1336,14 +1977,329 @@ public class CashTransactionService : ICashTransactionService
 
     private static bool IsIncomingTransferLeg(CashTransaction transaction)
         => transaction.TransactionType == CashTransactionType.Transfer
-            && transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase);
+            && (transaction.TransferLeg == BankTransferLeg.Incoming
+                || (!transaction.TransferLeg.HasValue
+                    && transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)));
 
     private static bool IsOutgoingTransferLeg(CashTransaction transaction)
         => transaction.TransactionType == CashTransactionType.Transfer
-            && transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase);
+            && (transaction.TransferLeg == BankTransferLeg.Outgoing
+                || (!transaction.TransferLeg.HasValue
+                    && transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)));
 
     private static decimal RoundMoney(decimal amount)
         => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+    private static decimal RoundCrossRate(decimal rate)
+        => decimal.Round(rate, 8, MidpointRounding.AwayFromZero);
+
+    private async Task<CashTransaction?> LoadCashTransactionForPostingOrNullAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        return await _context.Set<CashTransaction>()
+            .AsNoTracking()
+            .Include(item => item.BankAccount)
+            .Include(item => item.ToBankAccount)
+            .Include(item => item.PaymentMethod)
+            .Include(item => item.Cheque)
+            .FirstOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == id && !item.IsDeleted,
+                cancellationToken);
+    }
+
+    private async Task<CashTransaction> CreateReceiptOrPaymentReversalAsync(
+        CashTransaction source,
+        FinancePostingResultDto reversalResult,
+        FinanceReversalPolicyDecision policy,
+        DateTime now,
+        Guid reversedBy,
+        CancellationToken cancellationToken)
+    {
+        var correctionType = source.TransactionType == CashTransactionType.Receipt
+            ? CashTransactionType.Payment
+            : CashTransactionType.Receipt;
+        var documentType = correctionType == CashTransactionType.Receipt
+            ? FinanceDocumentTypes.CashReceipt
+            : FinanceDocumentTypes.CashPayment;
+        var transactionNumber = await GenerateTransactionNumberAsync(documentType, policy.ReversalDate);
+        var correction = new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = source.TenantId,
+            TransactionNumber = transactionNumber,
+            TransactionDate = policy.ReversalDate,
+            TransactionType = correctionType,
+            BankAccountId = source.BankAccountId,
+            Amount = source.Amount,
+            Currency = source.Currency,
+            ExchangeRate = source.ExchangeRate,
+            BaseAmount = source.BaseAmount,
+            PaymentMethodId = source.PaymentMethodId,
+            ReferenceNumber = LimitText($"{source.TransactionNumber}-REV", 100),
+            PayeeOrPayer = source.PayeeOrPayer,
+            Description = LimitText($"Reversal of {source.TransactionNumber}: {policy.Reason}", 500),
+            GLAccountId = source.GLAccountId,
+            IsReconciled = false,
+            IsPosted = true,
+            ApprovalStatus = CashTransactionApprovalStatus.Posted,
+            JournalEntryId = reversalResult.JournalEntryId,
+            PostedDate = now,
+            PostedBy = reversedBy,
+            ReversalOfCashTransactionId = source.Id,
+            CreatedAt = now,
+            CreatedBy = _currentUserService.UserName
+        };
+        _context.Set<CashTransaction>().Add(correction);
+        return correction;
+    }
+
+    private async Task<IReadOnlyList<CashTransaction>> CreateTransferReversalPairAsync(
+        CashTransaction source,
+        CashTransaction linkedDestinationLeg,
+        FinancePostingResultDto reversalResult,
+        FinanceReversalPolicyDecision policy,
+        DateTime now,
+        Guid reversedBy,
+        CancellationToken cancellationToken)
+    {
+        var baseNumber = await GenerateTransactionNumberAsync(
+            FinanceDocumentTypes.BankTransfer,
+            policy.ReversalDate);
+        var reversalPairId = Guid.NewGuid();
+        var reference = LimitText($"{source.TransactionNumber}-REV", 100);
+        var description = LimitText($"Reversal of {source.TransactionNumber}: {policy.Reason}", 500);
+        var inverseCrossRate = linkedDestinationLeg.Amount > 0m
+            ? RoundCrossRate(source.Amount / linkedDestinationLeg.Amount)
+            : (decimal?)null;
+        var reversedFxGainLoss = -RoundMoney(source.TransferFxGainLossBaseAmount);
+
+        // The compensating transfer moves funds from the original destination back to the
+        // original source. Each correction leg deliberately copies the amount, currency and
+        // immutable rate snapshot of the original leg affecting that bank. Copying the source
+        // amount to both sides would corrupt foreign bank balances and statement matching.
+        var correctionOut = new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = source.TenantId,
+            TransactionNumber = $"{baseNumber}-OUT",
+            TransactionDate = policy.ReversalDate,
+            TransactionType = CashTransactionType.Transfer,
+            BankAccountId = linkedDestinationLeg.BankAccountId,
+            ToBankAccountId = source.BankAccountId,
+            TransferPairId = reversalPairId,
+            TransferLeg = BankTransferLeg.Outgoing,
+            Amount = linkedDestinationLeg.Amount,
+            Currency = linkedDestinationLeg.Currency,
+            ExchangeRate = linkedDestinationLeg.ExchangeRate,
+            ExchangeRateId = linkedDestinationLeg.ExchangeRateId,
+            ExchangeRateSource = linkedDestinationLeg.ExchangeRateSource,
+            ExchangeRateDate = linkedDestinationLeg.ExchangeRateDate,
+            ExchangeRateQuoteSide = linkedDestinationLeg.ExchangeRateQuoteSide,
+            BaseAmount = linkedDestinationLeg.BaseAmount,
+            TransferCrossRate = inverseCrossRate,
+            TransferFxGainLossBaseAmount = reversedFxGainLoss,
+            ReferenceNumber = reference,
+            Description = description,
+            IsReconciled = false,
+            IsPosted = true,
+            ApprovalStatus = CashTransactionApprovalStatus.Posted,
+            JournalEntryId = reversalResult.JournalEntryId,
+            PostedDate = now,
+            PostedBy = reversedBy,
+            ReversalOfCashTransactionId = linkedDestinationLeg.Id,
+            CreatedAt = now,
+            CreatedBy = _currentUserService.UserName
+        };
+        var correctionIn = new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = source.TenantId,
+            TransactionNumber = $"{baseNumber}-IN",
+            TransactionDate = policy.ReversalDate,
+            TransactionType = CashTransactionType.Transfer,
+            BankAccountId = source.BankAccountId,
+            ToBankAccountId = linkedDestinationLeg.BankAccountId,
+            TransferPairId = reversalPairId,
+            TransferLeg = BankTransferLeg.Incoming,
+            Amount = source.Amount,
+            Currency = source.Currency,
+            ExchangeRate = source.ExchangeRate,
+            ExchangeRateId = source.ExchangeRateId,
+            ExchangeRateSource = source.ExchangeRateSource,
+            ExchangeRateDate = source.ExchangeRateDate,
+            ExchangeRateQuoteSide = source.ExchangeRateQuoteSide,
+            BaseAmount = source.BaseAmount,
+            TransferCrossRate = inverseCrossRate,
+            TransferFxGainLossBaseAmount = reversedFxGainLoss,
+            ReferenceNumber = reference,
+            Description = description,
+            IsReconciled = false,
+            IsPosted = true,
+            ApprovalStatus = CashTransactionApprovalStatus.Posted,
+            JournalEntryId = reversalResult.JournalEntryId,
+            PostedDate = now,
+            PostedBy = reversedBy,
+            ReversalOfCashTransactionId = source.Id,
+            CreatedAt = now,
+            CreatedBy = _currentUserService.UserName
+        };
+        _context.Set<CashTransaction>().AddRange(correctionOut, correctionIn);
+        return new[] { correctionOut, correctionIn };
+    }
+
+    private void ApplyReversalLineage(
+        CashTransaction original,
+        CashTransaction correction,
+        FinancePostingResultDto reversalResult,
+        FinanceReversalPolicyDecision policy,
+        DateTime now,
+        Guid reversedBy)
+    {
+        original.IsReversed = true;
+        original.ReversalCashTransactionId = correction.Id;
+        original.ReversalJournalEntryId = reversalResult.JournalEntryId;
+        original.ReversalPostingEventId = reversalResult.PostingEventId;
+        original.ReversalDate = policy.ReversalDate;
+        original.ReversedAt = now;
+        original.ReversedById = reversedBy;
+        original.ReversalReason = policy.Reason;
+        original.UpdatedAt = now;
+        original.UpdatedBy = _currentUserService.UserName;
+    }
+
+    private static string LimitText(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength];
+
+    private static CashTransactionDto MapCashTransactionDto(CashTransaction transaction)
+        => new()
+        {
+            Id = transaction.Id,
+            TransactionNumber = transaction.TransactionNumber,
+            TransactionDate = transaction.TransactionDate,
+            TransactionType = transaction.TransactionType,
+            BankAccountId = transaction.BankAccountId,
+            BankAccountName = transaction.BankAccount?.AccountName ?? string.Empty,
+            ToBankAccountId = transaction.ToBankAccountId,
+            ToBankAccountName = transaction.ToBankAccount?.AccountName,
+            TransferPairId = transaction.TransferPairId,
+            TransferLeg = transaction.TransferLeg,
+            Amount = transaction.Amount,
+            Currency = transaction.Currency,
+            ExchangeRate = transaction.ExchangeRate,
+            ExchangeRateId = transaction.ExchangeRateId,
+            ExchangeRateSource = transaction.ExchangeRateSource,
+            ExchangeRateDate = transaction.ExchangeRateDate,
+            ExchangeRateQuoteSide = transaction.ExchangeRateQuoteSide?.ToString(),
+            BaseAmount = transaction.BaseAmount,
+            TransferCrossRate = transaction.TransferCrossRate,
+            TransferFxGainLossBaseAmount = transaction.TransferFxGainLossBaseAmount,
+            PaymentMethodId = transaction.PaymentMethodId,
+            PaymentMethodName = transaction.PaymentMethod?.Name,
+            ReferenceNumber = transaction.ReferenceNumber,
+            PayeeOrPayer = transaction.PayeeOrPayer,
+            Description = transaction.Description,
+            GLAccountId = transaction.GLAccountId,
+            IsReconciled = transaction.IsReconciled,
+            ReconciliationId = transaction.ReconciliationId,
+            ChequeId = transaction.ChequeId,
+            ChequeNumber = transaction.Cheque?.ChequeNumber,
+            IsPosted = transaction.IsPosted,
+            ApprovalStatus = transaction.ApprovalStatus,
+            ApprovalStatusName = transaction.ApprovalStatus.ToString(),
+            WorkflowInstanceId = transaction.WorkflowInstanceId,
+            SubmittedAt = transaction.SubmittedAt,
+            SubmittedById = transaction.SubmittedById,
+            ApprovedAt = transaction.ApprovedAt,
+            ApprovedById = transaction.ApprovedById,
+            RejectedAt = transaction.RejectedAt,
+            RejectedById = transaction.RejectedById,
+            ApprovalComments = transaction.ApprovalComments,
+            RejectionReason = transaction.RejectionReason,
+            CancelledAt = transaction.CancelledAt,
+            CancelledById = transaction.CancelledById,
+            CancellationReason = transaction.CancellationReason,
+            JournalEntryId = transaction.JournalEntryId,
+            PostedDate = transaction.PostedDate,
+            IsReversed = transaction.IsReversed,
+            ReversalOfCashTransactionId = transaction.ReversalOfCashTransactionId,
+            ReversalCashTransactionId = transaction.ReversalCashTransactionId,
+            ReversalJournalEntryId = transaction.ReversalJournalEntryId,
+            ReversalPostingEventId = transaction.ReversalPostingEventId,
+            ReversalDate = transaction.ReversalDate,
+            ReversedAt = transaction.ReversedAt,
+            ReversedById = transaction.ReversedById,
+            ReversalReason = transaction.ReversalReason,
+            CreatedAt = transaction.CreatedAt,
+            CreatedBy = transaction.CreatedBy
+        };
+
+    private static FinancePostingTraceDto MapPostingTrace(FinancePostingEvent postingEvent)
+    {
+        var journal = postingEvent.JournalEntry;
+        return new FinancePostingTraceDto
+        {
+            PostingEventId = postingEvent.Id,
+            PostingAction = postingEvent.PostingAction,
+            PostingStatus = postingEvent.PostingStatus,
+            PostingDate = postingEvent.PostingDate,
+            PostedAt = postingEvent.PostedAt,
+            JournalEntryId = postingEvent.JournalEntryId,
+            JournalEntryNumber = journal?.JournalEntryNumber,
+            OriginalJournalEntryId = journal?.OriginalJournalEntryId,
+            ReversalJournalEntryId = journal?.ReversalJournalEntryId,
+            TotalDebitAmount = postingEvent.TotalDebitAmount,
+            TotalCreditAmount = postingEvent.TotalCreditAmount,
+            FunctionalCurrencyCode = postingEvent.FunctionalCurrencyCode,
+            Lines = journal?.Transactions
+                .OrderBy(item => item.LineNumber)
+                .Select(item => new FinanceJournalLineTraceDto
+                {
+                    TransactionId = item.Id,
+                    LineNumber = item.LineNumber,
+                    AccountId = item.AccountId,
+                    AccountNumber = item.Account?.AccountNumber ?? string.Empty,
+                    AccountName = item.Account?.AccountName ?? string.Empty,
+                    Description = item.Description ?? string.Empty,
+                    DebitAmount = item.DebitAmount,
+                    CreditAmount = item.CreditAmount,
+                    TransactionCurrency = item.TransactionCurrency ?? postingEvent.FunctionalCurrencyCode,
+                    ForeignCurrencyAmount = item.ForeignCurrencyAmount,
+                    ExchangeRate = item.ExchangeRate,
+                    OriginalTransactionId = item.OriginalTransactionId,
+                    ReversalTransactionId = item.ReversalTransactionId
+                })
+                .ToList() ?? new List<FinanceJournalLineTraceDto>()
+        };
+    }
+
+    private static FinancePostingLineDto CreateFunctionalPostingLine(
+        Guid accountId,
+        string description,
+        decimal debitAmount,
+        decimal creditAmount,
+        string functionalCurrency,
+        CashTransaction sourceTransaction,
+        int lineNumber,
+        string transactionTag)
+    {
+        // Functional-currency gain/loss lines intentionally carry no foreign amount or rate id;
+        // those belong to the two bank legs whose valuation difference produced this line.
+        return new FinancePostingLineDto
+        {
+            AccountId = accountId,
+            Description = description,
+            DebitAmount = RoundMoney(debitAmount),
+            CreditAmount = RoundMoney(creditAmount),
+            TransactionCurrency = functionalCurrency,
+            SourceReferenceNumber = string.IsNullOrWhiteSpace(sourceTransaction.ReferenceNumber)
+                ? sourceTransaction.TransactionNumber
+                : sourceTransaction.ReferenceNumber,
+            LineNumber = lineNumber,
+            TransactionTag = transactionTag
+        };
+    }
 
     private async Task RecordCashBankAuditAsync(
         string eventType,
@@ -1380,10 +2336,18 @@ public class CashTransactionService : ICashTransactionService
                 transaction.TransactionType,
                 transaction.BankAccountId,
                 transaction.ToBankAccountId,
+                transaction.TransferPairId,
+                transaction.TransferLeg,
                 transaction.GLAccountId,
                 transaction.Amount,
                 transaction.Currency,
+                transaction.ExchangeRateId,
+                transaction.ExchangeRate,
+                transaction.ExchangeRateSource,
+                transaction.ExchangeRateDate,
                 transaction.BaseAmount,
+                transaction.TransferCrossRate,
+                transaction.TransferFxGainLossBaseAmount,
                 transaction.ApprovalStatus,
                 transaction.WorkflowInstanceId,
                 transaction.IsPosted,
@@ -1393,6 +2357,478 @@ public class CashTransactionService : ICashTransactionService
             ResourceId = transaction.Id.ToString()
         }, cancellationToken);
     }
+
+    private static void ValidateTransferRequestBasics(CreateBankTransferDto dto)
+    {
+        if (dto.FromBankAccountId == Guid.Empty || dto.ToBankAccountId == Guid.Empty)
+            throw new InvalidOperationException("Transfer source and destination bank accounts are required.");
+
+        if (dto.FromBankAccountId == dto.ToBankAccountId)
+            throw new InvalidOperationException("Transfer source and destination bank accounts must be different.");
+
+        if (dto.TransactionDate == default)
+            throw new InvalidOperationException("Transfer date is required.");
+
+        if (dto.Amount <= 0m)
+            throw new InvalidOperationException("Transfer source amount must be greater than zero.");
+
+        if (dto.DestinationAmount.HasValue && dto.DestinationAmount.Value < 0m)
+            throw new InvalidOperationException("Transfer destination amount cannot be negative.");
+
+        if (dto.TransferPairId == Guid.Empty)
+            throw new InvalidOperationException("Transfer pair id cannot be an empty GUID when supplied.");
+
+        if (dto.SourceExchangeRateId == Guid.Empty || dto.DestinationExchangeRateId == Guid.Empty)
+            throw new InvalidOperationException("Exchange-rate ids cannot be empty GUIDs when supplied.");
+    }
+
+    private async Task<(CashTransaction Outgoing, CashTransaction Incoming)?> LoadTransferPairAsync(
+        Guid transferPairId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = TenantId;
+        var rows = await _context.Set<CashTransaction>()
+            .Include(t => t.BankAccount)
+            .Include(t => t.ToBankAccount)
+            .Where(t => t.TenantId == tenantId
+                && !t.IsDeleted
+                && t.TransactionType == CashTransactionType.Transfer
+                && t.TransferPairId == transferPairId)
+            .ToListAsync(cancellationToken);
+
+        if (rows.Count == 0)
+            return null;
+
+        var outgoing = rows.SingleOrDefault(t => t.TransferLeg == BankTransferLeg.Outgoing);
+        var incoming = rows.SingleOrDefault(t => t.TransferLeg == BankTransferLeg.Incoming);
+        if (rows.Count != 2 || outgoing == null || incoming == null)
+        {
+            throw new InvalidOperationException(
+                "The transfer retry key is already present but its OUT/IN lineage is incomplete. Review the development data before retrying.");
+        }
+
+        return (outgoing, incoming);
+    }
+
+    private static void EnsureTransferRetryMatches(
+        CashTransaction outgoing,
+        CashTransaction incoming,
+        CreateBankTransferDto dto)
+    {
+        var matches = outgoing.BankAccountId == dto.FromBankAccountId
+            && outgoing.ToBankAccountId == dto.ToBankAccountId
+            && incoming.BankAccountId == dto.ToBankAccountId
+            && incoming.ToBankAccountId == dto.FromBankAccountId
+            && outgoing.TransactionDate.Date == dto.TransactionDate.Date
+            && RoundMoney(outgoing.Amount) == RoundMoney(dto.Amount);
+
+        if (dto.DestinationAmount is > 0m)
+            matches = matches && RoundMoney(incoming.Amount) == RoundMoney(dto.DestinationAmount.Value);
+
+        if (dto.SourceExchangeRateId.HasValue)
+            matches = matches && outgoing.ExchangeRateId == dto.SourceExchangeRateId;
+
+        if (dto.DestinationExchangeRateId.HasValue)
+            matches = matches && incoming.ExchangeRateId == dto.DestinationExchangeRateId;
+
+        if (!matches)
+        {
+            throw new InvalidOperationException(
+                "The transfer pair id has already been used for different transfer facts. Generate a new pair id for a new transfer.");
+        }
+    }
+
+    private async Task<BankTransferPlan> ResolveBankTransferPlanAsync(
+        CreateBankTransferDto dto,
+        bool allowDerivedDestinationAmount,
+        CancellationToken cancellationToken)
+    {
+        ValidateTransferRequestBasics(dto);
+        var tenantId = TenantId;
+        var accounts = await _context.BankAccounts
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId
+                && !a.IsDeleted
+                && (a.Id == dto.FromBankAccountId || a.Id == dto.ToBankAccountId))
+            .ToListAsync(cancellationToken);
+        var fromAccount = accounts.SingleOrDefault(a => a.Id == dto.FromBankAccountId)
+            ?? throw new InvalidOperationException("The source bank account was not found for this tenant.");
+        var toAccount = accounts.SingleOrDefault(a => a.Id == dto.ToBankAccountId)
+            ?? throw new InvalidOperationException("The destination bank account was not found for this tenant.");
+
+        ValidateTransferAccount(fromAccount, "Source");
+        ValidateTransferAccount(toAccount, "Destination");
+        if (fromAccount.GLAccountId == toAccount.GLAccountId)
+            throw new InvalidOperationException("Transfer bank accounts must be linked to different GL accounts.");
+
+        var functionalCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync());
+        var sourceCurrency = NormalizeCurrency(fromAccount.Currency);
+        var destinationCurrency = NormalizeCurrency(toAccount.Currency);
+        var isCrossCurrency = !string.Equals(sourceCurrency, destinationCurrency, StringComparison.OrdinalIgnoreCase);
+        var transactionDate = dto.TransactionDate.Date;
+        var settings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken);
+
+        var sourcePolicy = await ResolveBankTransferRatePolicyAsync(
+            tenantId,
+            fromAccount.GLAccountId!.Value,
+            sourceCurrency,
+            transactionDate,
+            settings,
+            cancellationToken);
+        var destinationPolicy = await ResolveBankTransferRatePolicyAsync(
+            tenantId,
+            toAccount.GLAccountId!.Value,
+            destinationCurrency,
+            transactionDate,
+            settings,
+            cancellationToken);
+
+        // Moving the same foreign currency between two bank accounts must use one valuation.
+        // Divergent account policies would make a no-conversion transfer manufacture FX, so the
+        // configuration must be aligned before Finance can capture it.
+        if (!isCrossCurrency
+            && !string.Equals(sourceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+            && sourcePolicy != destinationPolicy)
+        {
+            throw new InvalidOperationException(
+                $"The two {sourceCurrency} bank GL accounts have different transaction-rate policies. Align their currency links before transferring funds.");
+        }
+
+        var sourceRate = await ResolveBankTransferRateSnapshotAsync(
+            tenantId,
+            functionalCurrency,
+            sourceCurrency,
+            transactionDate,
+            dto.SourceExchangeRateId,
+            sourcePolicy,
+            cancellationToken);
+        var destinationRate = isCrossCurrency
+            ? await ResolveBankTransferRateSnapshotAsync(
+                tenantId,
+                functionalCurrency,
+                destinationCurrency,
+                transactionDate,
+                dto.DestinationExchangeRateId,
+                destinationPolicy,
+                cancellationToken)
+            : sourceRate;
+
+        var sourceAmount = RoundMoney(dto.Amount);
+        var sourceBaseAmount = ToBaseAmount(sourceAmount, sourceRate.Rate);
+        var destinationWasDerived = false;
+        decimal destinationAmount;
+        if (!isCrossCurrency)
+        {
+            if (dto.DestinationAmount is > 0m
+                && RoundMoney(dto.DestinationAmount.Value) != sourceAmount)
+            {
+                throw new InvalidOperationException("Same-currency transfers must move the same amount into the destination bank account.");
+            }
+
+            destinationAmount = sourceAmount;
+        }
+        else if (dto.DestinationAmount is > 0m)
+        {
+            destinationAmount = RoundMoney(dto.DestinationAmount.Value);
+        }
+        else if (allowDerivedDestinationAmount)
+        {
+            destinationAmount = RoundMoney(sourceBaseAmount / destinationRate.Rate);
+            destinationWasDerived = true;
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "Confirm the destination amount before capturing a cross-currency bank transfer.");
+        }
+
+        if (destinationAmount <= 0m)
+            throw new InvalidOperationException("Transfer destination amount must be greater than zero.");
+
+        var destinationBaseAmount = ToBaseAmount(destinationAmount, destinationRate.Rate);
+        var realizedFxGainLoss = isCrossCurrency
+            ? RoundMoney(destinationBaseAmount - sourceBaseAmount)
+            : 0m;
+        var crossRate = RoundCrossRate(destinationAmount / sourceAmount);
+        var realizedFxOutcome = realizedFxGainLoss > 0m
+            ? "Gain"
+            : realizedFxGainLoss < 0m
+                ? "Loss"
+                : "None";
+
+        return new BankTransferPlan(
+            fromAccount,
+            toAccount,
+            transactionDate,
+            functionalCurrency,
+            isCrossCurrency,
+            sourceCurrency,
+            sourceAmount,
+            sourceRate,
+            sourceBaseAmount,
+            destinationCurrency,
+            destinationAmount,
+            destinationWasDerived,
+            destinationRate,
+            destinationBaseAmount,
+            crossRate,
+            realizedFxGainLoss,
+            realizedFxOutcome);
+    }
+
+    private async Task<BankTransferRatePolicy> ResolveBankTransferRatePolicyAsync(
+        Guid tenantId,
+        Guid accountId,
+        string currency,
+        DateTime transactionDate,
+        FinanceSettings? settings,
+        CancellationToken cancellationToken)
+    {
+        var directionalPolicyEnabled = settings?.DirectionalExchangeRatePolicyEnabled == true;
+        if (!directionalPolicyEnabled)
+            return new BankTransferRatePolicy(ExchangeRateType.Daily, ExchangeRateQuoteSide.Mid);
+
+        var link = await _context.AccountCurrencyLinks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(l => l.TenantId == tenantId
+                && l.AccountId == accountId
+                && l.LinkedCurrencyCode == currency
+                && !l.IsDeleted
+                && l.IsActive
+                && l.EffectiveDate.Date <= transactionDate.Date
+                && (!l.EffectiveEndDate.HasValue || l.EffectiveEndDate.Value.Date >= transactionDate.Date),
+                cancellationToken);
+
+        return link == null
+            ? new BankTransferRatePolicy(
+                ExchangeRateType.Daily,
+                settings?.DefaultTransactionQuoteSide ?? ExchangeRateQuoteSide.Mid)
+            : new BankTransferRatePolicy(
+                ParseBankTransferRateType(link.TransactionRateType),
+                link.TransactionQuoteSide);
+    }
+
+    private async Task<BankTransferRateSnapshot> ResolveBankTransferRateSnapshotAsync(
+        Guid tenantId,
+        string functionalCurrency,
+        string transactionCurrency,
+        DateTime transactionDate,
+        Guid? requestedRateId,
+        BankTransferRatePolicy policy,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (requestedRateId.HasValue)
+                throw new InvalidOperationException("A functional-currency bank leg does not require an exchange-rate id.");
+
+            return new BankTransferRateSnapshot(
+                null,
+                1m,
+                "Functional currency",
+                transactionDate.Date,
+                ExchangeRateQuoteSide.Mid,
+                ExchangeRateType.Daily);
+        }
+
+        ExchangeRate? rate;
+        if (requestedRateId.HasValue)
+        {
+            rate = await _context.ExchangeRates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId
+                    && r.Id == requestedRateId.Value
+                    && !r.IsDeleted,
+                    cancellationToken);
+        }
+        else
+        {
+            rate = await _context.ExchangeRates
+                .AsNoTracking()
+                .Where(r => r.TenantId == tenantId
+                    && !r.IsDeleted
+                    && r.BaseCurrencyCode == functionalCurrency
+                    && r.TargetCurrencyCode == transactionCurrency
+                    && r.RateType == policy.RateType
+                    && r.QuoteSide == policy.QuoteSide
+                    && r.IsActive
+                    && r.Rate > 0m
+                    && (r.ApprovalStatus == RateApprovalStatus.Approved
+                        || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                    && r.EffectiveDate.Date <= transactionDate.Date
+                    && (!r.EndDate.HasValue || r.EndDate.Value.Date >= transactionDate.Date))
+                .OrderByDescending(r => r.EffectiveDate)
+                .ThenByDescending(r => r.Priority)
+                .ThenByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (rate == null)
+        {
+            throw new InvalidOperationException(
+                $"No approved {policy.QuoteSide} {policy.RateType} exchange rate exists for {transactionCurrency} to {functionalCurrency} on {transactionDate:yyyy-MM-dd}.");
+        }
+
+        if (!rate.IsActive
+            || rate.Rate <= 0m
+            || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved))
+        {
+            throw new InvalidOperationException("The selected exchange rate must be active, approved, and greater than zero.");
+        }
+
+        if (!string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The selected exchange-rate currency pair does not match the bank-leg currency.");
+        }
+
+        if (rate.EffectiveDate.Date > transactionDate.Date
+            || (rate.EndDate.HasValue && rate.EndDate.Value.Date < transactionDate.Date))
+        {
+            throw new InvalidOperationException("The selected exchange rate is not effective for the transfer date.");
+        }
+
+        // Capture rejects policy overrides because an ordinary transfer screen does not collect
+        // exceptional-rate approval evidence. Finance can first correct/approve its rate setup,
+        // keeping preview, capture and the central posting engine on one deterministic policy.
+        if (rate.RateType != policy.RateType || rate.QuoteSide != policy.QuoteSide)
+        {
+            throw new InvalidOperationException(
+                $"The selected exchange rate does not match the required {policy.QuoteSide} {policy.RateType} policy for this bank account.");
+        }
+
+        return new BankTransferRateSnapshot(
+            rate.Id,
+            rate.Rate,
+            string.IsNullOrWhiteSpace(rate.RateSource) ? "Approved tenant rate" : rate.RateSource.Trim(),
+            rate.EffectiveDate.Date,
+            rate.QuoteSide,
+            rate.RateType);
+    }
+
+    private static ExchangeRateType ParseBankTransferRateType(string? value)
+    {
+        var normalized = value?.Trim()
+            .Replace("-", string.Empty)
+            .Replace("_", string.Empty)
+            .Replace(" ", string.Empty);
+        return Enum.TryParse<ExchangeRateType>(normalized, ignoreCase: true, out var rateType)
+            ? rateType
+            : throw new InvalidOperationException("The bank GL account has an invalid transaction exchange-rate type.");
+    }
+
+    private CashTransaction CreateTransferLeg(
+        BankTransferPlan plan,
+        Guid transferPairId,
+        BankTransferLeg leg,
+        string transactionNumber,
+        Guid bankAccountId,
+        Guid toBankAccountId,
+        decimal amount,
+        string currency,
+        BankTransferRateSnapshot rate,
+        decimal baseAmount,
+        CreateBankTransferDto dto,
+        string description)
+    {
+        var now = DateTime.UtcNow;
+        return new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            TransactionNumber = transactionNumber,
+            TransactionDate = plan.TransactionDate,
+            TransactionType = CashTransactionType.Transfer,
+            BankAccountId = bankAccountId,
+            ToBankAccountId = toBankAccountId,
+            TransferPairId = transferPairId,
+            TransferLeg = leg,
+            Amount = amount,
+            Currency = currency,
+            ExchangeRate = rate.Rate,
+            ExchangeRateId = rate.ExchangeRateId,
+            ExchangeRateSource = rate.RateSource,
+            ExchangeRateDate = rate.RateDate,
+            ExchangeRateQuoteSide = rate.QuoteSide,
+            BaseAmount = baseAmount,
+            TransferCrossRate = plan.CrossRate,
+            TransferFxGainLossBaseAmount = plan.RealizedFxGainLossBaseAmount,
+            ReferenceNumber = string.IsNullOrWhiteSpace(dto.ReferenceNumber)
+                ? null
+                : LimitText(dto.ReferenceNumber.Trim(), 100),
+            Description = LimitText(description, 500),
+            IsReconciled = false,
+            IsPosted = false,
+            ApprovalStatus = CashTransactionApprovalStatus.Captured,
+            CreatedAt = now,
+            CreatedBy = _currentUserService.UserName
+        };
+    }
+
+    private static BankTransferPreviewDto MapBankTransferPreview(BankTransferPlan plan)
+        => new()
+        {
+            FromBankAccountId = plan.FromBankAccount.Id,
+            FromBankAccountName = plan.FromBankAccount.AccountName,
+            ToBankAccountId = plan.ToBankAccount.Id,
+            ToBankAccountName = plan.ToBankAccount.AccountName,
+            TransactionDate = plan.TransactionDate,
+            IsCrossCurrency = plan.IsCrossCurrency,
+            SourceCurrency = plan.SourceCurrency,
+            SourceAmount = plan.SourceAmount,
+            SourceExchangeRate = plan.SourceRate.Rate,
+            SourceExchangeRateId = plan.SourceRate.ExchangeRateId,
+            SourceExchangeRateSource = plan.SourceRate.RateSource,
+            SourceExchangeRateDate = plan.SourceRate.RateDate,
+            SourceExchangeRateQuoteSide = plan.SourceRate.QuoteSide.ToString(),
+            SourceBaseAmount = plan.SourceBaseAmount,
+            DestinationCurrency = plan.DestinationCurrency,
+            DestinationAmount = plan.DestinationAmount,
+            DestinationAmountWasDerived = plan.DestinationAmountWasDerived,
+            DestinationExchangeRate = plan.DestinationRate.Rate,
+            DestinationExchangeRateId = plan.DestinationRate.ExchangeRateId,
+            DestinationExchangeRateSource = plan.DestinationRate.RateSource,
+            DestinationExchangeRateDate = plan.DestinationRate.RateDate,
+            DestinationExchangeRateQuoteSide = plan.DestinationRate.QuoteSide.ToString(),
+            DestinationBaseAmount = plan.DestinationBaseAmount,
+            CrossRate = plan.CrossRate,
+            RealizedFxGainLossBaseAmount = plan.RealizedFxGainLossBaseAmount,
+            RealizedFxOutcome = plan.RealizedFxOutcome,
+            FunctionalCurrency = plan.FunctionalCurrency
+        };
+
+    private sealed record BankTransferRatePolicy(
+        ExchangeRateType RateType,
+        ExchangeRateQuoteSide QuoteSide);
+
+    private sealed record BankTransferRateSnapshot(
+        Guid? ExchangeRateId,
+        decimal Rate,
+        string RateSource,
+        DateTime RateDate,
+        ExchangeRateQuoteSide QuoteSide,
+        ExchangeRateType RateType);
+
+    private sealed record BankTransferPlan(
+        BankAccount FromBankAccount,
+        BankAccount ToBankAccount,
+        DateTime TransactionDate,
+        string FunctionalCurrency,
+        bool IsCrossCurrency,
+        string SourceCurrency,
+        decimal SourceAmount,
+        BankTransferRateSnapshot SourceRate,
+        decimal SourceBaseAmount,
+        string DestinationCurrency,
+        decimal DestinationAmount,
+        bool DestinationAmountWasDerived,
+        BankTransferRateSnapshot DestinationRate,
+        decimal DestinationBaseAmount,
+        decimal CrossRate,
+        decimal RealizedFxGainLossBaseAmount,
+        string RealizedFxOutcome);
 
     private async Task<string> GenerateTransactionNumberAsync(string documentType, DateTime transactionDate)
     {

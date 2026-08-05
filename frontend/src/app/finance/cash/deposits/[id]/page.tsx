@@ -3,11 +3,14 @@
 import { ChangeEvent, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, FileText, Landmark, Loader2, RotateCcw, Send, XCircle } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, CheckCircle2, FileText, Landmark, Loader2, RotateCcw, Send, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
 
@@ -16,6 +19,13 @@ export default function BankDepositDetailPage() {
     const [deposit, setDeposit] = useState<BankDeposit | null>(null);
     const [loading, setLoading] = useState(true);
     const [working, setWorking] = useState(false);
+    const [confirmationEvidenceName, setConfirmationEvidenceName] = useState('');
+    const [confirmationForm, setConfirmationForm] = useState({
+        bankConfirmationReference: '',
+        bankConfirmationDate: new Date().toISOString().slice(0, 10),
+        confirmationEvidenceFileId: '',
+        notes: '',
+    });
 
     const load = useCallback(async () => {
         try {
@@ -55,6 +65,40 @@ export default function BankDepositDetailPage() {
             event.target.value = '';
             setWorking(false);
         }
+    };
+
+    const uploadConfirmationEvidence = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        setWorking(true);
+        try {
+            const fileId = await cashManagementDataService.uploadBankingEvidence(file);
+            setConfirmationForm(current => ({ ...current, confirmationEvidenceFileId: fileId }));
+            setConfirmationEvidenceName(file.name);
+            toast.success('Bank confirmation evidence is ready to record.');
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not upload confirmation evidence.');
+        } finally {
+            event.target.value = '';
+            setWorking(false);
+        }
+    };
+
+    const confirmDeposit = async () => {
+        if (!deposit || !confirmationForm.bankConfirmationReference.trim()) {
+            toast.error('Enter the bank confirmation reference.');
+            return;
+        }
+        await run(
+            () => cashManagementDataService.confirmBankDeposit(deposit.id, {
+                bankConfirmationReference: confirmationForm.bankConfirmationReference.trim(),
+                bankConfirmationDate: confirmationForm.bankConfirmationDate,
+                confirmationEvidenceFileId: confirmationForm.confirmationEvidenceFileId || undefined,
+                notes: confirmationForm.notes.trim() || undefined,
+                rowVersion: deposit.rowVersion,
+            }),
+            'Bank acknowledgement recorded.',
+        );
     };
 
     if (loading || !deposit) {
@@ -114,11 +158,29 @@ export default function BankDepositDetailPage() {
                             <div className="flex justify-between"><span className="text-muted-foreground">Policy</span><span>{deposit.policySnapshot}</span></div>
                             <div className="flex justify-between"><span className="text-muted-foreground">Submitted</span><span>{deposit.submittedAt ? new Date(deposit.submittedAt).toLocaleString() : '—'}</span></div>
                             <div className="flex justify-between"><span className="text-muted-foreground">Posted</span><span>{deposit.postedAt ? new Date(deposit.postedAt).toLocaleString() : '—'}</span></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Bank confirmation</span><Badge variant={deposit.confirmationStatus === 'Confirmed' ? 'default' : 'secondary'}>{deposit.confirmationStatus}</Badge></div>
+                            <div className="flex justify-between"><span className="text-muted-foreground">Reconciliation</span><span>{deposit.reconciliationStatus ?? (deposit.status === 'Posted' ? 'Unreconciled' : 'Not eligible')}</span></div>
+                            {deposit.bankConfirmationReference && <div className="flex justify-between gap-4"><span className="text-muted-foreground">Bank reference</span><span className="text-right font-medium">{deposit.bankConfirmationReference}</span></div>}
+                            {deposit.bankConfirmationDate && <div className="flex justify-between"><span className="text-muted-foreground">Confirmed date</span><span>{new Date(deposit.bankConfirmationDate).toLocaleDateString()}</span></div>}
+                            {deposit.bankConfirmationEvidence && <a className="flex items-center gap-2 rounded-md border p-3 hover:bg-muted" href={deposit.bankConfirmationEvidence.fileUrl} target="_blank" rel="noreferrer"><BadgeCheck className="h-4 w-4" /><span className="flex-1 truncate">{deposit.bankConfirmationEvidence.fileName}</span></a>}
                             {deposit.journalEntryId && <Button className="w-full" variant="outline" asChild><Link href={`/finance/journal-entries/${deposit.journalEntryId}`}>View posting journal</Link></Button>}
+                            {deposit.status === 'Posted' && <Button className="w-full" variant="outline" asChild><Link href={`/finance/cash/reconciliation?account=${deposit.bankAccountId}`}>Open bank reconciliation</Link></Button>}
                         </div>
                     </CardContent>
                 </Card>
             </div>
+            {deposit.status === 'Posted' && deposit.confirmationStatus === 'Pending' && (
+                <Card>
+                    <CardHeader><CardTitle>Record bank acknowledgement</CardTitle><CardDescription>Capture the bank-issued reference after the approved deposit has been accepted. This does not create another accounting entry.</CardDescription></CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2"><Label htmlFor="bank-confirmation-reference">Bank confirmation reference</Label><Input id="bank-confirmation-reference" maxLength={100} value={confirmationForm.bankConfirmationReference} onChange={event => setConfirmationForm(current => ({ ...current, bankConfirmationReference: event.target.value }))} placeholder="Stamped slip / bank advice reference" /></div>
+                        <div className="space-y-2"><Label htmlFor="bank-confirmation-date">Confirmation date</Label><Input id="bank-confirmation-date" type="date" min={deposit.depositDate.slice(0, 10)} max={new Date().toISOString().slice(0, 10)} value={confirmationForm.bankConfirmationDate} onChange={event => setConfirmationForm(current => ({ ...current, bankConfirmationDate: event.target.value }))} /></div>
+                        <div className="space-y-2 md:col-span-2"><Label>Confirmation evidence (optional)</Label><Button className="w-full justify-start" variant="outline" asChild><label className="cursor-pointer"><Upload className="mr-2 h-4 w-4" />{confirmationEvidenceName || 'Upload bank-stamped slip or advice'}<input className="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={uploadConfirmationEvidence} /></label></Button></div>
+                        <div className="space-y-2 md:col-span-2"><Label htmlFor="bank-confirmation-notes">Notes</Label><Textarea id="bank-confirmation-notes" maxLength={1000} value={confirmationForm.notes} onChange={event => setConfirmationForm(current => ({ ...current, notes: event.target.value }))} placeholder="Optional confirmation context" /></div>
+                        <div className="md:col-span-2"><Button disabled={working || !confirmationForm.bankConfirmationReference.trim() || !confirmationForm.bankConfirmationDate} onClick={() => void confirmDeposit()}><BadgeCheck className="mr-2 h-4 w-4" />Record bank confirmation</Button></div>
+                    </CardContent>
+                </Card>
+            )}
         </div>
     );
 }

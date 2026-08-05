@@ -134,9 +134,9 @@ public class BankReconciliationEngine
             CashTransactionType.Deposit => line.CreditAmount > 0m && line.DebitAmount == 0m,
             CashTransactionType.Payment => line.DebitAmount > 0m && line.CreditAmount == 0m,
             CashTransactionType.ReturnedCheque => line.DebitAmount > 0m && line.CreditAmount == 0m,
-            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)
+            CashTransactionType.Transfer when IsOutgoingTransferLeg(transaction)
                 => line.DebitAmount > 0m && line.CreditAmount == 0m,
-            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)
+            CashTransactionType.Transfer when IsIncomingTransferLeg(transaction)
                 => line.CreditAmount > 0m && line.DebitAmount == 0m,
             _ => false
         };
@@ -150,13 +150,25 @@ public class BankReconciliationEngine
             CashTransactionType.Deposit => line.CreditAmount,
             CashTransactionType.Payment => line.DebitAmount,
             CashTransactionType.ReturnedCheque => line.DebitAmount,
-            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase)
+            CashTransactionType.Transfer when IsOutgoingTransferLeg(transaction)
                 => line.DebitAmount,
-            CashTransactionType.Transfer when transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase)
+            CashTransactionType.Transfer when IsIncomingTransferLeg(transaction)
                 => line.CreditAmount,
             _ => 0m
         };
     }
+
+    private static bool IsOutgoingTransferLeg(CashTransaction transaction)
+        // Explicit lineage is authoritative for every newly captured transfer. The suffix check
+        // is retained only so already-seeded development rows remain visible to reconciliation.
+        => transaction.TransferLeg == BankTransferLeg.Outgoing
+            || (!transaction.TransferLeg.HasValue
+                && transaction.TransactionNumber.EndsWith("-OUT", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsIncomingTransferLeg(CashTransaction transaction)
+        => transaction.TransferLeg == BankTransferLeg.Incoming
+            || (!transaction.TransferLeg.HasValue
+                && transaction.TransactionNumber.EndsWith("-IN", StringComparison.OrdinalIgnoreCase));
 
     private double CalculateStringSimilarity(string str1, string str2)
     {

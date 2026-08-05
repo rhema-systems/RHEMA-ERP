@@ -25,6 +25,18 @@ public enum CashTransactionType
 }
 
 /// <summary>
+/// Identifies which bank-account side of one transfer a <see cref="CashTransaction"/> row
+/// represents. Transfer legs used to be inferred only from an OUT/IN document-number suffix;
+/// retaining an explicit value makes cross-currency amounts and reconciliation lineage safe to
+/// query even when a document-number format is changed later.
+/// </summary>
+public enum BankTransferLeg
+{
+    Outgoing = 1,
+    Incoming = 2
+}
+
+/// <summary>
 /// Operational stores and settlement channels that hold monetary value before it reaches
 /// (or after it leaves) a physical bank account.
 /// </summary>
@@ -60,6 +72,17 @@ public enum LiquidityEntryType
     Adjustment = 11
 }
 
+/// <summary>
+/// Operational lifecycle for a physical cashier till. A submitted session is frozen for
+/// independent review; returning it re-opens the same session for a corrected denomination count.
+/// </summary>
+public enum CashierTillSessionStatus
+{
+    Open = 1,
+    PendingReview = 2,
+    Closed = 3
+}
+
 public enum BankDepositStatus
 {
     Draft = 1,
@@ -70,6 +93,17 @@ public enum BankDepositStatus
     Rejected = 6,
     Cancelled = 7,
     Reversed = 8
+}
+
+/// <summary>
+/// Operational acknowledgement that the destination bank accepted a posted deposit. This is
+/// deliberately separate from GL posting and bank-statement reconciliation: each answers a
+/// different control question and therefore retains its own timestamp and actor.
+/// </summary>
+public enum BankDepositConfirmationStatus
+{
+    Pending = 1,
+    Confirmed = 2
 }
 
 public enum BankDepositAllocationType

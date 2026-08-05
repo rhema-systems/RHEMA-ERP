@@ -12,7 +12,9 @@ import type {
     CustomerDetailedLedgerReport,
     CollectionsDashboardStats,
     PaymentAllocation,
-    PaymentAllocationResultDto
+    PaymentAllocationResultDto,
+    CustomerPaymentTrace,
+    ReverseCustomerPaymentRequest
 } from '../types/ar';
 
 // Pagination and Filtering Types
@@ -155,6 +157,18 @@ class ArService {
 
     public async getPayment(id: string): Promise<CustomerPayment> {
         return apiService.get<CustomerPayment>(`${this.baseUrl}/payments/${id}`);
+    }
+
+    public async getPaymentTrace(id: string): Promise<CustomerPaymentTrace> {
+        return apiService.get<CustomerPaymentTrace>(`${this.baseUrl}/payments/${id}/trace`);
+    }
+
+    /**
+     * Posts an immutable correction rather than editing the receipt. The service name mirrors
+     * the accounting action so callers do not confuse this with deletion or legacy voiding.
+     */
+    public async reversePayment(id: string, request: ReverseCustomerPaymentRequest): Promise<CustomerPayment> {
+        return apiService.post<CustomerPayment>(`${this.baseUrl}/payments/${id}/reverse`, request);
     }
 
     public async createPayment(data: PaymentCreateRequest): Promise<CustomerPayment> {

@@ -673,6 +673,10 @@ public sealed class GhanaStatutoryTaxEngineTests
             Mock.Of<ILogger<VendorPaymentService>>(),
             CreateDocumentNumberingService(),
             Mock.Of<IWorkflowService>(),
+            // Tax tests are concerned with statutory calculation and posting, not data-scope
+            // enforcement. Dedicated Finance access-scope tests cover that control boundary.
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
     }
@@ -691,6 +695,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             tenantSettings.Object,
             Mock.Of<ILogger<PaymentService>>(),
             CreateDocumentNumberingService(),
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
     }

@@ -528,138 +528,46 @@ namespace ErpSystem.Api.Services.Finance.AP
         public async Task<SupplierStatementDto> GetSupplierStatementAsync(
             Guid supplierId, DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default)
         {
-            var supplier = await _unitOfWork.Repository<Supplier>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == supplierId);
-            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            // Keep this compatibility-shaped endpoint on the same supplier detailed-ledger path
+            // used by the report screen and controlled exports. The previous implementation
+            // independently queried operational invoice/payment fields and used the opposite
+            // debit/credit convention, which allowed viewed and downloaded statements to drift.
+            var detailed = await GetSupplierDetailedLedgerAsync(
+                fromDate,
+                toDate,
+                new[] { supplierId },
+                showSupplierCurrency: false,
+                cancellationToken);
+            var supplier = detailed.Suppliers.SingleOrDefault(item =>
+                item.SupplierId == supplierId || item.BusinessPartnerId == supplierId)
+                ?? throw new KeyNotFoundException($"Supplier with Id '{supplierId}' was not found in the current tenant.");
 
-            if (supplier == null)
-                throw new KeyNotFoundException($"Supplier with Id '{supplierId}' not found.");
-
-            var statement = new SupplierStatementDto
+            return new SupplierStatementDto
             {
-                SupplierId = supplierId,
-                SupplierName = supplier.Name,
+                SupplierId = supplier.SupplierId,
+                SupplierName = supplier.SupplierName,
                 SupplierCode = supplier.SupplierCode,
-                FromDate = fromDate,
-                ToDate = toDate,
-                CurrencyCode = baseCurrencyCode
+                FromDate = detailed.FromDate,
+                ToDate = detailed.ToDate,
+                CurrencyCode = supplier.CurrencyCode,
+                OpeningBalance = supplier.OpeningBalance,
+                // These two property names are retained for the narrow compatibility DTO. The
+                // values now follow the canonical AP control-account convention: credits increase
+                // the payable and debits reduce it.
+                TotalInvoices = supplier.TotalCredits,
+                TotalPayments = supplier.TotalDebits,
+                ClosingBalance = supplier.ClosingBalance,
+                Lines = supplier.Lines.Select(line => new SupplierStatementLineDto
+                {
+                    Date = line.TransactionDate,
+                    TransactionType = line.TransactionType,
+                    DocumentNumber = line.DocumentNumber,
+                    Reference = line.Reference,
+                    Debit = line.Debit,
+                    Credit = line.Credit,
+                    RunningBalance = line.RunningBalance
+                }).ToList()
             };
-
-            // Calculate opening balance — sum of unpaid invoices before fromDate
-            var priorInvoices = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(i =>
-                    i.TenantId == TenantId &&
-                    i.SupplierId == supplierId &&
-                    i.InvoiceDate < fromDate &&
-                    i.Status != VendorInvoiceStatus.Voided &&
-                    i.Status != VendorInvoiceStatus.Draft)
-                .ToListAsync(cancellationToken);
-
-            var priorPayments = await _unitOfWork.Repository<VendorPayment>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    p.SupplierId == supplierId &&
-                    p.PaymentDate < fromDate &&
-                    p.Status != VendorPaymentStatus.Voided)
-                .ToListAsync(cancellationToken);
-
-            var allAdjustments = await GetPostedApAdjustmentsAsync(supplierId, cancellationToken);
-            statement.OpeningBalance = priorInvoices.Sum(i => i.TotalAmount)
-                - priorPayments.Sum(p => p.TotalAmount)
-                + allAdjustments
-                    .Where(a => a.AdjustmentDate < fromDate)
-                    .Sum(GetSignedApSubledgerAmount);
-
-            // Get period invoices
-            var periodInvoices = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(i =>
-                    i.TenantId == TenantId &&
-                    i.SupplierId == supplierId &&
-                    i.InvoiceDate >= fromDate &&
-                    i.InvoiceDate <= toDate &&
-                    i.Status != VendorInvoiceStatus.Voided &&
-                    i.Status != VendorInvoiceStatus.Draft)
-                .OrderBy(i => i.InvoiceDate)
-                .ToListAsync(cancellationToken);
-
-            // Get period payments
-            var periodPayments = await _unitOfWork.Repository<VendorPayment>()
-                .GetQueryable(p =>
-                    p.TenantId == TenantId &&
-                    p.SupplierId == supplierId &&
-                    p.PaymentDate >= fromDate &&
-                    p.PaymentDate <= toDate &&
-                    p.Status != VendorPaymentStatus.Voided)
-                .OrderBy(p => p.PaymentDate)
-                .ToListAsync(cancellationToken);
-
-            var periodAdjustments = allAdjustments
-                .Where(a => a.AdjustmentDate >= fromDate && a.AdjustmentDate <= toDate)
-                .ToList();
-
-            statement.TotalInvoices = periodInvoices.Sum(i => i.TotalAmount)
-                + periodAdjustments.Where(a => GetSignedApSubledgerAmount(a) > 0).Sum(GetSignedApSubledgerAmount);
-            statement.TotalPayments = periodPayments.Sum(p => p.TotalAmount)
-                + periodAdjustments.Where(a => GetSignedApSubledgerAmount(a) < 0).Sum(a => Math.Abs(GetSignedApSubledgerAmount(a)));
-            statement.ClosingBalance = statement.OpeningBalance + statement.TotalInvoices - statement.TotalPayments;
-
-            // Build statement lines
-            var lines = new List<SupplierStatementLineDto>();
-            decimal runningBalance = statement.OpeningBalance;
-
-            // Combine and sort by date
-            var allTransactions = periodInvoices
-                .Select(i => new
-                {
-                    Date = i.InvoiceDate,
-                    Type = "Invoice",
-                    DocumentNumber = i.InvoiceNumber,
-                    Reference = i.SupplierInvoiceNumber ?? i.Reference,
-                    Debit = i.TotalAmount,
-                    Credit = 0m
-                })
-                .Concat(periodPayments.Select(p => new
-                {
-                    Date = p.PaymentDate,
-                    Type = "Payment",
-                    DocumentNumber = p.PaymentNumber,
-                    Reference = p.TransactionReference ?? p.ChequeNumber,
-                    Debit = 0m,
-                    Credit = p.TotalAmount
-                }))
-                .Concat(periodAdjustments.Select(a =>
-                {
-                    var amount = GetSignedApSubledgerAmount(a);
-                    return new
-                    {
-                        Date = a.AdjustmentDate,
-                        Type = GetAdjustmentTransactionType(a),
-                        DocumentNumber = a.AdjustmentNumber,
-                        Reference = a.Reference,
-                        Debit = amount > 0 ? amount : 0m,
-                        Credit = amount < 0 ? Math.Abs(amount) : 0m
-                    };
-                }))
-                .OrderBy(t => t.Date)
-                .ThenBy(t => t.Type);
-
-            foreach (var txn in allTransactions)
-            {
-                runningBalance += txn.Debit - txn.Credit;
-                lines.Add(new SupplierStatementLineDto
-                {
-                    Date = txn.Date,
-                    TransactionType = txn.Type,
-                    DocumentNumber = txn.DocumentNumber,
-                    Reference = txn.Reference,
-                    Debit = txn.Debit,
-                    Credit = txn.Credit,
-                    RunningBalance = runningBalance
-                });
-            }
-
-            statement.Lines = lines;
-            return statement;
         }
 
         public async Task<SupplierDetailedLedgerReportDto> GetSupplierDetailedLedgerAsync(
@@ -936,13 +844,6 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await RecordReportAuditAsync(FinanceAuditEvents.ApAgingExported, exportReport, cancellationToken);
             return Encoding.UTF8.GetBytes(csv.ToString());
-        }
-
-        public async Task<byte[]> ExportSupplierStatementAsync(Guid supplierId, DateTime fromDate, DateTime toDate, string format = "PDF", CancellationToken cancellationToken = default)
-        {
-            var statement = await GetSupplierStatementAsync(supplierId, fromDate, toDate, cancellationToken);
-            _logger.LogInformation("Export supplier statement requested for {SupplierId} in {Format} format", supplierId, format);
-            throw new NotImplementedException($"Supplier statement export in {format} format will be implemented with the reporting library.");
         }
 
         private Task<List<SubledgerAdjustmentJournal>> GetPostedApAdjustmentsAsync(

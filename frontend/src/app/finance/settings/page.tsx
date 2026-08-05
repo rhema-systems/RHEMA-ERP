@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote } from 'lucide-react';
+import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote, ShieldCheck, Undo2 } from 'lucide-react';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
@@ -126,6 +126,12 @@ export default function FinanceSettingsPage() {
         apSettlementQuoteSide: 'Selling',
         closingQuoteSide: 'Mid',
         requireExchangeRateOverrideApproval: true,
+        // TDC default: corrections post in the current open period and require a substantive
+        // explanation. Scope enforcement remains off until administrators have created grants.
+        reversalDatePolicy: 'CurrentOpenPeriod',
+        minimumReversalReasonLength: 20,
+        enforceFinanceAccessScopes: false,
+        requireDepreciationBeforePeriodClose: true,
     });
 
     useEffect(() => {
@@ -178,6 +184,10 @@ export default function FinanceSettingsPage() {
                 apSettlementQuoteSide: data.apSettlementQuoteSide ?? 'Selling',
                 closingQuoteSide: data.closingQuoteSide ?? 'Mid',
                 requireExchangeRateOverrideApproval: true,
+                reversalDatePolicy: data.reversalDatePolicy ?? 'CurrentOpenPeriod',
+                minimumReversalReasonLength: data.minimumReversalReasonLength ?? 20,
+                enforceFinanceAccessScopes: data.enforceFinanceAccessScopes ?? false,
+                requireDepreciationBeforePeriodClose: data.requireDepreciationBeforePeriodClose ?? true,
             });
 
             // Load accounts for the current COA type
@@ -432,6 +442,86 @@ export default function FinanceSettingsPage() {
                         <AlertTitle>Override control is mandatory</AlertTitle>
                         <AlertDescription>
                             A document-level rate override requires an authorised approver and a recorded reason. One approved override is applied consistently to all balancing lines.
+                        </AlertDescription>
+                    </Alert>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Undo2 className="h-5 w-5" /> Posting Correction & Access Controls</CardTitle>
+                    <CardDescription>
+                        Tenant policy for correcting posted Finance documents and restricting operational data by bank account.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label>Reversal date policy</Label>
+                            <Select
+                                value={formData.reversalDatePolicy ?? 'CurrentOpenPeriod'}
+                                onValueChange={value => setFormData({ ...formData, reversalDatePolicy: value as UpdateFinanceSettingsDto['reversalDatePolicy'] })}
+                            >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="CurrentOpenPeriod">Current open period</SelectItem>
+                                    <SelectItem value="OriginalDocumentPeriodIfOpen">Original period, only if still open</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                Closed history is never reopened implicitly; corrections fall forward to the latest open period.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="minimumReversalReasonLength">Minimum reversal reason length</Label>
+                            <Input
+                                id="minimumReversalReasonLength"
+                                type="number"
+                                min={10}
+                                max={500}
+                                value={formData.minimumReversalReasonLength ?? 20}
+                                onChange={event => setFormData({ ...formData, minimumReversalReasonLength: Number(event.target.value) })}
+                            />
+                            <p className="text-xs text-muted-foreground">Applies to posted-document corrections and is enforced by the API.</p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-4 rounded-md border p-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <Label htmlFor="enforceFinanceAccessScopes">Enforce Finance access scopes</Label>
+                            <p className="max-w-2xl text-sm text-muted-foreground">
+                                When enabled, Finance users only see and operate on bank accounts covered by an effective grant. Tenant administrators retain recovery access.
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <Link href="/administration/finance/access-scopes">
+                                <Button type="button" variant="outline" size="sm"><ShieldCheck className="mr-2 h-4 w-4" /> Manage Grants</Button>
+                            </Link>
+                            <Switch
+                                id="enforceFinanceAccessScopes"
+                                checked={formData.enforceFinanceAccessScopes ?? false}
+                                onCheckedChange={checked => setFormData({ ...formData, enforceFinanceAccessScopes: checked })}
+                            />
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-4 rounded-md border p-4">
+                        <div>
+                            <Label htmlFor="requireDepreciationBeforePeriodClose">Require depreciation before period close</Label>
+                            <p className="max-w-2xl text-sm text-muted-foreground">
+                                TDC default: due or failed fixed-asset depreciation blocks close. Disable only under an approved Finance policy exception.
+                            </p>
+                        </div>
+                        <Switch
+                            id="requireDepreciationBeforePeriodClose"
+                            checked={formData.requireDepreciationBeforePeriodClose ?? true}
+                            onCheckedChange={checked => setFormData({ ...formData, requireDepreciationBeforePeriodClose: checked })}
+                        />
+                    </div>
+                    <Alert variant="default">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>Staged activation</AlertTitle>
+                        <AlertDescription>
+                            Create and review at least one active grant before enabling enforcement. The backend blocks activation when no grant exists.
                         </AlertDescription>
                     </Alert>
                 </CardContent>

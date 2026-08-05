@@ -115,6 +115,25 @@ public class CashTransactionController : ControllerBase
     }
 
     /// <summary>
+    /// Returns the immutable cash/bank operational, posting, journal-line, and audit trail.
+    /// </summary>
+    [HttpGet("{id}/trace")]
+    public async Task<ActionResult<CashTransactionTraceDto>> GetTrace(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var trace = await _cashTransactionService.GetTraceAsync(id, cancellationToken);
+            return trace == null ? NotFound() : Ok(trace);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+    }
+
+    /// <summary>
     /// Retrieves all cash transactions for a specific bank account, optionally filtered by date range.
     /// </summary>
     /// <remarks>
@@ -150,8 +169,15 @@ public class CashTransactionController : ControllerBase
         [FromQuery] DateTime? fromDate = null,
         [FromQuery] DateTime? toDate = null)
     {
-        var transactions = await _cashTransactionService.GetByBankAccountAsync(bankAccountId, fromDate, toDate);
-        return Ok(transactions);
+        try
+        {
+            var transactions = await _cashTransactionService.GetByBankAccountAsync(bankAccountId, fromDate, toDate);
+            return Ok(transactions);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     /// <summary>
@@ -186,8 +212,15 @@ public class CashTransactionController : ControllerBase
     [HttpGet("bank-account/{bankAccountId}/unreconciled")]
     public async Task<ActionResult<IEnumerable<CashTransactionDto>>> GetUnreconciled(Guid bankAccountId)
     {
-        var transactions = await _cashTransactionService.GetUnreconciledAsync(bankAccountId);
-        return Ok(transactions);
+        try
+        {
+            var transactions = await _cashTransactionService.GetUnreconciledAsync(bankAccountId);
+            return Ok(transactions);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     /// <summary>
@@ -229,6 +262,10 @@ public class CashTransactionController : ControllerBase
         {
             var transaction = await _cashTransactionService.CreateReceiptAsync(dto);
             return CreatedAtAction(nameof(GetById), new { id = transaction.Id }, transaction);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {
@@ -276,6 +313,10 @@ public class CashTransactionController : ControllerBase
             var transaction = await _cashTransactionService.CreatePaymentAsync(dto);
             return CreatedAtAction(nameof(GetById), new { id = transaction.Id }, transaction);
         }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
         catch (Exception ex)
         {
             return BadRequest(new { message = ex.Message });
@@ -315,6 +356,29 @@ public class CashTransactionController : ControllerBase
     /// <response code="400">Validation failed. The accounts are invalid, identical, the amount is non-positive, or the fiscal period is closed.</response>
     /// <response code="401">Not authenticated. A valid authentication token is required.</response>
     /// <response code="500">Internal server error occurred while creating the transfer.</response>
+    /// <summary>
+    /// Calculates the bank-specific amounts, approved rate snapshots, functional values, and
+    /// projected realised FX for a transfer without creating operational or ledger records.
+    /// </summary>
+    [HttpPost("transfer/preview")]
+    public async Task<ActionResult<BankTransferPreviewDto>> PreviewTransfer(
+        [FromBody] CreateBankTransferDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _cashTransactionService.PreviewTransferAsync(dto, cancellationToken));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("transfer")]
     public async Task<ActionResult<object>> CreateTransfer([FromBody] CreateBankTransferDto dto)
     {
@@ -322,6 +386,10 @@ public class CashTransactionController : ControllerBase
         {
             var (fromTransaction, toTransaction) = await _cashTransactionService.CreateTransferAsync(dto);
             return Ok(new { fromTransaction, toTransaction });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {
@@ -336,6 +404,10 @@ public class CashTransactionController : ControllerBase
         {
             var transaction = await _cashTransactionService.SubmitAsync(id, cancellationToken);
             return Ok(transaction);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {
@@ -405,6 +477,10 @@ public class CashTransactionController : ControllerBase
             var transaction = await _cashTransactionService.CancelAsync(id, request?.Reason ?? request?.Comments ?? string.Empty, cancellationToken);
             return Ok(transaction);
         }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
         catch (Exception ex)
         {
             return BadRequest(new { message = ex.Message });
@@ -418,6 +494,38 @@ public class CashTransactionController : ControllerBase
         {
             var transaction = await _cashTransactionService.PostAsync(id, cancellationToken);
             return Ok(transaction);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Corrects a posted Finance-owned cash receipt, payment, or transfer with linked
+    /// compensating operational and ledger entries. Reconciled transactions are blocked.
+    /// </summary>
+    [HttpPost("{id}/reverse")]
+    public async Task<ActionResult<CashTransactionDto>> Reverse(
+        Guid id,
+        [FromBody] ReverseCashTransactionDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _cashTransactionService.ReverseAsync(id, dto, cancellationToken));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
         }
         catch (Exception ex)
         {
@@ -464,6 +572,10 @@ public class CashTransactionController : ControllerBase
         {
             await _cashTransactionService.DeleteAsync(id);
             return NoContent();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
         catch (Exception ex)
         {

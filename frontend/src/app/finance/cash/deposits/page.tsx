@@ -26,13 +26,15 @@ export default function BankDepositsPage() {
     const filtered = useMemo(() => {
         const value = search.trim().toLowerCase();
         return value
-            ? items.filter(item => [item.depositNumber, item.depositReference, item.bankAccountName].some(text => text.toLowerCase().includes(value)))
+            ? items.filter(item => [item.depositNumber, item.depositReference, item.bankAccountName, item.bankConfirmationReference].some(text => text?.toLowerCase().includes(value)))
             : items;
     }, [items, search]);
 
     const openTotal = items.filter(item => !['Posted', 'Cancelled', 'Rejected', 'Reversed'].includes(item.status))
         .reduce((sum, item) => sum + item.netAmount, 0);
     const awaiting = items.filter(item => item.status === 'Submitted').length;
+    const awaitingConfirmation = items.filter(item => item.status === 'Posted' && item.confirmationStatus === 'Pending').length;
+    const unreconciled = items.filter(item => item.status === 'Posted' && !item.isReconciled).length;
 
     return (
         <div className="space-y-6 p-6">
@@ -43,10 +45,11 @@ export default function BankDepositsPage() {
                 </div>
                 <Button asChild><Link href="/finance/cash/deposits/new"><Plus className="mr-2 h-4 w-4" />New deposit</Link></Button>
             </div>
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Open deposits</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">GHS {openTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Awaiting approval</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{awaiting}</CardContent></Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Posted this list</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{items.filter(item => item.status === 'Posted').length}</CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Awaiting bank confirmation</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{awaitingConfirmation}</CardContent></Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Posted & unreconciled</CardTitle></CardHeader><CardContent className="text-2xl font-semibold">{unreconciled}</CardContent></Card>
             </div>
             <Card>
                 <CardHeader className="flex-row items-center justify-between gap-3"><CardTitle>Deposit register</CardTitle><Input className="max-w-sm" placeholder="Search number, reference, bank…" value={search} onChange={event => setSearch(event.target.value)} /></CardHeader>
@@ -56,7 +59,7 @@ export default function BankDepositsPage() {
                     ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
-                                <thead className="border-b text-left text-muted-foreground"><tr><th className="p-3">Deposit</th><th className="p-3">Bank / reference</th><th className="p-3">Date</th><th className="p-3 text-right">Receipts</th><th className="p-3 text-right">Deductions</th><th className="p-3 text-right">Net banked</th><th className="p-3">Status</th></tr></thead>
+                                <thead className="border-b text-left text-muted-foreground"><tr><th className="p-3">Deposit</th><th className="p-3">Bank / reference</th><th className="p-3">Date</th><th className="p-3 text-right">Receipts</th><th className="p-3 text-right">Deductions</th><th className="p-3 text-right">Net banked</th><th className="p-3">Lifecycle</th><th className="p-3">Bank confirmation</th><th className="p-3">Reconciliation</th></tr></thead>
                                 <tbody>{filtered.map(item => (
                                     <tr key={item.id} className="border-b hover:bg-muted/40">
                                         <td className="p-3 font-medium"><Link className="text-primary hover:underline" href={`/finance/cash/deposits/${item.id}`}>{item.depositNumber}</Link></td>
@@ -66,6 +69,8 @@ export default function BankDepositsPage() {
                                         <td className="p-3 text-right text-red-600">{item.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                         <td className="p-3 text-right font-semibold">{item.currency} {item.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                         <td className="p-3"><Badge variant={item.status === 'Posted' ? 'default' : item.status === 'Rejected' ? 'destructive' : 'secondary'}>{item.status}</Badge></td>
+                                        <td className="p-3"><div><Badge variant={item.confirmationStatus === 'Confirmed' ? 'default' : 'secondary'}>{item.confirmationStatus}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{item.bankConfirmationReference ?? 'No bank reference'}</div></td>
+                                        <td className="p-3"><Badge variant={item.reconciliationStatus === 'Approved' ? 'default' : 'secondary'}>{item.reconciliationStatus ?? (item.status === 'Posted' ? 'Unreconciled' : 'Not eligible')}</Badge></td>
                                     </tr>
                                 ))}</tbody>
                             </table>

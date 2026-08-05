@@ -1,3 +1,5 @@
+import type { ControlledDocumentIssueSummary } from '@/types/controlled-documents';
+
 export interface Customer {
     id: string;
     customerCode: string;
@@ -133,17 +135,37 @@ export interface CustomerPayment {
     bankAccountName?: string;
     liquidityAccountId?: string;
     liquidityAccountName?: string;
+    liquidityAccountEntryId?: string;
     referenceNumber?: string;
+    transactionReference?: string;
     checkNumber?: string;
     chequeDrawerBank?: string;
-    paymentReference: string;
+    paymentReference?: string;
     amount: number;
-    status: 'Draft' | 'Posted' | 'Void' | 'Bounced';
+    status: 'Draft' | 'Approved' | 'Pending' | 'Posted' | 'Cleared' | 'Reversed' | 'Void' | 'Bounced';
     currencyCode: string;
     exchangeRate: number;
+    withholdingTaxId?: string;
+    withholdingTaxAccountId?: string;
+    withholdingTaxAmount: number;
+    vatWithholdingTaxId?: string;
+    vatWithholdingAccountId?: string;
+    vatWithholdingAmount: number;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     isCreditNote: boolean;
     notes?: string;
     clearedDate?: string;
+    journalEntryId?: string;
+    reversalJournalEntryId?: string;
+    reversalPostingEventId?: string;
+    reversalCashTransactionId?: string;
+    reversalLiquidityAccountEntryId?: string;
+    reversalDate?: string;
+    reversedAt?: string;
+    reversedById?: string;
+    reversalReason?: string;
+    receiptIssuance?: ControlledDocumentIssueSummary;
     bouncedDate?: string;
     bouncedReason?: string;
     createdAt: string;
@@ -164,6 +186,14 @@ export interface PaymentCreateRequest {
     transactionReference?: string;
     currencyCode: string;
     exchangeRate?: number;
+    withholdingTaxId?: string;
+    withholdingTaxAccountId?: string;
+    withholdingTaxAmount?: number;
+    vatWithholdingTaxId?: string;
+    vatWithholdingAccountId?: string;
+    vatWithholdingAmount?: number;
+    withholdingCertificateNumber?: string;
+    withholdingCertificateDate?: string;
     notes?: string;
     isCreditNote?: boolean;
     allocations?: InvoiceAllocationRequest[];
@@ -178,6 +208,75 @@ export interface PaymentAllocation {
     discountAmount?: number;
     allocationDate: string;
     notes?: string;
+    isReversal: boolean;
+    originalAllocationId?: string;
+}
+
+export interface ReverseCustomerPaymentRequest {
+    reason: string;
+    reversalDate?: string;
+}
+
+/** Complete Finance evidence for an AR receipt and any linked correction. */
+export interface CustomerPaymentTrace {
+    payment: CustomerPayment;
+    postings: FinancePostingTrace[];
+    operationalEntries: FinanceOperationalTrace[];
+    auditEvents: FinanceAuditTrace[];
+}
+
+export interface FinancePostingTrace {
+    postingEventId: string;
+    postingAction: string;
+    postingStatus: string;
+    postingDate: string;
+    postedAt?: string;
+    journalEntryId?: string;
+    journalEntryNumber?: string;
+    originalJournalEntryId?: string;
+    reversalJournalEntryId?: string;
+    totalDebitAmount: number;
+    totalCreditAmount: number;
+    functionalCurrencyCode: string;
+    lines: FinanceJournalLineTrace[];
+}
+
+export interface FinanceJournalLineTrace {
+    transactionId: string;
+    lineNumber: number;
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    description: string;
+    debitAmount: number;
+    creditAmount: number;
+    transactionCurrency: string;
+    foreignCurrencyAmount?: number;
+    exchangeRate?: number;
+    originalTransactionId?: string;
+    reversalTransactionId?: string;
+}
+
+export interface FinanceOperationalTrace {
+    recordType: string;
+    recordId: string;
+    originalRecordId?: string;
+    reference: string;
+    status: string;
+    recordDate: string;
+    amount: number;
+    currencyCode: string;
+    isReconciled: boolean;
+}
+
+export interface FinanceAuditTrace {
+    auditLogId: string;
+    eventType: string;
+    timestamp: string;
+    userId: string;
+    username: string;
+    beforeValuesJson?: string;
+    detailsJson?: string;
 }
 
 export interface PaymentAllocationRequest {

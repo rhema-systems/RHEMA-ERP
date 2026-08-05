@@ -139,12 +139,13 @@ export interface CreateFiscalYearDto {
 export interface PeriodCloseRequestDto {
   fiscalPeriodId: string;
   closingNotes?: string;
-  bypassValidation?: boolean;
+  reviewerDeclaration: string;
 }
 
 export interface PeriodReopenRequestDto {
   fiscalPeriodId: string;
   reason: string;
+  affectedPeriodAssessment: string;
 }
 
 export interface PeriodLockRequestDto {
@@ -622,10 +623,10 @@ class FinanceService {
   }
 
   /**
-   * Reopen closed period
+   * Request controlled reopening of a closed period. The period remains closed until reviewed.
    */
-  async reopenPeriod(id: string, data: PeriodReopenRequestDto): Promise<FiscalPeriod> {
-    return apiService.post<FiscalPeriod>(`${this.baseUrl}/periods/${id}/reopen`, data);
+  async reopenPeriod(id: string, data: PeriodReopenRequestDto): Promise<unknown> {
+    return apiService.post(`${this.baseUrl}/periods/${id}/reopen-requests`, data);
   }
 
   /**

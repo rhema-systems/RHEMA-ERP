@@ -1,7 +1,7 @@
 export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
 export type InvoiceMatchingStatus = 'Unmatched' | 'TwoWayMatched' | 'ThreeWayMatched' | 'MatchException';
-export type VendorPaymentStatus = 'Draft' | 'PendingAuthorization' | 'Authorized' | 'Processed' | 'Cleared' | 'Voided' | 'Failed' | 'Reconciled';
+export type VendorPaymentStatus = 'Draft' | 'PendingAuthorization' | 'Authorized' | 'Processed' | 'Cleared' | 'Voided' | 'Failed' | 'Reconciled' | 'Reversed';
 export type VendorPaymentMethod = 'BankTransfer' | 'Cheque' | 'Cash' | 'WireTransfer' | 'MobileMoney' | 'DirectDebit' | 'Other';
 export type PaymentBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Processing' | 'Completed' | 'PartiallyCompleted' | 'Cancelled';
 
@@ -66,6 +66,8 @@ export interface VendorInvoiceCreateRequest {
     earlyPaymentDiscountDueDate?: string;
     taxGroupId?: string | null;
     withholdingTaxRate?: number;
+    withholdingTaxId?: string | null;
+    withholdingTaxAccountId?: string | null;
     matchingType?: InvoiceMatchingType;
     expenseAccountId?: string;
     apAccountId?: string;
@@ -145,11 +147,39 @@ export interface VendorPayment {
     transactionReference?: string;
     withholdingTaxRate: number;
     withholdingTaxAmount: number;
+    withholdingTaxBaseAmount: number;
+    withholdingTaxCumulativeBefore: number;
+    withholdingTaxThresholdAmount?: number | null;
+    withholdingTaxThresholdApplied: boolean;
+    withholdingTaxCalculationNote?: string;
     discountTaken: number;
     status: VendorPaymentStatus;
+    submittedById?: string;
+    submittedAt?: string;
+    workflowInstanceId?: string;
+    appliedApprovalPolicySetId?: string;
+    appliedApprovalPolicyCode?: string;
+    approvalControlSnapshotHash?: string;
+    isExceptionalPayment: boolean;
+    exceptionalPaymentReason?: string;
+    requiresManagingDirectorApproval: boolean;
+    managingDirectorApprovedById?: string;
+    managingDirectorApprovedAt?: string;
+    evidenceExceptionRequested: boolean;
+    evidenceExceptionReason?: string;
+    evidenceExceptionRequestedById?: string;
+    evidenceExceptionRequestedAt?: string;
+    evidenceExceptionApprovedById?: string;
+    evidenceExceptionApprovedAt?: string;
     paymentBatchId?: string;
     paymentBatchNumber?: string;
     journalEntryId?: string;
+    reversalJournalEntryId?: string;
+    reversalPostingEventId?: string;
+    reversalDate?: string;
+    reversedAt?: string;
+    reversedById?: string;
+    reversalReason?: string;
     notes?: string;
     createdAt: string;
     allocations: VendorPaymentAllocation[];
@@ -168,6 +198,7 @@ export interface VendorPaymentCreateRequest {
     transactionReference?: string;
     withholdingTaxRate?: number;
     withholdingTaxAmount?: number;
+    withholdingTaxBaseAmount?: number;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string | null;
     withholdingCertificateNumber?: string;
@@ -195,6 +226,122 @@ export interface VendorPaymentAllocationCreateRequest {
     discountAmount?: number;
     withholdingTaxAmount?: number;
     notes?: string;
+}
+
+/** Explicit exception decisions captured when a maker submits a direct AP payment. */
+export interface SubmitVendorPaymentRequest {
+    isExceptionalPayment: boolean;
+    exceptionalPaymentReason?: string;
+    requestEvidenceException: boolean;
+    evidenceExceptionReason?: string;
+}
+
+/**
+ * Server-computed payment-control readiness. Keeping this as a dedicated read model means the
+ * client never guesses which effective-dated policy or evidence subset applies.
+ */
+export interface VendorPaymentControl {
+    paymentId: string;
+    policyCode?: string;
+    policySetId?: string;
+    policySnapshotHash?: string;
+    workflowInstanceId?: string;
+    workflowStatus?: string;
+    currentStepInstanceId?: string;
+    currentStepName?: string;
+    isExceptionalPayment: boolean;
+    requiresManagingDirectorApproval: boolean;
+    managingDirectorApprovalCompleted: boolean;
+    evidenceExceptionRequested: boolean;
+    evidenceExceptionApproved: boolean;
+    evidenceRequirementsSatisfied: boolean;
+    canSubmit: boolean;
+    minimumExceptionReasonLength: number;
+    evidenceRequirements: VendorPaymentEvidenceRequirementStatus[];
+    evidenceDocuments: VendorPaymentEvidenceDocument[];
+    blockingReasons: string[];
+}
+
+export interface VendorPaymentEvidenceRequirementStatus {
+    requirementKey: string;
+    documentName: string;
+    documentType?: string;
+    minimumDocuments: number;
+    requireVerification: boolean;
+    currentDocumentCount: number;
+    verifiedDocumentCount: number;
+    isSatisfied: boolean;
+}
+
+export interface VendorPaymentEvidenceDocument {
+    id: string;
+    attachmentId: string;
+    requirementKey?: string;
+    documentName?: string;
+    documentType?: string;
+    fileName: string;
+    verificationStatus: string;
+    malwareScanStatus: string;
+    uploadedAt: string;
+    uploadedById: string;
+    verifiedById?: string;
+    verifiedAt?: string;
+    verificationNotes?: string;
+    sha256: string;
+}
+
+export interface ReverseVendorPaymentRequest {
+    reason: string;
+    reversalDate?: string;
+}
+
+/** Source-to-ledger evidence returned by the AP payment trace endpoint. */
+export interface VendorPaymentTrace {
+    payment: VendorPayment;
+    postings: VendorPaymentPostingTrace[];
+    auditEvents: VendorPaymentAuditTrace[];
+}
+
+export interface VendorPaymentPostingTrace {
+    postingEventId: string;
+    postingAction: string;
+    postingStatus: string;
+    postingDate: string;
+    postedAt?: string;
+    journalEntryId?: string;
+    journalEntryNumber?: string;
+    originalJournalEntryId?: string;
+    reversalJournalEntryId?: string;
+    totalDebitAmount: number;
+    totalCreditAmount: number;
+    functionalCurrencyCode: string;
+    lines: VendorPaymentJournalLineTrace[];
+}
+
+export interface VendorPaymentJournalLineTrace {
+    transactionId: string;
+    lineNumber: number;
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    description: string;
+    debitAmount: number;
+    creditAmount: number;
+    transactionCurrency: string;
+    foreignCurrencyAmount?: number;
+    exchangeRate?: number;
+    originalTransactionId?: string;
+    reversalTransactionId?: string;
+}
+
+export interface VendorPaymentAuditTrace {
+    auditLogId: string;
+    eventType: string;
+    timestamp: string;
+    userId: string;
+    username: string;
+    beforeValuesJson?: string;
+    detailsJson?: string;
 }
 
 export interface PaymentBatch {

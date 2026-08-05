@@ -48,7 +48,9 @@ public class FinanceSettingsMigrationGapTests
 
         migrations.Should().ContainKey(MigrationId);
         migrations.Should().ContainKey(ReconciliationMigrationId);
-        migrations.Keys.Max(StringComparer.Ordinal).Should().Be(ReconciliationMigrationId);
+        // This regression protects the dependency between these two historical repair migrations.
+        // Do not require reconciliation to remain the latest migration: legitimate Finance schema
+        // work (such as AP reversal lineage) must be allowed to follow it.
         string.CompareOrdinal(MigrationId, ReconciliationMigrationId).Should().BeNegative();
     }
 

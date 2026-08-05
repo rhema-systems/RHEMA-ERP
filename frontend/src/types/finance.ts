@@ -98,6 +98,10 @@ export interface FiscalPeriod {
     isGlobalLockSuspended?: boolean;
     isPartiallyLocked?: boolean;
     closedDate?: string;
+    /** Latest signed cycle remains available after reopen as historical close evidence. */
+    latestClosePackCycleId?: string;
+    /** Latest controlled reopen decision, including pending higher-tier review evidence. */
+    latestReopenRequest?: FinancePeriodReopenRequest;
     closedByUserId?: string;
     closingNotes?: string;
     moduleLocks?: PeriodModuleLock[];
@@ -518,6 +522,10 @@ export interface FinanceSettings {
     apSettlementQuoteSide?: ExchangeRateQuoteSide;
     closingQuoteSide?: ExchangeRateQuoteSide;
     requireExchangeRateOverrideApproval?: boolean;
+    reversalDatePolicy?: 'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen';
+    minimumReversalReasonLength?: number;
+    enforceFinanceAccessScopes?: boolean;
+    requireDepreciationBeforePeriodClose?: boolean;
     /** True when posted transactions exist — base currency and control accounts become locked */
     transactionsExist?: boolean;
 }
@@ -557,6 +565,10 @@ export interface UpdateFinanceSettingsDto {
     apSettlementQuoteSide?: ExchangeRateQuoteSide;
     closingQuoteSide?: ExchangeRateQuoteSide;
     requireExchangeRateOverrideApproval?: boolean;
+    reversalDatePolicy?: 'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen';
+    minimumReversalReasonLength?: number;
+    enforceFinanceAccessScopes?: boolean;
+    requireDepreciationBeforePeriodClose?: boolean;
 }
 
 // Currency
@@ -651,12 +663,45 @@ export interface CreateFiscalYearDto {
 export interface PeriodCloseRequestDto {
     fiscalPeriodId: string;
     closingNotes?: string;
-    bypassValidation?: boolean;
+    reviewerDeclaration: string;
 }
 
 export interface PeriodReopenRequestDto {
     fiscalPeriodId: string;
     reason: string;
+    affectedPeriodAssessment: string;
+}
+
+export interface PeriodReopenReviewDto {
+    approved: boolean;
+    reviewComment: string;
+}
+
+export interface FinancePeriodReopenImpactPeriod {
+    fiscalPeriodId: string;
+    periodCode: string;
+    periodName: string;
+    periodStatus: string;
+}
+
+export interface FinancePeriodReopenRequest {
+    id: string;
+    fiscalPeriodId: string;
+    financeCloseCycleId: string;
+    resultingFinanceCloseCycleId?: string;
+    closedCycleNumber: number;
+    status: 'PendingApproval' | 'Approved' | 'Rejected' | string;
+    reason: string;
+    affectedPeriodAssessment: string;
+    impactFingerprint: string;
+    affectedPeriodCount: number;
+    requestedByUserName: string;
+    requestedAt: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewComment?: string;
+    affectedPeriods: FinancePeriodReopenImpactPeriod[];
+    validationWarnings: string[];
 }
 
 export interface PeriodLockRequestDto {
@@ -674,6 +719,187 @@ export interface PeriodCloseValidationDto {
     };
     blockers: string[];
     warnings: string[];
+}
+
+export interface FinanceCloseTask {
+    id: string;
+    taskCode: string;
+    title: string;
+    category: string;
+    dependsOnTaskCode?: string;
+    checkCode?: string;
+    sequence: number;
+    isMandatory: boolean;
+    isAutomated: boolean;
+    status: 'Pending' | 'Completed' | 'Blocked';
+    assignedToUserId?: string;
+    assignedToUserName?: string;
+    dueAt?: string;
+    isOverdue: boolean;
+    completedAt?: string;
+    completedByUserName?: string;
+    evidenceSummary?: string;
+    evidenceAttachments: FinanceCloseEvidenceAttachment[];
+}
+
+export type FinanceCloseType = 'MonthEnd' | 'QuarterEnd' | 'YearEnd';
+
+export interface FinanceCloseTemplateTask {
+    id: string;
+    taskCode: string;
+    title: string;
+    category: string;
+    dependsOnTaskCode?: string;
+    checkCode?: string;
+    sequence: number;
+    isMandatory: boolean;
+    isAutomated: boolean;
+    dueDaysAfterPeriodEnd: number;
+    defaultAssigneeUserId?: string;
+    instructions?: string;
+}
+
+export interface FinanceCloseTemplate {
+    id: string;
+    templateCode: string;
+    name: string;
+    closeType: FinanceCloseType;
+    version: number;
+    status: 'Draft' | 'Approved' | 'Superseded';
+    isActive: boolean;
+    isSystemDefault: boolean;
+    description?: string;
+    createdBy?: string;
+    createdAt: string;
+    approvedByUserName?: string;
+    approvedAt?: string;
+    approvalDeclaration?: string;
+    supersededAt?: string;
+    canEdit: boolean;
+    canApprove: boolean;
+    tasks: FinanceCloseTemplateTask[];
+}
+
+export interface SaveFinanceCloseTemplateVersion {
+    templateCode: string;
+    name: string;
+    closeType: FinanceCloseType;
+    description?: string;
+    tasks: Array<Omit<FinanceCloseTemplateTask, 'id'>>;
+}
+
+export interface FinanceCloseCheckSnapshot {
+    id: string;
+    evaluationNumber: number;
+    checkCode: string;
+    title: string;
+    category: string;
+    severity: 'Mandatory' | 'Warning';
+    status: 'Passed' | 'Failed' | 'Warning' | 'NotApplicable' | 'Waived';
+    resultSummary: string;
+    exceptionCount: number;
+    exceptionAmount?: number;
+    evaluatedAt: string;
+    evidenceFingerprint?: string;
+    appliedWaiverId?: string;
+    isWaivable: boolean;
+}
+
+export interface FinanceCloseEvidenceAttachment {
+    id: string;
+    financeCloseTaskId: string;
+    fileUploadRecordId: string;
+    evidenceType: 'SupportingDocument' | 'Reconciliation' | 'ManagementApproval';
+    description?: string;
+    originalFileName: string;
+    contentType?: string;
+    fileSize: number;
+    fileUrl: string;
+    uploadedByUserName?: string;
+    uploadedAt: string;
+}
+
+export interface FinanceCloseExceptionWaiver {
+    id: string;
+    financeCloseTaskId: string;
+    financeCloseCheckSnapshotId: string;
+    financeCloseEvidenceAttachmentId: string;
+    checkCode: string;
+    evidenceFingerprint: string;
+    status: 'Requested' | 'Approved' | 'Rejected';
+    justification: string;
+    requestedByUserId: string;
+    requestedByUserName: string;
+    requestedAt: string;
+    reviewedByUserId?: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewComment?: string;
+    matchesLatestEvidence: boolean;
+}
+
+export interface FinanceCloseAlertDelivery {
+    id: string;
+    financeCloseTaskId?: string;
+    financeCloseExceptionWaiverId?: string;
+    alertType: 'TaskDueSoon' | 'TaskAssignmentRequired' | 'TaskOverdue' | 'TaskOverdueEscalation' |
+        'WaiverReviewRequested' | 'WaiverReviewEscalation' | 'CloseApprovalRequested' | 'CloseApprovalEscalation';
+    recipientUserId: string;
+    recipientUserName: string;
+    status: 'Pending' | 'Delivered' | 'Failed';
+    dueAtUtc: string;
+    deliveredAtUtc?: string;
+    attemptCount: number;
+    lastError?: string;
+}
+
+export interface FinanceCloseCertification {
+    id: string;
+    preparedByUserName?: string;
+    preparedAt?: string;
+    preparerDeclaration?: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewerDeclaration?: string;
+    approvedByUserName?: string;
+    approvedAt?: string;
+    isSuperseded: boolean;
+}
+
+export interface FinanceCloseCycleHistory {
+    cycleId: string;
+    cycleNumber: number;
+    status: string;
+    startedAt: string;
+    preparedAt?: string;
+    closedAt?: string;
+    reopenedAt?: string;
+    reopenReason?: string;
+}
+
+export interface FinanceCloseWorkspace {
+    cycleId: string;
+    fiscalPeriodId: string;
+    periodName: string;
+    cycleNumber: number;
+    templateVersion: number;
+    templateCode: string;
+    closeType: FinanceCloseType;
+    templateName: string;
+    status: 'InProgress' | 'Prepared' | 'Closed' | 'Reopened';
+    evaluationNumber: number;
+    startedAt: string;
+    lastEvaluatedAt?: string;
+    mandatoryBlockerCount: number;
+    warningCount: number;
+    canPrepare: boolean;
+    canApproveAndClose: boolean;
+    tasks: FinanceCloseTask[];
+    checks: FinanceCloseCheckSnapshot[];
+    exceptionWaivers: FinanceCloseExceptionWaiver[];
+    alertDeliveries: FinanceCloseAlertDelivery[];
+    certification?: FinanceCloseCertification;
+    history: FinanceCloseCycleHistory[];
 }
 
 // Account

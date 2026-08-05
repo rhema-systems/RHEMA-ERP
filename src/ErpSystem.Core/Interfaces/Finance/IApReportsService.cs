@@ -92,8 +92,4 @@ public interface IApReportsService
     /// </summary>
     Task<byte[]> ExportAgingReportAsync(DateTime? asOfDate = null, string format = "Csv", CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Exports supplier statement to PDF.
-    /// </summary>
-    Task<byte[]> ExportSupplierStatementAsync(Guid supplierId, DateTime fromDate, DateTime toDate, string format = "PDF", CancellationToken cancellationToken = default);
 }

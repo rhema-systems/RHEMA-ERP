@@ -323,6 +323,15 @@ DEV-SERVERS.md
 # Locally generated management submission packs
 docs/tdc-finance-submission-pack/
 
+# Local stakeholder handbooks and other generated presentation artifacts.
+# These may contain environment-specific screenshots and are intentionally not synced.
+local-artifacts/
+
+# Locally rendered Finance QA outputs. These PDFs, page images, and spreadsheet previews
+# are reproducible verification artifacts and must not inflate or leak into review commits.
+/output/
+/tmp/
+
 # AI assistant local settings
 .claude/settings.local.json
 

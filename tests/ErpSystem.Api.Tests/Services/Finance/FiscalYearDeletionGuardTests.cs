@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -112,7 +113,8 @@ public sealed class FiscalYearDeletionGuardTests
         return new FiscalPeriodService(
             new UnitOfWork(db),
             currentUser.Object,
-            Mock.Of<ILogger<FiscalPeriodService>>());
+            Mock.Of<ILogger<FiscalPeriodService>>(),
+            Mock.Of<ISubledgerSettlementReadModelService>());
     }
 
     private static (FiscalYear Year, FiscalPeriod Period) SeedFiscalYear(

@@ -17,6 +17,7 @@ import type {
     CreateCashReceiptDto,
     CreateCashPaymentDto,
     CreateBankTransferDto,
+    BankTransferPreview,
     StartReconciliationDto,
     CreateManualMatchDto,
     CreateReconciliationAdjustmentDto,
@@ -34,6 +35,10 @@ import type {
     ReturnedChequeCase,
     ReturnedChequeCaseStatus,
     PostedLiquidityPaymentCandidate,
+    CashTransactionTrace,
+    ReverseCashTransactionDto,
+    CashierTillSession,
+    CashierTillSessionStatus,
 } from '@/types/cash-management';
 import { apiService } from '@/services/api.service';
 
@@ -42,6 +47,83 @@ import { apiService } from '@/services/api.service';
 // =============================================================================
 
 class CashManagementDataService {
+    // ===== CASHIER / TILL CUSTODY =====
+
+    async getCashierTillSessions(filters?: {
+        status?: CashierTillSessionStatus;
+        liquidityAccountId?: string;
+        businessDate?: string;
+    }): Promise<CashierTillSession[]> {
+        const query = new URLSearchParams();
+        if (filters?.status) query.set('status', filters.status);
+        if (filters?.liquidityAccountId) query.set('liquidityAccountId', filters.liquidityAccountId);
+        if (filters?.businessDate) query.set('businessDate', filters.businessDate);
+        // Keep the optional suffix separate so the route-contract test can statically verify the
+        // endpoint while callers still avoid a trailing question mark when no filters are set.
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return apiService.get<CashierTillSession[]>(`/finance/cashier-tills/sessions${suffix}`);
+    }
+
+    async getCashierTillSession(id: string): Promise<CashierTillSession> {
+        return apiService.get<CashierTillSession>(`/finance/cashier-tills/sessions/${id}`);
+    }
+
+    async openCashierTillSession(dto: {
+        liquidityAccountId: string;
+        businessDate: string;
+        openingFloatAmount: number;
+        openingNotes?: string;
+        openingEvidenceFileId?: string;
+    }): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>('/finance/cashier-tills/sessions', dto);
+    }
+
+    async submitCashierTillCount(id: string, dto: {
+        countLines: Array<{ denomination: number; quantity: number }>;
+        varianceReason?: string;
+        closingEvidenceFileId?: string;
+        rowVersion: string;
+    }): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/submit-count`,
+            dto,
+        );
+    }
+
+    async approveCashierTillClosure(
+        id: string,
+        comments: string,
+        rowVersion: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/approve-closure`,
+            { comments, rowVersion },
+        );
+    }
+
+    async returnCashierTillForRecount(
+        id: string,
+        comments: string,
+        rowVersion: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/return-for-recount`,
+            { comments, rowVersion },
+        );
+    }
+
+    async reopenCashierTillAsCorrection(
+        id: string,
+        reason: string,
+        rowVersion: string,
+        openingEvidenceFileId?: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/reopen-as-correction`,
+            { reason, rowVersion, openingEvidenceFileId },
+        );
+    }
+
     // ===== BANKING & SETTLEMENT =====
 
     async getBankingSetup(): Promise<BankingSetupStatus> {
@@ -145,6 +227,16 @@ class CashManagementDataService {
 
     async postBankDeposit(id: string): Promise<BankDeposit> {
         return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/post`, {});
+    }
+
+    async confirmBankDeposit(id: string, dto: {
+        bankConfirmationReference: string;
+        bankConfirmationDate: string;
+        confirmationEvidenceFileId?: string;
+        notes?: string;
+        rowVersion: string;
+    }): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/confirm`, dto);
     }
 
     async uploadBankingEvidence(file: File): Promise<string> {
@@ -257,6 +349,14 @@ class CashManagementDataService {
         return apiService.get<CashTransaction>(`/finance/cash-transactions/${id}`);
     }
 
+    async getCashTransactionTrace(id: string): Promise<CashTransactionTrace | null> {
+        return apiService.get<CashTransactionTrace>(`/finance/cash-transactions/${id}/trace`);
+    }
+
+    async reverseCashTransaction(id: string, dto: ReverseCashTransactionDto): Promise<CashTransaction> {
+        return apiService.post<CashTransaction>(`/finance/cash-transactions/${id}/reverse`, dto);
+    }
+
     async getTransactionsByBankAccount(bankAccountId: string, fromDate?: string, toDate?: string): Promise<CashTransaction[]> {
         const queryParams = new URLSearchParams();
         if (fromDate) queryParams.append('fromDate', fromDate);
@@ -280,6 +380,12 @@ class CashManagementDataService {
 
     async createBankTransfer(dto: CreateBankTransferDto): Promise<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }> {
         return apiService.post<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }>('/finance/cash-transactions/transfer', dto);
+    }
+
+    async previewBankTransfer(dto: CreateBankTransferDto): Promise<BankTransferPreview> {
+        // Preview and capture intentionally share one server-side resolver; keeping rate
+        // selection out of the browser prevents an editable/manual rate from bypassing policy.
+        return apiService.post<BankTransferPreview>('/finance/cash-transactions/transfer/preview', dto);
     }
 
     async deleteCashTransaction(id: string): Promise<void> {
