@@ -999,6 +999,7 @@ public sealed class ProcurementFrameworkCallOffService :
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             callOff.PurchaseOrder.Status = "Cancelled";
+            callOff.PurchaseOrder.CancelledAtUtc = now;
             callOff.PurchaseOrder.UpdatedAt = now;
             callOff.PurchaseOrder.UpdatedBy = ActorName;
             callOff.PurchaseOrder.LastModifiedById = _currentUser.UserId;

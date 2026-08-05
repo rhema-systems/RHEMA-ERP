@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
@@ -31,6 +32,22 @@ public interface IApReportsService
     /// Reconciles AP settlement read-model outstanding amounts to the posted AP control GL balance.
     /// </summary>
     Task<SubledgerControlReconciliationDto> GetControlReconciliationAsync(DateTime? asOfDate = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reconciles Procurement commitments and receipts to AP invoices/payments,
+    /// central Finance postings/reversals, Projects retention, and contract milestones.
+    /// </summary>
+    Task<ProcurementFinanceReconciliationReportDto> GetProcurementFinanceReconciliationAsync(
+        DateTime? asOfDate = null,
+        Guid? purchaseOrderId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Exports the same AP-005/TDC-0508 reconciliation as CSV.</summary>
+    Task<byte[]> ExportProcurementFinanceReconciliationAsync(
+        DateTime? asOfDate = null,
+        Guid? purchaseOrderId = null,
+        string format = "Csv",
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Shows posted supplier advances and other unapplied vendor payments separately from invoice aging.
@@ -86,6 +103,23 @@ public interface IApReportsService
     /// - Pending approvals / batches
     /// </summary>
     Task<ApSummaryDto> GetApSummaryAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Reports the AP-006 three-way-match exception and corrective-action register.</summary>
+    Task<VendorInvoiceMatchExceptionReportDto> GetThreeWayMatchExceptionsAsync(
+        DateTime fromDate,
+        DateTime toDate,
+        VendorInvoiceMatchExceptionStatus? status = null,
+        Guid? supplierId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Exports the same audited AP-006 register as CSV.</summary>
+    Task<byte[]> ExportThreeWayMatchExceptionsAsync(
+        DateTime fromDate,
+        DateTime toDate,
+        VendorInvoiceMatchExceptionStatus? status = null,
+        Guid? supplierId = null,
+        string format = "Csv",
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Exports aging report to Excel or PDF.

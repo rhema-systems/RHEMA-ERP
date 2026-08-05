@@ -105,4 +105,6 @@ public static class DocumentTypes
     /// reopened period never overwrites the original signed pack.
     /// </summary>
     public const string FinanceClosePack = "Finance.ClosePack";
+    public const string InventoryStoreIssueVoucher = "Inventory.StoreIssueVoucher";
+    public const string InventoryStoreReturnVoucher = "Inventory.StoreReturnVoucher";
 }

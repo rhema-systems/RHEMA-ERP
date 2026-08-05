@@ -381,6 +381,10 @@ public class PurchaseOrderReceiptDto
     public string? InspectionNotes { get; set; }
     public string PurchaseOrderNumber { get; set; } = string.Empty;
     public string SupplierName { get; set; } = string.Empty;
+    public decimal ReceiptTolerancePercent { get; set; }
+    public string? ReceiptSourceIntegrityHash { get; set; }
+    public DateTime? ReceiptSourceValidatedAtUtc { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
     public List<PurchaseOrderReceiptItemDto> Items { get; set; } = new();
 }
 
@@ -430,6 +434,9 @@ public class ReceivePurchaseOrderDto
     public Guid? InspectedById { get; set; }
     public string? Notes { get; set; }
     public bool RequiresInspection { get; set; } = false;
+
+    [MaxLength(100)]
+    public string? IdempotencyKey { get; set; }
 
     [Required]
     public List<ReceivePurchaseOrderItemDto> Items { get; set; } = new();

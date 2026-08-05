@@ -1,16 +1,24 @@
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Services.Finance;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,6 +30,11 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// </summary>
     public class ApReportsService : IApReportsService
     {
+        private static readonly JsonSerializerOptions BudgetCommitmentSnapshotJsonOptions =
+            new(JsonSerializerDefaults.Web);
+        private static readonly JsonSerializerOptions PurchaseOrderSnapshotJsonOptions =
+            new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
+
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
@@ -323,6 +336,1560 @@ namespace ErpSystem.Api.Services.Finance.AP
                 asOfDate,
                 cancellationToken);
         }
+
+        public async Task<ProcurementFinanceReconciliationReportDto> GetProcurementFinanceReconciliationAsync(
+            DateTime? asOfDate = null,
+            Guid? purchaseOrderId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var tenantId = TenantId;
+            var date = (asOfDate ?? DateTime.UtcNow).Date;
+            var cutoffExclusive = date.AddDays(1);
+
+            var purchaseOrderCandidates = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == tenantId &&
+                    item.CreatedAt < cutoffExclusive &&
+                    item.OrderDate < cutoffExclusive &&
+                    (!item.IsDeleted || !item.DeletedAt.HasValue ||
+                     item.DeletedAt.Value >= cutoffExclusive))
+                .Include(item => item.Items.Where(line => !line.IsDeleted))
+                .Include(item => item.Receipts.Where(receipt =>
+                    !receipt.IsDeleted && receipt.ReceiptDate < cutoffExclusive))
+                    .ThenInclude(receipt => receipt.Items.Where(line => !line.IsDeleted))
+                .OrderBy(item => item.OrderNumber)
+                .ToListAsync(cancellationToken);
+
+            var purchaseOrderResourceIds = purchaseOrderCandidates
+                .Select(item => item.Id.ToString())
+                .ToList();
+            var purchaseOrderAudits = purchaseOrderResourceIds.Count == 0
+                ? new List<AuditLog>()
+                : await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        (item.Resource == nameof(PurchaseOrder) ||
+                         item.Resource == "Procurement.PurchaseOrder") &&
+                        item.ResourceId != null &&
+                        purchaseOrderResourceIds.Contains(item.ResourceId))
+                    .AsNoTracking()
+                    .OrderBy(item => item.Timestamp)
+                    .ToListAsync(cancellationToken);
+            var purchaseOrderStatesAsOf = purchaseOrderCandidates
+                .Select(item => ResolvePurchaseOrderStateAsOf(
+                    item,
+                    purchaseOrderAudits.Where(audit => audit.ResourceId == item.Id.ToString()),
+                    cutoffExclusive))
+                .Where(state => state is not null && IsOperativePurchaseOrderStatus(state.Status))
+                .Select(state => state!)
+                .ToDictionary(state => state.Id);
+            var purchaseOrders = purchaseOrderCandidates
+                .Where(item => purchaseOrderStatesAsOf.ContainsKey(item.Id))
+                .ToList();
+            var operativePurchaseOrderIds = purchaseOrders.Select(item => item.Id).ToList();
+            var purchaseOrderAmendments = operativePurchaseOrderIds.Count == 0
+                ? new List<ProcurementPurchaseOrderAmendment>()
+                : await _unitOfWork.Repository<ProcurementPurchaseOrderAmendment>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        operativePurchaseOrderIds.Contains(item.PurchaseOrderId) &&
+                        item.Status == ProcurementPurchaseOrderAmendmentStatus.Applied &&
+                        item.AppliedAtUtc.HasValue &&
+                        !item.IsDeleted)
+                    .AsNoTracking()
+                    .OrderBy(item => item.AppliedAtUtc)
+                    .ThenBy(item => item.AmendmentSequence)
+                    .ToListAsync(cancellationToken);
+            var purchaseOrderCommercialStates = purchaseOrders.ToDictionary(
+                item => item.Id,
+                item => ResolvePurchaseOrderCommercialStateAsOf(
+                    item,
+                    purchaseOrderAmendments.Where(amendment => amendment.PurchaseOrderId == item.Id),
+                    cutoffExclusive));
+
+            var selectedPurchaseOrders = purchaseOrderId.HasValue
+                ? purchaseOrders.Where(item => item.Id == purchaseOrderId.Value).ToList()
+                : purchaseOrders;
+            if (purchaseOrderId.HasValue && selectedPurchaseOrders.Count == 0)
+                throw new KeyNotFoundException(
+                    $"Purchase order with Id '{purchaseOrderId.Value}' was not found for this tenant.");
+
+            var selectedPoIds = selectedPurchaseOrders.Select(item => item.Id).ToList();
+            var selectedReceipts = selectedPurchaseOrders
+                .SelectMany(item => item.Receipts)
+                .ToList();
+            var selectedReceiptIds = selectedReceipts.Select(item => item.Id).ToList();
+            var receiptItemsById = selectedReceipts
+                .SelectMany(item => item.Items)
+                .ToDictionary(item => item.Id);
+            var receiptInspectionCases = selectedReceiptIds.Count == 0
+                ? new List<ProcurementReceiptInspectionCase>()
+                : await _unitOfWork.Repository<ProcurementReceiptInspectionCase>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        selectedReceiptIds.Contains(item.PurchaseOrderReceiptId) &&
+                        !item.IsDeleted)
+                    .Include(item => item.Lines.Where(line => !line.IsDeleted))
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+            var governedReceiptIds = receiptInspectionCases
+                .Select(item => item.PurchaseOrderReceiptId)
+                .ToHashSet();
+            var acceptedInspectionByReceiptAsOf = receiptInspectionCases
+                .Where(item =>
+                    item.StockPostedAtUtc.HasValue &&
+                    item.StockPostedAtUtc.Value.Date <= date &&
+                    ProcurementReceiptInspectionRules.IsApEligible(
+                        item.Status,
+                        item.PendingQuantity,
+                        item.ApEligibleQuantity))
+                .GroupBy(item => item.PurchaseOrderReceiptId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(item => item.Sequence).First());
+            var sourceRequisitionIds = selectedPurchaseOrders
+                .Select(item => purchaseOrderCommercialStates[item.Id].SourceRequisitionId)
+                .Where(item => item.HasValue)
+                .Select(item => item!.Value)
+                .Distinct()
+                .ToList();
+            var contractIds = selectedPurchaseOrders
+                .Where(item => item.ContractId.HasValue)
+                .Select(item => item.ContractId!.Value)
+                .Distinct()
+                .ToList();
+
+            var commitments = await _unitOfWork.Repository<ProcurementBudgetCommitment>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == tenantId &&
+                    sourceRequisitionIds.Contains(item.PurchaseRequisitionId) &&
+                    item.CreatedAt < cutoffExclusive &&
+                    (!item.IsDeleted || !item.DeletedAt.HasValue ||
+                     item.DeletedAt.Value >= cutoffExclusive))
+                .ToListAsync(cancellationToken);
+            var commitmentLifecycleActions = new[]
+            {
+                "BudgetCommitmentReserved",
+                "BudgetReservationReused",
+                "BudgetCommitmentReleased",
+                "BudgetCommitmentConsumed"
+            };
+            var commitmentLifecycleEvents = sourceRequisitionIds.Count == 0
+                ? new List<ProcurementControlEvent>()
+                : await _unitOfWork.Repository<ProcurementControlEvent>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.EventType == "PurchaseRequisitionBudgetControl" &&
+                        item.SourceId.HasValue &&
+                        sourceRequisitionIds.Contains(item.SourceId.Value) &&
+                        commitmentLifecycleActions.Contains(item.Action))
+                    .AsNoTracking()
+                    .OrderBy(item => item.OccurredAtUtc)
+                    .ToListAsync(cancellationToken);
+            var activeCommitmentsAsOf = commitments
+                .Select(item => ResolveBudgetCommitmentStateAsOf(
+                    item,
+                    commitmentLifecycleEvents.Where(controlEvent =>
+                        controlEvent.SourceId == item.PurchaseRequisitionId),
+                    cutoffExclusive))
+                .Where(item => item is not null &&
+                               item.Status == ProcurementBudgetCommitmentStatus.Reserved)
+                .Select(item => item!)
+                .ToList();
+            var allInvoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.PurchaseOrderId.HasValue &&
+                    selectedPoIds.Contains(item.PurchaseOrderId.Value) &&
+                    item.InvoiceDate < cutoffExclusive &&
+                    item.SubmittedDate.HasValue &&
+                    item.SubmittedDate.Value < cutoffExclusive &&
+                    item.ApprovedDate.HasValue &&
+                    item.ApprovedDate.Value < cutoffExclusive)
+                .ToListAsync(cancellationToken);
+            var invoiceIds = allInvoices.Select(item => item.Id).ToList();
+            var invoiceResourceIds = invoiceIds.Select(item => item.ToString()).ToList();
+            var invoiceTerminationsAsOf = invoiceResourceIds.Count == 0
+                ? new HashSet<Guid>()
+                : (await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.Resource == "Finance.APInvoice" &&
+                        item.ResourceId != null &&
+                        invoiceResourceIds.Contains(item.ResourceId) &&
+                        item.Timestamp < cutoffExclusive &&
+                        (item.Action == FinanceAuditEvents.ApInvoiceVoided ||
+                         item.Action == FinanceAuditEvents.ApInvoiceReversed))
+                    .AsNoTracking()
+                    .Select(item => item.ResourceId!)
+                    .ToListAsync(cancellationToken))
+                    .Select(value => Guid.TryParse(value, out var id) ? id : Guid.Empty)
+                    .Where(id => id != Guid.Empty)
+                    .ToHashSet();
+            var allocations = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                .GetQueryable(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    invoiceIds.Contains(item.VendorInvoiceId) &&
+                    item.AllocationDate.Date <= date)
+                .Include(item => item.VendorPayment)
+                .ToListAsync(cancellationToken);
+            var contracts = await _unitOfWork.Repository<Contract>()
+                .GetQueryable(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    contractIds.Contains(item.Id))
+                .ToListAsync(cancellationToken);
+            var contractValueAmendments = await _unitOfWork.Repository<ContractAmendment>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == tenantId &&
+                    contractIds.Contains(item.ContractId) &&
+                    item.Status == "Approved" &&
+                    item.ApprovedDate.HasValue &&
+                    item.AmendmentType == "ValueChange")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            var contractValuesAsOf = contracts.ToDictionary(
+                contract => contract.Id,
+                contract => ResolveContractValueAsOf(
+                    contract,
+                    contractValueAmendments.Where(item => item.ContractId == contract.Id),
+                    cutoffExclusive));
+            var milestones = await _unitOfWork.Repository<ContractMilestone>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == tenantId &&
+                    contractIds.Contains(item.ContractId) &&
+                    item.CreatedAt < cutoffExclusive &&
+                    (!item.IsDeleted || !item.DeletedAt.HasValue || item.DeletedAt.Value >= cutoffExclusive))
+                .ToListAsync(cancellationToken);
+            var milestoneResourceIds = milestones.Select(item => item.Id.ToString()).ToList();
+            var milestoneAuditSnapshots = milestoneResourceIds.Count == 0
+                ? new List<AuditLog>()
+                : await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.Resource == nameof(ContractMilestone) &&
+                        item.ResourceId != null &&
+                        milestoneResourceIds.Contains(item.ResourceId))
+                    .AsNoTracking()
+                    .OrderBy(item => item.Timestamp)
+                    .ToListAsync(cancellationToken);
+            var milestoneAuditsByResourceId = milestoneAuditSnapshots
+                .ToLookup(item => item.ResourceId ?? string.Empty);
+            var certificates = await _unitOfWork.Repository<ProjectPaymentCertificate>()
+                .GetQueryableIncludingDeleted(item =>
+                    item.TenantId == tenantId &&
+                    item.ContractId.HasValue &&
+                    contractIds.Contains(item.ContractId.Value) &&
+                    item.CreatedAt < cutoffExclusive &&
+                    item.IssueDate < cutoffExclusive &&
+                    (!item.IsDeleted || !item.DeletedAt.HasValue || item.DeletedAt.Value >= cutoffExclusive))
+                .ToListAsync(cancellationToken);
+            var certificateResourceIds = certificates.Select(item => item.Id.ToString()).ToList();
+            var certificateAuditSnapshots = certificateResourceIds.Count == 0
+                ? new List<AuditLog>()
+                : await _unitOfWork.Repository<AuditLog>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        item.Resource == ProjectPaymentCertificateAuditEvents.Resource &&
+                        item.Action == ProjectPaymentCertificateAuditEvents.Snapshot &&
+                        item.ResourceId != null &&
+                        certificateResourceIds.Contains(item.ResourceId))
+                    .AsNoTracking()
+                    .OrderBy(item => item.Timestamp)
+                    .ToListAsync(cancellationToken);
+            var certificateStatesAsOf = certificates
+                .Select(certificate => ResolvePaymentCertificateStateAsOf(
+                    certificate,
+                    certificateAuditSnapshots.Where(audit => audit.ResourceId == certificate.Id.ToString()),
+                    cutoffExclusive))
+                .Where(state => state is not null &&
+                                !state.IsDeleted &&
+                                state.IssueDate < cutoffExclusive &&
+                                state.Status != ProjectPaymentCertificateStatuses.Draft &&
+                                state.Status != ProjectPaymentCertificateStatuses.Cancelled)
+                .Select(state => state!)
+                .ToList();
+            var retentionReleaseActions = await _unitOfWork.Repository<ProcurementWorksCloseoutAction>()
+                .GetQueryable(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    contractIds.Contains(item.ContractId) &&
+                    item.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease &&
+                    item.Status == ProcurementWorksCloseoutActionStatus.Approved &&
+                    item.Amount.HasValue &&
+                    (item.EffectiveAtUtc ?? item.DecidedAtUtc ?? item.SubmittedAtUtc) < cutoffExclusive)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            var paymentIds = allocations.Select(item => item.VendorPaymentId).Distinct().ToList();
+            var allocationIds = allocations.Select(item => item.Id).Distinct().ToList();
+            var paymentAllocationHistory = paymentIds.Count == 0
+                ? new List<VendorPaymentAllocation>()
+                : await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(item =>
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted &&
+                        paymentIds.Contains(item.VendorPaymentId) &&
+                        item.AllocationDate.Date <= date)
+                    .Include(item => item.VendorPayment)
+                    .ToListAsync(cancellationToken);
+            var effectivePaymentSettlementById = GetEffectiveAllocationsAsOf(paymentAllocationHistory)
+                .GroupBy(item => item.VendorPaymentId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => RoundMoney(group.Sum(item =>
+                        item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount)));
+            var postingEvents = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.PostingStatus == "Posted" &&
+                    item.PostingDate < cutoffExclusive &&
+                    ((item.SourceDocumentType == "VendorInvoice" && invoiceIds.Contains(item.SourceDocumentId)) ||
+                     (item.SourceDocumentType == "VendorPayment" && paymentIds.Contains(item.SourceDocumentId)) ||
+                     (item.SourceDocumentType == "VendorPaymentAdvanceApplication" && allocationIds.Contains(item.SourceDocumentId)) ||
+                     (item.SourceDocumentType == "VendorPaymentAllocation" && allocationIds.Contains(item.SourceDocumentId))))
+                .Include(item => item.JournalEntry)
+                    .ThenInclude(item => item!.Transactions)
+                .ToListAsync(cancellationToken);
+
+            var rows = new List<ProcurementFinanceReconciliationRowDto>();
+            foreach (var purchaseOrder in selectedPurchaseOrders)
+            {
+                var commercialState = purchaseOrderCommercialStates[purchaseOrder.Id];
+                var currency = NormalizeCurrency(commercialState.Currency, "GHS");
+                var poInvoices = allInvoices
+                    .Where(item => item.PurchaseOrderId == purchaseOrder.Id)
+                    .ToList();
+                var poInvoiceIds = poInvoices.Select(item => item.Id).ToHashSet();
+                var poAllocations = allocations
+                    .Where(item => poInvoiceIds.Contains(item.VendorInvoiceId))
+                    .ToList();
+                var effectivePoAllocations = GetEffectiveAllocationsAsOf(poAllocations);
+                var poPaymentIds = poAllocations.Select(item => item.VendorPaymentId).ToHashSet();
+                var poAllocationIds = poAllocations.Select(item => item.Id).ToHashSet();
+                var poPostings = postingEvents
+                    .Where(item =>
+                        (item.SourceDocumentType == "VendorInvoice" && poInvoiceIds.Contains(item.SourceDocumentId)) ||
+                        (item.SourceDocumentType == "VendorPayment" && poPaymentIds.Contains(item.SourceDocumentId)) ||
+                        ((item.SourceDocumentType == "VendorPaymentAdvanceApplication" ||
+                          item.SourceDocumentType == "VendorPaymentAllocation") &&
+                         poAllocationIds.Contains(item.SourceDocumentId)))
+                    .ToList();
+                var reversedInvoiceIdsAsOf = poPostings
+                    .Where(item =>
+                        item.SourceDocumentType == "VendorInvoice" &&
+                        item.PostingAction != "Post")
+                    .Select(item => item.SourceDocumentId)
+                    .ToHashSet();
+                var activeInvoices = poInvoices
+                    .Where(item => !invoiceTerminationsAsOf.Contains(item.Id) &&
+                                   !reversedInvoiceIdsAsOf.Contains(item.Id))
+                    .ToList();
+                var activeInvoiceIds = activeInvoices.Select(item => item.Id).ToHashSet();
+
+                var commitmentGroupOrders = commercialState.SourceRequisitionId.HasValue
+                    ? purchaseOrders
+                        .Select(item => purchaseOrderCommercialStates[item.Id])
+                        .Where(item =>
+                            item.SourceRequisitionId == commercialState.SourceRequisitionId &&
+                            NormalizeCurrency(item.Currency, currency) == currency)
+                        .ToList()
+                    : new List<PurchaseOrderCommercialState>();
+                var activeCommitments = commercialState.SourceRequisitionId.HasValue
+                    ? activeCommitmentsAsOf.Where(item =>
+                        item.PurchaseRequisitionId == commercialState.SourceRequisitionId.Value).ToList()
+                    : new List<ProcurementBudgetCommitment>();
+                var contractMilestones = purchaseOrder.ContractId.HasValue
+                    ? milestones.Where(item => item.ContractId == purchaseOrder.ContractId.Value).ToList()
+                    : new List<ContractMilestone>();
+                var milestoneAmountsAsOf = purchaseOrder.ContractId.HasValue &&
+                                           contractValuesAsOf.TryGetValue(
+                                               purchaseOrder.ContractId.Value,
+                                               out var contractValueAsOf)
+                    ? contractMilestones.ToDictionary(
+                        item => item.Id,
+                        item => ResolveMilestoneAmountAsOf(
+                            item,
+                            milestoneAuditsByResourceId[item.Id.ToString()],
+                            contractValueAsOf,
+                            cutoffExclusive))
+                    : new Dictionary<Guid, decimal>();
+                var contractCertificates = purchaseOrder.ContractId.HasValue
+                    ? certificateStatesAsOf.Where(item =>
+                        item.ContractId == purchaseOrder.ContractId.Value &&
+                        NormalizeCurrency(item.Currency, currency) == currency).ToList()
+                    : new List<PaymentCertificateStateAsOf>();
+                var controlledRetentionReleased = purchaseOrder.ContractId.HasValue
+                    ? retentionReleaseActions
+                        .Where(item =>
+                            item.ContractId == purchaseOrder.ContractId.Value &&
+                            NormalizeCurrency(item.Currency, currency) == currency)
+                        .Sum(item => item.Amount ?? 0m)
+                    : 0m;
+
+                var itemPrices = commercialState.ItemUnitPrices;
+                var acceptedReceiptValue = 0m;
+                foreach (var receipt in purchaseOrder.Receipts.Where(receipt =>
+                             receipt.Status != "Rejected" && receipt.Status != "Cancelled"))
+                {
+                    if (acceptedInspectionByReceiptAsOf.TryGetValue(receipt.Id, out var inspection))
+                    {
+                        acceptedReceiptValue += inspection.Lines.Sum(line =>
+                            receiptItemsById.TryGetValue(line.PurchaseOrderReceiptItemId, out var receiptItem) &&
+                            itemPrices.TryGetValue(receiptItem.PurchaseOrderItemId, out var unitPrice)
+                                ? line.AcceptedQuantity * unitPrice
+                                : 0m);
+                        continue;
+                    }
+
+                    // Legacy receipts without a governed inspection case retain their
+                    // explicit inspection timestamp. Never fall back to their current
+                    // accepted quantity when a governed decision exists after the cutoff.
+                    if (!governedReceiptIds.Contains(receipt.Id) &&
+                        receipt.InspectionDate.HasValue &&
+                        receipt.InspectionDate.Value.Date <= date)
+                    {
+                        acceptedReceiptValue += receipt.Items.Sum(item =>
+                            itemPrices.TryGetValue(item.PurchaseOrderItemId, out var unitPrice)
+                                ? item.AcceptedQuantity * unitPrice
+                                : 0m);
+                    }
+                }
+                var acceptedReceiptAmount = RoundMoney(acceptedReceiptValue);
+                var settledAmount = RoundMoney(effectivePoAllocations
+                    .Where(item => IsAllocationPostedAsOf(item, poPostings))
+                    .Sum(item => item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
+                var invoicePostedAmount = RoundMoney(poPostings
+                    .Where(item =>
+                        item.SourceDocumentType == "VendorInvoice" &&
+                        item.PostingAction == "Post" &&
+                        activeInvoiceIds.Contains(item.SourceDocumentId) &&
+                        GetActivePostingAsOf(poPostings, "VendorInvoice", item.SourceDocumentId)?.Id == item.Id)
+                    .Sum(item => GetTransactionDebit(item, currency)));
+                var activePoAllocations = effectivePoAllocations
+                    .Where(item => IsAllocationPostedAsOf(item, poPostings))
+                    .ToList();
+                var paymentPostedAmount = RoundMoney(activePoAllocations
+                    .GroupBy(item => item.VendorPaymentId)
+                    .Sum(group =>
+                    {
+                        var payment = group.First().VendorPayment;
+                        if (payment.IsSupplierAdvance)
+                        {
+                            var selectedAllocationIds = group.Select(item => item.Id).ToHashSet();
+                            return selectedAllocationIds.Sum(allocationId =>
+                            {
+                                var applicationPosting = GetActivePostingAsOf(
+                                        poPostings,
+                                        "VendorPaymentAdvanceApplication",
+                                        allocationId)
+                                    ?? GetActivePostingAsOf(
+                                        poPostings,
+                                        "VendorPaymentAllocation",
+                                        allocationId);
+                                return applicationPosting == null
+                                    ? 0m
+                                    : GetTransactionDebit(applicationPosting, currency);
+                            });
+                        }
+
+                        var paymentPosting = GetActivePostingAsOf(
+                            poPostings,
+                            "VendorPayment",
+                            payment.Id);
+                        if (paymentPosting == null) return 0m;
+
+                        var paymentSettlement = effectivePaymentSettlementById
+                            .GetValueOrDefault(payment.Id);
+                        if (paymentSettlement <= 0m) return 0m;
+                        var orderSettlement = RoundMoney(group.Sum(item =>
+                            item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount));
+                        return RoundMoney(
+                            GetTransactionDebit(paymentPosting, currency) * orderSettlement / paymentSettlement);
+                    }));
+
+                var row = new ProcurementFinanceReconciliationRowDto
+                {
+                    PurchaseOrderId = purchaseOrder.Id,
+                    PurchaseOrderNumber = purchaseOrder.OrderNumber,
+                    PurchaseOrderStatus = purchaseOrderStatesAsOf[purchaseOrder.Id].Status,
+                    CurrencyCode = currency,
+                    SourceRequisitionId = commercialState.SourceRequisitionId,
+                    ContractId = purchaseOrder.ContractId,
+                    PurchaseOrderAmount = RoundMoney(commercialState.TotalAmount),
+                    CommitmentAmount = RoundMoney(activeCommitments
+                        .Where(item => NormalizeCurrency(item.Currency, currency) == currency)
+                        .Sum(item => item.ReservedAmount)),
+                    CommitmentGroupOrderAmount = RoundMoney(commitmentGroupOrders.Sum(item => item.TotalAmount)),
+                    AcceptedReceiptAmount = acceptedReceiptAmount,
+                    InvoiceAmount = RoundMoney(activeInvoices.Sum(item => item.TotalAmount)),
+                    SettledAmount = settledAmount,
+                    InvoicePostedAmount = invoicePostedAmount,
+                    PaymentPostedAmount = paymentPostedAmount,
+                    RetentionHeldAmount = RoundMoney(contractCertificates.Sum(item => item.RetentionHeldAmount)),
+                    RetentionReleasedAmount = RoundMoney(Math.Max(
+                        contractCertificates.Sum(item => item.RetentionReleasedAmount),
+                        controlledRetentionReleased)),
+                    MilestoneAmount = RoundMoney(contractMilestones.Sum(item =>
+                        milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
+                    CompletedMilestoneAmount = RoundMoney(contractMilestones
+                        .Where(item => item.CompletedAt.HasValue && item.CompletedAt.Value < cutoffExclusive)
+                        .Sum(item => milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
+                    InvoicedMilestoneAmount = RoundMoney(contractMilestones
+                        .Where(item => item.InvoicedAt.HasValue && item.InvoicedAt.Value < cutoffExclusive)
+                        .Sum(item => milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
+                    PaidMilestoneAmount = RoundMoney(contractMilestones
+                        .Where(item => item.PaidAt.HasValue && item.PaidAt.Value < cutoffExclusive)
+                        .Sum(item => milestoneAmountsAsOf.GetValueOrDefault(item.Id))),
+                    InvoiceCount = activeInvoices.Count,
+                    PaymentCount = activePoAllocations.Select(item => item.VendorPaymentId).Distinct().Count(),
+                    PostingCount = poPostings.Count,
+                    ControlledReversalCount = poPostings.Count(item => item.PostingAction != "Post")
+                };
+                row.RetentionOutstandingAmount = RoundMoney(
+                    row.RetentionHeldAmount - row.RetentionReleasedAmount);
+
+                var issues = BuildProcurementFinanceIssues(
+                    purchaseOrder,
+                    commercialState.SourceRequisitionId,
+                    row,
+                    activeCommitments,
+                    contracts.FirstOrDefault(item => item.Id == purchaseOrder.ContractId),
+                    activeInvoices,
+                    poAllocations,
+                    poPostings,
+                    cutoffExclusive);
+                row.Issues = issues;
+                row.IsReconciled = issues.All(item => item.Severity != "Error");
+                rows.Add(row);
+            }
+
+            var apControl = await GetControlReconciliationAsync(date, cancellationToken);
+            var report = new ProcurementFinanceReconciliationReportDto
+            {
+                AsOfDate = date,
+                GeneratedAtUtc = DateTime.UtcNow,
+                DecisionKeys = Enumerable.Range(1, 14)
+                    .Select(index => $"DEC-{index:000}")
+                    .ToArray(),
+                PurchaseOrderCount = rows.Count,
+                IssueCount = rows.Sum(item => item.Issues.Count),
+                UnbalancedPostingCount = postingEvents.Count(item =>
+                    RoundMoney(item.TotalDebitAmount) != RoundMoney(item.TotalCreditAmount)),
+                ControlledReversalCount = postingEvents.Count(item => item.PostingAction != "Post"),
+                ApControlReconciliation = apControl,
+                Rows = rows,
+                CurrencySummaries = BuildProcurementFinanceCurrencySummaries(
+                    rows,
+                    activeCommitmentsAsOf)
+            };
+            report.IsReconciled =
+                report.UnbalancedPostingCount == 0 &&
+                Math.Abs(report.ApControlReconciliation.Variance) <= 0.01m &&
+                rows.All(item => item.IsReconciled);
+
+            await RecordReportAuditAsync(
+                FinanceAuditEvents.ApProcurementReconciliationGenerated,
+                report,
+                cancellationToken);
+            return report;
+        }
+
+        public async Task<byte[]> ExportProcurementFinanceReconciliationAsync(
+            DateTime? asOfDate = null,
+            Guid? purchaseOrderId = null,
+            string format = "Csv",
+            CancellationToken cancellationToken = default)
+        {
+            if (!string.Equals(format, "Csv", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException("Only CSV export is supported for procurement/Finance reconciliation.");
+
+            var report = await GetProcurementFinanceReconciliationAsync(
+                asOfDate, purchaseOrderId, cancellationToken);
+            var builder = new StringBuilder();
+            builder.AppendLine(
+                "PurchaseOrder,Status,Currency,PO Amount,Commitment,Commitment Group Orders,Accepted Receipts,Invoices,Settled,Invoice GL,Payment GL,Retention Held,Retention Released,Milestones,Reversals,Reconciled,Issues");
+            foreach (var row in report.Rows)
+            {
+                builder.AppendLine(string.Join(",",
+                    Csv(row.PurchaseOrderNumber),
+                    Csv(row.PurchaseOrderStatus),
+                    Csv(row.CurrencyCode),
+                    Csv(row.PurchaseOrderAmount),
+                    Csv(row.CommitmentAmount),
+                    Csv(row.CommitmentGroupOrderAmount),
+                    Csv(row.AcceptedReceiptAmount),
+                    Csv(row.InvoiceAmount),
+                    Csv(row.SettledAmount),
+                    Csv(row.InvoicePostedAmount),
+                    Csv(row.PaymentPostedAmount),
+                    Csv(row.RetentionHeldAmount),
+                    Csv(row.RetentionReleasedAmount),
+                    Csv(row.MilestoneAmount),
+                    row.ControlledReversalCount,
+                    row.IsReconciled,
+                    Csv(string.Join(" | ", row.Issues.Select(item => $"{item.Code}: {item.Message}")))));
+            }
+
+            await RecordReportAuditAsync(
+                FinanceAuditEvents.ApProcurementReconciliationExported,
+                new
+                {
+                    report.AsOfDate,
+                    report.PurchaseOrderCount,
+                    report.IssueCount,
+                    report.IsReconciled,
+                    Format = "Csv"
+                },
+                cancellationToken);
+            return Encoding.UTF8.GetBytes(builder.ToString());
+        }
+
+        private static IReadOnlyList<ProcurementFinanceReconciliationIssueDto> BuildProcurementFinanceIssues(
+            PurchaseOrder purchaseOrder,
+            Guid? sourceRequisitionId,
+            ProcurementFinanceReconciliationRowDto row,
+            IReadOnlyCollection<ProcurementBudgetCommitment> activeCommitments,
+            Contract? contract,
+            IReadOnlyCollection<VendorInvoice> invoices,
+            IReadOnlyCollection<VendorPaymentAllocation> allocations,
+            IReadOnlyCollection<FinancePostingEvent> postingEvents,
+            DateTime cutoffExclusive)
+        {
+            var issues = new List<ProcurementFinanceReconciliationIssueDto>();
+            void Add(
+                string code,
+                string area,
+                string message,
+                decimal? expected = null,
+                decimal? actual = null,
+                Guid? sourceDocumentId = null,
+                string severity = "Error")
+            {
+                issues.Add(new ProcurementFinanceReconciliationIssueDto
+                {
+                    Code = code,
+                    Severity = severity,
+                    Area = area,
+                    Message = message,
+                    ExpectedAmount = expected,
+                    ActualAmount = actual,
+                    VarianceAmount = expected.HasValue && actual.HasValue
+                        ? RoundMoney(actual.Value - expected.Value)
+                        : null,
+                    SourceDocumentId = sourceDocumentId
+                });
+            }
+
+            if (sourceRequisitionId.HasValue)
+            {
+                if (activeCommitments.Count == 0)
+                {
+                    Add(
+                        "COMMITMENT_MISSING",
+                        "Commitment",
+                        "The governed purchase-order requisition has no active budget commitment.",
+                        row.CommitmentGroupOrderAmount,
+                        0m,
+                        sourceRequisitionId);
+                }
+                else
+                {
+                    var mismatchedCurrency = activeCommitments.FirstOrDefault(item =>
+                        NormalizeCurrency(item.Currency, row.CurrencyCode) != row.CurrencyCode);
+                    if (mismatchedCurrency != null)
+                    {
+                        Add(
+                            "COMMITMENT_CURRENCY_MISMATCH",
+                            "Commitment",
+                            $"Commitment currency {mismatchedCurrency.Currency} does not match purchase-order currency {row.CurrencyCode}.",
+                            sourceDocumentId: mismatchedCurrency.Id);
+                    }
+
+                    if (Math.Abs(row.CommitmentAmount - row.CommitmentGroupOrderAmount) > 0.01m)
+                    {
+                        Add(
+                            "COMMITMENT_ORDER_VARIANCE",
+                            "Commitment",
+                            "The active requisition commitment does not equal the operative purchase-order family amount.",
+                            row.CommitmentGroupOrderAmount,
+                            row.CommitmentAmount,
+                            sourceRequisitionId);
+                    }
+                }
+            }
+
+            if (row.AcceptedReceiptAmount > row.PurchaseOrderAmount + 0.01m)
+            {
+                Add(
+                    "RECEIPT_EXCEEDS_ORDER",
+                    "Receipt",
+                    "Accepted receipt value exceeds the purchase-order amount.",
+                    row.PurchaseOrderAmount,
+                    row.AcceptedReceiptAmount,
+                    purchaseOrder.Id);
+            }
+            if (row.InvoiceAmount > row.AcceptedReceiptAmount + 0.01m)
+            {
+                Add(
+                    row.AcceptedReceiptAmount <= 0.01m
+                        ? "INVOICE_WITHOUT_ACCEPTED_RECEIPT"
+                        : "INVOICE_EXCEEDS_ACCEPTED_RECEIPT",
+                    "AP",
+                    "Active AP invoice value exceeds cumulative accepted receipt value.",
+                    row.AcceptedReceiptAmount,
+                    row.InvoiceAmount,
+                    purchaseOrder.Id);
+            }
+            if (row.InvoiceAmount > row.PurchaseOrderAmount + 0.01m)
+            {
+                Add(
+                    "INVOICE_EXCEEDS_ORDER",
+                    "AP",
+                    "Active AP invoice value exceeds the purchase-order amount.",
+                    row.PurchaseOrderAmount,
+                    row.InvoiceAmount,
+                    purchaseOrder.Id);
+            }
+            if (row.SettledAmount > row.InvoiceAmount + 0.01m)
+            {
+                Add(
+                    "PAYMENT_EXCEEDS_INVOICE",
+                    "Settlement",
+                    "Posted AP settlement exceeds active AP invoice value.",
+                    row.InvoiceAmount,
+                    row.SettledAmount,
+                    purchaseOrder.Id);
+            }
+            if (Math.Abs(row.InvoicePostedAmount - row.InvoiceAmount) > 0.01m)
+            {
+                Add(
+                    "INVOICE_GL_VARIANCE",
+                    "GL",
+                    "Active AP invoice value does not equal its active central-Finance posting amount.",
+                    row.InvoiceAmount,
+                    row.InvoicePostedAmount,
+                    purchaseOrder.Id);
+            }
+            if (Math.Abs(row.PaymentPostedAmount - row.SettledAmount) > 0.01m)
+            {
+                Add(
+                    "PAYMENT_GL_VARIANCE",
+                    "GL",
+                    "Posted AP settlement does not equal the active central-Finance payment or advance-application amount traced to this purchase order.",
+                    row.SettledAmount,
+                    row.PaymentPostedAmount,
+                    purchaseOrder.Id);
+            }
+
+            foreach (var invoice in invoices)
+            {
+                if (NormalizeCurrency(invoice.CurrencyCode, row.CurrencyCode) != row.CurrencyCode)
+                {
+                    Add(
+                        "INVOICE_CURRENCY_MISMATCH",
+                        "AP",
+                        $"Invoice {invoice.InvoiceNumber} currency {invoice.CurrencyCode} does not match purchase-order currency {row.CurrencyCode}.",
+                        sourceDocumentId: invoice.Id);
+                }
+
+                var post = postingEvents.FirstOrDefault(item =>
+                    item.SourceDocumentType == "VendorInvoice" &&
+                    item.SourceDocumentId == invoice.Id &&
+                    item.PostingAction == "Post");
+                var reversedAsOf = postingEvents.Any(item =>
+                    item.SourceDocumentType == "VendorInvoice" &&
+                    item.SourceDocumentId == invoice.Id &&
+                    item.PostingAction != "Post");
+                var voidedAsOf = invoice.Status == VendorInvoiceStatus.Voided &&
+                                 (!invoice.UpdatedAt.HasValue || invoice.UpdatedAt.Value < cutoffExclusive);
+                if (voidedAsOf && post != null && !reversedAsOf)
+                {
+                    Add(
+                        "VOIDED_INVOICE_REVERSAL_MISSING",
+                        "Reversal",
+                        $"Voided invoice {invoice.InvoiceNumber} has no controlled GL reversal.",
+                        sourceDocumentId: invoice.Id);
+                }
+                else if (!voidedAsOf && reversedAsOf)
+                {
+                    Add(
+                        "ACTIVE_INVOICE_HAS_REVERSED_GL",
+                        "Reversal",
+                        $"Active invoice {invoice.InvoiceNumber} points to a reversed GL journal.",
+                        sourceDocumentId: invoice.Id);
+                }
+            }
+
+            foreach (var payment in allocations
+                         .Where(item => !item.IsReversal && item.VendorPayment != null)
+                         .Select(item => item.VendorPayment)
+                         .DistinctBy(item => item.Id))
+            {
+                var post = postingEvents.FirstOrDefault(item =>
+                    item.SourceDocumentType == "VendorPayment" &&
+                    item.SourceDocumentId == payment.Id &&
+                    item.PostingAction == "Post");
+                var reversedAsOf = postingEvents.Any(item =>
+                    item.SourceDocumentType == "VendorPayment" &&
+                    item.SourceDocumentId == payment.Id &&
+                    item.PostingAction != "Post");
+                var voidedAsOf = payment.Status == VendorPaymentStatus.Voided &&
+                                 (!payment.UpdatedAt.HasValue || payment.UpdatedAt.Value < cutoffExclusive);
+                if (voidedAsOf && post != null && !reversedAsOf)
+                {
+                    Add(
+                        "VOIDED_PAYMENT_REVERSAL_MISSING",
+                        "Reversal",
+                        $"Voided payment {payment.PaymentNumber} has no controlled GL reversal.",
+                        sourceDocumentId: payment.Id);
+                }
+                else if (!voidedAsOf && reversedAsOf)
+                {
+                    Add(
+                        "ACTIVE_PAYMENT_HAS_REVERSED_GL",
+                        "Reversal",
+                        $"Active payment {payment.PaymentNumber} points to a reversed GL journal.",
+                        sourceDocumentId: payment.Id);
+                }
+
+                if (voidedAsOf)
+                {
+                    foreach (var original in allocations.Where(item =>
+                                 item.VendorPaymentId == payment.Id && !item.IsReversal))
+                    {
+                        if (!allocations.Any(item =>
+                                item.IsReversal && item.OriginalAllocationId == original.Id))
+                        {
+                            Add(
+                                "VOIDED_PAYMENT_ALLOCATION_REVERSAL_MISSING",
+                                "Settlement",
+                                $"Voided payment {payment.PaymentNumber} has an unreversed allocation.",
+                                sourceDocumentId: original.Id);
+                        }
+                    }
+                }
+            }
+
+            foreach (var posting in postingEvents.Where(item =>
+                         RoundMoney(item.TotalDebitAmount) != RoundMoney(item.TotalCreditAmount)))
+            {
+                Add(
+                    "UNBALANCED_FINANCE_POSTING",
+                    "GL",
+                    $"Finance posting {posting.Id} is not balanced.",
+                    posting.TotalCreditAmount,
+                    posting.TotalDebitAmount,
+                    posting.Id);
+            }
+
+            if (row.RetentionReleasedAmount > row.RetentionHeldAmount + 0.01m)
+            {
+                Add(
+                    "RETENTION_RELEASE_EXCEEDS_HELD",
+                    "Retention",
+                    "Released retention exceeds retention held on operative payment certificates.",
+                    row.RetentionHeldAmount,
+                    row.RetentionReleasedAmount,
+                    purchaseOrder.ContractId);
+            }
+            if (contract != null && NormalizeCurrency(contract.Currency, row.CurrencyCode) != row.CurrencyCode)
+            {
+                Add(
+                    "CONTRACT_CURRENCY_MISMATCH",
+                    "Milestone",
+                    $"Contract currency {contract.Currency} does not match purchase-order currency {row.CurrencyCode}.",
+                    sourceDocumentId: contract.Id);
+            }
+            if (row.PaidMilestoneAmount > row.SettledAmount + 0.01m)
+            {
+                Add(
+                    "PAID_MILESTONE_EXCEEDS_SETTLEMENT",
+                    "Milestone",
+                    "Milestones marked Paid exceed posted AP settlement traced to this purchase order.",
+                    row.SettledAmount,
+                    row.PaidMilestoneAmount,
+                    purchaseOrder.ContractId,
+                    severity: "Warning");
+            }
+
+            return issues;
+        }
+
+        private static decimal GetTransactionDebit(FinancePostingEvent postingEvent, string currencyCode)
+        {
+            if (postingEvent.JournalEntry?.Transactions == null)
+                return postingEvent.TotalDebitAmount;
+
+            var transactions = postingEvent.JournalEntry.Transactions
+                .Where(item =>
+                    string.Equals(
+                        NormalizeCurrency(item.TransactionCurrency, currencyCode),
+                        currencyCode,
+                        StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            return transactions.Count == 0
+                ? postingEvent.TotalDebitAmount
+                : RoundMoney(transactions.Sum(item => item.TransactionDebitAmount ?? item.DebitAmount));
+        }
+
+        private static IReadOnlyList<ProcurementFinanceReconciliationCurrencySummaryDto>
+            BuildProcurementFinanceCurrencySummaries(
+                IReadOnlyCollection<ProcurementFinanceReconciliationRowDto> rows,
+                IReadOnlyCollection<ProcurementBudgetCommitment> commitments)
+        {
+            var representedRequisitions = rows
+                .Where(item => item.SourceRequisitionId.HasValue)
+                .Select(item => item.SourceRequisitionId!.Value)
+                .ToHashSet();
+            var currencies = rows.Select(item => item.CurrencyCode)
+                .Concat(commitments
+                    .Where(item => representedRequisitions.Contains(item.PurchaseRequisitionId))
+                    .Select(item => NormalizeCurrency(item.Currency, "GHS")))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(item => item)
+                .ToList();
+
+            return currencies.Select(currency =>
+            {
+                var currencyRows = rows.Where(item => item.CurrencyCode == currency).ToList();
+                return new ProcurementFinanceReconciliationCurrencySummaryDto
+                {
+                    CurrencyCode = currency,
+                    PurchaseOrderAmount = RoundMoney(currencyRows.Sum(item => item.PurchaseOrderAmount)),
+                    CommitmentAmount = RoundMoney(commitments
+                        .Where(item =>
+                            representedRequisitions.Contains(item.PurchaseRequisitionId) &&
+                            NormalizeCurrency(item.Currency, currency) == currency)
+                        .Sum(item => item.ReservedAmount)),
+                    AcceptedReceiptAmount = RoundMoney(currencyRows.Sum(item => item.AcceptedReceiptAmount)),
+                    InvoiceAmount = RoundMoney(currencyRows.Sum(item => item.InvoiceAmount)),
+                    SettledAmount = RoundMoney(currencyRows.Sum(item => item.SettledAmount)),
+                    InvoicePostedAmount = RoundMoney(currencyRows.Sum(item => item.InvoicePostedAmount)),
+                    PaymentPostedAmount = RoundMoney(currencyRows.Sum(item => item.PaymentPostedAmount)),
+                    RetentionHeldAmount = RoundMoney(currencyRows.Sum(item => item.RetentionHeldAmount)),
+                    RetentionReleasedAmount = RoundMoney(currencyRows.Sum(item => item.RetentionReleasedAmount)),
+                    MilestoneAmount = RoundMoney(currencyRows.Sum(item => item.MilestoneAmount))
+                };
+            }).ToList();
+        }
+
+        private static FinancePostingEvent? GetActivePostingAsOf(
+            IEnumerable<FinancePostingEvent> postingEvents,
+            string sourceDocumentType,
+            Guid sourceDocumentId)
+        {
+            var sourceEvents = postingEvents
+                .Where(item =>
+                    item.SourceDocumentType == sourceDocumentType &&
+                    item.SourceDocumentId == sourceDocumentId)
+                .ToList();
+            if (sourceEvents.Any(item => item.PostingAction != "Post"))
+                return null;
+            return sourceEvents
+                .Where(item => item.PostingAction == "Post")
+                .OrderByDescending(item => item.PostingDate)
+                .ThenByDescending(item => item.CreatedAt)
+                .FirstOrDefault();
+        }
+
+        private static bool IsAllocationPostedAsOf(
+            VendorPaymentAllocation allocation,
+            IEnumerable<FinancePostingEvent> postingEvents)
+        {
+            if (allocation.VendorPayment?.IsSupplierAdvance == true)
+            {
+                return GetActivePostingAsOf(
+                           postingEvents,
+                           "VendorPaymentAdvanceApplication",
+                           allocation.Id) != null ||
+                       GetActivePostingAsOf(
+                           postingEvents,
+                           "VendorPaymentAllocation",
+                           allocation.Id) != null;
+            }
+
+            return GetActivePostingAsOf(
+                postingEvents,
+                "VendorPayment",
+                allocation.VendorPaymentId) != null;
+        }
+
+        private static List<VendorPaymentAllocation> GetEffectiveAllocationsAsOf(
+            IEnumerable<VendorPaymentAllocation> allocations)
+        {
+            var allocationHistory = allocations.ToList();
+            var reversedOriginalIds = allocationHistory
+                .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
+                .Select(item => item.OriginalAllocationId!.Value)
+                .ToHashSet();
+
+            return allocationHistory
+                .Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id))
+                .ToList();
+        }
+
+        private static decimal ResolveContractValueAsOf(
+            Contract contract,
+            IEnumerable<ContractAmendment> amendments,
+            DateTime cutoffExclusive)
+        {
+            var ordered = amendments
+                .Where(item =>
+                    item.Status == "Approved" &&
+                    item.ApprovedDate.HasValue &&
+                    item.AmendmentType == "ValueChange")
+                .OrderBy(item => item.ApprovedDate)
+                .ThenBy(item => item.SequenceNumber)
+                .ToList();
+
+            // Contract approval applies NewValue and recalculates every milestone in-place.
+            // The first later amendment therefore carries the exact value immediately before
+            // it, while the latest amendment at the cutoff carries the effective new value.
+            var firstAfterCutoff = ordered.FirstOrDefault(item =>
+                item.ApprovedDate!.Value >= cutoffExclusive && item.PreviousValue.HasValue);
+            if (firstAfterCutoff?.PreviousValue is decimal precedingValue)
+                return precedingValue;
+
+            var latestAtCutoff = ordered.LastOrDefault(item =>
+                item.ApprovedDate!.Value < cutoffExclusive && item.NewValue.HasValue);
+            return latestAtCutoff?.NewValue ?? contract.ContractValue;
+        }
+
+        private static decimal ResolveMilestoneAmountAsOf(
+            ContractMilestone milestone,
+            IEnumerable<AuditLog> auditSnapshots,
+            decimal contractValueAsOf,
+            DateTime cutoffExclusive)
+        {
+            var snapshots = auditSnapshots.OrderBy(item => item.Timestamp).ToList();
+            decimal? amount = null;
+            foreach (var snapshot in snapshots.Where(item => item.Timestamp < cutoffExclusive))
+            {
+                if (TryReadDecimalProperty(
+                        snapshot.NewValues,
+                        nameof(ContractMilestone.PaymentAmount),
+                        out var persistedAmount))
+                    amount = persistedAmount;
+            }
+
+            if (amount.HasValue)
+                return RoundMoney(amount.Value);
+
+            // The first mutation after the cutoff retains the state that immediately
+            // preceded it. This covers a later UpdateMilestoneAsync percentage change
+            // as well as a later contract-value recalculation of the same milestone.
+            var firstAfterCutoff = snapshots.FirstOrDefault(item =>
+                item.Timestamp >= cutoffExclusive &&
+                TryReadDecimalProperty(
+                    item.OldValues,
+                    nameof(ContractMilestone.PaymentAmount),
+                    out _));
+            if (firstAfterCutoff is not null &&
+                TryReadDecimalProperty(
+                    firstAfterCutoff.OldValues,
+                    nameof(ContractMilestone.PaymentAmount),
+                    out var precedingAmount))
+                return RoundMoney(precedingAmount);
+
+            // Compatibility fallback for legacy milestones that predate generic audit
+            // snapshots. The effective-dated contract value still prevents a later
+            // contract amendment from rewriting the earlier report.
+            return RoundMoney(contractValueAsOf * milestone.PaymentPercentage / 100m);
+        }
+
+        private static PurchaseOrderCommercialState ResolvePurchaseOrderCommercialStateAsOf(
+            PurchaseOrder purchaseOrder,
+            IEnumerable<ProcurementPurchaseOrderAmendment> amendments,
+            DateTime cutoffExclusive)
+        {
+            var ordered = amendments
+                .Where(item =>
+                    item.Status == ProcurementPurchaseOrderAmendmentStatus.Applied &&
+                    item.AppliedAtUtc.HasValue)
+                .OrderBy(item => item.AppliedAtUtc)
+                .ThenBy(item => item.AmendmentSequence)
+                .ToList();
+            var firstAfterCutoff = ordered.FirstOrDefault(item =>
+                item.AppliedAtUtc!.Value >= cutoffExclusive);
+            var effectiveAmendment = firstAfterCutoff ?? ordered.LastOrDefault(item =>
+                item.AppliedAtUtc!.Value < cutoffExclusive);
+            if (effectiveAmendment == null)
+            {
+                return new PurchaseOrderCommercialState(
+                    purchaseOrder.Id,
+                    purchaseOrder.SourceRequisitionId,
+                    purchaseOrder.Currency,
+                    purchaseOrder.TotalAmount,
+                    purchaseOrder.Items
+                        .Where(item => !item.IsDeleted)
+                        .ToDictionary(item => item.Id, item => item.UnitPrice));
+            }
+
+            var useBefore = firstAfterCutoff != null;
+            var snapshotJson = useBefore
+                ? effectiveAmendment.BeforeSnapshotJson
+                : effectiveAmendment.ProposedSnapshotJson;
+            var expectedHash = useBefore
+                ? effectiveAmendment.BeforeIntegrityHash
+                : effectiveAmendment.ProposedIntegrityHash;
+            if (string.IsNullOrWhiteSpace(snapshotJson) ||
+                string.IsNullOrWhiteSpace(expectedHash) ||
+                !string.Equals(HashJson(snapshotJson), expectedHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} has no trustworthy commercial snapshot.");
+
+            PurchaseOrderCommercialSnapshot? snapshot;
+            try
+            {
+                snapshot = JsonSerializer.Deserialize<PurchaseOrderCommercialSnapshot>(
+                    snapshotJson,
+                    PurchaseOrderSnapshotJsonOptions);
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} has an unreadable commercial snapshot.",
+                    exception);
+            }
+            if (snapshot == null ||
+                string.IsNullOrWhiteSpace(snapshot.Currency) ||
+                snapshot.TotalAmount < 0)
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} has an incomplete commercial snapshot.");
+
+            Dictionary<Guid, decimal> prices;
+            try
+            {
+                prices = snapshot.Items
+                    .Where(item => item.PurchaseOrderItemId.HasValue)
+                    .ToDictionary(
+                        item => item.PurchaseOrderItemId!.Value,
+                        item => item.UnitPrice);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidOperationException(
+                    $"PO_AMENDMENT_SNAPSHOT_INVALID: amendment {effectiveAmendment.Id} repeats a purchase-order line.",
+                    exception);
+            }
+
+            // A proposed amendment snapshot deliberately has no database line ID
+            // for lines introduced by that amendment. Once applied, those IDs live
+            // on the current PO. With no later amendment, merge only those missing
+            // IDs from the protected current state; when a later amendment exists,
+            // its before-snapshot already carries the generated IDs.
+            if (!useBefore)
+            {
+                foreach (var item in purchaseOrder.Items.Where(item => !item.IsDeleted))
+                {
+                    prices.TryAdd(item.Id, item.UnitPrice);
+                }
+            }
+
+            return new PurchaseOrderCommercialState(
+                purchaseOrder.Id,
+                snapshot.SourceRequisitionId == Guid.Empty
+                    ? null
+                    : snapshot.SourceRequisitionId,
+                snapshot.Currency,
+                snapshot.TotalAmount,
+                prices);
+        }
+
+        private static string HashJson(string value) =>
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+                .ToLowerInvariant();
+
+        private static PurchaseOrderStateAsOf? ResolvePurchaseOrderStateAsOf(
+            PurchaseOrder purchaseOrder,
+            IEnumerable<AuditLog> auditSnapshots,
+            DateTime cutoffExclusive)
+        {
+            if (purchaseOrder.CreatedAt >= cutoffExclusive)
+                return null;
+
+            var snapshots = auditSnapshots.OrderBy(item => item.Timestamp).ToList();
+            string? status = null;
+            foreach (var snapshot in snapshots.Where(item => item.Timestamp < cutoffExclusive))
+            {
+                if (TryReadStringProperty(snapshot.NewValues, nameof(PurchaseOrder.Status), out var persistedStatus))
+                    status = persistedStatus;
+            }
+
+            var statusFromAudit = !string.IsNullOrWhiteSpace(status);
+            if (!statusFromAudit)
+            {
+                foreach (var snapshot in snapshots.Where(item => item.Timestamp >= cutoffExclusive))
+                {
+                    if (!TryReadStringProperty(snapshot.OldValues, nameof(PurchaseOrder.Status), out var precedingStatus))
+                        continue;
+                    status = precedingStatus;
+                    statusFromAudit = true;
+                    break;
+                }
+            }
+
+            if (!statusFromAudit)
+            {
+                status = purchaseOrder.Status;
+
+                // ApprovedAt is the authoritative lifecycle boundary for records
+                // whose approval occurred after the reporting cutoff. Legacy rows
+                // without an approval timestamp retain their persisted state.
+                if (purchaseOrder.ApprovedAt.HasValue &&
+                    purchaseOrder.ApprovedAt.Value >= cutoffExclusive)
+                {
+                    status = "Draft";
+                }
+                else if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+                         ((purchaseOrder.CancelledAtUtc.HasValue &&
+                           purchaseOrder.CancelledAtUtc.Value >= cutoffExclusive) ||
+                          (!purchaseOrder.CancelledAtUtc.HasValue &&
+                           purchaseOrder.UpdatedAt.HasValue &&
+                           purchaseOrder.UpdatedAt.Value >= cutoffExclusive)))
+                {
+                    // The cancellation lifecycle timestamp is authoritative. UpdatedAt
+                    // remains a compatibility fallback for rows cancelled before the
+                    // timestamp column was introduced and backfilled.
+                    status = "Approved";
+                }
+            }
+
+            return new PurchaseOrderStateAsOf(purchaseOrder.Id, status ?? "Draft");
+        }
+
+        private static ProcurementBudgetCommitment? ResolveBudgetCommitmentStateAsOf(
+            ProcurementBudgetCommitment commitment,
+            IEnumerable<ProcurementControlEvent> lifecycleEvents,
+            DateTime cutoffExclusive)
+        {
+            var events = lifecycleEvents
+                .OrderBy(item => item.OccurredAtUtc)
+                .ThenBy(item => item.CreatedAt)
+                .ToList();
+            var latestAtCutoff = events.LastOrDefault(item => item.OccurredAtUtc < cutoffExclusive);
+            if (TryReadBudgetCommitmentSnapshot(latestAtCutoff?.AfterJson, out var persistedAtCutoff))
+                return persistedAtCutoff;
+
+            // The first lifecycle event after the cutoff carries the authoritative
+            // state immediately before that mutation. This preserves both status and
+            // reserved amount across later release/re-reservation cycles.
+            var firstAfterCutoff = events.FirstOrDefault(item => item.OccurredAtUtc >= cutoffExclusive);
+            if (TryReadBudgetCommitmentSnapshot(firstAfterCutoff?.BeforeJson, out var precedingState))
+                return precedingState;
+
+            if (commitment.ReservedAtUtc >= cutoffExclusive)
+                return null;
+
+            if (commitment.Status == ProcurementBudgetCommitmentStatus.Reserved)
+                return CopyBudgetCommitment(commitment, ProcurementBudgetCommitmentStatus.Reserved);
+
+            var terminalAt = commitment.Status == ProcurementBudgetCommitmentStatus.Consumed
+                ? commitment.ConsumedAtUtc ?? commitment.UpdatedAt
+                : commitment.ReleasedAtUtc ?? commitment.UpdatedAt;
+            return terminalAt.HasValue && terminalAt.Value >= cutoffExclusive
+                ? CopyBudgetCommitment(commitment, ProcurementBudgetCommitmentStatus.Reserved)
+                : CopyBudgetCommitment(commitment, commitment.Status);
+        }
+
+        private static bool TryReadBudgetCommitmentSnapshot(
+            string? json,
+            out ProcurementBudgetCommitment? commitment)
+        {
+            commitment = null;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                var snapshot = JsonSerializer.Deserialize<BudgetCommitmentSnapshot>(
+                    json,
+                    BudgetCommitmentSnapshotJsonOptions);
+                if (snapshot == null || !TryReadBudgetCommitmentStatus(snapshot.Status, out var status))
+                {
+                    return false;
+                }
+
+                commitment = new ProcurementBudgetCommitment
+                {
+                    Id = snapshot.Id,
+                    ProcurementBudgetId = snapshot.ProcurementBudgetId,
+                    PurchaseRequisitionId = snapshot.PurchaseRequisitionId,
+                    ReservationReference = snapshot.ReservationReference,
+                    ReservationSequence = snapshot.ReservationSequence,
+                    Status = status,
+                    ReservedAmount = snapshot.ReservedAmount,
+                    Currency = snapshot.Currency,
+                    BudgetCommittedBefore = snapshot.BudgetCommittedBefore,
+                    BudgetAvailableBefore = snapshot.BudgetAvailableBefore,
+                    BudgetCommittedAfter = snapshot.BudgetCommittedAfter,
+                    BudgetAvailableAfter = snapshot.BudgetAvailableAfter,
+                    IsOverride = snapshot.IsOverride,
+                    OverrideRuleCode = snapshot.OverrideRuleCode,
+                    OverrideApprovalReference = snapshot.OverrideApprovalReference,
+                    ReservedAtUtc = snapshot.ReservedAtUtc,
+                    ReleasedAtUtc = snapshot.ReleasedAtUtc,
+                    ConsumedAtUtc = snapshot.ConsumedAtUtc,
+                    ReleaseReason = snapshot.ReleaseReason
+                };
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadBudgetCommitmentStatus(
+            JsonElement value,
+            out ProcurementBudgetCommitmentStatus status)
+        {
+            status = default;
+            if (value.ValueKind == JsonValueKind.Number &&
+                value.TryGetInt32(out var numericStatus) &&
+                Enum.IsDefined(typeof(ProcurementBudgetCommitmentStatus), numericStatus))
+            {
+                status = (ProcurementBudgetCommitmentStatus)numericStatus;
+                return true;
+            }
+
+            return value.ValueKind == JsonValueKind.String &&
+                   Enum.TryParse(value.GetString(), ignoreCase: true, out status) &&
+                   Enum.IsDefined(typeof(ProcurementBudgetCommitmentStatus), status);
+        }
+
+        private static ProcurementBudgetCommitment CopyBudgetCommitment(
+            ProcurementBudgetCommitment source,
+            ProcurementBudgetCommitmentStatus status) => new()
+        {
+            Id = source.Id,
+            TenantId = source.TenantId,
+            ProcurementBudgetId = source.ProcurementBudgetId,
+            PurchaseRequisitionId = source.PurchaseRequisitionId,
+            ReservationReference = source.ReservationReference,
+            ReservationSequence = source.ReservationSequence,
+            Status = status,
+            ReservedAmount = source.ReservedAmount,
+            Currency = source.Currency,
+            BudgetCommittedBefore = source.BudgetCommittedBefore,
+            BudgetAvailableBefore = source.BudgetAvailableBefore,
+            BudgetCommittedAfter = source.BudgetCommittedAfter,
+            BudgetAvailableAfter = source.BudgetAvailableAfter,
+            IsOverride = source.IsOverride,
+            OverrideRuleCode = source.OverrideRuleCode,
+            OverrideApprovalReference = source.OverrideApprovalReference,
+            ReservedAtUtc = source.ReservedAtUtc,
+            ReleasedAtUtc = source.ReleasedAtUtc,
+            ConsumedAtUtc = source.ConsumedAtUtc,
+            ReleaseReason = source.ReleaseReason,
+            CreatedAt = source.CreatedAt,
+            UpdatedAt = source.UpdatedAt
+        };
+
+        private static bool IsOperativePurchaseOrderStatus(string status) =>
+            !string.Equals(status, "Draft", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Pending Approval", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "PendingApproval", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Submitted", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase);
+
+        private static bool TryReadStringProperty(
+            string? json,
+            string propertyName,
+            out string value)
+        {
+            value = string.Empty;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    return false;
+                var property = document.RootElement.EnumerateObject()
+                    .FirstOrDefault(item => string.Equals(
+                        item.Name,
+                        propertyName,
+                        StringComparison.OrdinalIgnoreCase));
+                if (property.Value.ValueKind != JsonValueKind.String)
+                    return false;
+                value = property.Value.GetString() ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(value);
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryReadDecimalProperty(
+            string? json,
+            string propertyName,
+            out decimal value)
+        {
+            value = 0m;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    return false;
+                var property = document.RootElement.EnumerateObject()
+                    .FirstOrDefault(item => string.Equals(
+                        item.Name,
+                        propertyName,
+                        StringComparison.OrdinalIgnoreCase));
+                if (property.Value.ValueKind == JsonValueKind.Number &&
+                    property.Value.TryGetDecimal(out value))
+                    return true;
+                if (property.Value.ValueKind == JsonValueKind.String &&
+                    decimal.TryParse(
+                        property.Value.GetString(),
+                        NumberStyles.Number,
+                        CultureInfo.InvariantCulture,
+                        out value))
+                    return true;
+                return false;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static PaymentCertificateStateAsOf? ResolvePaymentCertificateStateAsOf(
+            ProjectPaymentCertificate certificate,
+            IEnumerable<AuditLog> auditSnapshots,
+            DateTime cutoffExclusive)
+        {
+            var snapshots = auditSnapshots.OrderBy(item => item.Timestamp).ToList();
+            var latestAtCutoff = snapshots.LastOrDefault(item => item.Timestamp < cutoffExclusive);
+            if (TryReadPaymentCertificateSnapshot(latestAtCutoff?.NewValues, out var persistedAtCutoff))
+                return persistedAtCutoff;
+
+            // The first mutation after the cutoff contains the authoritative state that
+            // immediately preceded it, which also supports certificates created before
+            // snapshot auditing was introduced.
+            var firstAfterCutoff = snapshots.FirstOrDefault(item => item.Timestamp >= cutoffExclusive);
+            if (TryReadPaymentCertificateSnapshot(firstAfterCutoff?.OldValues, out var precedingState))
+                return precedingState;
+
+            if (certificate.CreatedAt >= cutoffExclusive)
+                return null;
+
+            var status = certificate.Status;
+            var releasedAmount = certificate.RetentionReleasedAmount;
+            var isDeleted = certificate.IsDeleted &&
+                            certificate.DeletedAt.HasValue &&
+                            certificate.DeletedAt.Value < cutoffExclusive;
+            if (certificate.UpdatedAt.HasValue && certificate.UpdatedAt.Value >= cutoffExclusive)
+            {
+                // Conservative compatibility for legacy rows whose first post-cutoff
+                // mutation predates explicit snapshots.
+                if (status == ProjectPaymentCertificateStatuses.Cancelled)
+                    status = ProjectPaymentCertificateStatuses.Approved;
+                if (releasedAmount > 0m)
+                    releasedAmount = 0m;
+            }
+
+            return new PaymentCertificateStateAsOf(
+                certificate.Id,
+                certificate.ContractId,
+                status,
+                certificate.Currency,
+                certificate.RetentionHeldAmount,
+                releasedAmount,
+                certificate.IssueDate,
+                isDeleted);
+        }
+
+        private static bool TryReadPaymentCertificateSnapshot(
+            string? json,
+            out PaymentCertificateStateAsOf? state)
+        {
+            state = null;
+            if (string.IsNullOrWhiteSpace(json))
+                return false;
+            try
+            {
+                var snapshot = JsonSerializer.Deserialize<PaymentCertificateAuditSnapshot>(json);
+                if (snapshot == null)
+                    return false;
+                state = new PaymentCertificateStateAsOf(
+                    snapshot.Id,
+                    snapshot.ContractId,
+                    snapshot.Status,
+                    snapshot.Currency,
+                    snapshot.RetentionHeldAmount,
+                    snapshot.RetentionReleasedAmount,
+                    snapshot.IssueDate,
+                    snapshot.IsDeleted);
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private sealed record PaymentCertificateAuditSnapshot(
+            Guid Id,
+            Guid? ContractId,
+            string Status,
+            string Currency,
+            decimal RetentionHeldAmount,
+            decimal RetentionReleasedAmount,
+            DateTime IssueDate,
+            DateTime CreatedAt,
+            DateTime? UpdatedAt,
+            bool IsDeleted,
+            DateTime? DeletedAt);
+
+        private sealed record PaymentCertificateStateAsOf(
+            Guid Id,
+            Guid? ContractId,
+            string Status,
+            string Currency,
+            decimal RetentionHeldAmount,
+            decimal RetentionReleasedAmount,
+            DateTime IssueDate,
+            bool IsDeleted);
+
+        private sealed record PurchaseOrderStateAsOf(Guid Id, string Status);
+
+        private sealed record BudgetCommitmentSnapshot(
+            Guid Id,
+            Guid ProcurementBudgetId,
+            Guid PurchaseRequisitionId,
+            string ReservationReference,
+            int ReservationSequence,
+            JsonElement Status,
+            decimal ReservedAmount,
+            string Currency,
+            decimal BudgetCommittedBefore,
+            decimal BudgetAvailableBefore,
+            decimal BudgetCommittedAfter,
+            decimal BudgetAvailableAfter,
+            bool IsOverride,
+            string? OverrideRuleCode,
+            string? OverrideApprovalReference,
+            DateTime ReservedAtUtc,
+            DateTime? ReleasedAtUtc,
+            DateTime? ConsumedAtUtc,
+            string? ReleaseReason);
 
         private async Task<ApAgingReportDto> GetSettlementReadModelAgingReportAsync(
             DateTime? asOfDate,
@@ -802,6 +2369,123 @@ namespace ErpSystem.Api.Services.Finance.AP
         // ═════════════════════════════════════════════════════════════════
         //  EXPORTS (STUBS)
         // ═════════════════════════════════════════════════════════════════
+
+        public async Task<VendorInvoiceMatchExceptionReportDto> GetThreeWayMatchExceptionsAsync(
+            DateTime fromDate,
+            DateTime toDate,
+            VendorInvoiceMatchExceptionStatus? status = null,
+            Guid? supplierId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var from = EnsureUtc(fromDate);
+            var to = EnsureUtc(toDate);
+            if (to < from) throw new ArgumentException("The report end date must not precede the start date.");
+            var endExclusive = to.Date.AddDays(1);
+            var now = DateTime.UtcNow;
+
+            IQueryable<VendorInvoiceMatchException> query = _unitOfWork.Repository<VendorInvoiceMatchException>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                                      item.RequestedAtUtc >= from.Date && item.RequestedAtUtc < endExclusive)
+                .AsNoTracking()
+                .Include(item => item.VendorInvoice).ThenInclude(invoice => invoice.Supplier)
+                .Include(item => item.PurchaseOrder)
+                .Include(item => item.Variances)
+                .Include(item => item.Evidence);
+            if (supplierId.HasValue)
+                query = query.Where(item => item.VendorInvoice.SupplierId == supplierId.Value);
+
+            var source = await query.OrderByDescending(item => item.RequestedAtUtc).ToListAsync(cancellationToken);
+            var rows = source.Select(item => new VendorInvoiceMatchExceptionReportRowDto
+            {
+                ExceptionId = item.Id,
+                VendorInvoiceId = item.VendorInvoiceId,
+                InvoiceNumber = item.VendorInvoice.InvoiceNumber,
+                SupplierId = item.VendorInvoice.SupplierId,
+                SupplierName = item.VendorInvoice.SupplierName,
+                PurchaseOrderId = item.PurchaseOrderId,
+                PurchaseOrderNumber = item.PurchaseOrder.OrderNumber,
+                Status = VendorInvoiceMatchExceptionRules.EffectiveStatus(item.Status, item.ExpiresAtUtc, now),
+                VarianceType = item.VarianceType,
+                MaximumVariancePercentage = item.Variances.Count == 0
+                    ? 0m
+                    : item.Variances.Max(variance => Math.Abs(variance.VariancePercentage)),
+                RootCauseCategory = item.RootCauseCategory,
+                RootCauseDescription = item.RootCauseDescription,
+                CorrectiveAction = item.CorrectiveAction,
+                CorrectiveActionOwnerName = item.CorrectiveActionOwnerName,
+                CorrectiveActionDueAtUtc = item.CorrectiveActionDueAtUtc,
+                CorrectiveActionStatus = item.CorrectiveActionStatus,
+                RequestedAtUtc = item.RequestedAtUtc,
+                ExpiresAtUtc = item.ExpiresAtUtc,
+                RequestedByName = item.RequestedByName,
+                FinalApprovedByName = item.FinalApprovedByName,
+                FinalApprovedAtUtc = item.FinalApprovedAtUtc,
+                WorkflowInstanceId = item.WorkflowInstanceId,
+                ApprovalControlEventId = item.ApprovalControlEventId,
+                EvidenceCount = item.Evidence.Count
+            }).ToList();
+            if (status.HasValue) rows = rows.Where(row => row.Status == status.Value).ToList();
+
+            var report = new VendorInvoiceMatchExceptionReportDto
+            {
+                FromDate = from.Date,
+                ToDate = to.Date,
+                Status = status,
+                SupplierId = supplierId,
+                TotalCount = rows.Count,
+                ApprovedCount = rows.Count(row => row.Status == VendorInvoiceMatchExceptionStatus.Approved),
+                ExpiredCount = rows.Count(row => row.Status == VendorInvoiceMatchExceptionStatus.Expired),
+                OpenCorrectiveActionCount = rows.Count(row =>
+                    VendorInvoiceMatchExceptionRules.CanCompleteCorrectiveAction(
+                        row.Status,
+                        row.CorrectiveActionStatus,
+                        row.ExpiresAtUtc,
+                        now)),
+                Rows = rows
+            };
+            await RecordReportAuditAsync(FinanceAuditEvents.ApMatchExceptionsGenerated, report, cancellationToken);
+            return report;
+        }
+
+        public async Task<byte[]> ExportThreeWayMatchExceptionsAsync(
+            DateTime fromDate,
+            DateTime toDate,
+            VendorInvoiceMatchExceptionStatus? status = null,
+            Guid? supplierId = null,
+            string format = "Csv",
+            CancellationToken cancellationToken = default)
+        {
+            if (!string.Equals(format, "Csv", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException("The AP-006 register currently supports CSV export only.");
+            var report = await GetThreeWayMatchExceptionsAsync(
+                fromDate, toDate, status, supplierId, cancellationToken);
+            var csv = new StringBuilder();
+            csv.AppendLine("Invoice,Supplier,Purchase Order,Status,Variance Type,Maximum Variance %,Root Cause,Corrective Action,Owner,Corrective Due,Corrective Status,Requested At,Expires At,Requester,Final Approver,Workflow Instance,Approval Event,Evidence Count");
+            foreach (var row in report.Rows)
+            {
+                csv.AppendLine(string.Join(",", new[]
+                {
+                    Csv(row.InvoiceNumber), Csv(row.SupplierName), Csv(row.PurchaseOrderNumber), Csv(row.Status.ToString()),
+                    Csv(row.VarianceType), row.MaximumVariancePercentage.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture),
+                    Csv(row.RootCauseDescription), Csv(row.CorrectiveAction), Csv(row.CorrectiveActionOwnerName),
+                    row.CorrectiveActionDueAtUtc.ToString("O"), Csv(row.CorrectiveActionStatus.ToString()),
+                    row.RequestedAtUtc.ToString("O"), row.ExpiresAtUtc.ToString("O"), Csv(row.RequestedByName),
+                    Csv(row.FinalApprovedByName ?? string.Empty), row.WorkflowInstanceId?.ToString() ?? string.Empty,
+                    row.ApprovalControlEventId?.ToString() ?? string.Empty, row.EvidenceCount.ToString()
+                }));
+            }
+            var bytes = Encoding.UTF8.GetBytes(csv.ToString());
+            await RecordReportAuditAsync(FinanceAuditEvents.ApMatchExceptionsExported, new
+            {
+                report.FromDate,
+                report.ToDate,
+                report.Status,
+                report.SupplierId,
+                report.TotalCount,
+                Format = "Csv"
+            }, cancellationToken);
+            return bytes;
+        }
 
         public async Task<byte[]> ExportAgingReportAsync(DateTime? asOfDate = null, string format = "Csv", CancellationToken cancellationToken = default)
         {
@@ -1310,6 +2994,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             return Math.Round(amount, 2, MidpointRounding.AwayFromZero);
         }
 
+        private static DateTime EnsureUtc(DateTime value) => value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+            _ => value.ToUniversalTime()
+        };
+
         private sealed record SupplierLedgerSelection(
             Guid? SupplierId,
             Guid? BusinessPartnerId,
@@ -1329,6 +3020,27 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal Debit,
             decimal Credit);
 
+        private sealed record PurchaseOrderCommercialState(
+            Guid PurchaseOrderId,
+            Guid? SourceRequisitionId,
+            string Currency,
+            decimal TotalAmount,
+            Dictionary<Guid, decimal> ItemUnitPrices);
+
+        private sealed class PurchaseOrderCommercialSnapshot
+        {
+            public Guid SourceRequisitionId { get; set; }
+            public string Currency { get; set; } = string.Empty;
+            public decimal TotalAmount { get; set; }
+            public List<PurchaseOrderCommercialSnapshotItem> Items { get; set; } = [];
+        }
+
+        private sealed class PurchaseOrderCommercialSnapshotItem
+        {
+            public Guid? PurchaseOrderItemId { get; set; }
+            public decimal UnitPrice { get; set; }
+        }
+
         private async Task RecordReportAuditAsync(string eventType, object report, CancellationToken cancellationToken)
         {
             if (_financeAuditService == null)
@@ -1338,13 +3050,26 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             try
             {
+                var isMatchExceptionRegister = eventType is
+                    FinanceAuditEvents.ApMatchExceptionsGenerated or FinanceAuditEvents.ApMatchExceptionsExported;
+                var isProcurementReconciliation = eventType is
+                    FinanceAuditEvents.ApProcurementReconciliationGenerated or
+                    FinanceAuditEvents.ApProcurementReconciliationExported;
                 await _financeAuditService.RecordAsync(new FinanceAuditEventDto
                 {
                     EventType = eventType,
                     TenantId = TenantId,
                     SourceModule = "AP",
-                    SourceDocumentType = "AgingReport",
-                    Resource = "Finance.AP.AgingReport",
+                    SourceDocumentType = isProcurementReconciliation
+                        ? "ProcurementFinanceReconciliation"
+                        : isMatchExceptionRegister
+                            ? "MatchExceptionRegister"
+                            : "AgingReport",
+                    Resource = isProcurementReconciliation
+                        ? "Finance.AP.ProcurementReconciliation"
+                        : isMatchExceptionRegister
+                            ? "Finance.AP.MatchExceptionRegister"
+                            : "Finance.AP.AgingReport",
                     ResourceId = TenantId.ToString(),
                     AfterValues = report
                 }, cancellationToken);
@@ -1357,6 +3082,16 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         private static string Csv(string value)
         {
+            // Prevent spreadsheet applications from interpreting exported,
+            // user-controlled text as a formula. The leading apostrophe is
+            // displayed as text by Excel-compatible readers.
+            var firstMeaningful = value.AsSpan().TrimStart();
+            if (!firstMeaningful.IsEmpty &&
+                firstMeaningful[0] is '=' or '+' or '-' or '@')
+            {
+                value = $"'{value}";
+            }
+
             if (value.Contains('"', StringComparison.Ordinal))
             {
                 value = value.Replace("\"", "\"\"", StringComparison.Ordinal);
@@ -1369,5 +3104,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? $"\"{value}\""
                 : value;
         }
+
+        private static string Csv(decimal value) =>
+            value.ToString("0.00####", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

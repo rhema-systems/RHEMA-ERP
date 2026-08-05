@@ -43,6 +43,8 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+        private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
+        private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
@@ -60,6 +62,19 @@ namespace ErpSystem.Web.Services
                     "Financial Controller Final Approval",
                     new[] { "Financial Controller" },
                     "Final finance control approval before the document is released to downstream processing.")
+            };
+
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinancePaymentApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Finance Manager Approval",
+                    new[] { "Finance Manager" },
+                    "Finance manager authorization of the supplier payment after invoice processing is complete."),
+                new(
+                    "Financial Controller Final Approval",
+                    new[] { "Financial Controller" },
+                    "Independent final payment authorization before posting, clearing, or settlement finalization.")
             };
 
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
@@ -84,6 +99,8 @@ namespace ErpSystem.Web.Services
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+            ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
+            InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null)
         {
             _context = context;
@@ -93,6 +110,8 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
+            _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
+            _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
@@ -167,6 +186,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC access roles, permissions, committees, and Draft workflow templates are seeded...");
                     await _procurementAccessControlSeeder.SeedAsync();
+                }
+
+                if (_procurementStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC procurement statutory report catalogue is seeded...");
+                    await _procurementStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_inventoryStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC inventory statutory report catalogue is seeded...");
+                    await _inventoryStatutoryReportSeeder.SeedAsync();
                 }
 
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
@@ -339,6 +370,11 @@ namespace ErpSystem.Web.Services
                 {
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
+                        var approvalStages = spec.EntityCode is
+                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                            ? FinancePaymentApprovalStages
+                            : FinanceApprovalStages;
+
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
                             spec.EntityCode,
@@ -346,7 +382,7 @@ namespace ErpSystem.Web.Services
                             spec.EntityClassName,
                             spec.DefinitionName,
                             spec.Description,
-                            FinanceApprovalStages);
+                            approvalStages);
                     }
                     await EnsureVendorPaymentControlWorkflowSeededAsync(tenant.Id);
                     await EnsureApPaymentControlPoliciesSeededAsync(tenant.Id);
@@ -670,6 +706,11 @@ namespace ErpSystem.Web.Services
                     "Goods receipt approval before AP invoice matching and inventory/expense recognition."),
                 new("VendorInvoice", "Vendor Invoice", typeof(VendorInvoice).FullName, "Accounts Payable Invoice Approval",
                     "Supplier invoice approval workflow for AP controls before payment or posting."),
+                new("VendorInvoiceMatchException", "Vendor Invoice Match Exception", typeof(VendorInvoiceMatchException).FullName,
+                    "Vendor Invoice Match Exception Approval",
+                    "Independent AP-006 exception approval: Finance Manager approval -> Financial Controller final approval. This workflow authorizes a precise match variance only and never allocates or posts payment."),
+                new("VendorPayment", "Vendor Payment", typeof(VendorPayment).FullName, "Vendor Payment Authorization",
+                    "Manual supplier payment authorization before posting, clearing, or settlement finalization."),
                 new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
                     "Bulk supplier payment batch approval before processing."),
                 new("SupplierReturn", "Supplier Return", typeof(SupplierReturn).FullName, "Supplier Return Approval",
@@ -4582,10 +4623,16 @@ namespace ErpSystem.Web.Services
                     changed = true;
                 }
 
+                // Baseline definitions are runtime controls, not editable drafts. Repair older
+                // seed rows that pre-date workflow lifecycle governance so startup does not leave
+                // Finance submission paths pointing at an "active" definition the repository
+                // correctly excludes from runtime selection.
                 if (sequentialDefinition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published)
                 {
                     sequentialDefinition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
                     sequentialDefinition.PublishedAt ??= repairNow;
+                    sequentialDefinition.RetiredAt = null;
+                    sequentialDefinition.RetiredById = null;
                     changed = true;
                 }
 
@@ -4835,9 +4882,14 @@ namespace ErpSystem.Web.Services
             foreach (var definition in definitions.Where(d =>
                          d.Id != activeDefinitionId
                          && d.IsActive
-                         && IsLegacySeededWorkflowDefinition(d, definitionName, approvalStages)))
+                         && IsReplaceableSeededWorkflowDefinition(d, definitionName, approvalStages)))
             {
                 definition.IsActive = false;
+                if (definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published)
+                {
+                    definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                    definition.RetiredAt ??= now;
+                }
                 definition.UpdatedAt = now;
                 definition.UpdatedBy = "System";
                 changed = true;
@@ -4863,6 +4915,28 @@ namespace ErpSystem.Web.Services
             }
 
             return definition.Steps.Count(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted) <= 1;
+        }
+
+        private static bool IsReplaceableSeededWorkflowDefinition(
+            WorkflowDefinition definition,
+            string definitionName,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
+        {
+            if (!string.Equals(definition.Name, definitionName, StringComparison.OrdinalIgnoreCase)
+                && !definition.Name.StartsWith($"{definitionName} ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (HasExpectedApprovalStages(definition, approvalStages))
+            {
+                return false;
+            }
+
+            // Definitions created by this baseline seeder may have multiple stages from an
+            // older release. They remain replaceable; tenant-authored definitions do not.
+            return string.Equals(definition.CreatedBy, "System", StringComparison.OrdinalIgnoreCase)
+                || IsLegacySeededWorkflowDefinition(definition, definitionName, approvalStages);
         }
 
         private static bool EnsureSequentialApprovalStepConfigurations(

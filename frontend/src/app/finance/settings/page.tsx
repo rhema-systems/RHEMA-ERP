@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -132,6 +132,8 @@ export default function FinanceSettingsPage() {
         minimumReversalReasonLength: 20,
         enforceFinanceAccessScopes: false,
         requireDepreciationBeforePeriodClose: true,
+        apInvoicePriceTolerancePercent: 1,
+        apInvoiceQuantityTolerancePercent: 1,
     });
 
     useEffect(() => {
@@ -188,6 +190,8 @@ export default function FinanceSettingsPage() {
                 minimumReversalReasonLength: data.minimumReversalReasonLength ?? 20,
                 enforceFinanceAccessScopes: data.enforceFinanceAccessScopes ?? false,
                 requireDepreciationBeforePeriodClose: data.requireDepreciationBeforePeriodClose ?? true,
+                apInvoicePriceTolerancePercent: data.apInvoicePriceTolerancePercent ?? 1,
+                apInvoiceQuantityTolerancePercent: data.apInvoiceQuantityTolerancePercent ?? 1,
             });
 
             // Load accounts for the current COA type
@@ -214,6 +218,18 @@ export default function FinanceSettingsPage() {
     };
 
     const handleSave = async () => {
+        const tolerances = [
+            formData.apInvoicePriceTolerancePercent,
+            formData.apInvoiceQuantityTolerancePercent,
+        ];
+        if (tolerances.some(value => value == null || !Number.isFinite(value) || value < 0 || value > 100)) {
+            toast({
+                title: 'Invalid matching tolerance',
+                description: 'AP invoice matching tolerances must be between 0 and 100 percent.',
+                variant: 'destructive',
+            });
+            return;
+        }
         try {
             setSaving(true);
             const updated = await financeDataService.updateFinanceSettings(formData);
@@ -593,6 +609,55 @@ export default function FinanceSettingsPage() {
                             <Link className="ml-1 font-medium underline" href="/finance/cash/liquidity-accounts">Open Banking Setup</Link>
                         </AlertDescription>
                     </Alert>
+                </CardContent>
+            </Card>
+
+            {/* AP matching is configured alongside the Finance-owned settlement controls because
+                these tolerances determine whether a supplier invoice can enter the payment cycle. */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Accounts Payable Matching Control</CardTitle>
+                    <CardDescription>
+                        Tenant-level tolerances used by the mandatory PO, invoice, and independently accepted receipt comparison.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                        <Label htmlFor="apInvoicePriceTolerancePercent">Unit price tolerance (%)</Label>
+                        <Input
+                            id="apInvoicePriceTolerancePercent"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.01"
+                            value={formData.apInvoicePriceTolerancePercent ?? 1}
+                            onChange={(event) => setFormData({
+                                ...formData,
+                                apInvoicePriceTolerancePercent: Number(event.target.value),
+                            })}
+                        />
+                        <p className="text-sm text-muted-foreground">
+                            Maximum unit-price variance from the governed purchase-order line.
+                        </p>
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="apInvoiceQuantityTolerancePercent">Cumulative quantity tolerance (%)</Label>
+                        <Input
+                            id="apInvoiceQuantityTolerancePercent"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.01"
+                            value={formData.apInvoiceQuantityTolerancePercent ?? 1}
+                            onChange={(event) => setFormData({
+                                ...formData,
+                                apInvoiceQuantityTolerancePercent: Number(event.target.value),
+                            })}
+                        />
+                        <p className="text-sm text-muted-foreground">
+                            Maximum cumulative invoice quantity above independently accepted receipt quantity.
+                        </p>
+                    </div>
                 </CardContent>
             </Card>
 

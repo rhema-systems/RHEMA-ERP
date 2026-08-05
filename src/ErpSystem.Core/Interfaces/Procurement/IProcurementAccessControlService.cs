@@ -9,6 +9,7 @@ public interface IProcurementAccessControlService
     Task<IReadOnlyList<ProcurementAccessPermissionDto>> GetPermissionsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProcurementAccessUserOptionDto>> GetUsersAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProcurementAccessWarehouseOptionDto>> GetWarehousesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProcurementAccessLocationOptionDto>> GetLocationsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProcurementResponsibilityAssignmentDto>> GetAssignmentsAsync(CancellationToken cancellationToken = default);
     Task<ProcurementResponsibilityAssignmentDto> SaveAssignmentAsync(Guid? id, SaveProcurementResponsibilityAssignmentRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProcurementCommitteeDto>> GetCommitteesAsync(CancellationToken cancellationToken = default);

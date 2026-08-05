@@ -83,7 +83,8 @@ public static class FinancePermissionPolicyMap
         "Export",
         "Print",
         "ExportToExcel",
-        "ExportToPdf"
+        "ExportToPdf",
+        "ExportThreeWayMatchExceptions"
     };
 
     public static IReadOnlyList<string> GetRequiredPolicies(
@@ -112,7 +113,7 @@ public static class FinancePermissionPolicyMap
             "VendorPayment" => VendorPaymentPolicy(action),
             "FinanceAccessScope" => One(FinancePermissions.ManageFinanceAccessScopes),
             "PaymentBatch" => PaymentBatchPolicy(action),
-            "ApReports" => One(FinancePermissions.RunFinanceReports),
+            "ApReports" => ReportPolicy(action),
             "Invoice" => ArInvoicePolicy(action),
             "Payment" => ArPaymentPolicy(action),
             "ArReports" => ReportPolicy(action),
@@ -193,6 +194,10 @@ public static class FinancePermissionPolicyMap
             "Post" => One(FinancePermissions.PostApInvoices),
             "Void" => One(FinancePermissions.VoidApInvoices),
             "TwoWayMatch" or "ThreeWayMatch" => One(FinancePermissions.ManageApInvoices),
+            "GetMatchExceptions" => One(FinancePermissions.ViewFinance),
+            "DecideMatchException" => One(FinancePermissions.ApproveApInvoices),
+            "RequestMatchException" or "CancelMatchException" or "CompleteMatchExceptionCorrectiveAction" =>
+                One(FinancePermissions.ManageApInvoices),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ManageApInvoices)
         };
 

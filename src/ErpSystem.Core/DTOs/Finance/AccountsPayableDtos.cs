@@ -59,6 +59,12 @@ public class VendorInvoiceDto
     public InvoiceMatchingType MatchingType { get; set; }
     public InvoiceMatchingStatus MatchingStatus { get; set; }
     public string? MatchingNotes { get; set; }
+    public Guid? MatchingControlEventId { get; set; }
+    public string? MatchingSnapshotHash { get; set; }
+    public DateTime? MatchingEvaluatedAtUtc { get; set; }
+    public decimal MatchingPriceTolerancePercent { get; set; }
+    public decimal MatchingQuantityTolerancePercent { get; set; }
+    public Guid? MatchExceptionControlEventId { get; set; }
 
     // Status
     public VendorInvoiceStatus Status { get; set; }
@@ -253,6 +259,29 @@ public class InvoiceMatchingResultDto
     public decimal? PurchaseOrderTotal { get; set; }
     public decimal? GoodsReceiptTotal { get; set; }
     public decimal TolerancePercentage { get; set; } = 1.0m;
+    public decimal PriceTolerancePercentage { get; set; } = 1.0m;
+    public decimal QuantityTolerancePercentage { get; set; } = 1.0m;
+    public bool IsRequired { get; set; }
+    public bool ApprovalReady { get; set; }
+    public bool ApprovedExceptionApplied { get; set; }
+    public Guid? MatchingControlEventId { get; set; }
+    public Guid? MatchExceptionControlEventId { get; set; }
+    public string? SnapshotHash { get; set; }
+    public DateTime? EvaluatedAtUtc { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string? ConfigurationProfileCode { get; set; }
+    public int? ConfigurationProfileVersion { get; set; }
+    public List<string> DecisionKeys { get; set; } = new();
+    public List<InvoiceMatchingCheckDto> Checks { get; set; } = new();
+}
+
+public class InvoiceMatchingCheckDto
+{
+    public string CheckKey { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public bool Passed { get; set; }
+    public bool ExceptionEligible { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
 
 public class MatchingDiscrepancyDto
@@ -263,6 +292,212 @@ public class MatchingDiscrepancyDto
     public decimal? ExpectedValue { get; set; }
     public decimal Variance { get; set; }
     public decimal VariancePercentage { get; set; }
+    public bool ExceptionEligible { get; set; }
+}
+
+public sealed class VendorInvoiceMatchControlException : Exception
+{
+    public VendorInvoiceMatchControlException(string code, string message) : base(message) => Code = code;
+    public string Code { get; }
+}
+
+#endregion
+
+#region Vendor Invoice Match Exception
+
+public sealed class VendorInvoiceMatchExceptionEvidenceRequestDto
+{
+    [Required, StringLength(100)] public string RequirementKey { get; set; } = string.Empty;
+    public VendorInvoiceMatchExceptionEvidenceKind ReferenceKind { get; set; }
+    public Guid? WorkflowEvidenceDocumentId { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    [Required, StringLength(1000)] public string EvidenceReference { get; set; } = string.Empty;
+}
+
+public sealed class CreateVendorInvoiceMatchExceptionDto
+{
+    [Required, StringLength(100)] public string RootCauseCategory { get; set; } = string.Empty;
+    [Required, StringLength(2000)] public string RootCauseDescription { get; set; } = string.Empty;
+    [Required, StringLength(2000)] public string Justification { get; set; } = string.Empty;
+    [Required, StringLength(2000)] public string CorrectiveAction { get; set; } = string.Empty;
+    public Guid CorrectiveActionOwnerId { get; set; }
+    public DateTime CorrectiveActionDueAtUtc { get; set; }
+    public DateTime ExpiresAtUtc { get; set; }
+    [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+    [MinLength(2)] public List<VendorInvoiceMatchExceptionEvidenceRequestDto> Evidence { get; set; } = new();
+}
+
+public sealed class DecideVendorInvoiceMatchExceptionDto
+{
+    public bool Approved { get; set; }
+    [Required, StringLength(2000)] public string Comment { get; set; } = string.Empty;
+    [Required] public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class CancelVendorInvoiceMatchExceptionDto
+{
+    [Required, StringLength(2000)] public string Reason { get; set; } = string.Empty;
+    [Required] public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class CompleteVendorInvoiceMatchCorrectiveActionDto
+{
+    [Required, StringLength(2000)] public string CompletionNote { get; set; } = string.Empty;
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [MinLength(1)] public List<VendorInvoiceMatchExceptionEvidenceRequestDto> Evidence { get; set; } = new();
+}
+
+public sealed class VendorInvoiceMatchExceptionVarianceDto
+{
+    public Guid Id { get; set; }
+    public string VarianceType { get; set; } = string.Empty;
+    public string ItemDescription { get; set; } = string.Empty;
+    public decimal ActualValue { get; set; }
+    public decimal ExpectedValue { get; set; }
+    public decimal Variance { get; set; }
+    public decimal VariancePercentage { get; set; }
+    public decimal ConfiguredTolerancePercent { get; set; }
+}
+
+public sealed class VendorInvoiceMatchExceptionEvidenceDto
+{
+    public Guid Id { get; set; }
+    public string RequirementKey { get; set; } = string.Empty;
+    public VendorInvoiceMatchExceptionEvidenceKind ReferenceKind { get; set; }
+    public Guid? WorkflowEvidenceDocumentId { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public string EvidenceReference { get; set; } = string.Empty;
+    public string EvidenceHash { get; set; } = string.Empty;
+}
+
+public sealed class VendorInvoiceMatchExceptionActionDto
+{
+    public Guid Id { get; set; }
+    public int Sequence { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public VendorInvoiceMatchExceptionStatus FromStatus { get; set; }
+    public VendorInvoiceMatchExceptionStatus ToStatus { get; set; }
+    public Guid ActorUserId { get; set; }
+    public string ActorName { get; set; } = string.Empty;
+    public string Comment { get; set; } = string.Empty;
+    public DateTime OccurredAtUtc { get; set; }
+}
+
+public sealed class VendorInvoiceMatchExceptionDto
+{
+    public Guid Id { get; set; }
+    public Guid VendorInvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public Guid PurchaseOrderId { get; set; }
+    public string PurchaseOrderNumber { get; set; } = string.Empty;
+    public int Sequence { get; set; }
+    public VendorInvoiceMatchExceptionStatus Status { get; set; }
+    public string VarianceType { get; set; } = string.Empty;
+    public decimal PriceTolerancePercent { get; set; }
+    public decimal QuantityTolerancePercent { get; set; }
+    public string RootCauseCategory { get; set; } = string.Empty;
+    public string RootCauseDescription { get; set; } = string.Empty;
+    public string Justification { get; set; } = string.Empty;
+    public string CorrectiveAction { get; set; } = string.Empty;
+    public Guid CorrectiveActionOwnerId { get; set; }
+    public string CorrectiveActionOwnerName { get; set; } = string.Empty;
+    public DateTime CorrectiveActionDueAtUtc { get; set; }
+    public VendorInvoiceMatchCorrectiveActionStatus CorrectiveActionStatus { get; set; }
+    public DateTime? CorrectiveActionCompletedAtUtc { get; set; }
+    public Guid? CorrectiveActionCompletedById { get; set; }
+    public string? CorrectiveActionCompletionNote { get; set; }
+    public DateTime ExpiresAtUtc { get; set; }
+    public string InvoiceSnapshotHash { get; set; } = string.Empty;
+    public Guid? ConfigurationProfileId { get; set; }
+    public int? ConfigurationProfileVersion { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid RequestedById { get; set; }
+    public string RequestedByName { get; set; } = string.Empty;
+    public DateTime RequestedAtUtc { get; set; }
+    public Guid? FinalApprovedById { get; set; }
+    public string? FinalApprovedByName { get; set; }
+    public DateTime? FinalApprovedAtUtc { get; set; }
+    public Guid? ApprovalControlEventId { get; set; }
+    public string IntegrityHash { get; set; } = string.Empty;
+    public string RowVersion { get; set; } = string.Empty;
+    public IReadOnlyList<VendorInvoiceMatchExceptionVarianceDto> Variances { get; set; } =
+        Array.Empty<VendorInvoiceMatchExceptionVarianceDto>();
+    public IReadOnlyList<VendorInvoiceMatchExceptionEvidenceDto> Evidence { get; set; } =
+        Array.Empty<VendorInvoiceMatchExceptionEvidenceDto>();
+    public IReadOnlyList<VendorInvoiceMatchExceptionActionDto> Actions { get; set; } =
+        Array.Empty<VendorInvoiceMatchExceptionActionDto>();
+}
+
+public sealed class VendorInvoiceMatchExceptionOverviewDto
+{
+    public Guid VendorInvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public InvoiceMatchingResultDto MatchingReadiness { get; set; } = new();
+    public bool CanRequest { get; set; }
+    public bool CanDecide { get; set; }
+    public bool CanCancel { get; set; }
+    public bool CanCompleteCorrectiveAction { get; set; }
+    public IReadOnlyList<string> RequiredEvidenceKeys { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> DecisionKeys { get; set; } = Array.Empty<string>();
+    public VendorInvoiceMatchExceptionDto? Active { get; set; }
+    public VendorInvoiceMatchExceptionDto? CorrectiveActionItem { get; set; }
+    public IReadOnlyList<VendorInvoiceMatchExceptionDto> History { get; set; } =
+        Array.Empty<VendorInvoiceMatchExceptionDto>();
+}
+
+public sealed class VendorInvoiceMatchExceptionReportDto
+{
+    public DateTime FromDate { get; set; }
+    public DateTime ToDate { get; set; }
+    public VendorInvoiceMatchExceptionStatus? Status { get; set; }
+    public Guid? SupplierId { get; set; }
+    public int TotalCount { get; set; }
+    public int ApprovedCount { get; set; }
+    public int ExpiredCount { get; set; }
+    public int OpenCorrectiveActionCount { get; set; }
+    public IReadOnlyList<VendorInvoiceMatchExceptionReportRowDto> Rows { get; set; } =
+        Array.Empty<VendorInvoiceMatchExceptionReportRowDto>();
+}
+
+public sealed class VendorInvoiceMatchExceptionReportRowDto
+{
+    public Guid ExceptionId { get; set; }
+    public Guid VendorInvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public Guid SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public Guid PurchaseOrderId { get; set; }
+    public string PurchaseOrderNumber { get; set; } = string.Empty;
+    public VendorInvoiceMatchExceptionStatus Status { get; set; }
+    public string VarianceType { get; set; } = string.Empty;
+    public decimal MaximumVariancePercentage { get; set; }
+    public string RootCauseCategory { get; set; } = string.Empty;
+    public string RootCauseDescription { get; set; } = string.Empty;
+    public string CorrectiveAction { get; set; } = string.Empty;
+    public string CorrectiveActionOwnerName { get; set; } = string.Empty;
+    public DateTime CorrectiveActionDueAtUtc { get; set; }
+    public VendorInvoiceMatchCorrectiveActionStatus CorrectiveActionStatus { get; set; }
+    public DateTime RequestedAtUtc { get; set; }
+    public DateTime ExpiresAtUtc { get; set; }
+    public string RequestedByName { get; set; } = string.Empty;
+    public string? FinalApprovedByName { get; set; }
+    public DateTime? FinalApprovedAtUtc { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? ApprovalControlEventId { get; set; }
+    public int EvidenceCount { get; set; }
+}
+
+public class VendorInvoiceMatchExceptionControlException : Exception
+{
+    public VendorInvoiceMatchExceptionControlException(string code, string message, int statusCode = 422)
+        : base(message)
+    {
+        Code = code;
+        StatusCode = statusCode;
+    }
+
+    public string Code { get; }
+    public int StatusCode { get; }
 }
 
 #endregion
@@ -322,6 +557,9 @@ public class VendorPaymentDto
     public DateTime? EvidenceExceptionRequestedAt { get; set; }
     public Guid? EvidenceExceptionApprovedById { get; set; }
     public DateTime? EvidenceExceptionApprovedAt { get; set; }
+    public Guid? AuthorizedById { get; set; }
+    public DateTime? AuthorizedDate { get; set; }
+    public Guid? InvoicePaymentSodControlEventId { get; set; }
     public Guid? PaymentBatchId { get; set; }
     public string? PaymentBatchNumber { get; set; }
     public Guid? JournalEntryId { get; set; }
@@ -503,6 +741,9 @@ public class VendorPaymentAllocationDto
     public DateTime AllocationDate { get; set; }
     public string? Notes { get; set; }
     public bool IsReversal { get; set; }
+    public Guid? PaymentReadinessControlEventId { get; set; }
+    public string? PaymentReadinessSnapshotHash { get; set; }
+    public DateTime? PaymentReadinessEvaluatedAtUtc { get; set; }
 }
 
 public class VendorPaymentAllocationCreateDto
@@ -543,6 +784,37 @@ public class OutstandingVendorInvoiceDto
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
     public bool IsDiscountAvailable { get; set; }
     public decimal? DiscountAmount { get; set; }
+    public VendorPaymentInvoiceReadinessDto? PaymentReadiness { get; set; }
+}
+
+/// <summary>
+/// Authoritative, read-only view of whether one invoice can participate in a
+/// direct allocation, supplier-advance application, posting, or payment batch.
+/// </summary>
+public class VendorPaymentInvoiceReadinessDto
+{
+    public Guid VendorInvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public VendorInvoiceStatus InvoiceStatus { get; set; }
+    public decimal OutstandingAmount { get; set; }
+    public bool IsPaymentReady { get; set; }
+    public bool InvoiceStateReady { get; set; }
+    public bool ThreeWayMatchRequired { get; set; }
+    public bool ThreeWayMatchReady { get; set; }
+    public bool ReceiptInspectionReady { get; set; }
+    public bool ApprovedExceptionApplied { get; set; }
+    public bool PersistedMatchCurrent { get; set; }
+    public Guid? MatchingControlEventId { get; set; }
+    public Guid? MatchExceptionControlEventId { get; set; }
+    public string? MatchSnapshotHash { get; set; }
+    public Guid? PaymentReadinessControlEventId { get; set; }
+    public string SnapshotHash { get; set; } = string.Empty;
+    public DateTime EvaluatedAtUtc { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string? ConfigurationProfileCode { get; set; }
+    public int? ConfigurationProfileVersion { get; set; }
+    public List<string> DecisionKeys { get; set; } = new();
+    public List<InvoiceMatchingCheckDto> Checks { get; set; } = new();
 }
 
 public class EarlyPaymentDiscountResultDto
@@ -582,7 +854,11 @@ public class PaymentBatchDto
     public Guid? BankAccountId { get; set; }
     public string? BankAccountName { get; set; }
     public PaymentBatchStatus Status { get; set; }
+    public Guid? CreatedById { get; set; }
+    public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
+    public Guid? InvoicePaymentSodControlEventId { get; set; }
+    public Guid? ProcessedById { get; set; }
     public DateTime? ProcessedDate { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -632,6 +908,20 @@ public class PaymentBatchItemDto
     public decimal Amount { get; set; }
     public string ItemStatus { get; set; } = "Pending";
     public string? FailureReason { get; set; }
+    public List<PaymentBatchInvoiceDto> Invoices { get; set; } = new();
+}
+
+public class PaymentBatchInvoiceDto
+{
+    public Guid Id { get; set; }
+    public Guid VendorInvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Status { get; set; } = "Pending";
+    public string? FailureReason { get; set; }
+    public Guid? PaymentReadinessControlEventId { get; set; }
+    public string? PaymentReadinessSnapshotHash { get; set; }
+    public DateTime? PaymentReadinessEvaluatedAtUtc { get; set; }
 }
 
 #endregion
@@ -823,6 +1113,89 @@ public class ApSummaryDto
     public decimal WithholdingTaxThisMonth { get; set; }
     public int PendingApprovalCount { get; set; }
     public int PendingBatchCount { get; set; }
+}
+
+/// <summary>
+/// Read-only AP-005/TDC-0508 reconciliation over authoritative Procurement,
+/// Projects, AP, and central Finance posting records. Amounts are never
+/// converted or combined across currencies.
+/// </summary>
+public sealed class ProcurementFinanceReconciliationReportDto
+{
+    public DateTime AsOfDate { get; set; }
+    public DateTime GeneratedAtUtc { get; set; }
+    public string RuleCode { get; set; } = "AP-005";
+    public string TaskCode { get; set; } = "TDC-0508";
+    public IReadOnlyList<string> DecisionKeys { get; set; } = Array.Empty<string>();
+    public bool IsReconciled { get; set; }
+    public int PurchaseOrderCount { get; set; }
+    public int IssueCount { get; set; }
+    public int UnbalancedPostingCount { get; set; }
+    public int ControlledReversalCount { get; set; }
+    public SubledgerControlReconciliationDto ApControlReconciliation { get; set; } = new();
+    public IReadOnlyList<ProcurementFinanceReconciliationCurrencySummaryDto> CurrencySummaries { get; set; } =
+        Array.Empty<ProcurementFinanceReconciliationCurrencySummaryDto>();
+    public IReadOnlyList<ProcurementFinanceReconciliationRowDto> Rows { get; set; } =
+        Array.Empty<ProcurementFinanceReconciliationRowDto>();
+}
+
+public sealed class ProcurementFinanceReconciliationCurrencySummaryDto
+{
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal PurchaseOrderAmount { get; set; }
+    public decimal CommitmentAmount { get; set; }
+    public decimal AcceptedReceiptAmount { get; set; }
+    public decimal InvoiceAmount { get; set; }
+    public decimal SettledAmount { get; set; }
+    public decimal InvoicePostedAmount { get; set; }
+    public decimal PaymentPostedAmount { get; set; }
+    public decimal RetentionHeldAmount { get; set; }
+    public decimal RetentionReleasedAmount { get; set; }
+    public decimal MilestoneAmount { get; set; }
+}
+
+public sealed class ProcurementFinanceReconciliationRowDto
+{
+    public Guid PurchaseOrderId { get; set; }
+    public string PurchaseOrderNumber { get; set; } = string.Empty;
+    public string PurchaseOrderStatus { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public Guid? SourceRequisitionId { get; set; }
+    public Guid? ContractId { get; set; }
+    public decimal PurchaseOrderAmount { get; set; }
+    public decimal CommitmentAmount { get; set; }
+    public decimal CommitmentGroupOrderAmount { get; set; }
+    public decimal AcceptedReceiptAmount { get; set; }
+    public decimal InvoiceAmount { get; set; }
+    public decimal SettledAmount { get; set; }
+    public decimal InvoicePostedAmount { get; set; }
+    public decimal PaymentPostedAmount { get; set; }
+    public decimal RetentionHeldAmount { get; set; }
+    public decimal RetentionReleasedAmount { get; set; }
+    public decimal RetentionOutstandingAmount { get; set; }
+    public decimal MilestoneAmount { get; set; }
+    public decimal CompletedMilestoneAmount { get; set; }
+    public decimal InvoicedMilestoneAmount { get; set; }
+    public decimal PaidMilestoneAmount { get; set; }
+    public int InvoiceCount { get; set; }
+    public int PaymentCount { get; set; }
+    public int PostingCount { get; set; }
+    public int ControlledReversalCount { get; set; }
+    public bool IsReconciled { get; set; }
+    public IReadOnlyList<ProcurementFinanceReconciliationIssueDto> Issues { get; set; } =
+        Array.Empty<ProcurementFinanceReconciliationIssueDto>();
+}
+
+public sealed class ProcurementFinanceReconciliationIssueDto
+{
+    public string Code { get; set; } = string.Empty;
+    public string Severity { get; set; } = "Error";
+    public string Area { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public decimal? ExpectedAmount { get; set; }
+    public decimal? ActualAmount { get; set; }
+    public decimal? VarianceAmount { get; set; }
+    public Guid? SourceDocumentId { get; set; }
 }
 
 #endregion

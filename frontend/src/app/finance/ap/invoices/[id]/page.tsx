@@ -33,6 +33,11 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { WorkflowEntitySummaryDto } from '@/types/workflow';
+import {
+    InvoiceThreeWayMatchControl,
+    invoiceThreeWayMatchQueryKey,
+} from '@/components/finance/InvoiceThreeWayMatchControl';
+import { InvoiceMatchExceptionControl } from '@/components/finance/InvoiceMatchExceptionControl';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -46,6 +51,13 @@ export default function VendorInvoiceDetailsPage() {
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['vendor-invoice', id],
         queryFn: () => accountsPayableService.getInvoice(id),
+    });
+
+    const { data: matchReadiness, isLoading: isMatchReadinessLoading } = useQuery({
+        queryKey: invoiceThreeWayMatchQueryKey(id),
+        queryFn: () => accountsPayableService.getThreeWayMatchReadiness(id),
+        enabled: Boolean(invoice?.purchaseOrderId && !invoice?.isOpeningBalance),
+        retry: 1,
     });
 
     useQuery({
@@ -66,6 +78,7 @@ export default function VendorInvoiceDetailsPage() {
         mutationFn: (id: string) => accountsPayableService.voidInvoice(id, 'Voided by user'),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
+            queryClient.invalidateQueries({ queryKey: invoiceThreeWayMatchQueryKey(id) });
             toast({
                 title: 'Success',
                 description: 'Vendor invoice voided successfully',
@@ -84,6 +97,7 @@ export default function VendorInvoiceDetailsPage() {
         mutationFn: (id: string) => accountsPayableService.approveInvoice(id, 'Approved'),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
+            queryClient.invalidateQueries({ queryKey: invoiceThreeWayMatchQueryKey(id) });
             toast({
                 title: 'Success',
                 description: 'Vendor invoice approved successfully',
@@ -102,6 +116,7 @@ export default function VendorInvoiceDetailsPage() {
         mutationFn: (invoiceId: string) => accountsPayableService.submitInvoiceForApproval(invoiceId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
+            queryClient.invalidateQueries({ queryKey: invoiceThreeWayMatchQueryKey(id) });
             toast({ title: 'Success', description: 'Vendor invoice submitted for approval.' });
         },
         onError: (error: any) => {
@@ -139,6 +154,8 @@ export default function VendorInvoiceDetailsPage() {
         }
     };
 
+    const mandatoryMatchReady = !invoice.purchaseOrderId || invoice.isOpeningBalance || matchReadiness?.approvalReady === true;
+
     return (
         <div className="space-y-8 p-8 max-w-[1000px] mx-auto">
             {/* Header Actions */}
@@ -157,13 +174,24 @@ export default function VendorInvoiceDetailsPage() {
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
                     {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
-                        <Button size="sm" variant="outline" onClick={() => submitInvoiceMutation.mutate(invoice.id)} disabled={submitInvoiceMutation.isPending}>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => submitInvoiceMutation.mutate(invoice.id)}
+                            disabled={submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady}
+                            title={!mandatoryMatchReady ? 'Resolve the mandatory three-way match before submission.' : undefined}
+                        >
                             {submitInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                             Submit for Approval
                         </Button>
                     )}
                     {invoice.status === 'PendingApproval' && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummary?.canCurrentUserApprove ?? true) && (
-                        <Button size="sm" onClick={() => approveInvoiceMutation.mutate(invoice.id)} disabled={approveInvoiceMutation.isPending}>
+                        <Button
+                            size="sm"
+                            onClick={() => approveInvoiceMutation.mutate(invoice.id)}
+                            disabled={approveInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady}
+                            title={!mandatoryMatchReady ? 'Resolve the mandatory three-way match before approval.' : undefined}
+                        >
                             {approveInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                             Approve
                         </Button>
@@ -181,6 +209,20 @@ export default function VendorInvoiceDetailsPage() {
                     )}
                 </div>
             </div>
+
+            {invoice.purchaseOrderId && !invoice.isOpeningBalance && (
+                <>
+                    <InvoiceThreeWayMatchControl
+                        invoiceId={invoice.id}
+                        canEvaluate={hasAnyPermission([
+                            'Finance.AP.Invoices.Edit',
+                            'Finance.AP.Invoices.Write',
+                            'Finance.AP.Invoices.Approve',
+                        ])}
+                    />
+                    <InvoiceMatchExceptionControl invoiceId={invoice.id} />
+                </>
+            )}
 
             <Card className="print:shadow-none print:border-none">
                 <CardHeader className="flex flex-row justify-between items-start border-b pb-8">

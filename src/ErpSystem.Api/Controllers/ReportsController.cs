@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -49,7 +50,13 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest("UserId not found in token");
                 }
 
-                var reports = await _reportsService.GetReportsAsync(tenantId.Value, userId.Value, type, status, favoriteOnly);
+                var reports = await _reportsService.GetReportsAsync(
+                    tenantId.Value,
+                    userId.Value,
+                    type,
+                    status,
+                    favoriteOnly,
+                    bypassRoleFiltering: IsReportAdministrator());
                 return Ok(reports);
             }
             catch (Exception ex)
@@ -63,6 +70,7 @@ namespace ErpSystem.Api.Controllers
         /// Get all reports for admin/management purposes (bypasses role filtering)
         /// </summary>
         [HttpGet("admin")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
         public async Task<ActionResult<List<ReportDefinitionDto>>> GetReportsForAdmin(
             [FromQuery] string? type = null,
             [FromQuery] string? status = null)
@@ -106,13 +114,29 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest("TenantId not found in token");
                 }
 
-                var report = await _reportsService.GetReportAsync(reportId, tenantId.Value);
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var report = await _reportsService.GetReportAsync(reportId, tenantId.Value, userId.Value, IsReportAdministrator());
                 if (report == null)
                 {
                     return NotFound();
                 }
 
                 return Ok(report);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to report {ReportId}", reportId);
+                return StatusCode(403, ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid report definition {ReportId}", reportId);
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -145,6 +169,11 @@ namespace ErpSystem.Api.Controllers
 
                 return CreatedAtAction(nameof(GetReport), new { reportId = report.Id }, report);
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected report creation for a reserved system identifier");
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating report");
@@ -173,7 +202,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
-                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                var isAdminUser = IsReportAdministrator();
 
                 var report = await _reportsService.UpdateReportAsync(reportId, updateReportDto, tenantId.Value, userId.Value, isAdminUser);
 
@@ -183,6 +212,11 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 return Ok(report);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected mutation of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
             }
             catch (Exception ex)
             {
@@ -220,6 +254,11 @@ namespace ErpSystem.Api.Controllers
 
                 return NoContent();
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected deletion of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting report {ReportId}", reportId);
@@ -248,7 +287,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
-                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                var isAdminUser = IsReportAdministrator();
 
                 var result = await _reportsService.ExecuteReportAsync(reportId, executeReportDto, tenantId.Value, userId.Value, isAdminUser);
 
@@ -292,7 +331,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
-                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                var isAdminUser = IsReportAdministrator();
 
                 var exportResult = await _reportsService.ExportReportAsync(reportId, exportReportDto, tenantId.Value, userId.Value, isAdminUser);
 
@@ -300,6 +339,16 @@ namespace ErpSystem.Api.Controllers
                     exportResult.Data,
                     exportResult.ContentType,
                     exportResult.FileName);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized export of report {ReportId}", reportId);
+                return StatusCode(403, ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid export request for report {ReportId}", reportId);
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -547,6 +596,11 @@ namespace ErpSystem.Api.Controllers
 
                 return Ok(new { reportId, unpublishedAt = result });
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected unpublish of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error unpublishing report {ReportId}", reportId);
@@ -577,6 +631,11 @@ namespace ErpSystem.Api.Controllers
                 var result = await _reportsService.AssignReportToModuleAsync(reportId, assignModuleDto.ModuleId, tenantId.Value, userId.Value);
 
                 return Ok(new { reportId, moduleId = assignModuleDto.ModuleId, assignedAt = result });
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected module reassignment of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
             }
             catch (Exception ex)
             {
@@ -609,11 +668,20 @@ namespace ErpSystem.Api.Controllers
 
                 return Ok(new { reportId, unassignedAt = result });
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected module removal from system report {ReportId}", reportId);
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error unassigning report {ReportId} from module", reportId);
                 return StatusCode(500, "An error occurred while unassigning the report from module");
             }
         }
+
+        private bool IsReportAdministrator() =>
+            _currentUserService.IsInRole(Constants.Roles.SuperAdmin) ||
+            _currentUserService.IsInRole(Constants.Roles.TenantAdmin);
     }
 }

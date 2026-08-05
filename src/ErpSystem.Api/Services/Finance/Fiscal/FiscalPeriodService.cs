@@ -13,6 +13,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Enums;
@@ -3652,6 +3653,38 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             var periodReferenceMismatches = await CountCrossTenantPeriodReferenceMismatchesAsync(period, cancellationToken);
             if (periodReferenceMismatches > 0)
                 errors.Add($"{periodReferenceMismatches} ledger records reference this period from another tenant.");
+
+            // TDC-0613: a year-end close with inventory history is not valid until the
+            // authoritative movement subledger, landed costs and Inventory control account
+            // have been reconciled and independently frozen at the exact period cut-off.
+            if (period.IsYearEnd)
+            {
+                var cutoff = period.EndDate.Date.AddDays(1);
+                var hasInventoryHistory = await _unitOfWork.Repository<InventoryMovement>()
+                    .GetQueryable(value => value.TenantId == TenantId && value.IsPosted && !value.IsDeleted &&
+                                           value.PostingDate < cutoff)
+                    .AnyAsync(cancellationToken);
+                if (hasInventoryHistory)
+                {
+                    var inventoryReconciliation = await _unitOfWork
+                        .Repository<InventoryValuationReconciliation>()
+                        .GetQueryable(value => value.TenantId == TenantId &&
+                                               value.FiscalPeriodId == period.Id && !value.IsDeleted)
+                        .OrderByDescending(value => value.GeneratedAtUtc)
+                        .FirstOrDefaultAsync(cancellationToken);
+                    if (inventoryReconciliation is null ||
+                        inventoryReconciliation.Status != InventoryValuationReconciliationStatus.Frozen ||
+                        inventoryReconciliation.ExceptionCount != 0 ||
+                        Math.Abs(inventoryReconciliation.ReconciliationVariance) >
+                        inventoryReconciliation.ToleranceAmount ||
+                        inventoryReconciliation.CutoffDateUtc < cutoff.AddTicks(-1) ||
+                        !inventoryReconciliation.PeriodModuleLockId.HasValue)
+                    {
+                        errors.Add(
+                            "Year-end inventory valuation must have a clean, independently frozen WAC/landed-cost/GL reconciliation at the exact cut-off.");
+                    }
+                }
+            }
 
             // Validate Trial Balance (Debits = Credits)
             var transactions = await _unitOfWork.Repository<AccountTransaction>()

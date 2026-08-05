@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -9,6 +10,8 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Services.Workflow;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +35,9 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// </summary>
     public class VendorPaymentService : IVendorPaymentService
     {
+        private const int DefaultOutstandingInvoicePageSize = 50;
+        private const int MaximumOutstandingInvoicePageSize = 100;
+
         private readonly IUnitOfWork _unitOfWork;
         private readonly ICurrentUserService _currentUser;
         private readonly ITenantSettingsService _tenantSettingsService;
@@ -52,6 +58,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             PropertyNameCaseInsensitive = true,
             Converters = { new JsonStringEnumConverter() }
         };
+        private readonly IVendorInvoiceService? _vendorInvoiceService;
+        private readonly IProcurementControlEventService? _procurementControlEvents;
+        private readonly IProcurementInvoicePaymentSodService? _invoicePaymentSod;
 
         public VendorPaymentService(
             IUnitOfWork unitOfWork,
@@ -66,7 +75,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             IFinanceAuditService? financeAuditService = null,
             IFxAccountingService? fxAccountingService = null,
             IWorkflowApprovalPolicyResolver? approvalPolicyResolver = null,
-            IWithholdingTaxCertificateService? withholdingTaxService = null)
+            IWithholdingTaxCertificateService? withholdingTaxService = null,
+            IVendorInvoiceService? vendorInvoiceService = null,
+            IProcurementControlEventService? procurementControlEvents = null,
+            IProcurementInvoicePaymentSodService? invoicePaymentSod = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -81,6 +93,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             _fxAccountingService = fxAccountingService;
             _approvalPolicyResolver = approvalPolicyResolver;
             _withholdingTaxService = withholdingTaxService;
+            _vendorInvoiceService = vendorInvoiceService;
+            _procurementControlEvents = procurementControlEvents;
+            _invoicePaymentSod = invoicePaymentSod;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -278,8 +293,25 @@ namespace ErpSystem.Api.Services.Finance.AP
         //  CREATE PAYMENT
         // ═════════════════════════════════════════════════════════════════
 
-        public async Task<VendorPaymentDto> CreateAsync(VendorPaymentCreateDto dto, CancellationToken cancellationToken = default)
+        public Task<VendorPaymentDto> CreateAsync(
+            VendorPaymentCreateDto dto,
+            CancellationToken cancellationToken = default) =>
+            CreateAsync(dto, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorPaymentDto> CreateAsync(
+            VendorPaymentCreateDto dto,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
+            if (dto.Allocations?.Any() == true &&
+                !_unitOfWork.HasActiveTransaction &&
+                !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => CreateAsync(dto, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
+
             var supplier = await ResolveSupplierForPaymentAsync(dto.SupplierId, cancellationToken);
 
             // Resolve and persist the effective account, including the tenant default. Leaving the
@@ -388,9 +420,27 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Status = VendorPaymentStatus.Draft,
                 Notes = dto.Notes,
                 CreatedAt = now,
-                CreatedBy = UserName
+                CreatedBy = UserName,
+                CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
             };
 
+            if (dto.Allocations?.Any() == true && !_unitOfWork.HasActiveTransaction)
+            {
+                foreach (var invoiceId in dto.Allocations.Select(item => item.VendorInvoiceId).Distinct())
+                    await RequirePaymentReadinessAsync(
+                        invoiceId,
+                        ProcurementPaymentReadinessRules.AllocateAction,
+                        payment.Id,
+                        batchId: null,
+                        cancellationToken);
+            }
+
+            var ownsTransaction = dto.Allocations?.Any() == true && !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
             await _unitOfWork.Repository<VendorPayment>().AddAsync(payment);
 
             // If allocations were provided, process them
@@ -411,6 +461,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             else
             {
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            if (ownsTransaction)
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
             }
 
             _logger.LogInformation("Created vendor payment {PaymentNumber} for supplier {SupplierId}, amount {Amount}",
@@ -779,6 +839,95 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
+        // The incoming Procurement/Finance SoD slice exposes a compatibility submission method
+        // used by its controller/service tests. Retain it beside the richer evidence-aware command
+        // during this merge; both paths start the same canonical VendorPayment workflow and the
+        // post/approval gates below revalidate the authoritative SoD evidence.
+        public Task<VendorPaymentDto> SubmitForAuthorizationAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            SubmitForAuthorizationAsync(id, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorPaymentDto> SubmitForAuthorizationAsync(
+            Guid id,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
+        {
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => SubmitForAuthorizationAsync(id, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
+
+            if (CurrentUserId == Guid.Empty)
+                throw new InvalidOperationException("Unable to resolve the current payment submitter.");
+
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0506-payment:{TenantId:N}:{id:N}", cancellationToken);
+                var payment = await _unitOfWork.Repository<VendorPayment>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                    .Include(item => item.Allocations.Where(allocation => !allocation.IsDeleted))
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
+
+                if (payment.PaymentBatchId.HasValue)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_SUBMISSION_BLOCKED",
+                        "Batch-owned payments are submitted and approved only through their payment batch.");
+                if (payment.Status != VendorPaymentStatus.Draft)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_SUBMISSION_STATE_INVALID",
+                        "Only draft manual payments can be submitted for authorization.");
+
+                var effectiveAllocations = GetEffectiveAllocations(payment.Allocations);
+                EnsureAllocationTotalIsValid(payment, effectiveAllocations);
+                foreach (var allocation in effectiveAllocations.OrderBy(item => item.VendorInvoiceId))
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"tdc0505-invoice:{TenantId:N}:{allocation.VendorInvoiceId:N}", cancellationToken);
+                    await RequirePaymentReadinessAsync(
+                        allocation.VendorInvoiceId,
+                        ProcurementPaymentReadinessRules.PostAction,
+                        payment.Id,
+                        batchId: null,
+                        cancellationToken,
+                        allowSettledInvoice: true);
+                }
+
+                payment.Status = VendorPaymentStatus.PendingAuthorization;
+                payment.UpdatedAt = DateTime.UtcNow;
+                payment.UpdatedBy = UserName;
+                payment.LastModifiedById = CurrentUserId;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("VendorPayment", payment.Id);
+                if (!workflowResult.Success)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_WORKFLOW_START_FAILED",
+                        workflowResult.Message ?? "Unable to start the vendor payment authorization workflow.");
+
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        }
+
         // ═════════════════════════════════════════════════════════════════
         //  ALLOCATIONS
         // ═════════════════════════════════════════════════════════════════
@@ -787,6 +936,12 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AP payment posting.");
+            if (_invoicePaymentSod == null)
+                throw new VendorPaymentControlException(
+                    ProcurementInvoicePaymentSodRules.EvidenceCode,
+                    "The authoritative invoice/payment SOD service is not configured.");
+
+            await _invoicePaymentSod.RevalidatePaymentAuthorizationAsync(id, cancellationToken);
 
             var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
             await _financeAccessScopeService.EnsureBankAccountAccessAsync(
@@ -805,6 +960,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 if (!payment.JournalEntryId.HasValue)
                 {
+                    await ApplyPostedPaymentAllocationsAsync(
+                        payment,
+                        postingResult.PostingEventId,
+                        postingResult.JournalEntryId,
+                        cancellationToken);
                     payment.JournalEntryId = postingResult.JournalEntryId;
                     if (payment.Status == VendorPaymentStatus.Authorized || payment.Status == VendorPaymentStatus.PendingAuthorization)
                     {
@@ -813,6 +973,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                     payment.UpdatedAt = DateTime.UtcNow;
                     payment.UpdatedBy = UserName;
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                else if (payment.Status is VendorPaymentStatus.Authorized or
+                         VendorPaymentStatus.PendingAuthorization or
+                         VendorPaymentStatus.Failed)
+                {
+                    // A finance-engine journal link is the durable posting
+                    // outcome. Restore an operational status that may have
+                    // been reset by a safe batch retry before post-processing.
+                    payment.Status = VendorPaymentStatus.Processed;
+                    payment.UpdatedAt = DateTime.UtcNow;
+                    payment.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<VendorPayment>()
+                        .UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 
@@ -954,7 +1128,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .ThenBy(item => item.Id)
                     .ToList();
 
-                if (activeAllocations.Any(item => item.ApplicationPostingEventId.HasValue))
+                // Ordinary invoice-settlement allocations are linked to the payment's own posting
+                // event for traceability. Only a posted supplier advance creates a later, separate
+                // application journal that must be unwound before the original cash payment.
+                if (payment.IsSupplierAdvance &&
+                    activeAllocations.Any(item => item.ApplicationPostingEventId.HasValue))
                 {
                     // A supplier advance application has its own reclassification journal. Reversing
                     // the original cash payment without first unwinding that application would leave
@@ -1160,14 +1338,50 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
-        public async Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync(
+        public Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync(
             Guid paymentId,
             List<VendorPaymentAllocationCreateDto> allocations,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) =>
+            AllocatePaymentAsync(
+                paymentId,
+                allocations,
+                cancellationToken,
+                executionStrategyScope: false,
+                batchProcessorScope: false);
+
+        private async Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync(
+            Guid paymentId,
+            List<VendorPaymentAllocationCreateDto> allocations,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope,
+            bool batchProcessorScope)
         {
+            var duplicateInvoiceIds = allocations
+                .GroupBy(item => item.VendorInvoiceId)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToList();
+            if (duplicateInvoiceIds.Count > 0)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_DUPLICATE_INVOICE_ALLOCATION",
+                    "Each vendor invoice may appear only once in a payment allocation request.");
+
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => AllocatePaymentAsync(
+                        paymentId,
+                        allocations,
+                        cancellationToken,
+                        executionStrategyScope: true,
+                        batchProcessorScope),
+                    cancellationToken);
+            }
+
             var payment = await _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId)
                 .Include(p => p.Allocations)
+                .Include(p => p.PaymentBatch)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
@@ -1188,6 +1402,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return await AllocatePostedSupplierAdvanceAsync(paymentId, allocations, cancellationToken);
             }
 
+            EnsureAllocationMutationAllowed(payment, batchProcessorScope);
+
+            if (!_unitOfWork.HasActiveTransaction)
+            {
+                foreach (var invoiceId in allocations.Select(item => item.VendorInvoiceId).Distinct())
+                    await RequirePaymentReadinessAsync(
+                        invoiceId,
+                        ProcurementPaymentReadinessRules.AllocateAction,
+                        paymentId,
+                        payment.PaymentBatchId,
+                        cancellationToken);
+            }
+
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0505-payment:{TenantId:N}:{paymentId:N}", cancellationToken);
+                foreach (var invoiceId in allocations.Select(item => item.VendorInvoiceId).Distinct().OrderBy(item => item))
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+
+                payment = await _unitOfWork.Repository<VendorPayment>()
+                    .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
+                    .Include(p => p.Allocations)
+                    .Include(p => p.PaymentBatch)
+                    .SingleAsync(cancellationToken);
+                EnsureAllocationMutationAllowed(payment, batchProcessorScope);
+
             var result = new VendorPaymentAllocationResultDto
             {
                 PaymentId = paymentId
@@ -1198,21 +1444,26 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var alloc in allocations)
             {
+                var paymentDecision = await RequirePaymentReadinessAsync(
+                    alloc.VendorInvoiceId,
+                    ProcurementPaymentReadinessRules.AllocateAction,
+                    paymentId,
+                    batchId: payment.PaymentBatchId,
+                    cancellationToken);
                 var invoice = await _unitOfWork.Repository<VendorInvoice>()
                     .FirstOrDefaultAsync(i => i.TenantId == TenantId && i.Id == alloc.VendorInvoiceId);
 
                 if (invoice == null)
-                {
-                    result.Warnings.Add($"Invoice '{alloc.VendorInvoiceId}' not found, skipped.");
-                    continue;
-                }
+                    throw new KeyNotFoundException($"Vendor invoice with Id '{alloc.VendorInvoiceId}' not found.");
 
-                var balance = invoice.TotalAmount - invoice.PaidAmount;
+                var balance = await GetInvoiceUnreservedBalanceAsync(
+                    invoice,
+                    payment.Id,
+                    cancellationToken);
                 if (balance <= 0)
-                {
-                    result.Warnings.Add($"Invoice '{invoice.InvoiceNumber}' is already fully paid, skipped.");
-                    continue;
-                }
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BALANCE_RESERVED",
+                        $"Invoice '{invoice.InvoiceNumber}' has no unreserved outstanding balance.");
 
                 if (invoice.SupplierId != payment.SupplierId)
                 {
@@ -1275,6 +1526,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                     WithholdingTaxAmount = withholdingTaxAmount,
                     AllocationDate = now,
                     Notes = alloc.Notes,
+                    PaymentReadinessControlEventId = paymentDecision.Event.Id,
+                    PaymentReadinessSnapshotHash = paymentDecision.Readiness.SnapshotHash,
+                    PaymentReadinessEvaluatedAtUtc = paymentDecision.Readiness.EvaluatedAtUtc,
                     CreatedAt = now,
                     CreatedBy = UserName
                 };
@@ -1282,18 +1536,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(allocation);
                 createdAllocations.Add(allocation);
 
-                // Update invoice paid amount. Supplier discounts and WHT settle the payable balance but are not cash.
-                invoice.PaidAmount += allocAmount + discountAmount + withholdingTaxAmount;
-                if (invoice.PaidAmount >= invoice.TotalAmount)
-                    invoice.Status = VendorInvoiceStatus.Paid;
-                else if (invoice.PaidAmount > 0)
-                    invoice.Status = VendorInvoiceStatus.PartiallyPaid;
-
-                invoice.UpdatedAt = now;
-                invoice.UpdatedBy = UserName;
-                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
-
-                // Update payment allocated amount
+                // Allocation reserves the intended settlement only. The payable balance is
+                // changed atomically with the successful Finance posting in PostAsync; a Draft
+                // or merely Authorized payment must never make an invoice appear paid.
                 payment.AllocatedAmount += allocAmount;
 
                 result.Allocations.Add(new VendorPaymentAllocationDto
@@ -1307,22 +1552,30 @@ namespace ErpSystem.Api.Services.Finance.AP
                     WithholdingTaxAmount = withholdingTaxAmount,
                     AllocationDate = now,
                     Notes = alloc.Notes
+                    ,PaymentReadinessControlEventId = paymentDecision.Event.Id
+                    ,PaymentReadinessSnapshotHash = paymentDecision.Readiness.SnapshotHash
+                    ,PaymentReadinessEvaluatedAtUtc = paymentDecision.Readiness.EvaluatedAtUtc
                 });
             }
 
-            // Update payment status
-            if (payment.AllocatedAmount >= payment.TotalAmount)
-                payment.Status = VendorPaymentStatus.Processed;
+            // Allocation completeness does not advance the payment lifecycle. Manual payments
+            // remain Draft until submitted and approved; batch payments remain Authorized until
+            // their central Finance posting succeeds.
 
             var createdAllocationIds = createdAllocations.Select(a => a.Id).ToHashSet();
-            payment.DiscountTaken = payment.Allocations
-                .Where(a => !a.IsReversal && !createdAllocationIds.Contains(a.Id))
-                .Sum(a => a.DiscountAmount) + createdAllocations.Sum(a => a.DiscountAmount);
+            payment.DiscountTaken = RoundMoney(GetEffectiveAllocations(
+                    payment.Allocations
+                        .Where(item => !createdAllocationIds.Contains(item.Id))
+                        .Concat(createdAllocations))
+                .Sum(item => item.DiscountAmount));
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
             await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (ownsTransaction)
+                await _unitOfWork.CommitAsync(cancellationToken);
 
             result.TotalAllocated = payment.AllocatedAmount;
             result.RemainingUnallocated = payment.TotalAmount - payment.AllocatedAmount;
@@ -1331,6 +1584,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                 result.Allocations.Count, paymentId, result.TotalAllocated);
 
             return result;
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         private async Task<VendorPaymentAllocationResultDto> AllocatePostedSupplierAdvanceAsync(
@@ -1345,13 +1605,32 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (requestedAllocations.Any(a => a.AllocatedAmount <= 0m || a.DiscountAmount != 0m || a.WithholdingTaxAmount != 0m))
                 throw new InvalidOperationException("Supplier advance applications support positive cash allocations only; use a dedicated adjustment workflow for discounts or withholding.");
 
+            if (!_unitOfWork.HasActiveTransaction)
+            {
+                foreach (var invoiceId in requestedAllocations.Select(item => item.VendorInvoiceId).Distinct())
+                    await RequirePaymentReadinessAsync(
+                        invoiceId,
+                        ProcurementPaymentReadinessRules.SupplierAdvanceAction,
+                        paymentId,
+                        batchId: null,
+                        cancellationToken);
+            }
+
             var transactionStarted = false;
             try
             {
                 // The available advance, invoice balances, allocation facts, and reclassification
                 // postings have to commit together. Serializable isolation prevents double use of one advance.
-                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-                transactionStarted = true;
+                if (!_unitOfWork.HasActiveTransaction)
+                {
+                    await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                    transactionStarted = true;
+                }
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0505-payment:{TenantId:N}:{paymentId:N}", cancellationToken);
+                foreach (var invoiceId in requestedAllocations.Select(item => item.VendorInvoiceId).Distinct().OrderBy(item => item))
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
 
                 var payment = await _unitOfWork.Repository<VendorPayment>()
                     .GetQueryable(p => p.TenantId == TenantId && p.Id == paymentId && !p.IsDeleted)
@@ -1379,7 +1658,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (advanceAccount.AccountType != AccountType.Asset)
                     throw new InvalidOperationException("Supplier advance account must be an asset account.");
 
-                var currentlyAllocated = RoundMoney(payment.Allocations.Where(a => !a.IsReversal).Sum(a => a.AllocatedAmount));
+                var currentlyAllocated = RoundMoney(GetEffectiveAllocations(payment.Allocations)
+                    .Sum(a => a.AllocatedAmount));
                 var requestedTotal = RoundMoney(requestedAllocations.Sum(a => a.AllocatedAmount));
                 if (requestedTotal > RoundMoney(payment.TotalAmount - currentlyAllocated))
                     throw new InvalidOperationException("Supplier advance application exceeds the unallocated advance balance.");
@@ -1388,6 +1668,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var result = new VendorPaymentAllocationResultDto { PaymentId = payment.Id };
                 foreach (var requested in requestedAllocations)
                 {
+                    var paymentDecision = await RequirePaymentReadinessAsync(
+                        requested.VendorInvoiceId,
+                        ProcurementPaymentReadinessRules.SupplierAdvanceAction,
+                        payment.Id,
+                        batchId: payment.PaymentBatchId,
+                        cancellationToken);
                     var invoice = await _unitOfWork.Repository<VendorInvoice>()
                         .GetQueryable(i => i.TenantId == TenantId && i.Id == requested.VendorInvoiceId && !i.IsDeleted)
                         .FirstOrDefaultAsync(cancellationToken)
@@ -1399,9 +1685,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                     if (!string.Equals(NormalizeCurrency(invoice.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Foreign-currency supplier advance application is not supported until advance FX settlement is implemented.");
 
-                    var invoiceOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount);
+                    var invoiceOutstanding = await GetInvoiceUnreservedBalanceAsync(
+                        invoice,
+                        payment.Id,
+                        cancellationToken);
                     if (requested.AllocatedAmount > invoiceOutstanding)
-                        throw new InvalidOperationException($"Supplier advance application exceeds the outstanding balance of invoice '{invoice.InvoiceNumber}'.");
+                        throw new VendorPaymentControlException(
+                            "AP_PAYMENT_BALANCE_RESERVED",
+                            $"Supplier advance application exceeds the unreserved outstanding balance of invoice '{invoice.InvoiceNumber}'.");
 
                     var allocation = new VendorPaymentAllocation
                     {
@@ -1412,6 +1703,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                         AllocatedAmount = RoundMoney(requested.AllocatedAmount),
                         AllocationDate = now,
                         Notes = requested.Notes,
+                        PaymentReadinessControlEventId = paymentDecision.Event.Id,
+                        PaymentReadinessSnapshotHash = paymentDecision.Readiness.SnapshotHash,
+                        PaymentReadinessEvaluatedAtUtc = paymentDecision.Readiness.EvaluatedAtUtc,
                         CreatedAt = now,
                         CreatedBy = UserName
                     };
@@ -1422,8 +1716,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     payment.Allocations.Add(allocation);
                     // This is a read-side operational snapshot. Recompute it from allocations so
                     // a stale value cannot cause an advance to be over-applied after a retry.
-                    payment.AllocatedAmount = RoundMoney(payment.Allocations
-                        .Where(a => !a.IsReversal)
+                    payment.AllocatedAmount = RoundMoney(GetEffectiveAllocations(payment.Allocations)
                         .Sum(a => a.AllocatedAmount));
                     payment.UpdatedAt = now;
                     payment.UpdatedBy = UserName;
@@ -1474,12 +1767,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                         InvoiceNumber = invoice.InvoiceNumber,
                         AllocatedAmount = allocation.AllocatedAmount,
                         AllocationDate = allocation.AllocationDate,
-                        Notes = allocation.Notes
+                        Notes = allocation.Notes,
+                        PaymentReadinessControlEventId = paymentDecision.Event.Id,
+                        PaymentReadinessSnapshotHash = paymentDecision.Readiness.SnapshotHash,
+                        PaymentReadinessEvaluatedAtUtc = paymentDecision.Readiness.EvaluatedAtUtc
                     });
                 }
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-                transactionStarted = false;
+                if (transactionStarted)
+                {
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    transactionStarted = false;
+                }
                 result.TotalAllocated = payment.AllocatedAmount;
                 result.RemainingUnallocated = RoundMoney(payment.TotalAmount - payment.AllocatedAmount);
                 await RecordApPaymentAuditAsync(
@@ -1498,76 +1797,259 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
-        public async Task ReverseAllocationAsync(Guid allocationId, string reason, CancellationToken cancellationToken = default)
+        private async Task<decimal> GetInvoiceUnreservedBalanceAsync(
+            VendorInvoice invoice,
+            Guid? currentPaymentId,
+            CancellationToken cancellationToken)
         {
-            var allocation = await _unitOfWork.Repository<VendorPaymentAllocation>()
-                .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
-                .Include(a => a.VendorPayment)
-                .Include(a => a.VendorInvoice)
-                .FirstOrDefaultAsync(cancellationToken);
+            var liveAllocationReservation = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == TenantId &&
+                    allocation.VendorInvoiceId == invoice.Id &&
+                    !allocation.IsDeleted &&
+                    !allocation.VendorPayment.IsDeleted &&
+                    !allocation.VendorPayment.JournalEntryId.HasValue &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Failed)
+                .SumAsync(
+                    allocation => (decimal?)(allocation.AllocatedAmount +
+                                               allocation.DiscountAmount +
+                                               allocation.WithholdingTaxAmount),
+                    cancellationToken) ?? 0m;
 
-            if (allocation == null)
-                throw new KeyNotFoundException($"Allocation with Id '{allocationId}' not found.");
-
-            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
-                await ResolveBankAccountIdForScopeAsync(allocation.VendorPayment.BankAccountId, cancellationToken),
-                FinanceAccessLevel.Operate,
-                cancellationToken);
-
-            if (allocation.IsReversal)
-                throw new InvalidOperationException("Cannot reverse a reversal allocation.");
-
-            if (allocation.VendorPayment.JournalEntryId.HasValue)
-                throw new InvalidOperationException("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
-
-            var now = DateTime.UtcNow;
-
-            // Create reversal allocation
-            var reversal = new VendorPaymentAllocation
+            var reservingBatchStatuses = new[]
             {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                VendorPaymentId = allocation.VendorPaymentId,
-                VendorInvoiceId = allocation.VendorInvoiceId,
-                AllocatedAmount = -allocation.AllocatedAmount,
-                DiscountAmount = -allocation.DiscountAmount,
-                WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
-                AllocationDate = now,
-                Notes = $"Reversal of allocation {allocationId}: {reason}",
-                IsReversal = true,
-                OriginalAllocationId = allocationId,
-                CreatedAt = now,
-                CreatedBy = UserName
+                PaymentBatchStatus.Draft,
+                PaymentBatchStatus.PendingApproval,
+                PaymentBatchStatus.Approved,
+                PaymentBatchStatus.Processing
             };
+            var batchSelectionReservation = await _unitOfWork.Repository<PaymentBatchInvoice>()
+                .GetQueryable(selection =>
+                    selection.TenantId == TenantId &&
+                    selection.VendorInvoiceId == invoice.Id &&
+                    !selection.IsDeleted &&
+                    (!currentPaymentId.HasValue || selection.VendorPaymentId != currentPaymentId.Value) &&
+                    !selection.PaymentBatch.IsDeleted &&
+                    reservingBatchStatuses.Contains(selection.PaymentBatch.Status) &&
+                    !selection.VendorPayment.IsDeleted &&
+                    !selection.VendorPayment.JournalEntryId.HasValue &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !selection.VendorPayment.Allocations.Any(allocation =>
+                        allocation.TenantId == TenantId &&
+                        allocation.VendorInvoiceId == invoice.Id &&
+                        !allocation.IsDeleted &&
+                        !allocation.IsReversal))
+                .SumAsync(selection => (decimal?)selection.Amount, cancellationToken) ?? 0m;
 
-            await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(reversal);
+            return RoundMoney(Math.Max(
+                invoice.TotalAmount -
+                invoice.PaidAmount -
+                liveAllocationReservation -
+                batchSelectionReservation,
+                0m));
+        }
 
-            // Restore invoice balance
-            allocation.VendorInvoice.PaidAmount -= allocation.AllocatedAmount + allocation.DiscountAmount + allocation.WithholdingTaxAmount;
-            if (allocation.VendorInvoice.PaidAmount <= 0)
+        private async Task<IReadOnlyDictionary<Guid, decimal>>
+            GetInvoiceUnreservedBalancesAsync(
+                IReadOnlyCollection<VendorInvoice> invoices,
+                Guid? currentPaymentId,
+                CancellationToken cancellationToken)
+        {
+            if (invoices.Count == 0)
+                return new Dictionary<Guid, decimal>();
+
+            var invoiceIds = invoices.Select(item => item.Id).ToArray();
+            var liveAllocationReservations = await _unitOfWork
+                .Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == TenantId &&
+                    invoiceIds.Contains(allocation.VendorInvoiceId) &&
+                    !allocation.IsDeleted &&
+                    !allocation.VendorPayment.IsDeleted &&
+                    !allocation.VendorPayment.JournalEntryId.HasValue &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Failed)
+                .GroupBy(allocation => allocation.VendorInvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Amount = group.Sum(allocation =>
+                        allocation.AllocatedAmount +
+                        allocation.DiscountAmount +
+                        allocation.WithholdingTaxAmount)
+                })
+                .ToDictionaryAsync(
+                    item => item.InvoiceId,
+                    item => item.Amount,
+                    cancellationToken);
+
+            var reservingBatchStatuses = new[]
             {
-                allocation.VendorInvoice.PaidAmount = 0;
-                allocation.VendorInvoice.Status = VendorInvoiceStatus.Approved;
-            }
-            else
+                PaymentBatchStatus.Draft,
+                PaymentBatchStatus.PendingApproval,
+                PaymentBatchStatus.Approved,
+                PaymentBatchStatus.Processing
+            };
+            var batchSelectionReservations = await _unitOfWork
+                .Repository<PaymentBatchInvoice>()
+                .GetQueryable(selection =>
+                    selection.TenantId == TenantId &&
+                    invoiceIds.Contains(selection.VendorInvoiceId) &&
+                    !selection.IsDeleted &&
+                    (!currentPaymentId.HasValue ||
+                     selection.VendorPaymentId != currentPaymentId.Value) &&
+                    !selection.PaymentBatch.IsDeleted &&
+                    reservingBatchStatuses.Contains(selection.PaymentBatch.Status) &&
+                    !selection.VendorPayment.IsDeleted &&
+                    !selection.VendorPayment.JournalEntryId.HasValue &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !selection.VendorPayment.Allocations.Any(allocation =>
+                        allocation.TenantId == TenantId &&
+                        allocation.VendorInvoiceId == selection.VendorInvoiceId &&
+                        !allocation.IsDeleted &&
+                        !allocation.IsReversal))
+                .GroupBy(selection => selection.VendorInvoiceId)
+                .Select(group => new
+                {
+                    InvoiceId = group.Key,
+                    Amount = group.Sum(selection => selection.Amount)
+                })
+                .ToDictionaryAsync(
+                    item => item.InvoiceId,
+                    item => item.Amount,
+                    cancellationToken);
+
+            return invoices.ToDictionary(
+                invoice => invoice.Id,
+                invoice => RoundMoney(Math.Max(
+                    invoice.TotalAmount -
+                    invoice.PaidAmount -
+                    liveAllocationReservations.GetValueOrDefault(invoice.Id) -
+                    batchSelectionReservations.GetValueOrDefault(invoice.Id),
+                    0m)));
+        }
+
+        public Task ReverseAllocationAsync(
+            Guid allocationId,
+            string reason,
+            CancellationToken cancellationToken = default) =>
+            ReverseAllocationAsync(
+                allocationId,
+                reason,
+                cancellationToken,
+                executionStrategyScope: false);
+
+        private async Task ReverseAllocationAsync(
+            Guid allocationId,
+            string reason,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
+        {
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
-                allocation.VendorInvoice.Status = VendorInvoiceStatus.PartiallyPaid;
+                await _unitOfWork.ExecuteInStrategyAsync(
+                    async () =>
+                    {
+                        await ReverseAllocationAsync(
+                            allocationId,
+                            reason,
+                            cancellationToken,
+                            executionStrategyScope: true);
+                        return true;
+                    },
+                    cancellationToken);
+                return;
             }
-            allocation.VendorInvoice.UpdatedAt = now;
-            allocation.VendorInvoice.UpdatedBy = UserName;
-            await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(allocation.VendorInvoice);
 
-            // Restore payment unallocated
-            allocation.VendorPayment.AllocatedAmount -= allocation.AllocatedAmount;
-            if (allocation.VendorPayment.AllocatedAmount < 0)
-                allocation.VendorPayment.AllocatedAmount = 0;
-            allocation.VendorPayment.UpdatedAt = now;
-            allocation.VendorPayment.UpdatedBy = UserName;
-            await _unitOfWork.Repository<VendorPayment>().UpdateAsync(allocation.VendorPayment);
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0505-allocation-reversal:{TenantId:N}:{allocationId:N}",
+                    cancellationToken);
 
-            _logger.LogInformation("Reversed allocation {AllocationId}. Reason: {Reason}", allocationId, reason);
+                var allocation = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
+                    .Include(a => a.VendorPayment)
+                        .ThenInclude(payment => payment.Allocations)
+                    .Include(a => a.VendorInvoice)
+                    .SingleOrDefaultAsync(cancellationToken);
+
+                if (allocation == null)
+                    throw new KeyNotFoundException($"Allocation with Id '{allocationId}' not found.");
+                if (allocation.IsReversal)
+                    throw new InvalidOperationException("Cannot reverse a reversal allocation.");
+                if (allocation.VendorPayment.PaymentBatchId.HasValue)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_ALLOCATION_FROZEN",
+                        "Batch-owned payment allocations are immutable after the batch invoice set is submitted.");
+                if (allocation.VendorPayment.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("Posted vendor payment allocations cannot be reversed by mutation. Use a reversal, void, or adjustment workflow.");
+
+                var alreadyReversed = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                    .GetQueryableIncludingDeleted(item =>
+                        item.TenantId == TenantId &&
+                        item.IsReversal &&
+                        item.OriginalAllocationId == allocationId)
+                    .AnyAsync(cancellationToken);
+                if (alreadyReversed)
+                    throw AllocationAlreadyReversed(allocationId);
+
+                var now = DateTime.UtcNow;
+                var reversal = new VendorPaymentAllocation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    VendorPaymentId = allocation.VendorPaymentId,
+                    VendorInvoiceId = allocation.VendorInvoiceId,
+                    AllocatedAmount = -allocation.AllocatedAmount,
+                    DiscountAmount = -allocation.DiscountAmount,
+                    WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
+                    AllocationDate = now,
+                    Notes = $"Reversal of allocation {allocationId}: {reason}",
+                    IsReversal = true,
+                    OriginalAllocationId = allocationId,
+                    CreatedAt = now,
+                    CreatedBy = UserName
+                };
+
+                await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(reversal);
+
+                allocation.VendorPayment.AllocatedAmount = Math.Max(
+                    0m,
+                    allocation.VendorPayment.AllocatedAmount - allocation.AllocatedAmount);
+                allocation.VendorPayment.DiscountTaken = RoundMoney(
+                    GetEffectiveAllocations(allocation.VendorPayment.Allocations)
+                        .Where(item => item.Id != allocationId)
+                        .Sum(item => item.DiscountAmount));
+                allocation.VendorPayment.UpdatedAt = now;
+                allocation.VendorPayment.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(allocation.VendorPayment);
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                _logger.LogInformation("Reversed allocation {AllocationId}. Reason: {Reason}", allocationId, reason);
+            }
+            catch (DbUpdateException exception) when (IsDuplicateAllocationReversal(exception))
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw AllocationAlreadyReversed(allocationId);
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         public async Task<List<VendorPaymentAllocationDto>> GetPaymentAllocationsAsync(Guid paymentId, CancellationToken cancellationToken = default)
@@ -1598,11 +2080,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                 WithholdingTaxAmount = a.WithholdingTaxAmount,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
-                IsReversal = a.IsReversal
+                IsReversal = a.IsReversal,
+                PaymentReadinessControlEventId = a.PaymentReadinessControlEventId,
+                PaymentReadinessSnapshotHash = a.PaymentReadinessSnapshotHash,
+                PaymentReadinessEvaluatedAtUtc = a.PaymentReadinessEvaluatedAtUtc
             }).ToList();
         }
 
-        public async Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(Guid supplierId, CancellationToken cancellationToken = default)
+        public async Task<List<OutstandingVendorInvoiceDto>> GetOutstandingInvoicesAsync(
+            Guid supplierId,
+            int pageNumber = 1,
+            int pageSize = DefaultOutstandingInvoicePageSize,
+            CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
             var resolvedSupplierId = await ResolveSupplierIdForQueryAsync(supplierId, cancellationToken);
@@ -1611,7 +2100,45 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return new List<OutstandingVendorInvoiceDto>();
             }
 
-            var invoices = await _unitOfWork.Repository<VendorInvoice>()
+            var boundedPageNumber = Math.Max(pageNumber, 1);
+            var boundedPageSize = Math.Clamp(
+                pageSize,
+                1,
+                MaximumOutstandingInvoicePageSize);
+            var skip = (int)Math.Min(
+                (long)(boundedPageNumber - 1) * boundedPageSize,
+                int.MaxValue);
+            var liveAllocations = _unitOfWork.Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == TenantId &&
+                    !allocation.IsDeleted &&
+                    !allocation.VendorPayment.IsDeleted &&
+                    !allocation.VendorPayment.JournalEntryId.HasValue &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    allocation.VendorPayment.Status != VendorPaymentStatus.Failed);
+            var reservingBatchStatuses = new[]
+            {
+                PaymentBatchStatus.Draft,
+                PaymentBatchStatus.PendingApproval,
+                PaymentBatchStatus.Approved,
+                PaymentBatchStatus.Processing
+            };
+            var batchSelections = _unitOfWork.Repository<PaymentBatchInvoice>()
+                .GetQueryable(selection =>
+                    selection.TenantId == TenantId &&
+                    !selection.IsDeleted &&
+                    !selection.PaymentBatch.IsDeleted &&
+                    reservingBatchStatuses.Contains(selection.PaymentBatch.Status) &&
+                    !selection.VendorPayment.IsDeleted &&
+                    !selection.VendorPayment.JournalEntryId.HasValue &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                    selection.VendorPayment.Status != VendorPaymentStatus.Failed &&
+                    !selection.VendorPayment.Allocations.Any(allocation =>
+                        allocation.TenantId == TenantId &&
+                        allocation.VendorInvoiceId == selection.VendorInvoiceId &&
+                        !allocation.IsDeleted &&
+                        !allocation.IsReversal));
+            var invoicePage = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
                     i.SupplierId == resolvedSupplierId.Value &&
@@ -1619,16 +2146,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                      i.Status == VendorInvoiceStatus.PartiallyPaid ||
                      i.Status == VendorInvoiceStatus.Overdue) &&
                     (i.TotalAmount - i.PaidAmount) > 0)
-                .OrderBy(i => i.DueDate)
+                .Select(invoice => new
+                {
+                    Invoice = invoice,
+                    UnreservedBalance = invoice.TotalAmount - invoice.PaidAmount -
+                        (liveAllocations
+                            .Where(allocation => allocation.VendorInvoiceId == invoice.Id)
+                            .Sum(allocation => (decimal?)(allocation.AllocatedAmount +
+                                                         allocation.DiscountAmount +
+                                                         allocation.WithholdingTaxAmount)) ?? 0m) -
+                        (batchSelections
+                            .Where(selection => selection.VendorInvoiceId == invoice.Id)
+                            .Sum(selection => (decimal?)selection.Amount) ?? 0m)
+                })
+                .Where(item => item.UnreservedBalance > 0m)
+                .OrderBy(item => item.Invoice.DueDate)
+                .ThenBy(item => item.Invoice.Id)
+                .Skip(skip)
+                .Take(boundedPageSize)
+                .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
-            return invoices.Select(i =>
+            var result = new List<OutstandingVendorInvoiceDto>();
+            foreach (var row in invoicePage)
             {
+                var i = row.Invoice;
+                var unreservedBalance = RoundMoney(row.UnreservedBalance);
+
                 var discountAvailable = i.EarlyPaymentDiscountPercentage > 0
                     && i.EarlyPaymentDiscountDueDate.HasValue
                     && i.EarlyPaymentDiscountDueDate.Value >= now.Date;
 
-                return new OutstandingVendorInvoiceDto
+                result.Add(new OutstandingVendorInvoiceDto
                 {
                     InvoiceId = i.Id,
                     InvoiceNumber = i.InvoiceNumber,
@@ -1637,17 +2186,31 @@ namespace ErpSystem.Api.Services.Finance.AP
                     DueDate = i.DueDate,
                     TotalAmount = i.TotalAmount,
                     PaidAmount = i.PaidAmount,
-                    BalanceAmount = i.BalanceAmount,
+                    BalanceAmount = unreservedBalance,
                     DaysOverdue = i.DueDate.HasValue && i.DueDate.Value < now
                         ? (int)(now - i.DueDate.Value).TotalDays
                         : 0,
                     EarlyPaymentDiscountPercentage = i.EarlyPaymentDiscountPercentage,
                     EarlyPaymentDiscountDueDate = i.EarlyPaymentDiscountDueDate,
                     IsDiscountAvailable = discountAvailable,
-                    DiscountAmount = discountAvailable ? i.EarlyPaymentDiscountAmount : 0
-                };
-            }).ToList();
+                    DiscountAmount = discountAvailable
+                        ? RoundMoney(unreservedBalance *
+                                     i.EarlyPaymentDiscountPercentage / 100m)
+                        : 0m,
+                    PaymentReadiness = await EvaluateInvoicePaymentReadinessAsync(
+                        i.Id,
+                        cancellationToken,
+                        preloadedInvoice: i)
+                });
+            }
+
+            return result;
         }
+
+        public Task<VendorPaymentInvoiceReadinessDto> GetInvoicePaymentReadinessAsync(
+            Guid invoiceId,
+            CancellationToken cancellationToken = default) =>
+            EvaluateInvoicePaymentReadinessAsync(invoiceId, cancellationToken);
 
         // ═════════════════════════════════════════════════════════════════
         //  PAYMENT STATUS
@@ -1680,63 +2243,269 @@ namespace ErpSystem.Api.Services.Finance.AP
             return MapToDto(payment);
         }
 
-        public async Task<VendorPaymentDto> VoidPaymentAsync(Guid id, string reason, CancellationToken cancellationToken = default)
+        public Task<VendorPaymentDto> VoidPaymentAsync(
+            Guid id,
+            string reason,
+            CancellationToken cancellationToken = default) =>
+            VoidPaymentAsync(id, reason, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorPaymentDto> VoidPaymentAsync(
+            Guid id,
+            string reason,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
-            var payment = await _unitOfWork.Repository<VendorPayment>()
-                .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
-                .Include(p => p.Supplier)
-                .Include(p => p.Allocations)
-                    .ThenInclude(a => a.VendorInvoice)
-                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A void and reversal reason is required.", nameof(reason));
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AP payment reversal.");
 
-            if (payment == null)
-                throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
-
-            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
-                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
-                FinanceAccessLevel.Operate,
-                cancellationToken);
-
-            if (payment.Status == VendorPaymentStatus.Voided)
-                throw new InvalidOperationException("Payment is already voided.");
-
-            if (payment.JournalEntryId.HasValue)
-                throw new InvalidOperationException("Posted vendor payments cannot be voided by mutation. Use the posted-payment reversal workflow.");
-
-            var now = DateTime.UtcNow;
-
-            // Reverse all non-reversal allocations
-            foreach (var alloc in payment.Allocations.Where(a => !a.IsReversal).ToList())
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
             {
-                // WHT is part of the invoice settlement even though it is remitted to the tax
-                // authority rather than paid to the supplier. Voiding an unposted payment must
-                // therefore restore allocated cash, discount, and WHT together.
-                alloc.VendorInvoice.PaidAmount -= alloc.AllocatedAmount + alloc.DiscountAmount + alloc.WithholdingTaxAmount;
-                if (alloc.VendorInvoice.PaidAmount <= 0)
-                {
-                    alloc.VendorInvoice.PaidAmount = 0;
-                    alloc.VendorInvoice.Status = VendorInvoiceStatus.Approved;
-                }
-                else
-                {
-                    alloc.VendorInvoice.Status = VendorInvoiceStatus.PartiallyPaid;
-                }
-                alloc.VendorInvoice.UpdatedAt = now;
-                alloc.VendorInvoice.UpdatedBy = UserName;
-                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(alloc.VendorInvoice);
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => VoidPaymentAsync(id, reason, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
             }
 
-            payment.Status = VendorPaymentStatus.Voided;
-            payment.AllocatedAmount = 0;
-            payment.Notes = $"{payment.Notes}\n\nVoided on {now:yyyy-MM-dd HH:mm}: {reason}";
-            payment.UpdatedAt = now;
-            payment.UpdatedBy = UserName;
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-            await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            VendorPayment? payment = null;
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0508-payment:{TenantId:N}:{id:N}", cancellationToken);
 
-            _logger.LogWarning("Voided vendor payment {PaymentNumber}. Reason: {Reason}", payment.PaymentNumber, reason);
-            return MapToDto(payment);
+                payment = await _unitOfWork.Repository<VendorPayment>()
+                    .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
+                    .Include(p => p.Supplier)
+                    .Include(p => p.Allocations.Where(a => !a.IsDeleted))
+                        .ThenInclude(a => a.VendorInvoice)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
+
+                if (payment.Status is VendorPaymentStatus.Cleared or VendorPaymentStatus.Reconciled)
+                {
+                    throw new InvalidOperationException(
+                        "A cleared or reconciled vendor payment must first be removed from bank reconciliation before it can be voided.");
+                }
+
+                var originalAllocations = payment.Allocations
+                    .Where(item => !item.IsReversal)
+                    .OrderBy(item => item.VendorInvoiceId)
+                    .ThenBy(item => item.Id)
+                    .ToList();
+                var reversedAllocationIds = payment.Allocations
+                    .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
+                    .Select(item => item.OriginalAllocationId!.Value)
+                    .ToHashSet();
+
+                foreach (var invoiceId in originalAllocations
+                             .Select(item => item.VendorInvoiceId)
+                             .Distinct()
+                             .OrderBy(item => item))
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"tdc0508-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+                }
+
+                FinancePostingEvent? paymentPostingEvent = null;
+                FinancePostingResultDto? paymentReversal = null;
+                if (payment.JournalEntryId.HasValue)
+                {
+                    paymentPostingEvent = await GetPostedPaymentEventAsync(payment, cancellationToken);
+                }
+
+                var pendingAllocationReversals = new List<PendingAllocationReversal>();
+                var auxiliaryReversalIds = new List<Guid>();
+                foreach (var allocation in originalAllocations.Where(item => !reversedAllocationIds.Contains(item.Id)))
+                {
+                    if (allocation.VendorInvoice == null || allocation.VendorInvoice.TenantId != TenantId)
+                        throw new InvalidOperationException(
+                            "AP payment allocation references an invoice from another tenant.");
+
+                    FinancePostingResultDto? applicationReversal = null;
+                    var realizedFx = await _unitOfWork.Repository<FxRealizedSettlement>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.SourceModule == "AP" &&
+                            item.SettlementDocumentType == "VendorPayment" &&
+                            item.SettlementDocumentId == payment.Id &&
+                            item.SettlementAllocationId == allocation.Id &&
+                            !item.IsDeleted)
+                        .OrderByDescending(item => item.PostedAt)
+                        .FirstOrDefaultAsync(cancellationToken);
+                    if (realizedFx?.PostingEventId is Guid fxPostingEventId &&
+                        string.Equals(realizedFx.Status, "Posted", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fxReversal = await ReversePostedEventAsync(
+                            fxPostingEventId,
+                            reason,
+                            $"FX:Realized:AP:{TenantId:N}:{allocation.Id:N}:Reverse",
+                            "Realized FX Reversal",
+                            $"Reverse realized FX for AP payment {payment.PaymentNumber}",
+                            cancellationToken);
+                        realizedFx.Status = "Reversed";
+                        realizedFx.UpdatedAt = DateTime.UtcNow;
+                        realizedFx.UpdatedBy = UserName;
+                        await _unitOfWork.Repository<FxRealizedSettlement>().UpdateAsync(realizedFx);
+                        auxiliaryReversalIds.Add(fxReversal.PostingEventId);
+                    }
+
+                    if (payment.IsSupplierAdvance &&
+                        allocation.ApplicationPostingEventId.HasValue &&
+                        paymentPostingEvent != null &&
+                        allocation.ApplicationPostingEventId.Value != paymentPostingEvent.Id)
+                    {
+                        applicationReversal = await ReversePostedEventAsync(
+                            allocation.ApplicationPostingEventId.Value,
+                            reason,
+                            $"AP:VendorPaymentAdvanceApplication:{TenantId:N}:{allocation.Id:N}:Reverse",
+                            "Supplier Advance Application Reversal",
+                            $"Reverse supplier advance application {payment.PaymentNumber}",
+                            cancellationToken);
+                        auxiliaryReversalIds.Add(applicationReversal.PostingEventId);
+                    }
+
+                    pendingAllocationReversals.Add(new PendingAllocationReversal(
+                        allocation,
+                        allocation.VendorInvoice,
+                        applicationReversal));
+                }
+
+                if (paymentPostingEvent != null)
+                {
+                    paymentReversal = await ReversePostedEventAsync(
+                        paymentPostingEvent.Id,
+                        reason,
+                        $"AP:VendorPayment:{TenantId:N}:{payment.Id:N}:Reverse",
+                        "AP Payment Reversal",
+                        $"Reverse AP payment {payment.PaymentNumber}",
+                        cancellationToken);
+                }
+
+                var now = DateTime.UtcNow;
+                foreach (var pending in pendingAllocationReversals)
+                {
+                    var original = pending.Allocation;
+                    var invoice = pending.Invoice;
+                    var settlementAmount = RoundMoney(
+                        original.AllocatedAmount +
+                        original.DiscountAmount +
+                        original.WithholdingTaxAmount);
+
+                    if (payment.JournalEntryId.HasValue)
+                    {
+                        invoice.PaidAmount = Math.Max(0m, RoundMoney(invoice.PaidAmount - settlementAmount));
+                        invoice.Status = invoice.PaidAmount <= 0.01m
+                            ? VendorInvoiceStatus.Approved
+                            : VendorInvoiceStatus.PartiallyPaid;
+                        invoice.UpdatedAt = now;
+                        invoice.UpdatedBy = UserName;
+                        invoice.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                        await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+                    }
+
+                    var allocationPosting = pending.ApplicationReversal ?? paymentReversal;
+                    await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(new VendorPaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        VendorPaymentId = payment.Id,
+                        VendorInvoiceId = invoice.Id,
+                        AllocatedAmount = -original.AllocatedAmount,
+                        DiscountAmount = -original.DiscountAmount,
+                        WithholdingTaxAmount = -original.WithholdingTaxAmount,
+                        AllocationDate = now,
+                        Notes = $"Controlled void reversal of allocation {original.Id}: {reason.Trim()}",
+                        IsReversal = true,
+                        OriginalAllocationId = original.Id,
+                        ApplicationPostingEventId = allocationPosting?.PostingEventId,
+                        ApplicationJournalEntryId = allocationPosting?.JournalEntryId,
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
+                    });
+                }
+
+                var alreadyVoided = payment.Status == VendorPaymentStatus.Voided;
+                payment.Status = VendorPaymentStatus.Voided;
+                payment.AllocatedAmount = 0m;
+                payment.DiscountTaken = 0m;
+                if (!alreadyVoided)
+                {
+                    payment.Notes = AppendLifecycleNote(
+                        payment.Notes,
+                        $"Voided on {now:yyyy-MM-dd HH:mm}: {reason.Trim()}");
+                }
+                payment.UpdatedAt = now;
+                payment.UpdatedBy = UserName;
+                payment.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                if (!alreadyVoided || pendingAllocationReversals.Count > 0 || paymentReversal?.WasDuplicate == false)
+                {
+                    await RecordApPaymentAuditAsync(
+                        payment.JournalEntryId.HasValue
+                            ? FinanceAuditEvents.ApPaymentReversed
+                            : FinanceAuditEvents.ApPaymentVoided,
+                        payment,
+                        postingEventId: paymentReversal?.PostingEventId,
+                        journalEntryId: paymentReversal?.JournalEntryId,
+                        beforeValues: new
+                        {
+                            status = alreadyVoided ? VendorPaymentStatus.Voided : (VendorPaymentStatus?)null,
+                            payment.JournalEntryId
+                        },
+                        afterValues: new
+                        {
+                            payment.Status,
+                            payment.AllocatedAmount,
+                            OriginalJournalEntryId = payment.JournalEntryId,
+                            ReversalPostingEventId = paymentReversal?.PostingEventId,
+                            ReversalJournalEntryId = paymentReversal?.JournalEntryId,
+                            AllocationReversalCount = pendingAllocationReversals.Count,
+                            AuxiliaryReversalPostingEventIds = auxiliaryReversalIds
+                        },
+                        reason: reason.Trim(),
+                        comment: "AP payment, allocation, invoice-balance, realized-FX and supplier-advance reversals were committed atomically.",
+                        cancellationToken: cancellationToken);
+                }
+
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                _logger.LogWarning(
+                    "Voided AP payment {PaymentNumber}. OriginalJournal={OriginalJournalId}; ReversalJournal={ReversalJournalId}; AllocationReversals={AllocationReversalCount}; Reason={Reason}",
+                    payment.PaymentNumber,
+                    payment.JournalEntryId,
+                    paymentReversal?.JournalEntryId,
+                    pendingAllocationReversals.Count,
+                    reason.Trim());
+
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+            }
+            catch (Exception ex)
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+
+                if (payment != null)
+                {
+                    await RecordApPaymentAuditAsync(
+                        FinanceAuditEvents.ApPaymentReversalFailed,
+                        payment,
+                        afterValues: new { payment.JournalEntryId, error = ex.Message },
+                        reason: ex.Message,
+                        comment: "AP payment void was rejected; no payment, allocation, invoice-balance, or ledger mutation was committed.",
+                        cancellationToken: cancellationToken);
+                }
+
+                throw;
+            }
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -1781,23 +2550,43 @@ namespace ErpSystem.Api.Services.Finance.AP
         //  PAYMENT BATCHES
         // ═════════════════════════════════════════════════════════════════
 
-        public async Task<PaymentBatchDto> CreatePaymentBatchAsync(PaymentBatchCreateDto dto, CancellationToken cancellationToken = default)
+        public Task<PaymentBatchDto> CreatePaymentBatchAsync(
+            PaymentBatchCreateDto dto,
+            CancellationToken cancellationToken = default) =>
+            CreatePaymentBatchAsync(dto, cancellationToken, executionStrategyScope: false);
+
+        private async Task<PaymentBatchDto> CreatePaymentBatchAsync(
+            PaymentBatchCreateDto dto,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => CreatePaymentBatchAsync(dto, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
+
+            if (dto.InvoiceIds.Count == 0)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_EMPTY", "At least one vendor invoice is required.");
+            if (dto.InvoiceIds.Count != dto.InvoiceIds.Distinct().Count())
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_DUPLICATE_INVOICE", "A vendor invoice may only appear once in a payment batch.");
+
             var batchNumber = await GenerateBatchNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
+            var batchId = Guid.NewGuid();
 
-            // Load the invoices
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
                     i.TenantId == TenantId &&
-                    dto.InvoiceIds.Contains(i.Id) &&
-                    i.Status == VendorInvoiceStatus.Approved &&
-                    (i.TotalAmount - i.PaidAmount) > 0)
+                    dto.InvoiceIds.Contains(i.Id) && !i.IsDeleted)
                 .Include(i => i.Supplier)
                 .ToListAsync(cancellationToken);
 
-            if (!invoices.Any())
-                throw new InvalidOperationException("No approved outstanding invoices found for the provided IDs.");
+            if (invoices.Count != dto.InvoiceIds.Count)
+                throw new KeyNotFoundException("One or more selected vendor invoices were not found in the current tenant.");
 
             var configuredPaymentMethod = await ResolveConfiguredPaymentMethodAsync(
                 dto.PaymentMethodId,
@@ -1810,9 +2599,53 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? dto.PaymentMethod
                 : MapConfiguredPaymentMethodToVendorPaymentMethod(configuredPaymentMethod.Type);
 
+            if (!_unitOfWork.HasActiveTransaction)
+            {
+                foreach (var invoice in invoices.OrderBy(item => item.Id))
+                    await RequirePaymentReadinessAsync(
+                        invoice.Id,
+                        ProcurementPaymentReadinessRules.BatchCreateAction,
+                        paymentId: null,
+                        batchId,
+                        cancellationToken);
+            }
+
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
+            foreach (var invoiceId in dto.InvoiceIds.OrderBy(item => item))
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0505-invoice:{TenantId:N}:{invoiceId:N}", cancellationToken);
+
+            // Refresh after taking the per-invoice locks. Another allocator may have
+            // committed between the initial UI/readiness query and this transaction.
+            invoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i =>
+                    i.TenantId == TenantId &&
+                    dto.InvoiceIds.Contains(i.Id) &&
+                    !i.IsDeleted)
+                .Include(i => i.Supplier)
+                .ToListAsync(cancellationToken);
+            var availableBalanceByInvoice = new Dictionary<Guid, decimal>();
+            foreach (var invoice in invoices.OrderBy(item => item.Id))
+            {
+                var availableBalance = await GetInvoiceUnreservedBalanceAsync(
+                    invoice,
+                    currentPaymentId: null,
+                    cancellationToken);
+                if (availableBalance <= 0m)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BALANCE_RESERVED",
+                        $"Invoice '{invoice.InvoiceNumber}' has no unreserved outstanding balance.");
+                availableBalanceByInvoice[invoice.Id] = availableBalance;
+            }
+
             var batch = new PaymentBatch
             {
-                Id = Guid.NewGuid(),
+                Id = batchId,
                 TenantId = TenantId,
                 BatchNumber = batchNumber,
                 Description = dto.Description,
@@ -1829,16 +2662,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CreatedBy = UserName
             };
 
-            // Group invoices by supplier and create one payment per supplier
-            var bySupplier = invoices.GroupBy(i => i.SupplierId);
+            var baseCurrencyCode = NormalizeCurrency(
+                await _tenantSettingsService.GetBaseCurrencyAsync(),
+                "GHS");
+            var selectedCurrencies = invoices
+                .Select(invoice => NormalizeCurrency(
+                    invoice.CurrencyCode,
+                    baseCurrencyCode))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (selectedCurrencies.Count != 1)
+            {
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_CURRENCY_MISMATCH",
+                    "A payment batch must contain invoices in exactly one currency. Create a separate batch for each currency.");
+            }
+            // A payment is denominated in exactly one currency. Splitting on
+            // both dimensions prevents unconverted mixed-currency totals and
+            // guarantees that every later allocation matches its payment.
+            var bySupplierAndCurrency = invoices.GroupBy(invoice => new
+            {
+                invoice.SupplierId,
+                CurrencyCode = NormalizeCurrency(
+                    invoice.CurrencyCode,
+                    baseCurrencyCode)
+            });
             decimal totalAmount = 0;
             int paymentCount = 0;
-            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
-            foreach (var group in bySupplier)
+            foreach (var group in bySupplierAndCurrency)
             {
                 var supplier = group.First().Supplier;
-                var supplierTotal = group.Sum(i => i.TotalAmount - i.PaidAmount);
+                var supplierTotal = group.Sum(i => availableBalanceByInvoice[i.Id]);
 
                 var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
                 var payment = new VendorPayment
@@ -1846,38 +2701,65 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
                     PaymentNumber = paymentNumber,
-                    SupplierId = group.Key,
+                    SupplierId = group.Key.SupplierId,
                     PaymentDate = dto.BatchDate,
                     TotalAmount = supplierTotal,
                     AllocatedAmount = 0,
                     PaymentMethod = paymentMethod,
                     PaymentMethodId = configuredPaymentMethod?.Id,
-                    CurrencyCode = group
-                        .Select(i => i.CurrencyCode)
-                        .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code))?
-                        .Trim()
-                        .ToUpperInvariant() ?? baseCurrencyCode,
+                    CurrencyCode = group.Key.CurrencyCode,
                     ExchangeRate = 1.0m,
                     BankAccountId = dto.BankAccountId,
                     PaymentBatchId = batch.Id,
+                    PaymentBatch = batch,
                     Status = VendorPaymentStatus.PendingAuthorization,
                     CreatedAt = now,
                     CreatedBy = UserName
                 };
 
-                await _unitOfWork.Repository<VendorPayment>().AddAsync(payment);
-
-                batch.Items.Add(new PaymentBatchItem
+                var batchItem = new PaymentBatchItem
                 {
                     Id = Guid.NewGuid(),
                     TenantId = TenantId,
                     PaymentBatchId = batch.Id,
+                    PaymentBatch = batch,
                     VendorPaymentId = payment.Id,
+                    VendorPayment = payment,
                     Amount = supplierTotal,
                     ItemStatus = "Pending",
                     CreatedAt = now,
                     CreatedBy = UserName
-                });
+                };
+                batch.Items.Add(batchItem);
+
+                foreach (var invoice in group.OrderBy(item => item.DueDate).ThenBy(item => item.Id))
+                {
+                    var selection = new PaymentBatchInvoice
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        PaymentBatchId = batch.Id,
+                        PaymentBatch = batch,
+                        PaymentBatchItemId = batchItem.Id,
+                        PaymentBatchItem = batchItem,
+                        VendorPaymentId = payment.Id,
+                        VendorPayment = payment,
+                        VendorInvoiceId = invoice.Id,
+                        VendorInvoice = invoice,
+                        Amount = availableBalanceByInvoice[invoice.Id],
+                        Status = "Pending",
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+                    var decision = await RequireBatchInvoiceReadinessAsync(
+                        selection,
+                        ProcurementPaymentReadinessRules.BatchCreateAction,
+                        cancellationToken);
+                    selection.PaymentReadinessControlEventId = decision.Event.Id;
+                    selection.PaymentReadinessSnapshotHash = decision.Readiness.SnapshotHash;
+                    selection.PaymentReadinessEvaluatedAtUtc = decision.Readiness.EvaluatedAtUtc;
+                    batchItem.Invoices.Add(selection);
+                }
 
                 totalAmount += supplierTotal;
                 paymentCount++;
@@ -1886,25 +2768,33 @@ namespace ErpSystem.Api.Services.Finance.AP
             batch.TotalAmount = totalAmount;
             batch.PaymentCount = paymentCount;
 
+            // Attach the fully evidenced aggregate only after every AP-003 event has been
+            // appended. The shared control-event service saves immediately; attaching a
+            // partially built batch-owned payment earlier would flush an incomplete graph
+            // (payment FK before batch/selection evidence) during that save.
             await _unitOfWork.Repository<PaymentBatch>().AddAsync(batch);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("PaymentBatch", batch.Id);
             if (!workflowResult.Success)
             {
-                batch.Status = PaymentBatchStatus.Draft;
-                batch.UpdatedAt = DateTime.UtcNow;
-                batch.UpdatedBy = UserName;
-                await _unitOfWork.Repository<PaymentBatch>().UpdateAsync(batch);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-
                 throw new InvalidOperationException(workflowResult.Message ?? "Unable to start payment batch approval workflow.");
             }
+
+            if (ownsTransaction)
+                await _unitOfWork.CommitAsync(cancellationToken);
 
             _logger.LogInformation("Created payment batch {BatchNumber} with {Count} payments, total {Total}",
                 batchNumber, paymentCount, totalAmount);
 
             return await GetPaymentBatchAsync(batch.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to retrieve created batch.");
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         public async Task<PaymentBatchDto?> GetPaymentBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
@@ -1914,6 +2804,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(b => b.Items)
                     .ThenInclude(i => i.VendorPayment)
                         .ThenInclude(p => p.Supplier)
+                .Include(b => b.Items)
+                    .ThenInclude(i => i.Invoices)
+                        .ThenInclude(i => i.VendorInvoice)
                 .Include(b => b.BankAccount)
                 .Include(b => b.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -1954,6 +2847,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Include(b => b.Items)
                     .ThenInclude(i => i.VendorPayment)
                         .ThenInclude(p => p.Supplier)
+                .Include(b => b.Items)
+                    .ThenInclude(i => i.Invoices)
+                        .ThenInclude(i => i.VendorInvoice)
                 .Include(b => b.ConfiguredPaymentMethod)
                 .ToListAsync(cancellationToken);
 
@@ -1966,10 +2862,33 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
-        public async Task<PaymentBatchDto> ApprovePaymentBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
+        public Task<PaymentBatchDto> ApprovePaymentBatchAsync(
+            Guid batchId,
+            CancellationToken cancellationToken = default) =>
+            ApprovePaymentBatchAsync(batchId, cancellationToken, executionStrategyScope: false);
+
+        private async Task<PaymentBatchDto> ApprovePaymentBatchAsync(
+            Guid batchId,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => ApprovePaymentBatchAsync(batchId, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
+
+            if (_invoicePaymentSod == null)
+                throw new VendorPaymentControlException(
+                    ProcurementInvoicePaymentSodRules.EvidenceCode,
+                    "The authoritative invoice/payment SOD service is not configured.");
+
             var batch = await _unitOfWork.Repository<PaymentBatch>()
-                .FirstOrDefaultAsync(b => b.TenantId == TenantId && b.Id == batchId);
+                .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId && !b.IsDeleted)
+                .Include(b => b.Items)
+                    .ThenInclude(item => item.Invoices)
+                .SingleOrDefaultAsync(cancellationToken);
 
             if (batch == null)
                 throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found.");
@@ -1980,106 +2899,302 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (CurrentUserId == Guid.Empty)
                 throw new InvalidOperationException("Unable to resolve the current approver.");
 
-            if (!await _workflowService.CanUserApproveAsync("PaymentBatch", batchId, CurrentUserId))
-                throw new InvalidOperationException("This payment batch is assigned to another workflow approver.");
+            var selections = batch.Items.SelectMany(item => item.Invoices).ToList();
+            if (selections.Count == 0)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_SELECTION_MISSING",
+                    "The payment batch has no immutable invoice selections.");
 
-            var workflowResult = await _workflowService.ProcessApprovalStepAsync("PaymentBatch", batchId, CurrentUserId, "Approve");
-            if (!workflowResult.Success)
-                throw new InvalidOperationException(workflowResult.Message ?? "Unable to process payment batch approval.");
+            if (!_unitOfWork.HasActiveTransaction)
+            {
+                foreach (var selection in selections.OrderBy(item => item.VendorInvoiceId))
+                    await RequireBatchInvoiceReadinessAsync(
+                        selection,
+                        ProcurementPaymentReadinessRules.BatchApproveAction,
+                        cancellationToken);
+            }
 
-            if (workflowResult.Status != WorkflowInstanceStatus.Completed)
-                return await GetPaymentBatchAsync(batchId, cancellationToken) ?? throw new InvalidOperationException("Batch not found after approval.");
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                foreach (var selection in selections.OrderBy(item => item.VendorInvoiceId))
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"tdc0505-invoice:{TenantId:N}:{selection.VendorInvoiceId:N}", cancellationToken);
+                    var decision = await RequireBatchInvoiceReadinessAsync(
+                        selection,
+                        ProcurementPaymentReadinessRules.BatchApproveAction,
+                        cancellationToken);
+                    selection.PaymentReadinessControlEventId = decision.Event.Id;
+                    selection.PaymentReadinessSnapshotHash = decision.Readiness.SnapshotHash;
+                    selection.PaymentReadinessEvaluatedAtUtc = decision.Readiness.EvaluatedAtUtc;
+                    selection.UpdatedAt = DateTime.UtcNow;
+                    selection.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<PaymentBatchInvoice>().UpdateAsync(selection);
+                }
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            batch.Status = PaymentBatchStatus.Approved;
-            batch.ApprovedById = CurrentUserId;
-            batch.ApprovedDate = DateTime.UtcNow;
-            batch.UpdatedAt = DateTime.UtcNow;
-            batch.UpdatedBy = UserName;
+                var sod = await _invoicePaymentSod.EnforceBatchApprovalAsync(
+                    batchId,
+                    $"tdc0506-batch-approve-{batchId:N}-{CurrentUserId:N}",
+                    cancellationToken);
+                batch.InvoicePaymentSodControlEventId = sod.ControlEventId;
+                batch.UpdatedAt = DateTime.UtcNow;
+                batch.UpdatedBy = UserName;
+                await _unitOfWork.Repository<PaymentBatch>().UpdateAsync(batch);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            await _unitOfWork.Repository<PaymentBatch>().UpdateAsync(batch);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                if (!await _workflowService.CanUserApproveAsync("PaymentBatch", batchId, CurrentUserId))
+                    throw new InvalidOperationException("This payment batch is assigned to another workflow approver.");
 
-            _logger.LogInformation("Approved payment batch {BatchNumber}", batch.BatchNumber);
-            return await GetPaymentBatchAsync(batchId, cancellationToken) ?? throw new InvalidOperationException("Batch not found after approval.");
+                var workflowResult = await _workflowService.ProcessApprovalStepAsync(
+                    "PaymentBatch", batchId, CurrentUserId, "Approve");
+                if (!workflowResult.Success)
+                    throw new InvalidOperationException(workflowResult.Message ?? "Unable to process payment batch approval.");
+
+                if (workflowResult.Status == WorkflowInstanceStatus.Completed)
+                {
+                    batch.Status = PaymentBatchStatus.Approved;
+                    batch.ApprovedById = CurrentUserId;
+                    batch.ApprovedDate = DateTime.UtcNow;
+                    batch.InvoicePaymentSodControlEventId = sod.ControlEventId;
+                    batch.UpdatedAt = DateTime.UtcNow;
+                    batch.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<PaymentBatch>().UpdateAsync(batch);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                _logger.LogInformation("Processed approval for payment batch {BatchNumber}; workflow status {Status}",
+                    batch.BatchNumber, workflowResult.Status);
+                return await GetPaymentBatchAsync(batchId, cancellationToken)
+                    ?? throw new InvalidOperationException("Batch not found after approval.");
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
         public async Task<PaymentBatchDto> ProcessPaymentBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
         {
+            if (_invoicePaymentSod == null)
+                throw new VendorPaymentControlException(
+                    ProcurementInvoicePaymentSodRules.EvidenceCode,
+                    "The authoritative invoice/payment SOD service is not configured.");
+
+            var claimAt = DateTime.UtcNow;
+            var interruptedBefore = claimAt.AddMinutes(-30);
+            var processorId = CurrentUserId == Guid.Empty ? (Guid?)null : CurrentUserId;
+            var claimed = await _unitOfWork.Repository<PaymentBatch>()
+                .GetQueryable(batch =>
+                    batch.TenantId == TenantId &&
+                    batch.Id == batchId &&
+                    !batch.IsDeleted &&
+                    (batch.Status == PaymentBatchStatus.Approved ||
+                     (batch.Status == PaymentBatchStatus.Processing &&
+                      (!batch.ProcessedDate.HasValue || batch.ProcessedDate < interruptedBefore))))
+                .ExecuteUpdateAsync(updates => updates
+                        .SetProperty(batch => batch.Status, PaymentBatchStatus.Processing)
+                        .SetProperty(batch => batch.ProcessedById, processorId)
+                        .SetProperty(batch => batch.ProcessedDate, claimAt)
+                        .SetProperty(batch => batch.UpdatedAt, claimAt)
+                        .SetProperty(batch => batch.UpdatedBy, UserName),
+                    cancellationToken);
+
+            if (claimed == 0)
+            {
+                var currentState = await _unitOfWork.Repository<PaymentBatch>()
+                    .GetQueryable(batch =>
+                        batch.TenantId == TenantId &&
+                        batch.Id == batchId &&
+                        !batch.IsDeleted)
+                    .AsNoTracking()
+                    .Select(batch => (PaymentBatchStatus?)batch.Status)
+                    .SingleOrDefaultAsync(cancellationToken);
+                if (!currentState.HasValue)
+                    throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found.");
+                if (currentState == PaymentBatchStatus.Processing)
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_ALREADY_PROCESSING",
+                        "This payment batch is already being processed. An interrupted claim can be resumed after its 30-minute lease expires.");
+                throw new InvalidOperationException(
+                    "Only approved or interrupted processing batches can be processed.");
+            }
+
             var batch = await _unitOfWork.Repository<PaymentBatch>()
-                .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId)
-                .Include(b => b.Items)
+                .GetQueryable(b => b.TenantId == TenantId && b.Id == batchId && !b.IsDeleted)
+                .Include(b => b.Items.Where(item => !item.IsDeleted))
                     .ThenInclude(i => i.VendorPayment)
+                        .ThenInclude(payment => payment.Allocations.Where(allocation =>
+                            !allocation.IsDeleted))
+                .Include(b => b.Items.Where(item => !item.IsDeleted))
+                    .ThenInclude(i => i.Invoices.Where(selection => !selection.IsDeleted))
+                        .ThenInclude(i => i.VendorInvoice)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (batch == null)
-                throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found.");
+                throw new KeyNotFoundException($"Payment batch with Id '{batchId}' not found after its processing claim was acquired.");
 
-            if (batch.Status != PaymentBatchStatus.Approved)
-                throw new InvalidOperationException("Only approved batches can be processed.");
+            if (batch.Items.Count == 0 || batch.Items.Any(item => item.Invoices.Count == 0))
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_SELECTION_MISSING",
+                    "Every payment batch item must retain at least one immutable invoice selection.");
 
-            var now = DateTime.UtcNow;
+            await _invoicePaymentSod.RevalidateBatchAuthorizationAsync(batchId, cancellationToken);
+
+            var now = claimAt;
+            var resumableItems = batch.Items
+                .Where(item => !IsDurablyPosted(item.VendorPayment))
+                .ToList();
+            foreach (var selection in resumableItems.SelectMany(item => item.Invoices)
+                         .OrderBy(item => item.VendorInvoiceId))
+            {
+                var decision = await RequireBatchInvoiceReadinessAsync(
+                    selection,
+                    ProcurementPaymentReadinessRules.BatchProcessAction,
+                    cancellationToken);
+                selection.PaymentReadinessControlEventId = decision.Event.Id;
+                selection.PaymentReadinessSnapshotHash = decision.Readiness.SnapshotHash;
+                selection.PaymentReadinessEvaluatedAtUtc = decision.Readiness.EvaluatedAtUtc;
+                selection.UpdatedAt = now;
+                selection.UpdatedBy = UserName;
+                await _unitOfWork.Repository<PaymentBatchInvoice>().UpdateAsync(selection);
+            }
             batch.Status = PaymentBatchStatus.Processing;
+            batch.UpdatedAt = now;
+            batch.UpdatedBy = UserName;
+            await _unitOfWork.Repository<PaymentBatch>().UpdateAsync(batch);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             int processedCount = 0;
             int failedCount = 0;
 
             foreach (var item in batch.Items)
             {
+                if (IsDurablyPosted(item.VendorPayment))
+                {
+                    MarkBatchItemProcessed(item);
+                    processedCount++;
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    continue;
+                }
+
                 try
                 {
-                    // Get outstanding invoices for this supplier
                     var payment = item.VendorPayment;
-                    var invoices = await _unitOfWork.Repository<VendorInvoice>()
-                        .GetQueryable(i =>
-                            i.TenantId == TenantId &&
-                            i.SupplierId == payment.SupplierId &&
-                            i.Status == VendorInvoiceStatus.Approved &&
-                            (i.TotalAmount - i.PaidAmount) > 0)
-                        .OrderBy(i => i.DueDate)
-                        .ToListAsync(cancellationToken);
-
-                    // Auto-allocate payment to invoices by due date
-                    var remaining = payment.TotalAmount;
-                    var allocs = new List<VendorPaymentAllocationCreateDto>();
-
-                    foreach (var inv in invoices)
-                    {
-                        if (remaining <= 0) break;
-                        var balance = inv.TotalAmount - inv.PaidAmount;
-                        var allocAmount = Math.Min(balance, remaining);
-
-                        allocs.Add(new VendorPaymentAllocationCreateDto
+                    var allocs = item.Invoices
+                        .OrderBy(selection => selection.VendorInvoice?.DueDate)
+                        .ThenBy(selection => selection.VendorInvoiceId)
+                        .Select(selection => new VendorPaymentAllocationCreateDto
                         {
-                            VendorInvoiceId = inv.Id,
-                            AllocatedAmount = allocAmount
-                        });
-
-                        remaining -= allocAmount;
-                    }
-
-                    if (allocs.Any())
-                    {
-                        await AllocatePaymentAsync(payment.Id, allocs, cancellationToken);
-                    }
+                            VendorInvoiceId = selection.VendorInvoiceId,
+                            AllocatedAmount = selection.Amount,
+                            Notes = $"Payment batch {batch.BatchNumber} exact invoice selection"
+                        }).ToList();
 
                     payment.Status = VendorPaymentStatus.Authorized;
+                    payment.AuthorizedById = batch.ApprovedById;
+                    payment.AuthorizedDate = batch.ApprovedDate;
+                    payment.InvoicePaymentSodControlEventId = batch.InvoicePaymentSodControlEventId;
                     payment.UpdatedAt = now;
                     payment.UpdatedBy = UserName;
                     await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+                    var existingAllocations = GetEffectiveAllocations(payment.Allocations);
+                    if (allocs.Any() && existingAllocations.Count == 0)
+                    {
+                        await AllocatePaymentAsync(
+                            payment.Id,
+                            allocs,
+                            cancellationToken,
+                            executionStrategyScope: false,
+                            batchProcessorScope: true);
+                    }
+                    else if (allocs.Any())
+                    {
+                        EnsureBatchResumeAllocationsMatch(item, existingAllocations);
+                    }
+
                     await PostAsync(payment.Id, cancellationToken);
 
-                    item.ItemStatus = "Processed";
+                    MarkBatchItemProcessed(item);
                     processedCount++;
                 }
                 catch (Exception ex)
                 {
-                    item.ItemStatus = "Failed";
-                    item.FailureReason = ex.Message;
-                    failedCount++;
-                    _logger.LogError(ex, "Failed to process batch item {ItemId}", item.Id);
+                    var postedPayment = await _unitOfWork
+                        .Repository<VendorPayment>()
+                        .GetQueryable(payment =>
+                            payment.TenantId == TenantId &&
+                            payment.Id == item.VendorPaymentId &&
+                            !payment.IsDeleted)
+                        .AsNoTracking()
+                        .Select(payment => new
+                        {
+                            payment.Status,
+                            payment.JournalEntryId
+                        })
+                        .SingleOrDefaultAsync(cancellationToken);
+                    var postingCommitted = postedPayment?.JournalEntryId is not null &&
+                                           postedPayment.Status is
+                                               VendorPaymentStatus.Processed or
+                                               VendorPaymentStatus.Cleared or
+                                               VendorPaymentStatus.Reconciled;
+
+                    if (postingCommitted)
+                    {
+                        item.ItemStatus = "Processed";
+                        item.FailureReason = null;
+                        item.VendorPayment.Status = VendorPaymentStatus.Processed;
+                        item.VendorPayment.JournalEntryId =
+                            postedPayment!.JournalEntryId;
+                        foreach (var selection in item.Invoices)
+                        {
+                            selection.Status = "Processed";
+                            selection.FailureReason = null;
+                        }
+                        processedCount++;
+                        _logger.LogError(
+                            ex,
+                            "Payment batch item {ItemId} posted durably but a post-posting audit or FX step failed; preserving the committed payment outcome",
+                            item.Id);
+                    }
+                    else
+                    {
+                        item.ItemStatus = "Failed";
+                        item.FailureReason = ex.Message;
+                        item.VendorPayment.Status = VendorPaymentStatus.Failed;
+                        item.VendorPayment.UpdatedAt = DateTime.UtcNow;
+                        item.VendorPayment.UpdatedBy = UserName;
+                        foreach (var selection in item.Invoices)
+                        {
+                            selection.Status = "Failed";
+                            selection.FailureReason = ex.Message;
+                        }
+                        failedCount++;
+                        _logger.LogError(ex,
+                            "Failed to process batch item {ItemId}", item.Id);
+                    }
                 }
+
+                // Checkpoint each item while the batch remains Processing. A
+                // crash or cancellation can therefore resume without replaying
+                // a durable posting or its exact invoice allocations.
+                batch.ProcessedDate = DateTime.UtcNow;
+                batch.UpdatedAt = batch.ProcessedDate.Value;
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
+
+            // Persist item/selection outcomes while the batch is still Processing.
+            // The protected final batch transition then observes the exact durable outcomes.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             batch.Status = failedCount == 0
                 ? PaymentBatchStatus.Completed
@@ -2099,9 +3214,476 @@ namespace ErpSystem.Api.Services.Finance.AP
             return await GetPaymentBatchAsync(batchId, cancellationToken) ?? throw new InvalidOperationException("Batch not found after processing.");
         }
 
+        private static bool IsDurablyPosted(VendorPayment payment) =>
+            payment.JournalEntryId.HasValue && payment.Status is
+                VendorPaymentStatus.Processed or
+                VendorPaymentStatus.Cleared or
+                VendorPaymentStatus.Reconciled;
+
+        private static void MarkBatchItemProcessed(PaymentBatchItem item)
+        {
+            item.ItemStatus = "Processed";
+            item.FailureReason = null;
+            foreach (var selection in item.Invoices)
+            {
+                selection.Status = "Processed";
+                selection.FailureReason = null;
+            }
+        }
+
+        private static void EnsureBatchResumeAllocationsMatch(
+            PaymentBatchItem item,
+            IReadOnlyCollection<VendorPaymentAllocation> existingAllocations)
+        {
+            var expected = item.Invoices
+                .GroupBy(selection => selection.VendorInvoiceId)
+                .ToDictionary(group => group.Key, group => group.Sum(selection => selection.Amount));
+            var actual = existingAllocations
+                .GroupBy(allocation => allocation.VendorInvoiceId)
+                .ToDictionary(group => group.Key, group => group.Sum(allocation =>
+                    allocation.AllocatedAmount + allocation.DiscountAmount +
+                    allocation.WithholdingTaxAmount));
+            var exact = expected.Count == actual.Count && expected.All(pair =>
+                actual.TryGetValue(pair.Key, out var allocated) &&
+                Math.Abs(allocated - pair.Value) <= 0.01m);
+            if (!exact)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_RESUME_ALLOCATION_MISMATCH",
+                    "The interrupted payment's saved allocations no longer match the batch's immutable invoice selections.");
+        }
+
+        private async Task<VendorPaymentInvoiceReadinessDto> EvaluateInvoicePaymentReadinessAsync(
+            Guid invoiceId,
+            CancellationToken cancellationToken,
+            bool allowSettledInvoice = false,
+            VendorInvoice? preloadedInvoice = null)
+        {
+            var invoice = preloadedInvoice;
+            if (invoice is null)
+            {
+                invoice = await _unitOfWork.Repository<VendorInvoice>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.Id == invoiceId &&
+                        !item.IsDeleted)
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(cancellationToken);
+            }
+            if (invoice is null || invoice.TenantId != TenantId ||
+                invoice.Id != invoiceId || invoice.IsDeleted)
+            {
+                throw new KeyNotFoundException(
+                    $"Vendor invoice with Id '{invoiceId}' not found.");
+            }
+
+            var evaluatedAtUtc = DateTime.UtcNow;
+            var stateReady = ProcurementPaymentReadinessRules.IsInvoiceStatePaymentEligible(invoice.Status) ||
+                allowSettledInvoice && invoice.Status == VendorInvoiceStatus.Paid;
+            var outstandingAmount = RoundMoney(invoice.TotalAmount - invoice.PaidAmount);
+            var matching = _vendorInvoiceService == null
+                ? new InvoiceMatchingResultDto
+                {
+                    VendorInvoiceId = invoice.Id,
+                    IsRequired = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                        invoice.PurchaseOrderId, invoice.IsOpeningBalance),
+                    Message = "The authoritative invoice matching service is not registered.",
+                    DecisionKeys = ProcurementPaymentReadinessRules.DecisionKeys.ToList(),
+                    Checks = new List<InvoiceMatchingCheckDto>
+                    {
+                        PaymentCheck("AP-PAYMENT-MATCH-SERVICE", "Mandatory matching service", false,
+                            "The authoritative invoice matching service is not registered.")
+                    }
+                }
+                : await _vendorInvoiceService.GetThreeWayMatchReadinessAsync(invoice.Id, cancellationToken);
+
+            var required = matching.IsRequired;
+            var persistedMatchEventValid = !required;
+            if (required && invoice.MatchingControlEventId.HasValue &&
+                !string.IsNullOrWhiteSpace(invoice.MatchingSnapshotHash) &&
+                string.Equals(invoice.MatchingSnapshotHash, matching.SnapshotHash, StringComparison.OrdinalIgnoreCase))
+            {
+                persistedMatchEventValid = await _unitOfWork.Repository<ProcurementControlEvent>()
+                    .GetQueryable(item => item.TenantId == TenantId &&
+                        item.Id == invoice.MatchingControlEventId.Value &&
+                        item.SourceType == "VendorInvoice" && item.SourceId == invoice.Id &&
+                        item.RuleCode == ProcurementInvoiceThreeWayMatchRules.RuleCode &&
+                        item.RuleVersion == ProcurementInvoiceThreeWayMatchRules.RuleVersion &&
+                        item.Action == ProcurementInvoiceThreeWayMatchRules.EvaluationAction &&
+                        item.Result == ProcurementControlEventResult.Allowed && !item.IsDeleted)
+                    .AsNoTracking()
+                    .AnyAsync(cancellationToken);
+            }
+
+            if (required && matching.ApprovedExceptionApplied)
+            {
+                persistedMatchEventValid = persistedMatchEventValid &&
+                    invoice.MatchExceptionControlEventId.HasValue &&
+                    invoice.MatchExceptionControlEventId == matching.MatchExceptionControlEventId;
+            }
+
+            var inspectionReady = !required || matching.Checks.Any(item =>
+                item.CheckKey == "AP-MATCH-INSPECTION" && item.Passed);
+            var matchReady = !required || matching.ApprovalReady && persistedMatchEventValid;
+            var auditReady = _procurementControlEvents != null;
+            var balanceReady = outstandingAmount > 0m || allowSettledInvoice && invoice.Status == VendorInvoiceStatus.Paid;
+            var paymentReady = stateReady && balanceReady && matchReady && inspectionReady && auditReady;
+
+            var checks = matching.Checks.ToList();
+            checks.Add(PaymentCheck("AP-PAYMENT-INVOICE-STATE", "Payable invoice state", stateReady,
+                stateReady
+                    ? $"Invoice state {invoice.Status} is eligible for settlement."
+                    : $"Invoice state {invoice.Status} is not eligible for settlement."));
+            checks.Add(PaymentCheck("AP-PAYMENT-BALANCE", "Outstanding or settled balance", balanceReady,
+                outstandingAmount > 0m
+                    ? $"Outstanding amount {outstandingAmount:0.00} remains payable."
+                    : allowSettledInvoice && invoice.Status == VendorInvoiceStatus.Paid
+                        ? "The invoice is fully settled by the payment being revalidated for posting."
+                    : "The invoice has no positive outstanding balance."));
+            checks.Add(PaymentCheck("AP-PAYMENT-PERSISTED-MATCH", "Current persisted match decision",
+                persistedMatchEventValid,
+                persistedMatchEventValid
+                    ? required
+                        ? "The current invoice snapshot is bound to an allowed AP-002 / TDC-0504 decision."
+                        : "Three-way matching is not required for this invoice."
+                    : "The persisted AP-002 / TDC-0504 decision is missing, denied, or stale."));
+            checks.Add(PaymentCheck("AP-PAYMENT-RECEIPT-INSPECTION", "Approved GRN and inspection", inspectionReady,
+                inspectionReady
+                    ? required
+                        ? "The latest independently approved receipt inspection is AP eligible."
+                        : "Receipt inspection is not applicable to this invoice."
+                    : "A latest independently approved AP-eligible receipt inspection is required."));
+            checks.Add(PaymentCheck("AP-PAYMENT-EXCEPTION", "Strict match exception status",
+                !required || matching.IsMatched || matching.ApprovedExceptionApplied,
+                matching.ApprovedExceptionApplied
+                    ? "A current independently approved AP-006 / TDC-0507 exception covers the matching variance."
+                    : matching.IsMatched || !required
+                        ? "No matching exception is required."
+                        : "No current independently approved match exception covers the variance."));
+            checks.Add(PaymentCheck("AP-PAYMENT-AUDIT", "Immutable payment decision audit", auditReady,
+                auditReady
+                    ? "The shared procurement control-event service is available."
+                    : "The shared procurement control-event service is not registered."));
+
+            var message = paymentReady
+                ? "Invoice is ready for controlled payment allocation and batch processing."
+                : checks.FirstOrDefault(item => !item.Passed)?.Message ??
+                  "Invoice is not ready for payment.";
+            var snapshotHash = ProcurementPaymentReadinessRules.HashSnapshot(new
+            {
+                schemaVersion = "tdc.ap-payment-readiness.v1",
+                invoice.Id,
+                invoice.InvoiceNumber,
+                invoice.Status,
+                invoice.TotalAmount,
+                invoice.PaidAmount,
+                outstandingAmount,
+                allowSettledInvoice,
+                invoice.PurchaseOrderId,
+                matching.IsRequired,
+                matching.IsMatched,
+                matching.ApprovalReady,
+                matching.ApprovedExceptionApplied,
+                matching.SnapshotHash,
+                invoice.MatchingControlEventId,
+                invoice.MatchExceptionControlEventId,
+                persistedMatchEventValid,
+                inspectionReady,
+                matching.ConfigurationProfileCode,
+                matching.ConfigurationProfileVersion
+            });
+
+            return new VendorPaymentInvoiceReadinessDto
+            {
+                VendorInvoiceId = invoice.Id,
+                InvoiceNumber = invoice.InvoiceNumber,
+                InvoiceStatus = invoice.Status,
+                OutstandingAmount = outstandingAmount,
+                IsPaymentReady = paymentReady,
+                InvoiceStateReady = stateReady,
+                ThreeWayMatchRequired = required,
+                ThreeWayMatchReady = matchReady,
+                ReceiptInspectionReady = inspectionReady,
+                ApprovedExceptionApplied = matching.ApprovedExceptionApplied,
+                PersistedMatchCurrent = persistedMatchEventValid,
+                MatchingControlEventId = invoice.MatchingControlEventId,
+                MatchExceptionControlEventId = invoice.MatchExceptionControlEventId,
+                MatchSnapshotHash = matching.SnapshotHash,
+                SnapshotHash = snapshotHash,
+                EvaluatedAtUtc = evaluatedAtUtc,
+                Message = message,
+                ConfigurationProfileCode = matching.ConfigurationProfileCode,
+                ConfigurationProfileVersion = matching.ConfigurationProfileVersion,
+                DecisionKeys = ProcurementPaymentReadinessRules.DecisionKeys.ToList(),
+                Checks = checks
+            };
+        }
+
+        private async Task<ProcurementControlEventDto> RecordPaymentReadinessDecisionAsync(
+            VendorPaymentInvoiceReadinessDto readiness,
+            string action,
+            Guid? paymentId,
+            Guid? batchId,
+            CancellationToken cancellationToken)
+        {
+            if (_procurementControlEvents == null)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_AUDIT_UNAVAILABLE",
+                    "The shared procurement control-event service is required for payment decisions.");
+
+            var correlationId = $"tdc0505-{readiness.VendorInvoiceId:N}-{Guid.NewGuid():N}";
+            return await _procurementControlEvents.RecordAsync(new ProcurementControlEventWriteRequest
+            {
+                EventKey = ProcurementControlEventKey.Create(
+                    "ap-payment-readiness", TenantId, readiness.VendorInvoiceId, action, correlationId),
+                EventType = ProcurementPaymentReadinessRules.EventType,
+                Action = action,
+                Result = readiness.IsPaymentReady
+                    ? ProcurementControlEventResult.Allowed
+                    : ProcurementControlEventResult.Denied,
+                RuleCode = ProcurementPaymentReadinessRules.RuleCode,
+                RuleVersion = ProcurementPaymentReadinessRules.RuleVersion,
+                DecisionKeys = ProcurementPaymentReadinessRules.DecisionKeys.ToList(),
+                SourceType = "VendorInvoice",
+                SourceId = readiness.VendorInvoiceId,
+                SourceReference = readiness.InvoiceNumber,
+                Reason = readiness.Message,
+                InputValues = new
+                {
+                    paymentId,
+                    batchId,
+                    invoiceStatus = readiness.InvoiceStatus,
+                    readiness.OutstandingAmount,
+                    readiness.MatchingControlEventId,
+                    readiness.MatchExceptionControlEventId
+                },
+                ResultValues = new
+                {
+                    readiness.IsPaymentReady,
+                    readiness.InvoiceStateReady,
+                    readiness.ThreeWayMatchRequired,
+                    readiness.ThreeWayMatchReady,
+                    readiness.ReceiptInspectionReady,
+                    readiness.ApprovedExceptionApplied,
+                    readiness.PersistedMatchCurrent,
+                    readiness.SnapshotHash,
+                    readiness.Checks
+                },
+                CorrelationId = correlationId,
+                OccurredAtUtc = readiness.EvaluatedAtUtc,
+                Evidence = new[]
+                    {
+                        readiness.MatchingControlEventId,
+                        readiness.MatchExceptionControlEventId
+                    }
+                    .Where(item => item.HasValue)
+                    .Select((item, index) => new ProcurementControlEventEvidenceReference
+                    {
+                        ReferenceKind = ProcurementControlEvidenceReferenceKind.ExternalReference,
+                        Reference = item!.Value.ToString(),
+                        Label = index == 0 ? "Mandatory three-way match decision" : "Approved match exception",
+                        RequirementKey = index == 0
+                            ? ProcurementInvoiceThreeWayMatchRules.RuleCode
+                            : ProcurementInvoiceThreeWayMatchRules.ExceptionRuleCode
+                    }).ToList()
+            }, cancellationToken);
+        }
+
+        private async Task<(VendorPaymentInvoiceReadinessDto Readiness, ProcurementControlEventDto Event)>
+            RequirePaymentReadinessAsync(
+                Guid invoiceId,
+                string action,
+                Guid? paymentId,
+                Guid? batchId,
+                CancellationToken cancellationToken,
+                bool allowSettledInvoice = false)
+        {
+            var readiness = await EvaluateInvoicePaymentReadinessAsync(
+                invoiceId, cancellationToken, allowSettledInvoice);
+            var controlEvent = await RecordPaymentReadinessDecisionAsync(
+                readiness, action, paymentId, batchId, cancellationToken);
+            readiness.PaymentReadinessControlEventId = controlEvent.Id;
+            if (!readiness.IsPaymentReady)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_READINESS_BLOCKED", readiness.Message);
+            return (readiness, controlEvent);
+        }
+
+        private async Task<(VendorPaymentInvoiceReadinessDto Readiness, ProcurementControlEventDto Event)>
+            RequireBatchInvoiceReadinessAsync(
+                PaymentBatchInvoice selection,
+                string action,
+                CancellationToken cancellationToken)
+        {
+            var readiness = await EvaluateInvoicePaymentReadinessAsync(selection.VendorInvoiceId, cancellationToken);
+            var amountReady = selection.Amount > 0m && selection.Amount <= readiness.OutstandingAmount;
+            readiness.Checks.Add(PaymentCheck(
+                "AP-PAYMENT-BATCH-AMOUNT",
+                "Locked batch amount",
+                amountReady,
+                amountReady
+                    ? $"The locked batch amount {selection.Amount:0.00} remains within the current outstanding amount."
+                    : $"The locked batch amount {selection.Amount:0.00} exceeds the current outstanding amount {readiness.OutstandingAmount:0.00}."));
+            readiness.IsPaymentReady = readiness.IsPaymentReady && amountReady;
+            readiness.SnapshotHash = ProcurementPaymentReadinessRules.HashSnapshot(new
+            {
+                readiness.SnapshotHash,
+                selection.PaymentBatchId,
+                selection.PaymentBatchItemId,
+                selection.VendorPaymentId,
+                selection.VendorInvoiceId,
+                selection.Amount
+            });
+            if (!amountReady)
+                readiness.Message = readiness.Checks.Last().Message;
+
+            var controlEvent = await RecordPaymentReadinessDecisionAsync(
+                readiness, action, selection.VendorPaymentId, selection.PaymentBatchId, cancellationToken);
+            readiness.PaymentReadinessControlEventId = controlEvent.Id;
+            if (!readiness.IsPaymentReady)
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_READINESS_BLOCKED", readiness.Message);
+            return (readiness, controlEvent);
+        }
+
+        private static InvoiceMatchingCheckDto PaymentCheck(
+            string key,
+            string label,
+            bool passed,
+            string message) => new()
+        {
+            CheckKey = key,
+            Label = label,
+            Passed = passed,
+            ExceptionEligible = false,
+            Message = message
+        };
+
         // ═════════════════════════════════════════════════════════════════
         //  UTILITIES
         // ═════════════════════════════════════════════════════════════════
+
+        private async Task<FinancePostingEvent> GetPostedPaymentEventAsync(
+            VendorPayment payment,
+            CancellationToken cancellationToken)
+        {
+            if (!payment.JournalEntryId.HasValue)
+                throw new InvalidOperationException("The AP payment is not linked to a posted journal.");
+
+            return await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.SourceModule == "AP" &&
+                    item.SourceDocumentType == "VendorPayment" &&
+                    item.SourceDocumentId == payment.Id &&
+                    item.PostingAction == "Post" &&
+                    item.PostingStatus == "Posted" &&
+                    item.JournalEntryId == payment.JournalEntryId.Value &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The authoritative AP payment posting event was not found for this tenant.");
+        }
+
+        private async Task<FinancePostingResultDto> ReversePostedEventAsync(
+            Guid postingEventId,
+            string reason,
+            string idempotencyKey,
+            string journalType,
+            string description,
+            CancellationToken cancellationToken)
+        {
+            var originalEvent = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == postingEventId &&
+                    item.PostingStatus == "Posted" &&
+                    item.JournalEntryId.HasValue &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The authoritative Finance posting event was not found for this tenant.");
+
+            var originalJournal = await _unitOfWork.Repository<JournalEntry>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Id == originalEvent.JournalEntryId!.Value &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The Finance posting journal was not found for this tenant.");
+
+            if (originalJournal.IsReversed)
+            {
+                if (!originalJournal.ReversalJournalEntryId.HasValue)
+                    throw new InvalidOperationException(
+                        "The original journal is marked reversed but has no reversal-journal lineage.");
+
+                var existing = await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.SourceModule == originalEvent.SourceModule &&
+                        item.SourceDocumentType == originalEvent.SourceDocumentType &&
+                        item.SourceDocumentId == originalEvent.SourceDocumentId &&
+                        item.PostingAction != "Post" &&
+                        item.PostingStatus == "Posted" &&
+                        item.JournalEntryId == originalJournal.ReversalJournalEntryId.Value &&
+                        !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The existing Finance reversal event was not found for this tenant.");
+
+                return ToPostingResult(existing, wasDuplicate: true);
+            }
+
+            var plan = await _financePostingEngine!.GetReversalPlanAsync(
+                originalEvent.Id,
+                reason.Trim(),
+                DateTime.UtcNow.Date,
+                cancellationToken);
+            return await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+            {
+                SourceModule = originalEvent.SourceModule,
+                OriginModuleCode = originalEvent.OriginModuleCode,
+                SourceDocumentType = originalEvent.SourceDocumentType,
+                SourceDocumentId = originalEvent.SourceDocumentId,
+                SourceDocumentTenantId = originalEvent.TenantId,
+                PostingAction = "Reverse",
+                SourceDocumentReference = originalEvent.SourceDocumentReference,
+                Description = description,
+                PostingDate = plan.ReversalDate,
+                JournalType = journalType,
+                BookClassification = originalEvent.BookClassification,
+                FunctionalCurrencyCode = originalEvent.FunctionalCurrencyCode,
+                ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+                ReversalReason = reason.Trim(),
+                ReversalType = "Controlled AP void",
+                IdempotencyKey = idempotencyKey,
+                ReturnExistingOnDuplicate = true,
+                Lines = plan.ReversalLines
+            }, cancellationToken);
+        }
+
+        private static FinancePostingResultDto ToPostingResult(
+            FinancePostingEvent postingEvent,
+            bool wasDuplicate) => new()
+        {
+            PostingEventId = postingEvent.Id,
+            JournalEntryId = postingEvent.JournalEntryId!.Value,
+            PostingStatus = postingEvent.PostingStatus,
+            WasDuplicate = wasDuplicate,
+            TotalDebitAmount = postingEvent.TotalDebitAmount,
+            TotalCreditAmount = postingEvent.TotalCreditAmount,
+            FunctionalCurrencyCode = postingEvent.FunctionalCurrencyCode,
+            PostingDate = postingEvent.PostingDate,
+            SourceModule = postingEvent.SourceModule,
+            OriginModuleCode = postingEvent.OriginModuleCode ?? postingEvent.SourceModule,
+            SourceDocumentType = postingEvent.SourceDocumentType,
+            SourceDocumentId = postingEvent.SourceDocumentId,
+            PostingAction = postingEvent.PostingAction
+        };
+
+        private static string AppendLifecycleNote(string? notes, string entry) =>
+            string.IsNullOrWhiteSpace(notes) ? entry : $"{notes.TrimEnd()}\n\n{entry}";
 
         private async Task<VendorPayment> LoadPaymentForPostingAsync(Guid id, CancellationToken cancellationToken)
         {
@@ -2117,6 +3699,60 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
 
             return payment;
+        }
+
+        private async Task ApplyPostedPaymentAllocationsAsync(
+            VendorPayment payment,
+            Guid postingEventId,
+            Guid journalEntryId,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTime.UtcNow;
+            foreach (var allocation in GetEffectiveAllocations(payment.Allocations)
+                         .OrderBy(item => item.AllocationDate)
+                         .ThenBy(item => item.Id))
+            {
+                if (allocation.ApplicationPostingEventId.HasValue)
+                {
+                    if (allocation.ApplicationPostingEventId.Value != postingEventId ||
+                        allocation.ApplicationJournalEntryId != journalEntryId)
+                    {
+                        throw new InvalidOperationException(
+                            $"Payment allocation '{allocation.Id}' is already bound to a different Finance posting.");
+                    }
+
+                    continue;
+                }
+
+                var invoice = allocation.VendorInvoice;
+                if (invoice == null || invoice.TenantId != TenantId)
+                    throw new InvalidOperationException("AP payment allocation references an invoice from another tenant.");
+
+                var settlementAmount = RoundMoney(
+                    allocation.AllocatedAmount +
+                    allocation.DiscountAmount +
+                    allocation.WithholdingTaxAmount);
+                var resultingPaidAmount = RoundMoney(invoice.PaidAmount + settlementAmount);
+                if (resultingPaidAmount > RoundMoney(invoice.TotalAmount) + 0.01m)
+                    throw new InvalidOperationException(
+                        $"AP payment would over-settle invoice '{invoice.InvoiceNumber}'.");
+
+                invoice.PaidAmount = Math.Min(resultingPaidAmount, RoundMoney(invoice.TotalAmount));
+                invoice.Status = invoice.PaidAmount >= RoundMoney(invoice.TotalAmount)
+                    ? VendorInvoiceStatus.Paid
+                    : VendorInvoiceStatus.PartiallyPaid;
+                invoice.UpdatedAt = now;
+                invoice.UpdatedBy = UserName;
+                invoice.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+
+                allocation.ApplicationPostingEventId = postingEventId;
+                allocation.ApplicationJournalEntryId = journalEntryId;
+                allocation.UpdatedAt = now;
+                allocation.UpdatedBy = UserName;
+                allocation.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                await _unitOfWork.Repository<VendorPaymentAllocation>().UpdateAsync(allocation);
+            }
         }
 
         private async Task<FinancePostingRequestDto> BuildApPaymentPostingRequestAsync(
@@ -2140,11 +3776,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (payment.TotalAmount <= 0m)
                 throw new InvalidOperationException("AP payment amount must be positive.");
 
-            var activeAllocations = payment.Allocations?
-                .Where(a => !a.IsReversal)
-                .OrderBy(a => a.AllocationDate)
-                .ThenBy(a => a.Id)
-                .ToList() ?? new List<VendorPaymentAllocation>();
+            var allAllocations = payment.IsSupplierAdvance && payment.JournalEntryId.HasValue
+                ? new List<VendorPaymentAllocation>()
+                : payment.Allocations?.Where(a => !a.IsDeleted).ToList()
+                  ?? new List<VendorPaymentAllocation>();
+            var activeAllocations = GetEffectiveAllocations(allAllocations);
+            EnsureAllocationTotalIsValid(payment, activeAllocations);
 
             var isSupplierAdvance = activeAllocations.Count == 0;
             if (isSupplierAdvance &&
@@ -2156,6 +3793,20 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var allocation in activeAllocations)
             {
+                var paymentDecision = await RequirePaymentReadinessAsync(
+                    allocation.VendorInvoiceId,
+                    ProcurementPaymentReadinessRules.PostAction,
+                    payment.Id,
+                    payment.PaymentBatchId,
+                    cancellationToken,
+                    allowSettledInvoice: true);
+                allocation.PaymentReadinessControlEventId = paymentDecision.Event.Id;
+                allocation.PaymentReadinessSnapshotHash = paymentDecision.Readiness.SnapshotHash;
+                allocation.PaymentReadinessEvaluatedAtUtc = paymentDecision.Readiness.EvaluatedAtUtc;
+                allocation.UpdatedAt = DateTime.UtcNow;
+                allocation.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorPaymentAllocation>().UpdateAsync(allocation);
+
                 if (allocation.TenantId != tenantId || allocation.VendorPaymentId != payment.Id)
                     throw new InvalidOperationException("AP payment allocation belongs to another tenant or payment.");
 
@@ -2182,23 +3833,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (!invoicePostingExists)
                     throw new InvalidOperationException($"AP payment cannot settle invoice '{allocation.VendorInvoice.InvoiceNumber}' because its central posting event was not found.");
 
-                var totalInvoiceSettlement = await _unitOfWork.Repository<VendorPaymentAllocation>()
+                var invoiceAllocationHistory = await _unitOfWork.Repository<VendorPaymentAllocation>()
                     .GetQueryable(a =>
                         a.TenantId == tenantId &&
                         a.VendorInvoiceId == allocation.VendorInvoiceId &&
-                        !a.IsReversal &&
                         !a.IsDeleted)
-                    .SumAsync(a => a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount, cancellationToken);
+                    .ToListAsync(cancellationToken);
+                var totalInvoiceSettlement = GetEffectiveAllocations(invoiceAllocationHistory)
+                    .Sum(a => a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount);
 
                 if (RoundMoney(totalInvoiceSettlement) > RoundMoney(allocation.VendorInvoice.TotalAmount))
                     throw new InvalidOperationException($"AP payment would over-settle invoice '{allocation.VendorInvoice.InvoiceNumber}'.");
             }
 
-            var allocatedCashAmount = RoundMoney(activeAllocations.Sum(a => a.AllocatedAmount));
-            if (!isSupplierAdvance && allocatedCashAmount != RoundMoney(payment.TotalAmount))
-            {
-                throw new InvalidOperationException("AP payment amount must equal allocated cash amount before posting. Use the supplier-advance path for an unapplied payment.");
-            }
+            if (activeAllocations.Count > 0)
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
@@ -2576,6 +4225,80 @@ namespace ErpSystem.Api.Services.Finance.AP
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+        private static VendorPaymentControlException AllocationAlreadyReversed(Guid allocationId) =>
+            new(
+                "AP_PAYMENT_ALLOCATION_ALREADY_REVERSED",
+                $"Allocation '{allocationId}' already has an immutable reversal.");
+
+        private static bool IsDuplicateAllocationReversal(DbUpdateException exception) =>
+            exception.ToString().Contains(
+                "UX_VendorPaymentAllocation_TenantId_OriginalAllocationId_Reversal",
+                StringComparison.OrdinalIgnoreCase);
+
+        private static void EnsureAllocationMutationAllowed(
+            VendorPayment payment,
+            bool batchProcessorScope)
+        {
+            if (payment.PaymentBatchId.HasValue)
+            {
+                if (!batchProcessorScope ||
+                    payment.PaymentBatch?.Status != PaymentBatchStatus.Processing ||
+                    payment.Status != VendorPaymentStatus.Authorized)
+                {
+                    throw new VendorPaymentControlException(
+                        "AP_PAYMENT_BATCH_DIRECT_ALLOCATION_BLOCKED",
+                        "Batch-owned payment allocations are immutable outside the approved batch processor.");
+                }
+
+                return;
+            }
+
+            if (payment.Status != VendorPaymentStatus.Draft)
+            {
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_ALLOCATION_SET_FROZEN",
+                    "A manual payment's invoice set cannot change after it is submitted for authorization.");
+            }
+        }
+
+        private static List<VendorPaymentAllocation> GetEffectiveAllocations(
+            IEnumerable<VendorPaymentAllocation>? allocations)
+        {
+            var live = allocations?.Where(item => !item.IsDeleted).ToList()
+                       ?? new List<VendorPaymentAllocation>();
+            var reversedOriginalIds = live
+                .Where(item => item.IsReversal && item.OriginalAllocationId.HasValue)
+                .Select(item => item.OriginalAllocationId!.Value)
+                .ToHashSet();
+
+            return live
+                .Where(item => !item.IsReversal && !reversedOriginalIds.Contains(item.Id))
+                .OrderBy(item => item.AllocationDate)
+                .ThenBy(item => item.Id)
+                .ToList();
+        }
+
+        private static void EnsureAllocationTotalIsValid(
+            VendorPayment payment,
+            IReadOnlyCollection<VendorPaymentAllocation> effectiveAllocations)
+        {
+            if (payment.IsSupplierAdvance && payment.JournalEntryId.HasValue)
+                return;
+
+            var hasInitialAllocationHistory = payment.Allocations?.Any(item =>
+                !item.IsDeleted && !item.IsReversal) == true;
+            if (!hasInitialAllocationHistory)
+                return;
+
+            var allocatedCashAmount = RoundMoney(effectiveAllocations.Sum(item => item.AllocatedAmount));
+            if (allocatedCashAmount != RoundMoney(payment.TotalAmount))
+            {
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH",
+                    "AP payment amount must equal the effective allocated cash amount. Reversed allocations must be replaced before authorization or posting.");
+            }
+        }
+
         private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
         {
             var supplierRepository = _unitOfWork.Repository<Supplier>();
@@ -2907,6 +4630,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 EvidenceExceptionRequestedAt = payment.EvidenceExceptionRequestedAt,
                 EvidenceExceptionApprovedById = payment.EvidenceExceptionApprovedById,
                 EvidenceExceptionApprovedAt = payment.EvidenceExceptionApprovedAt,
+                AuthorizedById = payment.AuthorizedById,
+                AuthorizedDate = payment.AuthorizedDate,
+                InvoicePaymentSodControlEventId = payment.InvoicePaymentSodControlEventId,
                 PaymentBatchId = payment.PaymentBatchId,
                 PaymentBatchNumber = payment.PaymentBatch?.BatchNumber,
                 JournalEntryId = payment.JournalEntryId,
@@ -2929,7 +4655,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     WithholdingTaxAmount = a.WithholdingTaxAmount,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
-                    IsReversal = a.IsReversal
+                    IsReversal = a.IsReversal,
+                    PaymentReadinessControlEventId = a.PaymentReadinessControlEventId,
+                    PaymentReadinessSnapshotHash = a.PaymentReadinessSnapshotHash,
+                    PaymentReadinessEvaluatedAtUtc = a.PaymentReadinessEvaluatedAtUtc
                 }).ToList() ?? new List<VendorPaymentAllocationDto>()
             };
         }
@@ -2975,6 +4704,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
+        private sealed record PendingAllocationReversal(
+            VendorPaymentAllocation Allocation,
+            VendorInvoice Invoice,
+            FinancePostingResultDto? ApplicationReversal);
+
         private PaymentBatchDto MapBatchToDto(PaymentBatch batch)
         {
             return new PaymentBatchDto
@@ -2993,7 +4727,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 BankAccountId = batch.BankAccountId,
                 BankAccountName = batch.BankAccount?.AccountName,
                 Status = batch.Status,
+                CreatedById = batch.CreatedById,
+                ApprovedById = batch.ApprovedById,
                 ApprovedDate = batch.ApprovedDate,
+                InvoicePaymentSodControlEventId = batch.InvoicePaymentSodControlEventId,
+                ProcessedById = batch.ProcessedById,
                 ProcessedDate = batch.ProcessedDate,
                 Notes = batch.Notes,
                 CreatedAt = batch.CreatedAt,
@@ -3005,7 +4743,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                     SupplierName = i.VendorPayment?.Supplier?.Name ?? string.Empty,
                     Amount = i.Amount,
                     ItemStatus = i.ItemStatus,
-                    FailureReason = i.FailureReason
+                    FailureReason = i.FailureReason,
+                    Invoices = i.Invoices?.OrderBy(selection => selection.VendorInvoice?.DueDate)
+                        .ThenBy(selection => selection.VendorInvoiceId)
+                        .Select(selection => new PaymentBatchInvoiceDto
+                        {
+                            Id = selection.Id,
+                            VendorInvoiceId = selection.VendorInvoiceId,
+                            InvoiceNumber = selection.VendorInvoice?.InvoiceNumber ?? string.Empty,
+                            Amount = selection.Amount,
+                            Status = selection.Status,
+                            FailureReason = selection.FailureReason,
+                            PaymentReadinessControlEventId = selection.PaymentReadinessControlEventId,
+                            PaymentReadinessSnapshotHash = selection.PaymentReadinessSnapshotHash,
+                            PaymentReadinessEvaluatedAtUtc = selection.PaymentReadinessEvaluatedAtUtc
+                        }).ToList() ?? new List<PaymentBatchInvoiceDto>()
                 }).ToList() ?? new List<PaymentBatchItemDto>()
             };
         }

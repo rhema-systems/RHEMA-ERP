@@ -22,6 +22,8 @@ public class TenantController : ControllerBase
     private readonly FinanceCloseTemplateBaselineSeeder _financeCloseTemplateBaselineSeeder;
     private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+    private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
+    private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
 
     public TenantController(
         ITenantService tenantService,
@@ -32,7 +34,9 @@ public class TenantController : ControllerBase
         PaymentTermBaselineSeeder paymentTermBaselineSeeder,
         FinanceCloseTemplateBaselineSeeder financeCloseTemplateBaselineSeeder,
         ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
-        ProcurementAccessControlSeeder? procurementAccessControlSeeder = null)
+        ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+        ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
+        InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null)
     {
         _tenantService = tenantService;
         _logger = logger;
@@ -43,6 +47,8 @@ public class TenantController : ControllerBase
         _financeCloseTemplateBaselineSeeder = financeCloseTemplateBaselineSeeder;
         _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
+        _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
+        _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
     }
 
     /// <summary>
@@ -209,6 +215,14 @@ public class TenantController : ControllerBase
                     ? parsedInitializerActorId
                     : (Guid?)null;
                 await _procurementAccessControlSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+            if (_procurementStatutoryReportSeeder is not null)
+            {
+                await _procurementStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
+            }
+            if (_inventoryStatutoryReportSeeder is not null)
+            {
+                await _inventoryStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
             }
 
             // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.

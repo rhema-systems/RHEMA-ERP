@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -353,6 +354,59 @@ public class ProcurementBudgetService : IProcurementBudgetService
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Utilized {Amount} from committed budget {BudgetId}, category: {Category}", amount, budgetId, category ?? "N/A");
+    }
+
+    public async Task<bool> UtilizePurchaseOrderCommittedBudgetAsync(
+        Guid purchaseOrderId,
+        decimal amount)
+    {
+        if (purchaseOrderId == Guid.Empty)
+            throw new ArgumentException("A purchase order is required.", nameof(purchaseOrderId));
+        if (amount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "The utilized amount must be greater than zero.");
+
+        var tenantId = _currentUserProvider.TenantId;
+        var planItem = await _unitOfWork.Repository<ProcurementPlanItem>()
+            .GetQueryable(item =>
+                item.TenantId == tenantId &&
+                item.PurchaseOrderId == purchaseOrderId &&
+                !item.IsDeleted)
+            .OrderBy(item => item.CreatedAt)
+            .FirstOrDefaultAsync();
+        if (planItem is null)
+        {
+            _logger.LogWarning(
+                "No procurement plan item is linked to purchase order {PurchaseOrderId}; budget utilization was skipped",
+                purchaseOrderId);
+            return false;
+        }
+
+        var budget = await _budgetRepository.GetQueryable(item =>
+                item.TenantId == tenantId &&
+                !item.IsDeleted &&
+                (item.Status == "Active" || item.Status == "Approved") &&
+                (planItem.ProcurementBudgetId.HasValue
+                    ? item.Id == planItem.ProcurementBudgetId.Value
+                    : item.ProcurementPlanId == planItem.ProcurementPlanId))
+            .OrderByDescending(item => item.ApprovedDate)
+            .ThenByDescending(item => item.CreatedAt)
+            .FirstOrDefaultAsync();
+        if (budget is null)
+        {
+            _logger.LogWarning(
+                "No active or approved procurement budget is linked to purchase order {PurchaseOrderId}; budget utilization was skipped",
+                purchaseOrderId);
+            return false;
+        }
+
+        await UtilizeCommittedBudgetAsync(budget.Id, amount, planItem.ItemCategory);
+        _logger.LogInformation(
+            "Utilized {Amount} from budget {BudgetCode} for purchase order {PurchaseOrderId}, category {Category}",
+            amount,
+            budget.BudgetCode,
+            purchaseOrderId,
+            planItem.ItemCategory ?? "N/A");
+        return true;
     }
 
     public async Task<IEnumerable<ProcurementBudgetDto>> GetAvailableBudgetsForLinkingAsync(Guid departmentId, int fiscalYear)

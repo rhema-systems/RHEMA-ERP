@@ -61,6 +61,9 @@ public static class FinanceAuditEvents
     public const string ApInvoiceApproved = "Finance.APInvoice.Approved";
     public const string ApInvoiceRejected = "Finance.APInvoice.Rejected";
     public const string ApInvoicePosted = "Finance.APInvoice.Posted";
+    public const string ApInvoiceReversed = "Finance.APInvoice.Reversed";
+    public const string ApInvoiceVoided = "Finance.APInvoice.Voided";
+    public const string ApInvoiceReversalFailed = "Finance.APInvoice.ReversalFailed";
     public const string ApInvoicePostingFailed = "Finance.APInvoice.PostingFailed";
     public const string ApInvoiceDuplicatePostingAttempt = "Finance.APInvoice.DuplicatePostingAttempt";
     public const string ApPaymentSubmitted = "Finance.APPayment.SubmittedForApproval";
@@ -68,11 +71,11 @@ public static class FinanceAuditEvents
     public const string ApPaymentRejected = "Finance.APPayment.Rejected";
     public const string ApPaymentEvidenceApprovalBlocked = "Finance.APPayment.EvidenceApprovalBlocked";
     public const string ApPaymentPosted = "Finance.APPayment.Posted";
+    public const string ApPaymentReversed = "Finance.APPayment.Reversed";
     public const string ApPaymentVoided = "Finance.APPayment.Voided";
+    public const string ApPaymentReversalFailed = "Finance.APPayment.ReversalFailed";
     public const string ApPaymentPostingFailed = "Finance.APPayment.PostingFailed";
     public const string ApPaymentDuplicatePostingAttempt = "Finance.APPayment.DuplicatePostingAttempt";
-    public const string ApPaymentReversed = "Finance.APPayment.Reversed";
-    public const string ApPaymentReversalFailed = "Finance.APPayment.ReversalFailed";
     public const string ApPaymentTraceViewed = "Finance.APPayment.TraceViewed";
     public const string ArInvoiceSubmitted = "Finance.ARInvoice.SubmittedForApproval";
     public const string ArInvoiceApproved = "Finance.ARInvoice.Approved";
@@ -101,6 +104,10 @@ public static class FinanceAuditEvents
     public const string ApSupplierAdvanceApplied = "Finance.AP.SupplierAdvanceApplied";
     public const string ArCustomerAdvanceApplied = "Finance.AR.CustomerAdvanceApplied";
     public const string ApUnappliedSettlementsGenerated = "Finance.AP.UnappliedSettlements.Generated";
+    public const string ApMatchExceptionsGenerated = "Finance.AP.MatchExceptions.Generated";
+    public const string ApMatchExceptionsExported = "Finance.AP.MatchExceptions.Exported";
+    public const string ApProcurementReconciliationGenerated = "Finance.AP.ProcurementReconciliation.Generated";
+    public const string ApProcurementReconciliationExported = "Finance.AP.ProcurementReconciliation.Exported";
     public const string ArUnappliedSettlementsGenerated = "Finance.AR.UnappliedSettlements.Generated";
     public const string CashBankTransactionCaptured = "Finance.CashBankTransaction.Captured";
     public const string CashBankTransactionSubmitted = "Finance.CashBankTransaction.Submitted";

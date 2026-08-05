@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Enums;
 
@@ -302,5 +303,22 @@ namespace ErpSystem.Core.Entities.Finance
         /// resolves FIN-LIM-0034 by allowing an authorised tenant policy decision when needed.
         /// </summary>
         public bool RequireDepreciationBeforePeriodClose { get; set; } = true;
+
+        // Procurement/Finance invoice-match tolerances belong to the same tenant Finance policy.
+        // Retaining them alongside the correction controls lets the incoming three-way-match
+        // workflow and the Finance close/payment controls share one authoritative settings row.
+        /// <summary>
+        /// Maximum unit-price variance allowed for PO-linked AP invoice matching.
+        /// </summary>
+        [Range(typeof(decimal), "0", "100")]
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal ApInvoicePriceTolerancePercent { get; set; } = 1m;
+
+        /// <summary>
+        /// Maximum cumulative invoice quantity over the accepted receipt quantity.
+        /// </summary>
+        [Range(typeof(decimal), "0", "100")]
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal ApInvoiceQuantityTolerancePercent { get; set; } = 1m;
     }
 }

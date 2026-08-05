@@ -1,6 +1,7 @@
 using System.Reflection;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.Enums;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using ErpSystem.Web.Services;
@@ -16,6 +17,104 @@ namespace ErpSystem.Api.Tests.Services;
 
 public class DatabaseSeedingServiceTests
 {
+    [Fact]
+    public async Task EnsureFinanceWorkflowsSeededAsync_ShouldPublishAndRepairPaymentRuntimeDefinitions()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = "Finance Workflow Tenant",
+            Code = "FIN",
+            Status = TenantStatus.Active,
+            ContactEmail = "finance-workflow@test.local",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        context.Tenants.Add(tenant);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+        var seedMethod = typeof(DatabaseSeedingService)
+            .GetMethod("EnsureFinanceWorkflowsSeededAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        seedMethod.Should().NotBeNull();
+        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
+
+        var paymentDefinitions = await context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .Where(definition =>
+                definition.TenantId == tenant.Id &&
+                (definition.EntityType.Code == "VendorPayment" ||
+                 definition.EntityType.Code == "PaymentBatch" ||
+                 definition.EntityType.Code == "VendorInvoiceMatchException"))
+            .ToListAsync();
+        paymentDefinitions.Should().HaveCount(3);
+        paymentDefinitions.Should().OnlyContain(definition =>
+            definition.IsActive &&
+            definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+            definition.PublishedAt.HasValue &&
+            definition.DefinitionKey != Guid.Empty);
+
+        paymentDefinitions.Should().OnlyContain(definition =>
+            definition.Steps
+                .Where(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted)
+                .OrderBy(step => step.Order)
+                .Select(step => step.Name)
+                .SequenceEqual(new[]
+                {
+                    "Finance Manager Approval",
+                    "Financial Controller Final Approval"
+                }));
+
+        var matchException = paymentDefinitions.Single(definition =>
+            definition.EntityType.Code == "VendorInvoiceMatchException");
+        matchException.Description.Should().Contain("AP-006");
+        matchException.Description.Should().Contain("never allocates or posts payment");
+
+        var vendorPayment = paymentDefinitions.Single(definition => definition.EntityType.Code == "VendorPayment");
+        vendorPayment.Steps
+            .Single(step => step.StepType == WorkflowStepType.Approval && step.Order == 2)
+            .Name = "Accounts Officer Review";
+
+        var paymentBatch = paymentDefinitions.Single(definition => definition.EntityType.Code == "PaymentBatch");
+        paymentBatch.IsActive = false;
+        paymentBatch.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Draft;
+        paymentBatch.PublishedAt = null;
+        await context.SaveChangesAsync();
+
+        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+
+        paymentBatch.IsActive.Should().BeTrue();
+        paymentBatch.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Published);
+        paymentBatch.PublishedAt.Should().NotBeNull();
+
+        var activeVendorPaymentDefinitions = await context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .Where(definition =>
+                definition.TenantId == tenant.Id &&
+                definition.EntityType.Code == "VendorPayment" &&
+                definition.IsActive)
+            .ToListAsync();
+
+        activeVendorPaymentDefinitions.Should().ContainSingle();
+        activeVendorPaymentDefinitions.Single().Steps
+            .Where(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted)
+            .OrderBy(step => step.Order)
+            .Select(step => step.Name)
+            .Should().Equal("Finance Manager Approval", "Financial Controller Final Approval");
+        vendorPayment.IsActive.Should().BeFalse();
+        vendorPayment.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Retired);
+        vendorPayment.RetiredAt.Should().NotBeNull();
+    }
+
     [Fact]
     public async Task EnsureProjectWorkflowsSeededAsync_ShouldCreateBaselineProjectWorkflowDefinitions()
     {

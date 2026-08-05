@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Send, FileText, Loader2, DollarSign, Calculator, Save } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import {
   inventoryManagementService,
   InventoryTransferDetailDto, InventoryTransferItemDto, ShipTransferItemDto, ShipTransferWithCostsDto
@@ -46,7 +47,9 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
   const [transfer, setTransfer] = useState<InventoryTransferDetailDto | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [carrierName, setCarrierName] = useState('');
+  const [dispatchComment, setDispatchComment] = useState('');
   const [shipQuantities, setShipQuantities] = useState<ShipQuantity[]>([]);
+  const mutationKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   // Shipping costs state
   const [includeCosts, setIncludeCosts] = useState(false);
@@ -65,6 +68,8 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
       setShipQuantities([]);
       setTrackingNumber('');
       setCarrierName('');
+      setDispatchComment('');
+      mutationKeyRef.current = null;
       setIncludeCosts(false);
       setShippingCost(0);
       setMiscellaneousCost(0);
@@ -117,8 +122,16 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
     ));
   };
 
+  const mutationKeyFor = (kind: string, payload: unknown) => {
+    const fingerprint = `${kind}:${JSON.stringify(payload)}`;
+    if (mutationKeyRef.current?.fingerprint !== fingerprint) {
+      mutationKeyRef.current = { fingerprint, key: crypto.randomUUID() };
+    }
+    return mutationKeyRef.current.key;
+  };
+
   const handleShip = async () => {
-    if (!transferId) return;
+    if (!transferId || !transfer) return;
 
     // Filter items with quantity to ship
     const itemsToShip: ShipTransferItemDto[] = shipQuantities
@@ -142,8 +155,17 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
       setSaving(true);
 
       if (includeCosts) {
+        const idempotencyKey = mutationKeyFor('dispatch-with-costs', {
+          trackingNumber, carrierName, shippingCost, miscellaneousCost,
+          miscellaneousCostDescription, costAllocationMethod, costApportionmentBasis,
+          expenseGLAccount, itemsToShip, dispatchComment,
+        });
         // Use the new shipping costs API
         const costsDto: ShipTransferWithCostsDto = {
+          rowVersion: transfer.rowVersion,
+          idempotencyKey,
+          correlationId: `transfer-dispatch:${transferId}:${idempotencyKey}`,
+          comment: dispatchComment.trim() || undefined,
           trackingNumber: trackingNumber || undefined,
           carrierName: carrierName || undefined,
           shippingCost,
@@ -158,8 +180,13 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
         await inventoryManagementService.shipTransferWithCosts(transferId, costsDto);
         toast({ title: 'Success', description: 'Transfer shipped with costs successfully' });
       } else {
-        // Use the original API
-        await inventoryManagementService.shipTransfer(transferId, trackingNumber || undefined, itemsToShip);
+        const idempotencyKey = mutationKeyFor('dispatch', { trackingNumber, itemsToShip, dispatchComment });
+        await inventoryManagementService.shipTransfer(transferId, {
+          rowVersion: transfer.rowVersion,
+          idempotencyKey,
+          correlationId: `transfer-dispatch:${transferId}:${idempotencyKey}`,
+          comment: dispatchComment.trim() || undefined,
+        }, trackingNumber || undefined, itemsToShip);
         toast({ title: 'Success', description: 'Transfer shipped successfully' });
       }
 
@@ -178,7 +205,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
   };
 
   const handlePrintShipmentNote = async () => {
-    if (!transferId) return;
+    if (!transferId || !transfer) return;
     try {
       const blob = await inventoryManagementService.getShipmentNotePdf(transferId);
       const url = window.URL.createObjectURL(blob);
@@ -203,7 +230,16 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
     try {
       setSavingDraft(true);
 
+      const idempotencyKey = mutationKeyFor('save-shipping-costs', {
+        trackingNumber, carrierName, shippingCost, miscellaneousCost,
+        miscellaneousCostDescription, costAllocationMethod, costApportionmentBasis,
+        expenseGLAccount,
+      });
       const costsDto: ShipTransferWithCostsDto = {
+        rowVersion: transfer.rowVersion,
+        idempotencyKey,
+        correlationId: `transfer-shipping-costs:${transferId}:${idempotencyKey}`,
+        comment: dispatchComment.trim() || undefined,
         trackingNumber: trackingNumber || undefined,
         carrierName: carrierName || undefined,
         shippingCost,
@@ -334,6 +370,17 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                   placeholder="Enter carrier name"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="dispatchComment">Dispatch control comment</Label>
+              <Textarea
+                id="dispatchComment"
+                value={dispatchComment}
+                onChange={(event) => setDispatchComment(event.target.value)}
+                placeholder="Optional operational context retained in the immutable transfer action register"
+                rows={2}
+              />
             </div>
 
             {/* Shipping Costs Section */}

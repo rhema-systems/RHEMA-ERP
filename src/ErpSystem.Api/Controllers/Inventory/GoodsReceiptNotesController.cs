@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,6 +32,24 @@ public class GoodsReceiptNotesController : ControllerBase
         return Guid.TryParse(userIdClaim, out var userId) ? userId : Guid.Empty;
     }
 
+    private ObjectResult ReceiptSourceForbidden(
+        ProcurementReceiptSourceAuthorizationException exception) =>
+        StatusCode(StatusCodes.Status403Forbidden, new
+        {
+            code = "RCV_SOURCE_FORBIDDEN",
+            message = exception.Message,
+            correlationId = HttpContext.TraceIdentifier
+        });
+
+    private NotFoundObjectResult ReceiptSourceNotFound(
+        ProcurementReceiptSourceNotFoundException exception) =>
+        NotFound(new
+        {
+            code = exception.Code,
+            message = exception.Message,
+            correlationId = HttpContext.TraceIdentifier
+        });
+
     /// <summary>
     /// Gets all goods receipt notes with optional date filtering
     /// </summary>
@@ -44,7 +63,11 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetAllAsync(fromDate, toDate);
             return Ok(grns);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes");
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -65,7 +88,11 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(grn);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt note {Id}", id);
             return StatusCode(500, "An error occurred while retrieving the goods receipt note");
@@ -86,7 +113,11 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(grn);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt note {GRNNumber}", grnNumber);
             return StatusCode(500, "An error occurred while retrieving the goods receipt note");
@@ -104,7 +135,11 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetByWarehouseAsync(warehouseId);
             return Ok(grns);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for warehouse {WarehouseId}", warehouseId);
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -122,7 +157,11 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetBySupplierAsync(supplierId);
             return Ok(grns);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for supplier {SupplierId}", supplierId);
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -140,7 +179,11 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetByPurchaseOrderAsync(purchaseOrderId);
             return Ok(grns);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving goods receipt notes for PO {PurchaseOrderId}", purchaseOrderId);
             return StatusCode(500, "An error occurred while retrieving goods receipt notes");
@@ -158,7 +201,11 @@ public class GoodsReceiptNotesController : ControllerBase
             var grns = await _grnService.GetPendingInspectionAsync();
             return Ok(grns);
         }
-        catch (Exception ex)
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error retrieving pending inspection GRNs");
             return StatusCode(500, "An error occurred while retrieving pending inspection GRNs");
@@ -173,15 +220,64 @@ public class GoodsReceiptNotesController : ControllerBase
     {
         try
         {
+            dto.IdempotencyKey ??=
+                Request.Headers["Idempotency-Key"].FirstOrDefault();
             var userId = GetCurrentUserId();
             var grn = await _grnService.CreateAsync(dto, userId);
             return CreatedAtAction(nameof(GetById), new { id = grn.Id }, grn);
+        }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
         }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error creating goods receipt note");
             return StatusCode(500, "An error occurred while creating the goods receipt note");
@@ -203,6 +299,14 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "GRN submitted for inspection successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -211,7 +315,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error submitting GRN {Id} for inspection", id);
             return StatusCode(500, "An error occurred while submitting the GRN for inspection");
@@ -227,11 +331,19 @@ public class GoodsReceiptNotesController : ControllerBase
         try
         {
             var userId = GetCurrentUserId();
-            var result = await _grnService.UpdateInspectionResultAsync(dto, userId);
+            var result = await _grnService.UpdateInspectionResultAsync(id, dto, userId);
             if (!result)
                 return BadRequest("Failed to update inspection result");
 
             return Ok(new { message = "Inspection result updated successfully" });
+        }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
         }
         catch (ArgumentException ex)
         {
@@ -241,7 +353,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error updating inspection for GRN {Id}", id);
             return StatusCode(500, "An error occurred while updating the inspection result");
@@ -263,6 +375,14 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "Inspection completed successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -271,7 +391,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error completing inspection for GRN {Id}", id);
             return StatusCode(500, "An error occurred while completing the inspection");
@@ -293,15 +413,80 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "GRN posted to inventory successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return NotFound(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            return Conflict(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "RCV_SOURCE_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodBlockedException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                readiness = ex.Readiness,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (ProcurementPurchaseOrderSodAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "PO_SOD_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
+        }
+        catch (InventoryTrackingAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                code = "INV_TRACKING_FORBIDDEN",
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
+        }
+        catch (InventoryTrackingControlException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                code = ex.Code,
+                message = ex.Message,
+                correlationId = HttpContext.TraceIdentifier
+            });
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error posting GRN {Id} to inventory", id);
             return StatusCode(500, "An error occurred while posting the GRN to inventory");
@@ -323,6 +508,14 @@ public class GoodsReceiptNotesController : ControllerBase
 
             return Ok(new { message = "GRN cancelled successfully" });
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return ReceiptSourceNotFound(ex);
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return ReceiptSourceForbidden(ex);
+        }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
@@ -331,7 +524,7 @@ public class GoodsReceiptNotesController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not UnauthorizedAccessException)
         {
             _logger.LogError(ex, "Error cancelling GRN {Id}", id);
             return StatusCode(500, "An error occurred while cancelling the GRN");

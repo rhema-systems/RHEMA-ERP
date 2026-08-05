@@ -50,6 +50,11 @@ public class InventoryCategoriesController : ControllerBase
                 DefaultUnitOfMeasure = c.DefaultUnitOfMeasure,
                 DefaultSerialTracking = c.DefaultSerialTracking,
                 DefaultLotTracking = c.DefaultLotTracking,
+                DefaultBatchTracking = c.DefaultBatchTracking,
+                DefaultManufactureDateTracking = c.DefaultManufactureDateTracking,
+                DefaultExpirationTracking = c.DefaultExpirationTracking,
+                EnforceFifoIssue = c.EnforceFifoIssue,
+                MinimumShelfLifeDays = c.MinimumShelfLifeDays,
                 DefaultRequiresInspection = c.DefaultRequiresInspection
             });
 
@@ -134,6 +139,11 @@ public class InventoryCategoryDto
     public string? DefaultUnitOfMeasure { get; set; }
     public bool DefaultSerialTracking { get; set; }
     public bool DefaultLotTracking { get; set; }
+    public bool DefaultBatchTracking { get; set; }
+    public bool DefaultManufactureDateTracking { get; set; }
+    public bool DefaultExpirationTracking { get; set; }
+    public bool EnforceFifoIssue { get; set; }
+    public int MinimumShelfLifeDays { get; set; }
     public bool DefaultRequiresInspection { get; set; }
 }
 

@@ -5,7 +5,6 @@ import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -43,6 +42,9 @@ import {
 import { inventoryManagementService, LandedCostDetailDto, LandedCostDto } from '@/services/inventoryManagementService';
 import { format } from 'date-fns';
 import Link from 'next/link';
+import { ReceiptInspectionControl } from '@/components/procurement/ReceiptInspectionControl';
+import { ReceiptDocumentControl } from '@/components/procurement/ReceiptDocumentControl';
+import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 
 const GRNStatuses = [
   { value: 'Pending', label: 'Pending', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
@@ -97,17 +99,6 @@ export default function PurchaseReceiptDetailPage() {
       case '7':
       default:
         return 'Other';
-    }
-  };
-
-  const handlePrint = async () => {
-    try {
-      const blob = await purchasingService.getPurchaseReceiptGrnPdf(id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating GRN PDF:', err);
-      toast.error('Failed to generate GRN PDF');
     }
   };
 
@@ -345,12 +336,7 @@ export default function PurchaseReceiptDetailPage() {
           </div>
         </div>
         
-        <div className="flex items-center gap-2 print:hidden">
-          <Button variant="outline" onClick={handlePrint}>
-            <Printer className="h-4 w-4 mr-2" />
-            Print GRN
-          </Button>
-        </div>
+        <div className="flex items-center gap-2 print:hidden"><Button variant="outline" onClick={() => setActiveTab('documents')}><Printer className="h-4 w-4 mr-2" />GRN / MRN register</Button></div>
       </div>
 
       {/* Breadcrumbs */}
@@ -380,6 +366,7 @@ export default function PurchaseReceiptDetailPage() {
           <TabsTrigger value="details">Receipt Details</TabsTrigger>
           <TabsTrigger value="items">Items Received</TabsTrigger>
           <TabsTrigger value="landed-cost">Landed Cost</TabsTrigger>
+          <TabsTrigger value="documents">GRN / MRN</TabsTrigger>
           {receipt.requiresInspection && (
             <TabsTrigger value="inspection">Quality Inspection</TabsTrigger>
           )}
@@ -864,100 +851,17 @@ export default function PurchaseReceiptDetailPage() {
         {/* Quality Inspection Tab */}
         {receipt.requiresInspection && (
           <TabsContent value="inspection" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5" />
-                  Quality Inspection
-                </CardTitle>
-                <CardDescription>
-                  Quality inspection details and results
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {receipt.inspectedByName && (
-                    <div>
-                      <Label className="text-muted-foreground">Inspector</Label>
-                      <p className="font-medium mt-1">{receipt.inspectedByName}</p>
-                    </div>
-                  )}
-                  
-                  {receipt.inspectionDate && (
-                    <div>
-                      <Label className="text-muted-foreground">Inspection Date</Label>
-                      <p className="font-medium mt-1">
-                        {format(new Date(receipt.inspectionDate), 'MMM dd, yyyy HH:mm')}
-                      </p>
-                    </div>
-                  )}
-                  
-                  {receipt.inspectionResult && (
-                    <div>
-                      <Label className="text-muted-foreground">Inspection Result</Label>
-                      <div className="mt-1">
-                        <Badge className={
-                          receipt.inspectionResult === 'Passed' ? 'bg-green-100 text-green-800' :
-                          receipt.inspectionResult === 'Failed' ? 'bg-red-100 text-red-800' :
-                          'bg-yellow-100 text-yellow-800'
-                        }>
-                          {receipt.inspectionResult}
-                        </Badge>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {receipt.inspectionNotes && (
-                  <>
-                    <Separator />
-                    <div>
-                      <Label className="text-muted-foreground">Inspection Notes</Label>
-                      <p className="mt-2 text-sm whitespace-pre-wrap">{receipt.inspectionNotes}</p>
-                    </div>
-                  </>
-                )}
-                
-                {/* Item-level quality status */}
-                {receipt.items && receipt.items.length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <Label className="text-muted-foreground mb-3 block">Item Quality Status</Label>
-                      <div className="space-y-2">
-                        {receipt.items.map((item, index) => (
-                          <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div>
-                              <p className="font-medium">{item.itemCode} - {item.itemName}</p>
-                              {item.qualityNotes && (
-                                <p className="text-xs text-muted-foreground mt-1">{item.qualityNotes}</p>
-                              )}
-                            </div>
-                            <div className="text-right">
-                              {item.qualityStatus && (
-                                <Badge variant="outline" className={
-                                  item.qualityStatus === 'Passed' ? 'bg-green-50 text-green-700' :
-                                  item.qualityStatus === 'Failed' ? 'bg-red-50 text-red-700' :
-                                  item.qualityStatus === 'Conditional' ? 'bg-yellow-50 text-yellow-700' :
-                                  'bg-gray-50 text-gray-700'
-                                }>
-                                  {item.qualityStatus}
-                                </Badge>
-                              )}
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Accepted: {item.acceptedQuantity} / Rejected: {item.rejectedQuantity}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+            <PurchaseOrderSodControl
+              purchaseOrderId={receipt.purchaseOrderId}
+              status={receipt.status}
+              scope="receipt"
+            />
+            <ReceiptInspectionControl receiptId={id} onChanged={() => void fetchReceipt()} />
           </TabsContent>
         )}
+        <TabsContent value="documents" className="space-y-6">
+          <ReceiptDocumentControl receiptId={id} />
+        </TabsContent>
       </Tabs>
     </div>
   );

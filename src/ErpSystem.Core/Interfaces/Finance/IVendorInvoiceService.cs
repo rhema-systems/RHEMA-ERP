@@ -93,6 +93,11 @@ public interface IVendorInvoiceService
     Task<InvoiceMatchingResultDto> GetMatchingResultAsync(Guid invoiceId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns the authoritative current three-way approval readiness without mutating the invoice.
+    /// </summary>
+    Task<InvoiceMatchingResultDto> GetThreeWayMatchReadinessAsync(Guid invoiceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Checks if a potential duplicate exists based on supplier, reference, and date.
     /// </summary>
     Task<bool> IsDuplicateAsync(Guid supplierId, string? supplierInvoiceNumber, DateTime invoiceDate, Guid? excludeId = null, CancellationToken cancellationToken = default);

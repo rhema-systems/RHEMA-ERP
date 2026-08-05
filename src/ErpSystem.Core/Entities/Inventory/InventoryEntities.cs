@@ -37,15 +37,46 @@ public class InventoryItem : TenantEntity
     [MaxLength(100)]
     public string? Model { get; set; }
 
+    /// <summary>
+    /// Tenant-unique primary machine-readable item identifier.
+    /// Values are normalized by the shared inventory identifier service before persistence.
+    /// </summary>
+    [MaxLength(100)]
+    public string? Barcode { get; set; }
+
+    /// <summary>
+    /// Optional tenant-unique secondary barcode for the same stocking item.
+    /// </summary>
+    [MaxLength(100)]
+    public string? AlternateBarcode { get; set; }
+
+    /// <summary>
+    /// Optional tenant-unique QR payload used to resolve the item.
+    /// </summary>
+    [MaxLength(100)]
+    public string? QRCode { get; set; }
+
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA"; // Each, KG, LB, FT, M, L, GAL, etc.
 
     public Guid? UnitOfMeasureScheduleId { get; set; }
     public virtual UnitOfMeasureSchedule? UnitOfMeasureSchedule { get; set; }
 
-    public ValuationMethod ValuationMethod { get; set; }
+    public ValuationMethod ValuationMethod { get; set; } = ValuationMethod.WeightedAverage;
     public bool IsValuationLocked { get; set; }
     public decimal DailyRentalRate { get; set; }
+
+    /// <summary>
+    /// Declares whether the item may be selected against project-controlled demand.
+    /// This is master-data applicability only; Projects remains the project owner.
+    /// </summary>
+    public bool IsProjectApplicable { get; set; }
+
+    /// <summary>
+    /// Declares whether the item may be selected against a Finance cost-centre segment.
+    /// This does not create or own Finance segment values.
+    /// </summary>
+    public bool IsCostCentreApplicable { get; set; }
 
     // Costing
     [Column(TypeName = "decimal(18,4)")]
@@ -102,6 +133,8 @@ public class InventoryItem : TenantEntity
     // Tracking Options
     public bool IsSerialTracked { get; set; } = false;
     public bool IsLotTracked { get; set; } = false;
+    public bool IsBatchTracked { get; set; } = false;
+    public bool IsManufactureDateTracked { get; set; } = false;
     public bool IsExpirationTracked { get; set; } = false;
     public bool IsLocationTracked { get; set; } = false;
 
@@ -132,7 +165,11 @@ public class InventoryItem : TenantEntity
     public virtual ICollection<InventoryLocation> InventoryLocations { get; set; } = new List<InventoryLocation>();
     public virtual ICollection<InventoryAllocation> Allocations { get; set; } = new List<InventoryAllocation>();
     public virtual ICollection<StockAdjustment> StockAdjustments { get; set; } = new List<StockAdjustment>();
+    public virtual ICollection<ItemUnitOfMeasure> ItemUnitsOfMeasure { get; set; } = new List<ItemUnitOfMeasure>();
     public virtual TaxGroup? DefaultTaxGroup { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }
 
 /// <summary>
@@ -166,6 +203,11 @@ public class InventoryCategory : TenantEntity
     
     public bool DefaultSerialTracking { get; set; } = false;
     public bool DefaultLotTracking { get; set; } = false;
+    public bool DefaultBatchTracking { get; set; } = false;
+    public bool DefaultManufactureDateTracking { get; set; } = false;
+    public bool DefaultExpirationTracking { get; set; } = false;
+    public bool EnforceFifoIssue { get; set; } = false;
+    public int MinimumShelfLifeDays { get; set; } = 0;
     public bool DefaultRequiresInspection { get; set; } = false;
 
     // Tax Assignment
@@ -233,7 +275,17 @@ public class StockMovement : TenantEntity
     [MaxLength(100)]
     public string? LotNumber { get; set; }
 
+    [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+
     public DateTime? ExpirationDate { get; set; }
+
+    public Guid? InventoryTrackingExceptionId { get; set; }
+
+    public Guid? InventoryIssueVoucherId { get; set; }
+    public Guid? InventoryReturnVoucherId { get; set; }
 
     // Balances after this movement
     public decimal RunningBalance { get; set; } = 0;
@@ -250,6 +302,8 @@ public class StockMovement : TenantEntity
     public virtual WarehouseLocation? Location { get; set; }
     public virtual ApplicationUser? ProcessedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual InventoryIssueVoucher? InventoryIssueVoucher { get; set; }
+    public virtual InventoryReturnVoucher? InventoryReturnVoucher { get; set; }
 }
 
 /// <summary>
@@ -282,6 +336,29 @@ public class StockAdjustment : TenantEntity
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
 
+    public Guid RequestedById { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAtUtc { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? RejectedById { get; set; }
+    public DateTime? RejectedAtUtc { get; set; }
+    [MaxLength(1000)] public string? RejectionReason { get; set; }
+    public Guid? PostedById { get; set; }
+    public DateTime? PostedAtUtc { get; set; }
+    public Guid? ReversedById { get; set; }
+    public DateTime? ReversedAtUtc { get; set; }
+    [MaxLength(1000)] public string? ReversalReason { get; set; }
+    public Guid? RelatedIssueVoucherId { get; set; }
+    public Guid? FinancePostingEventId { get; set; }
+    public Guid? FinanceJournalEntryId { get; set; }
+    public Guid? ReversalFinancePostingEventId { get; set; }
+    public Guid? ReversalFinanceJournalEntryId { get; set; }
+    [MaxLength(100)] public string? IdempotencyKey { get; set; }
+    [MaxLength(64)] public string? PayloadHash { get; set; }
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    [MaxLength(64)] public string? IntegrityHash { get; set; }
+    [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     [Column(TypeName = "decimal(18,4)")]
     public decimal TotalAdjustmentValue { get; set; } = 0;
 
@@ -289,6 +366,8 @@ public class StockAdjustment : TenantEntity
     public virtual Warehouse? Warehouse { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ICollection<StockAdjustmentItem> Items { get; set; } = new List<StockAdjustmentItem>();
+    public virtual ICollection<StockAdjustmentEvidence> Evidence { get; set; } = new List<StockAdjustmentEvidence>();
+    public virtual ICollection<StockAdjustmentAction> Actions { get; set; } = new List<StockAdjustmentAction>();
 }
 
 /// <summary>
@@ -309,6 +388,13 @@ public class StockAdjustmentItem : TenantEntity
 
     [MaxLength(100)]
     public string? LotNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? BatchNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+
+    public DateTime? ExpiryDate { get; set; }
 
     public decimal SystemQuantity { get; set; } = 0; // What the system shows
     public decimal PhysicalQuantity { get; set; } = 0; // What was actually counted
@@ -609,6 +695,13 @@ public class InventoryAllocation : TenantEntity
 
     public Guid? ReferenceId { get; set; }
 
+    // Governed project/requisition reservation lineage (TDC-0611).
+    public Guid? InventoryRequisitionId { get; set; }
+    public Guid? InventoryRequisitionItemId { get; set; }
+    public Guid? ProjectId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? SubstitutedFromAllocationId { get; set; }
+
     public decimal AllocatedQuantity { get; set; } = 0;
     public decimal ConsumedQuantity { get; set; } = 0;
     public decimal RemainingQuantity { get; set; } = 0;
@@ -631,11 +724,29 @@ public class InventoryAllocation : TenantEntity
 
     public Guid? AllocatedById { get; set; }
 
+    [MaxLength(100)]
+    public string? IdempotencyKey { get; set; }
+
+    [MaxLength(64)]
+    public string? PayloadHash { get; set; }
+
+    [MaxLength(100)]
+    public string? CorrelationId { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     // Navigation Properties
     public virtual InventoryItem InventoryItem { get; set; } = null!;
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
     public virtual ApplicationUser? AllocatedBy { get; set; }
+    public virtual InventoryRequisition? InventoryRequisition { get; set; }
+    public virtual InventoryRequisitionItem? InventoryRequisitionItem { get; set; }
+    public virtual ErpSystem.Core.Entities.Projects.Project? Project { get; set; }
+    public virtual InventoryAllocation? SubstitutedFromAllocation { get; set; }
+    public virtual InventoryAllocation? SubstitutedByAllocation { get; set; }
+    public virtual ICollection<InventoryProjectReservationAction> ProjectReservationActions { get; set; } = new List<InventoryProjectReservationAction>();
 }
 
 #endregion

@@ -526,6 +526,8 @@ export interface FinanceSettings {
     minimumReversalReasonLength?: number;
     enforceFinanceAccessScopes?: boolean;
     requireDepreciationBeforePeriodClose?: boolean;
+    apInvoicePriceTolerancePercent: number;
+    apInvoiceQuantityTolerancePercent: number;
     /** True when posted transactions exist — base currency and control accounts become locked */
     transactionsExist?: boolean;
 }
@@ -569,6 +571,8 @@ export interface UpdateFinanceSettingsDto {
     minimumReversalReasonLength?: number;
     enforceFinanceAccessScopes?: boolean;
     requireDepreciationBeforePeriodClose?: boolean;
+    apInvoicePriceTolerancePercent?: number;
+    apInvoiceQuantityTolerancePercent?: number;
 }
 
 // Currency

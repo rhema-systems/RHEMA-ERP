@@ -356,6 +356,22 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.RequireDepreciationBeforePeriodClose = dto.RequireDepreciationBeforePeriodClose.Value;
             }
 
+            // Procurement invoice matching consumes the same tenant Finance policy row. Keeping
+            // these bounds in this service prevents report/UI integration from bypassing the
+            // authoritative validation used by invoice readiness controls.
+            if (dto.ApInvoicePriceTolerancePercent.HasValue)
+            {
+                if (dto.ApInvoicePriceTolerancePercent.Value is < 0 or > 100)
+                    throw new InvalidOperationException("AP invoice price tolerance must be between 0 and 100 percent.");
+                settings.ApInvoicePriceTolerancePercent = dto.ApInvoicePriceTolerancePercent.Value;
+            }
+            if (dto.ApInvoiceQuantityTolerancePercent.HasValue)
+            {
+                if (dto.ApInvoiceQuantityTolerancePercent.Value is < 0 or > 100)
+                    throw new InvalidOperationException("AP invoice quantity tolerance must be between 0 and 100 percent.");
+                settings.ApInvoiceQuantityTolerancePercent = dto.ApInvoiceQuantityTolerancePercent.Value;
+            }
+
             await _context.SaveChangesAsync();
 
             var afterFxMappings = new
@@ -562,6 +578,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 MinimumReversalReasonLength = settings.MinimumReversalReasonLength,
                 EnforceFinanceAccessScopes = settings.EnforceFinanceAccessScopes,
                 RequireDepreciationBeforePeriodClose = settings.RequireDepreciationBeforePeriodClose,
+                ApInvoicePriceTolerancePercent = settings.ApInvoicePriceTolerancePercent,
+                ApInvoiceQuantityTolerancePercent = settings.ApInvoiceQuantityTolerancePercent,
                 TransactionsExist = transactionsExist
             };
         }

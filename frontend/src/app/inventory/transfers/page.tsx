@@ -13,7 +13,7 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { formatPendingApprovers, useWorkflowEntitySummaries } from '@/hooks/useWorkflowEntitySummaries';
 import {
   Plus, Search, Eye, ArrowRight, Truck, Package, CheckCircle,
-  Clock, XCircle, Send, Download, Pencil, FileText, Undo2
+  Clock, XCircle, Send, Download, Pencil, FileText, Undo2, ShieldCheck
 } from 'lucide-react';
 import {
   inventoryManagementService,
@@ -236,6 +236,13 @@ export default function InventoryTransfersPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
+      <Card className="border-blue-200 bg-blue-50/40">
+        <CardContent className="flex flex-col gap-3 pt-6 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 text-blue-700" /><div><div className="font-semibold">Controlled transfer lifecycle</div><p className="text-sm text-muted-foreground">Independent dispatch, receipt, discrepancy resolution and closure are retained in an immutable action register.</p></div></div>
+          <div className="flex flex-wrap gap-2"><Badge variant="outline">Partial dispatch</Badge><Badge variant="outline">Damage / shortage</Badge><Badge variant="outline">Protected Central DMS evidence</Badge><Badge variant="outline">Independent closure</Badge></div>
+        </CardContent>
+      </Card>
+
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card><CardContent className="pt-6">
@@ -405,7 +412,7 @@ export default function InventoryTransfersPage() {
                           onOpenWorkflows={() => router.push('/administration/workflow')}
                         />
 
-                        {transfer.status === 'Approved' && <Button size="sm" variant="outline" onClick={() => handleShip(transfer.id)}><Send className="h-4 w-4 mr-1" />Ship</Button>}
+                        {['Approved', 'InTransit'].includes(transfer.status) && <Button size="sm" variant="outline" onClick={() => handleShip(transfer.id)}><Send className="h-4 w-4 mr-1" />{transfer.status === 'InTransit' ? 'Dispatch More' : 'Ship'}</Button>}
                         {transfer.status === 'InTransit' && (
                           <>
                             <Button size="sm" variant="outline" onClick={() => handleReceive(transfer.id)}><Download className="h-4 w-4 mr-1" />Receive</Button>

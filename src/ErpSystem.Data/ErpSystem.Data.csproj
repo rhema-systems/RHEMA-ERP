@@ -10,7 +10,7 @@
       verification configurations retain the complete migration history.
       Pass -p:TdcFastEfBuild=false to request a full Debug migration build.
     -->
-    <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == '' and '$(Configuration)' == 'Debug' and '$(Tdc0402FocusedEfBuild)' != 'true'">true</TdcFastEfBuild>
+    <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == '' and '$(Configuration)' == 'Debug' and '$(Tdc0402FocusedEfBuild)' != 'true' and '$(TdcFocusedEfToolingBuild)' != 'true'">true</TdcFastEfBuild>
     <TdcFastEfBuild Condition="'$(TdcFastEfBuild)' == ''">false</TdcFastEfBuild>
   </PropertyGroup>
 
@@ -66,23 +66,17 @@
     <!--
       The accumulated EF designer history exceeds 350 MB of generated C#.
       Lightweight metadata keeps every migration discoverable by startup
-      MigrateAsync while recent designers retain useful target models.
+      MigrateAsync without compiling generated target models.
       Release/verification builds continue to compile the complete history.
       When a generated designer is no longer retained here, add its migration
       attribute to FastBuildMigrationMetadata.cs before merging.
     -->
     <Compile Remove="Migrations\*.Designer.cs" />
+    <!-- The model snapshot is needed by EF tooling, not by runtime migration
+         discovery. Excluding it keeps normal Debug builds on the intended
+         lightweight path; Release/full verification still compiles it. -->
+    <Compile Remove="Migrations\ApplicationDbContextModelSnapshot.cs" />
     <Compile Include="Migrations\FastBuildMigrationMetadata.cs" />
-    <Compile Include="Migrations\20260725111657_AddProcurementSupplierOnboardingTokens.Designer.cs" />
-    <Compile Include="Migrations\20260726101435_AddProcurementSupplierDueDiligence.Designer.cs" />
-    <Compile Include="Migrations\20260726174311_AddProcurementSupplierAvlLifecycle.Designer.cs" />
-    <Compile Include="Migrations\20260726224147_AddProcurementSupplierRiskAndConcentration.Designer.cs" />
-    <Compile Include="Migrations\20260727005601_AddProcurementSupplierPerformanceScorecards.Designer.cs" />
-    <Compile Include="Migrations\20260727101510_AddProcurementSupplierMasterChangeRollout.Designer.cs" />
-    <Compile Include="Migrations\20260727113854_AddProcurementSupplierApplicantAccess.Designer.cs" />
-    <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
-    <Compile Include="Migrations\20260730032601_TDC0406PurchaseOrderAmendments.Designer.cs" />
-    <Compile Include="Migrations\20260730132714_TDC0407ContractActivationGate.Designer.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(Tdc0402FocusedEfBuild)' == 'true'">
@@ -90,6 +84,18 @@
     <Compile Remove="Migrations\*.Designer.cs" />
     <Compile Include="Migrations\20260729084856_TDC0401FrameworkAgreements.Designer.cs" />
     <Compile Include="Migrations\20260729124416_TDC0402FrameworkCallOffs.Designer.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TdcFocusedEfToolingBuild)' == 'true'">
+    <!--
+      EF migration tooling needs the current model snapshot, but it does not
+      need to parse hundreds of megabytes of historical target models. The
+      lightweight attributes retain migration discovery while the snapshot
+      remains compiled for accurate model differencing. Set the property as an
+      environment variable when running dotnet ef.
+    -->
+    <Compile Remove="Migrations\*.Designer.cs" />
+    <Compile Include="Migrations\FastBuildMigrationMetadata.cs" />
   </ItemGroup>
 
   <Target Name="RejectEfToolingWithFastMigrationBuild"

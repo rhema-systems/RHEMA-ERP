@@ -45,6 +45,7 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { InvoicePaymentSodControl } from '@/components/finance/InvoicePaymentSodControl';
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
@@ -105,6 +106,21 @@ export default function VendorPaymentDetailsPage() {
         enabled: Boolean(payment?.journalEntryId),
     });
 
+    // Procurement owns the maker/checker rule, while Finance owns the payment workflow and
+    // evidence policy. Display both control results so the operator sees every blocking reason
+    // before attempting submission; the API still revalidates both controls atomically.
+    const {
+        data: sodReadiness,
+        isLoading: isSodLoading,
+        error: sodError,
+        refetch: refetchSod,
+    } = useQuery({
+        queryKey: ['vendor-payment-sod-readiness', id],
+        queryFn: () => accountsPayableService.getPaymentSodReadiness(id),
+        enabled: Boolean(id),
+        retry: false,
+    });
+
     const handlePost = async () => {
         if (!payment) return;
 
@@ -140,7 +156,7 @@ export default function VendorPaymentDetailsPage() {
                 description: 'The applicable evidence and approval policy has been snapshotted for review.',
             });
             setSubmitDialogOpen(false);
-            await Promise.all([refetch(), refetchControl()]);
+            await Promise.all([refetch(), refetchControl(), refetchSod()]);
         } catch (error: any) {
             toast({
                 title: 'Submission failed',
@@ -303,7 +319,7 @@ export default function VendorPaymentDetailsPage() {
                             <ShieldCheck className="mr-2 h-4 w-4" /> Submit for Approval
                         </Button>
                     )}
-                    {!payment.journalEntryId && ['Authorized', 'Processed'].includes(payment.status) && (
+                    {!payment.journalEntryId && ['Authorized', 'Processed'].includes(payment.status) && canSubmitPayment && (
                         <Button size="sm" onClick={handlePost} disabled={isPosting}>
                             {isPosting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Post Payment
@@ -329,6 +345,12 @@ export default function VendorPaymentDetailsPage() {
                     )}
                 </div>
             </div>
+
+            <InvoicePaymentSodControl
+                readiness={sodReadiness}
+                isLoading={isSodLoading}
+                error={sodError instanceof Error ? sodError.message : sodError ? 'Unable to load the AP-004 control.' : null}
+            />
 
             <Card className="print:shadow-none print:border-none">
                 <CardHeader className="flex flex-row justify-between items-start border-b pb-8">
