@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -303,14 +304,14 @@ export default function SupplierAvlPage() {
       )}
 
       <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {[
+        {([
           ['Registers', summary.data?.totalRegisters ?? 0, ListTree],
           ['Draft', summary.data?.draftCount ?? 0, CalendarClock],
           ['Pending', summary.data?.pendingApprovalCount ?? 0, CalendarClock],
           ['Published', summary.data?.publishedCount ?? 0, CheckCircle2],
           ['Active suppliers', summary.data?.currentEntryCount ?? 0, CheckCircle2],
           ['Suspended', summary.data?.suspendedEntryCount ?? 0, PauseCircle],
-        ].map(([label, value, Icon]) => (
+        ] satisfies Array<[string, number, LucideIcon]>).map(([label, value, Icon]) => (
           <Card key={String(label)}>
             <CardContent className="flex items-center justify-between p-4">
               <div>

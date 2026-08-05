@@ -263,6 +263,7 @@ public sealed class CashBankWorkflowApprovalHardeningTests
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("TRF-202607-0001");
+        var accessScope = CreateUnrestrictedFinanceAccessScope();
 
         return new CashTransactionService(
             db,
@@ -270,9 +271,21 @@ public sealed class CashBankWorkflowApprovalHardeningTests
             tenantSettings.Object,
             documentNumbering.Object,
             currentUser.Object,
+            accessScope.Object,
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService,
             workflowIntegrationService);
+    }
+
+    private static Mock<IFinanceAccessScopeService> CreateUnrestrictedFinanceAccessScope()
+    {
+        var scope = new Mock<IFinanceAccessScopeService>();
+        scope.Setup(x => x.GetPermittedBankAccountIdsAsync(
+                It.IsAny<FinanceAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyCollection<Guid>?)null);
+        return scope;
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId)

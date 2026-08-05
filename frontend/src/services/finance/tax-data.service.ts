@@ -24,7 +24,12 @@ import type {
     WhtCertificate,
     WhtCertificateQuery,
     GenerateWhtCertificateDto,
-    FinancePagedResult
+    FinancePagedResult,
+    TaxConfigurationVersion,
+    WhtCalculationRequest,
+    WhtCalculationResult,
+    WhtRemittance,
+    WhtRemittanceLiability
 } from '@/types/tax';
 import { apiService } from '@/services/api.service';
 
@@ -96,6 +101,10 @@ class TaxDataService {
 
     async getTaxById(id: string): Promise<Tax> {
         return apiService.get<Tax>(`/finance/tax/taxes/${id}`);
+    }
+
+    async getTaxConfigurationVersions(id: string): Promise<TaxConfigurationVersion[]> {
+        return apiService.get<TaxConfigurationVersion[]>(`/finance/tax/taxes/${id}/versions`);
     }
 
     async createTax(dto: CreateTaxDto): Promise<Tax> {
@@ -353,8 +362,74 @@ class TaxDataService {
             request);
     }
 
-    async getWhtCertificatePrintHtml(vendorPaymentId: string): Promise<string> {
-        return apiService.get<string>(`/finance/tax/wht-certificates/${vendorPaymentId}/print`);
+    async reissueWhtCertificate(vendorPaymentId: string, reason: string): Promise<WhtCertificate> {
+        return apiService.post<WhtCertificate>(
+            `/finance/tax/wht-certificates/${vendorPaymentId}/reissue`,
+            { reason });
+    }
+
+    async cancelWhtCertificate(vendorPaymentId: string, reason: string): Promise<WhtCertificate> {
+        return apiService.post<WhtCertificate>(
+            `/finance/tax/wht-certificates/${vendorPaymentId}/cancel`,
+            { reason });
+    }
+
+    async calculateApWithholding(request: WhtCalculationRequest): Promise<WhtCalculationResult> {
+        return apiService.post<WhtCalculationResult>('/finance/tax/wht-certificates/calculate', request);
+    }
+
+    async getWhtCertificatePrintHtml(vendorPaymentId: string, certificateId?: string): Promise<string> {
+        return apiService.get<string>(`/finance/tax/wht-certificates/${vendorPaymentId}/print`, {
+            certificateId,
+        });
+    }
+
+    async getUnremittedWhtLiabilities(fromDate?: string, toDate?: string, currencyCode = 'GHS'): Promise<WhtRemittanceLiability[]> {
+        return apiService.get<WhtRemittanceLiability[]>('/finance/tax/wht-certificates/remittances/liabilities', {
+            fromDate,
+            toDate,
+            currencyCode,
+        });
+    }
+
+    async getWhtRemittances(query: Record<string, unknown> = {}): Promise<FinancePagedResult<WhtRemittance>> {
+        return apiService.get<FinancePagedResult<WhtRemittance>>('/finance/tax/wht-certificates/remittances', query);
+    }
+
+    async createWhtRemittance(request: {
+        periodFrom: string;
+        periodTo: string;
+        dueDate?: string;
+        currencyCode: string;
+        vendorPaymentIds: string[];
+        notes?: string;
+    }): Promise<WhtRemittance> {
+        return apiService.post<WhtRemittance>('/finance/tax/wht-certificates/remittances', request);
+    }
+
+    async submitWhtRemittance(id: string, submissionReference: string): Promise<WhtRemittance> {
+        return apiService.post<WhtRemittance>(`/finance/tax/wht-certificates/remittances/${id}/submit`, {
+            submissionReference,
+        });
+    }
+
+    async markWhtRemittancePaid(id: string, request: {
+        paymentDate: string;
+        paymentReference: string;
+        authorityReceiptReference?: string;
+    }): Promise<WhtRemittance> {
+        return apiService.post<WhtRemittance>(`/finance/tax/wht-certificates/remittances/${id}/paid`, request);
+    }
+
+    async cancelWhtRemittance(id: string, reason: string): Promise<WhtRemittance> {
+        return apiService.post<WhtRemittance>(`/finance/tax/wht-certificates/remittances/${id}/cancel`, { reason });
+    }
+
+    async downloadWhtRegister(fromDate?: string, toDate?: string): Promise<Blob> {
+        const query = new URLSearchParams();
+        if (fromDate) query.set('fromDate', fromDate);
+        if (toDate) query.set('toDate', toDate);
+        return apiService.downloadBlob(`/finance/tax/wht-certificates/register/export${query.size ? `?${query}` : ''}`);
     }
 
     // ===== TAX RULES =====

@@ -1,10 +1,13 @@
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Documents;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Api.Services.Finance;
@@ -28,9 +31,12 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly ITenantSettingsService _tenantSettingsService;
         private readonly ILogger<PaymentService> _logger;
         private readonly IDocumentNumberingService _documentNumberingService;
+        private readonly IFinanceAccessScopeService _financeAccessScopeService;
+        private readonly IFinanceReversalPolicyService _financeReversalPolicyService;
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IFxAccountingService? _fxAccountingService;
+        private readonly IFinanceControlledDocumentIssueService? _controlledDocumentIssueService;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
@@ -38,43 +44,211 @@ namespace ErpSystem.Api.Services.Finance.AR
             ITenantSettingsService tenantSettingsService,
             ILogger<PaymentService> logger,
             IDocumentNumberingService documentNumberingService,
+            IFinanceAccessScopeService financeAccessScopeService,
+            IFinanceReversalPolicyService financeReversalPolicyService,
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
-            IFxAccountingService? fxAccountingService = null)
+            IFxAccountingService? fxAccountingService = null,
+            IFinanceControlledDocumentIssueService? controlledDocumentIssueService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _tenantSettingsService = tenantSettingsService;
             _logger = logger;
             _documentNumberingService = documentNumberingService;
+            _financeAccessScopeService = financeAccessScopeService;
+            _financeReversalPolicyService = financeReversalPolicyService;
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
             _fxAccountingService = fxAccountingService;
+            _controlledDocumentIssueService = controlledDocumentIssueService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
         private string UserName => _currentUser.UserName ?? "system";
+        private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
         public async Task<CustomerPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            var payment = await _unitOfWork.Repository<CustomerPayment>()
-                .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
+            var permittedBankAccountIds = await _financeAccessScopeService
+                .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
+            var query = _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == id);
+            if (permittedBankAccountIds != null)
+            {
+                // Non-bank receipts live in controlled liquidity accounts rather than a bank.
+                // Until liquidity accounts become an assignable scope dimension, only a tenant-wide
+                // grant may expose them; this deliberately fails closed for bank-restricted users.
+                query = query.Where(payment =>
+                    payment.BankAccountId.HasValue &&
+                    permittedBankAccountIds.Contains(payment.BankAccountId.Value));
+            }
+
+            var payment = await query
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
                 .Include(p => p.ConfiguredPaymentMethod)
+                .Include(p => p.BankAccount)
+                .Include(p => p.LiquidityAccount)
                 .FirstOrDefaultAsync(cancellationToken);
 
             var customer = payment == null
                 ? null
                 : await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
 
-            return payment == null ? null : MapToDto(payment, customer);
+            if (payment == null)
+                return null;
+
+            var result = MapToDto(payment, customer);
+            if (_controlledDocumentIssueService != null && !payment.IsCreditNote)
+            {
+                // Receipt issue state is read from the common append-only output register. The
+                // source AR payment remains free of duplicate print counters or copy-status fields.
+                result.ReceiptIssuance = await _controlledDocumentIssueService.GetSummaryAsync(
+                    DocumentTypes.FinanceArCustomerReceipt,
+                    payment.Id,
+                    cancellationToken);
+            }
+
+            return result;
+        }
+
+        public async Task<CustomerPaymentTraceDto?> GetTraceAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var payment = await _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                .Include(item => item.Allocations)
+                    .ThenInclude(item => item.Invoice)
+                .Include(item => item.BankAccount)
+                .Include(item => item.LiquidityAccount)
+                .Include(item => item.ConfiguredPaymentMethod)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (payment == null)
+                return null;
+
+            // Trace visibility follows the same Finance data scope as the source receipt. Passing
+            // null for a liquidity-held receipt intentionally requires tenant-wide scope because
+            // liquidity-account grants are not yet an assignable Finance dimension.
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                payment.BankAccountId,
+                FinanceAccessLevel.Read,
+                cancellationToken);
+
+            var customer = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken);
+            var allocationIds = payment.Allocations.Select(item => item.Id).ToList();
+            var postingEvents = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    !item.IsDeleted &&
+                    ((item.SourceDocumentType == "CustomerPayment" && item.SourceDocumentId == payment.Id) ||
+                     (allocationIds.Contains(item.SourceDocumentId) &&
+                      (item.SourceDocumentType == "PaymentAllocation" ||
+                       item.SourceDocumentType == "CustomerPaymentAdvanceApplication"))))
+                .Include(item => item.JournalEntry)
+                    .ThenInclude(item => item!.Transactions)
+                        .ThenInclude(item => item.Account)
+                .OrderBy(item => item.PostingDate)
+                .ThenBy(item => item.RequestedAt)
+                .ToListAsync(cancellationToken);
+
+            var cashTransactions = await _unitOfWork.Repository<CashTransaction>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    !item.IsDeleted &&
+                    ((item.TransactionType == CashTransactionType.Receipt &&
+                      item.ReferenceNumber == payment.PaymentNumber) ||
+                     (payment.ReversalCashTransactionId.HasValue &&
+                      item.Id == payment.ReversalCashTransactionId.Value)))
+                .AsNoTracking()
+                .OrderBy(item => item.TransactionDate)
+                .ToListAsync(cancellationToken);
+            var liquidityEntries = await _unitOfWork.Repository<LiquidityAccountEntry>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    !item.IsDeleted &&
+                    ((item.SourceDocumentType == nameof(CustomerPayment) &&
+                      item.SourceDocumentId == payment.Id) ||
+                     (payment.ReversalLiquidityAccountEntryId.HasValue &&
+                      item.Id == payment.ReversalLiquidityAccountEntryId.Value)))
+                .AsNoTracking()
+                .OrderBy(item => item.EntryDate)
+                .ToListAsync(cancellationToken);
+            var auditEvents = await _unitOfWork.Repository<AuditLog>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Resource == "Finance.ARReceipt" &&
+                    item.ResourceId == payment.Id.ToString())
+                .AsNoTracking()
+                .OrderBy(item => item.Timestamp)
+                .ToListAsync(cancellationToken);
+
+            var trace = new CustomerPaymentTraceDto
+            {
+                Payment = MapToDto(payment, customer),
+                Postings = postingEvents.Select(MapPostingTrace).ToList(),
+                OperationalEntries = cashTransactions.Select(item => new FinanceOperationalTraceDto
+                {
+                    RecordType = nameof(CashTransaction),
+                    RecordId = item.Id,
+                    Reference = item.TransactionNumber,
+                    Status = item.ApprovalStatus.ToString(),
+                    RecordDate = item.TransactionDate,
+                    Amount = item.Amount,
+                    CurrencyCode = item.Currency,
+                    IsReconciled = item.IsReconciled
+                }).Concat(liquidityEntries.Select(item => new FinanceOperationalTraceDto
+                {
+                    RecordType = nameof(LiquidityAccountEntry),
+                    RecordId = item.Id,
+                    OriginalRecordId = item.ReversalOfEntryId,
+                    Reference = item.EntryNumber,
+                    Status = item.IsReversed ? "Reversed" : item.Direction.ToString(),
+                    RecordDate = item.EntryDate,
+                    Amount = item.Amount,
+                    CurrencyCode = item.Currency,
+                    IsReconciled = item.AllocatedAmount > 0m
+                })).ToList(),
+                AuditEvents = auditEvents.Select(item => new FinanceAuditTraceDto
+                {
+                    AuditLogId = item.Id,
+                    EventType = item.Action,
+                    Timestamp = item.Timestamp,
+                    UserId = item.UserId,
+                    Username = item.Username,
+                    BeforeValuesJson = item.OldValues,
+                    DetailsJson = item.NewValues
+                }).ToList()
+            };
+
+            await RecordArReceiptAuditAsync(
+                FinanceAuditEvents.ArReceiptTraceViewed,
+                payment,
+                afterValues: new
+                {
+                    PostingCount = trace.Postings.Count,
+                    OperationalEntryCount = trace.OperationalEntries.Count,
+                    AuditEventCount = trace.AuditEvents.Count
+                },
+                comment: "AR receipt source-to-ledger trace viewed.",
+                cancellationToken: cancellationToken);
+
+            return trace;
         }
 
         public async Task<CustomerPaymentDto?> GetByPaymentNumberAsync(string paymentNumber, CancellationToken cancellationToken = default)
         {
-            var payment = await _unitOfWork.Repository<CustomerPayment>()
-                .GetQueryable(p => p.TenantId == TenantId && p.PaymentNumber == paymentNumber)
+            var permittedBankAccountIds = await _financeAccessScopeService
+                .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
+            var query = _unitOfWork.Repository<CustomerPayment>()
+                .GetQueryable(p => p.TenantId == TenantId && p.PaymentNumber == paymentNumber);
+            if (permittedBankAccountIds != null)
+            {
+                query = query.Where(payment =>
+                    payment.BankAccountId.HasValue &&
+                    permittedBankAccountIds.Contains(payment.BankAccountId.Value));
+            }
+
+            var payment = await query
                 .Include(p => p.Allocations)
                 .Include(p => p.ConfiguredPaymentMethod)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -90,6 +264,15 @@ namespace ErpSystem.Api.Services.Finance.AR
         {
             var queryable = _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId);
+
+            var permittedBankAccountIds = await _financeAccessScopeService
+                .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
+            if (permittedBankAccountIds != null)
+            {
+                queryable = queryable.Where(payment =>
+                    payment.BankAccountId.HasValue &&
+                    permittedBankAccountIds.Contains(payment.BankAccountId.Value));
+            }
 
             // Apply filters
             if (!string.IsNullOrWhiteSpace(query.SearchTerm))
@@ -140,6 +323,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .Skip((query.PageNumber - 1) * query.PageSize)
                 .Take(query.PageSize)
                 .Include(p => p.ConfiguredPaymentMethod)
+                .Include(p => p.BankAccount)
+                .Include(p => p.LiquidityAccount)
                 .ToListAsync(cancellationToken);
             var customerIds = payments.Select(p => p.CustomerId).Distinct().ToList();
             var customerMap = customerIds.Count == 0
@@ -163,6 +348,15 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<CustomerPaymentDto> CreateAsync(PaymentCreateDto dto, CancellationToken cancellationToken = default)
         {
+            if (dto.IsCreditNote)
+            {
+                // FIN-LIM-0013: CustomerPayment.IsCreditNote is retained only so historical rows
+                // remain readable. New customer credits must use the primary Sales CreditNote
+                // workflow, which owns approval, posting, application, and immutable correction.
+                throw new InvalidOperationException(
+                    "The legacy AR payment credit-note path is retired. Create the credit through the Sales credit-note workflow.");
+            }
+
             CustomerPayment? payment = null;
             BusinessPartner? customer = null;
             var transactionStarted = false;
@@ -195,6 +389,49 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var paymentMethod = configuredPaymentMethod == null
                     ? dto.PaymentMethod
                     : MapConfiguredPaymentMethodToCustomerPaymentMethod(configuredPaymentMethod.Type);
+                var receiptDestination = dto.IsCreditNote
+                    ? new ReceiptDestination(null, null)
+                    : await ResolveReceiptDestinationAsync(
+                        configuredPaymentMethod?.Type,
+                        paymentMethod,
+                        dto.BankAccountId,
+                        dto.LiquidityAccountId,
+                        paymentCurrencyCode,
+                        cancellationToken);
+                await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                    receiptDestination.BankAccountId,
+                    FinanceAccessLevel.Operate,
+                    cancellationToken);
+
+                if (dto.WithholdingTaxAmount < 0m || dto.VatWithholdingAmount < 0m)
+                {
+                    throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
+                }
+                if ((dto.WithholdingTaxAmount > 0m || dto.VatWithholdingAmount > 0m)
+                    && string.IsNullOrWhiteSpace(dto.WithholdingCertificateNumber))
+                {
+                    throw new InvalidOperationException("Customer withholding certificate/reference number is required when WHT or VAT withholding is recorded.");
+                }
+
+                // Resolve the account exclusively from the selected, effective-dated sales tax.
+                // This prevents a browser from redirecting statutory receivables to an unrelated
+                // same-tenant account while retaining the existing posting engine as authority.
+                Guid? withholdingReceivableAccountId = dto.WithholdingTaxAmount > 0m
+                    ? await ResolveConfiguredWithholdingReceivableAccountAsync(
+                        dto.PaymentDate,
+                        dto.WithholdingTaxId ?? throw new InvalidOperationException("Configured WHT receivable tax is required."),
+                        TaxCategory.Withholding,
+                        cancellationToken)
+                        ?? throw new InvalidOperationException("The selected WHT tax has no effective receivable account configured.")
+                    : null;
+                Guid? vatWithholdingReceivableAccountId = dto.VatWithholdingAmount > 0m
+                    ? await ResolveConfiguredWithholdingReceivableAccountAsync(
+                        dto.PaymentDate,
+                        dto.VatWithholdingTaxId ?? throw new InvalidOperationException("Configured VAT withholding receivable tax is required."),
+                        TaxCategory.VatWithholding,
+                        cancellationToken)
+                        ?? throw new InvalidOperationException("The selected VAT withholding tax has no effective receivable account configured.")
+                    : null;
 
                 var now = DateTime.UtcNow;
                 payment = new CustomerPayment
@@ -210,14 +447,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                     PaymentMethodId = configuredPaymentMethod?.Id,
                     CurrencyCode = paymentCurrencyCode,
                     ExchangeRate = dto.ExchangeRate,
-                    BankAccountId = dto.BankAccountId,
+                    BankAccountId = receiptDestination.BankAccountId,
+                    LiquidityAccountId = receiptDestination.LiquidityAccountId,
                     CheckNumber = dto.CheckNumber,
+                    ChequeDrawerBank = dto.ChequeDrawerBank,
                     TransactionReference = dto.TransactionReference,
-                    WithholdingTaxId = dto.WithholdingTaxId,
-                    WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+                    WithholdingTaxId = dto.WithholdingTaxAmount > 0m ? dto.WithholdingTaxId : null,
+                    WithholdingTaxAccountId = withholdingReceivableAccountId,
                     WithholdingTaxAmount = dto.WithholdingTaxAmount,
-                    VatWithholdingTaxId = dto.VatWithholdingTaxId,
-                    VatWithholdingAccountId = dto.VatWithholdingAccountId,
+                    VatWithholdingTaxId = dto.VatWithholdingAmount > 0m ? dto.VatWithholdingTaxId : null,
+                    VatWithholdingAccountId = vatWithholdingReceivableAccountId,
                     VatWithholdingAmount = dto.VatWithholdingAmount,
                     WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
                     WithholdingCertificateDate = dto.WithholdingCertificateDate,
@@ -294,6 +533,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{dto.Id}' not found.");
 
+            EnsureCompatibilityCreditNoteIsReadOnly(payment);
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                payment.BankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
             if (payment.JournalEntryId.HasValue)
                 throw new InvalidOperationException("Posted customer payments cannot be updated. Use a reversal, void, or adjustment workflow.");
 
@@ -313,20 +559,64 @@ namespace ErpSystem.Api.Services.Finance.AR
             var paymentMethod = configuredPaymentMethod == null
                 ? dto.PaymentMethod
                 : MapConfiguredPaymentMethodToCustomerPaymentMethod(configuredPaymentMethod.Type);
+            var receiptDestination = await ResolveReceiptDestinationAsync(
+                configuredPaymentMethod?.Type,
+                paymentMethod,
+                dto.BankAccountId,
+                dto.LiquidityAccountId,
+                payment.CurrencyCode,
+                cancellationToken);
+            // Re-check the resolved destination because an update may move a pending receipt to a
+            // different bank account than the one against which the command was initially loaded.
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                receiptDestination.BankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
+            if (dto.WithholdingTaxAmount < 0m || dto.VatWithholdingAmount < 0m)
+            {
+                throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
+            }
+            if ((dto.WithholdingTaxAmount > 0m || dto.VatWithholdingAmount > 0m)
+                && string.IsNullOrWhiteSpace(dto.WithholdingCertificateNumber))
+            {
+                throw new InvalidOperationException("Customer withholding certificate/reference number is required when WHT or VAT withholding is recorded.");
+            }
+
+            // Pending-receipt edits have the same configuration boundary as creation. Never let
+            // an update reintroduce client-selected GL accounts after the create path was hardened.
+            Guid? withholdingReceivableAccountId = dto.WithholdingTaxAmount > 0m
+                ? await ResolveConfiguredWithholdingReceivableAccountAsync(
+                    dto.PaymentDate,
+                    dto.WithholdingTaxId ?? throw new InvalidOperationException("Configured WHT receivable tax is required."),
+                    TaxCategory.Withholding,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException("The selected WHT tax has no effective receivable account configured.")
+                : null;
+            Guid? vatWithholdingReceivableAccountId = dto.VatWithholdingAmount > 0m
+                ? await ResolveConfiguredWithholdingReceivableAccountAsync(
+                    dto.PaymentDate,
+                    dto.VatWithholdingTaxId ?? throw new InvalidOperationException("Configured VAT withholding receivable tax is required."),
+                    TaxCategory.VatWithholding,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException("The selected VAT withholding tax has no effective receivable account configured.")
+                : null;
 
             var now = DateTime.UtcNow;
             payment.PaymentDate = dto.PaymentDate;
             payment.TotalAmount = dto.TotalAmount;
             payment.PaymentMethod = paymentMethod;
             payment.PaymentMethodId = configuredPaymentMethod?.Id;
-            payment.BankAccountId = dto.BankAccountId;
+            payment.BankAccountId = receiptDestination.BankAccountId;
+            payment.LiquidityAccountId = receiptDestination.LiquidityAccountId;
             payment.CheckNumber = dto.CheckNumber;
+            payment.ChequeDrawerBank = dto.ChequeDrawerBank;
             payment.TransactionReference = dto.TransactionReference;
-            payment.WithholdingTaxId = dto.WithholdingTaxId;
-            payment.WithholdingTaxAccountId = dto.WithholdingTaxAccountId;
+            payment.WithholdingTaxId = dto.WithholdingTaxAmount > 0m ? dto.WithholdingTaxId : null;
+            payment.WithholdingTaxAccountId = withholdingReceivableAccountId;
             payment.WithholdingTaxAmount = dto.WithholdingTaxAmount;
-            payment.VatWithholdingTaxId = dto.VatWithholdingTaxId;
-            payment.VatWithholdingAccountId = dto.VatWithholdingAccountId;
+            payment.VatWithholdingTaxId = dto.VatWithholdingAmount > 0m ? dto.VatWithholdingTaxId : null;
+            payment.VatWithholdingAccountId = vatWithholdingReceivableAccountId;
             payment.VatWithholdingAmount = dto.VatWithholdingAmount;
             payment.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
             payment.WithholdingCertificateDate = dto.WithholdingCertificateDate;
@@ -358,6 +648,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 transactionStarted = true;
 
                 payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+                EnsureCompatibilityCreditNoteIsReadOnly(payment);
+                await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                    payment.BankAccountId,
+                    FinanceAccessLevel.Operate,
+                    cancellationToken);
                 var postingOutcome = await PostArReceiptCoreAsync(payment, cancellationToken);
                 await FinalizeArReceiptPostingAsync(postingOutcome, cancellationToken);
 
@@ -389,6 +684,425 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
 
                 _logger.LogError(ex, "Failed to post AR receipt {PaymentNumber}", payment?.PaymentNumber ?? id.ToString());
+                throw;
+            }
+        }
+
+        public async Task<CustomerPaymentDto> ReversePaymentAsync(
+            Guid id,
+            ReverseCustomerPaymentDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(dto);
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AR receipt reversal.");
+
+            var initialPayment = await LoadPaymentForPostingAsync(id, cancellationToken);
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                initialPayment.BankAccountId,
+                FinanceAccessLevel.Approve,
+                cancellationToken);
+
+            // AP and AR share the same evaluator so reason length, closed-period behaviour, and
+            // date selection remain one tenant policy instead of diverging by subledger.
+            var policyDecision = await _financeReversalPolicyService.ResolveAsync(
+                initialPayment.PaymentDate,
+                dto.Reason,
+                dto.ReversalDate,
+                cancellationToken);
+            var reason = policyDecision.Reason;
+            var reversalDate = policyDecision.ReversalDate;
+            var initialStatus = initialPayment.Status;
+            var initialAllocatedAmount = initialPayment.AllocatedAmount;
+            var initialJournalEntryId = initialPayment.JournalEntryId;
+
+            var transactionStarted = false;
+            try
+            {
+                // All compensating records are one accounting command. Serializable isolation
+                // prevents an allocation, bank reconciliation, or deposit from consuming the
+                // receipt while its GL and operational footprints are being reversed.
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                transactionStarted = true;
+
+                var payment = await _unitOfWork.Repository<CustomerPayment>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                    .Include(item => item.BankAccount)
+                    .Include(item => item.LiquidityAccount)
+                    .Include(item => item.LiquidityAccountEntry)
+                    .Include(item => item.ConfiguredPaymentMethod)
+                    .Include(item => item.Allocations)
+                        .ThenInclude(item => item.Invoice)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Payment with Id '{id}' not found.");
+                var customer = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken)
+                    ?? throw new InvalidOperationException("Customer was not found while reversing the AR receipt.");
+
+                // A successful retry returns the original correction. Deterministic posting keys
+                // also protect the GL layer if concurrent requests pass the source-state check.
+                if (string.Equals(payment.Status, "Reversed", StringComparison.OrdinalIgnoreCase) &&
+                    payment.ReversalJournalEntryId.HasValue &&
+                    payment.ReversalPostingEventId.HasValue)
+                {
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    transactionStarted = false;
+                    return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment, customer);
+                }
+
+                if (payment.IsCreditNote)
+                {
+                    throw new InvalidOperationException(
+                        "Customer credit notes use their own correction workflow and cannot be reversed as cash receipts.");
+                }
+                if (!payment.JournalEntryId.HasValue ||
+                    !string.Equals(payment.Status, "Posted", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Only a posted AR customer receipt can be reversed.");
+                }
+
+                var activeAllocations = payment.Allocations
+                    .Where(item => !item.IsReversal && !item.IsDeleted)
+                    .OrderBy(item => item.AllocationDate)
+                    .ThenBy(item => item.Id)
+                    .ToList();
+                if (activeAllocations.Any(item => item.ApplicationPostingEventId.HasValue))
+                {
+                    // Applying a posted customer advance creates a separate advance-to-AR journal.
+                    // Removing the original cash first would leave that reclassification orphaned.
+                    throw new InvalidOperationException(
+                        "This customer advance has posted applications. Reverse those applications before reversing the original receipt.");
+                }
+
+                var originalPosting = await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.SourceDocumentType == "CustomerPayment" &&
+                        item.SourceDocumentId == payment.Id &&
+                        item.PostingAction == "Post" &&
+                        item.PostingStatus == "Posted" &&
+                        !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException("The original AR receipt posting event was not found.");
+
+                CashTransaction? originalCashTransaction = null;
+                LiquidityAccountEntry? originalLiquidityEntry = null;
+                if (payment.BankAccountId.HasValue)
+                {
+                    originalCashTransaction = await _unitOfWork.Repository<CashTransaction>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.BankAccountId == payment.BankAccountId.Value &&
+                            item.TransactionType == CashTransactionType.Receipt &&
+                            item.ReferenceNumber == payment.PaymentNumber &&
+                            item.JournalEntryId == payment.JournalEntryId &&
+                            !item.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("The original bank receipt transaction was not found.");
+                    if (originalCashTransaction.IsReconciled || originalCashTransaction.ReconciliationId.HasValue)
+                    {
+                        throw new InvalidOperationException(
+                            "This receipt is bank-reconciled. Remove it from the reconciliation before reversal.");
+                    }
+                }
+                else if (payment.LiquidityAccountEntryId.HasValue)
+                {
+                    originalLiquidityEntry = await _unitOfWork.Repository<LiquidityAccountEntry>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.Id == payment.LiquidityAccountEntryId.Value &&
+                            !item.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("The original receipt holding-account entry was not found.");
+                    if (originalLiquidityEntry.AllocatedAmount > 0m)
+                    {
+                        throw new InvalidOperationException(
+                            "This receipt has already been included in a bank deposit or settlement. Reverse that banking transaction first.");
+                    }
+                    if (originalLiquidityEntry.IsReversed)
+                    {
+                        throw new InvalidOperationException(
+                            "The receipt holding-account entry has already been reversed by another controlled workflow.");
+                    }
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        "The posted receipt has no bank or liquidity operational footprint to reverse.");
+                }
+
+                var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
+                    originalPosting.Id,
+                    reason,
+                    reversalDate,
+                    cancellationToken);
+                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                {
+                    SourceModule = "AR",
+                    SourceDocumentType = "CustomerPayment",
+                    SourceDocumentId = payment.Id,
+                    SourceDocumentTenantId = payment.TenantId,
+                    PostingAction = "Reverse",
+                    SourceDocumentReference = payment.PaymentNumber,
+                    Description = $"Reverse customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
+                    PostingDate = reversalDate,
+                    JournalType = "AR Receipt Reversal",
+                    BookClassification = "IFRS",
+                    FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
+                    ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
+                    ReversalReason = reason,
+                    ReversalType = "SourceDocument",
+                    IdempotencyKey = $"AR:CustomerPayment:{payment.TenantId:N}:{payment.Id:N}:Reverse",
+                    ReturnExistingOnDuplicate = true,
+                    Lines = reversalPlan.ReversalLines.ToList()
+                }, cancellationToken);
+
+                // Realized FX is a distinct event from the receipt journal. Reverse each event in
+                // this same transaction so no gain/loss survives after its settlement is removed.
+                var realizedSettlements = await _unitOfWork.Repository<FxRealizedSettlement>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.SettlementDocumentType == "CustomerPayment" &&
+                        item.SettlementDocumentId == payment.Id &&
+                        item.Status == "Posted" &&
+                        !item.IsDeleted)
+                    .OrderBy(item => item.SettlementAllocationId)
+                    .ToListAsync(cancellationToken);
+                foreach (var settlement in realizedSettlements)
+                {
+                    if (!settlement.PostingEventId.HasValue || !settlement.JournalEntryId.HasValue)
+                        throw new InvalidOperationException("A realized FX settlement is missing its original posting links.");
+
+                    var fxPlan = await _financePostingEngine.GetReversalPlanAsync(
+                        settlement.PostingEventId.Value,
+                        reason,
+                        reversalDate,
+                        cancellationToken);
+                    var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    {
+                        SourceModule = "FX",
+                        SourceDocumentType = "PaymentAllocation",
+                        SourceDocumentId = settlement.SettlementAllocationId,
+                        SourceDocumentTenantId = payment.TenantId,
+                        PostingAction = "ReverseRealizedFx",
+                        SourceDocumentReference = payment.PaymentNumber,
+                        Description = $"Reverse AR realized FX for {payment.PaymentNumber}",
+                        PostingDate = reversalDate,
+                        JournalType = "Realized FX Reversal",
+                        BookClassification = "IFRS",
+                        FunctionalCurrencyCode = settlement.FunctionalCurrencyCode,
+                        ReversalOfJournalEntryId = fxPlan.OriginalJournalEntryId,
+                        ReversalReason = reason,
+                        ReversalType = "SourceDocument",
+                        IdempotencyKey = $"FX:Realized:AR:{payment.TenantId:N}:{settlement.SettlementAllocationId:N}:Reverse",
+                        ReturnExistingOnDuplicate = true,
+                        Lines = fxPlan.ReversalLines.ToList()
+                    }, cancellationToken);
+
+                    settlement.ReversalJournalEntryId = fxResult.JournalEntryId;
+                    settlement.ReversalPostingEventId = fxResult.PostingEventId;
+                    settlement.ReversedAt = DateTime.UtcNow;
+                    settlement.ReversalReason = reason;
+                    settlement.Status = "Reversed";
+                    settlement.UpdatedAt = DateTime.UtcNow;
+                    settlement.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<FxRealizedSettlement>().UpdateAsync(settlement);
+                }
+
+                var now = DateTime.UtcNow;
+                var restoredCustomerBalance = 0m;
+                foreach (var allocation in activeAllocations)
+                {
+                    var settledAmount = allocation.AllocatedAmount + allocation.DiscountAmount;
+                    restoredCustomerBalance += settledAmount;
+                    allocation.Invoice.PaidAmount = Math.Max(
+                        0m,
+                        RoundMoney(allocation.Invoice.PaidAmount - settledAmount));
+                    allocation.Invoice.Status = await ResolveInvoiceStatusAfterReceiptReversalAsync(
+                        allocation.Invoice,
+                        reversalDate,
+                        cancellationToken);
+                    allocation.Invoice.UpdatedAt = now;
+                    allocation.Invoice.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<Invoice>().UpdateAsync(allocation.Invoice);
+
+                    // Never rewrite or flag the original allocation as if it did not happen. A
+                    // negative linked row gives reports an immutable settlement/correction chain.
+                    await _unitOfWork.Repository<PaymentAllocation>().AddAsync(new PaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = payment.TenantId,
+                        CustomerPaymentId = payment.Id,
+                        InvoiceId = allocation.InvoiceId,
+                        AllocatedAmount = -allocation.AllocatedAmount,
+                        DiscountAmount = -allocation.DiscountAmount,
+                        AllocationDate = reversalDate,
+                        Notes = $"Receipt reversal of allocation {allocation.Id}: {reason}",
+                        IsReversal = true,
+                        OriginalAllocationId = allocation.Id,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    });
+                }
+
+                customer.OutstandingBalance = RoundMoney(
+                    (customer.OutstandingBalance ?? 0m) + restoredCustomerBalance);
+                customer.UpdatedAt = now;
+                customer.UpdatedBy = UserName;
+                await _unitOfWork.Repository<BusinessPartner>().UpdateAsync(customer);
+
+                if (originalCashTransaction != null)
+                {
+                    var bankAccount = payment.BankAccount
+                        ?? throw new InvalidOperationException("The receipt bank account was not loaded for reversal.");
+                    var reversalTransactionNumber = await _documentNumberingService.GenerateAsync(
+                        DocumentNumberingModules.Finance,
+                        FinanceDocumentTypes.CashPayment,
+                        TenantId,
+                        reversalDate,
+                        nameof(CashTransaction),
+                        cancellationToken: cancellationToken);
+                    var reversalCashTransaction = new CashTransaction
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        TransactionNumber = reversalTransactionNumber,
+                        TransactionDate = reversalDate,
+                        TransactionType = CashTransactionType.Payment,
+                        BankAccountId = bankAccount.Id,
+                        Amount = originalCashTransaction.Amount,
+                        Currency = originalCashTransaction.Currency,
+                        ExchangeRate = originalCashTransaction.ExchangeRate,
+                        BaseAmount = originalCashTransaction.BaseAmount,
+                        PaymentMethodId = originalCashTransaction.PaymentMethodId,
+                        ReferenceNumber = $"{payment.PaymentNumber}-REV",
+                        PayeeOrPayer = customer.PartnerName,
+                        Description = $"Reversal of AR customer receipt {payment.PaymentNumber}: {reason}",
+                        GLAccountId = originalCashTransaction.GLAccountId,
+                        IsReconciled = false,
+                        IsPosted = true,
+                        ApprovalStatus = CashTransactionApprovalStatus.Posted,
+                        JournalEntryId = reversalResult.JournalEntryId,
+                        PostedDate = now,
+                        PostedBy = CurrentUserId == Guid.Empty ? null : CurrentUserId,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+                    await _unitOfWork.Repository<CashTransaction>().AddAsync(reversalCashTransaction);
+
+                    // The cash transaction is an operational mirror of the already-posted journal;
+                    // it must reduce the same bank balance increased by receipt finalization.
+                    bankAccount.CurrentBalance -= originalCashTransaction.Amount;
+                    bankAccount.AvailableBalance -= originalCashTransaction.Amount;
+                    bankAccount.UpdatedAt = now;
+                    bankAccount.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<BankAccount>().UpdateAsync(bankAccount);
+                    payment.ReversalCashTransactionId = reversalCashTransaction.Id;
+                }
+                else if (originalLiquidityEntry != null)
+                {
+                    var reversalEntryNumber = await _documentNumberingService.GenerateAsync(
+                        DocumentNumberingModules.Finance,
+                        FinanceDocumentTypes.LiquidityEntry,
+                        TenantId,
+                        reversalDate,
+                        nameof(LiquidityAccountEntry),
+                        cancellationToken: cancellationToken);
+                    var reversalLiquidityEntry = new LiquidityAccountEntry
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        LiquidityAccountId = originalLiquidityEntry.LiquidityAccountId,
+                        EntryNumber = reversalEntryNumber,
+                        EntryDate = reversalDate,
+                        EntryType = LiquidityEntryType.Reversal,
+                        Direction = LiquidityEntryDirection.Decrease,
+                        Amount = originalLiquidityEntry.Amount,
+                        AllocatedAmount = 0m,
+                        Currency = originalLiquidityEntry.Currency,
+                        SourceDocumentType = nameof(CustomerPayment),
+                        SourceDocumentId = payment.Id,
+                        ReferenceNumber = $"{payment.PaymentNumber}-REV",
+                        CounterpartyName = customer.PartnerName,
+                        Description = $"Reversal of AR customer receipt {payment.PaymentNumber}: {reason}",
+                        ReversalOfEntryId = originalLiquidityEntry.Id,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+                    await _unitOfWork.Repository<LiquidityAccountEntry>().AddAsync(reversalLiquidityEntry);
+                    originalLiquidityEntry.IsReversed = true;
+                    originalLiquidityEntry.UpdatedAt = now;
+                    originalLiquidityEntry.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<LiquidityAccountEntry>().UpdateAsync(originalLiquidityEntry);
+                    payment.ReversalLiquidityAccountEntryId = reversalLiquidityEntry.Id;
+                }
+
+                payment.Status = "Reversed";
+                payment.AllocatedAmount = 0m;
+                payment.ReversalJournalEntryId = reversalResult.JournalEntryId;
+                payment.ReversalPostingEventId = reversalResult.PostingEventId;
+                payment.ReversalDate = reversalDate;
+                payment.ReversedAt = now;
+                payment.ReversedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                payment.ReversalReason = reason;
+                payment.UpdatedAt = now;
+                payment.UpdatedBy = UserName;
+                await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await RecordArReceiptAuditAsync(
+                    FinanceAuditEvents.ArReceiptReversed,
+                    payment,
+                    postingEventId: reversalResult.PostingEventId,
+                    journalEntryId: reversalResult.JournalEntryId,
+                    beforeValues: new
+                    {
+                        Status = initialStatus,
+                        JournalEntryId = initialJournalEntryId,
+                        AllocatedAmount = initialAllocatedAmount
+                    },
+                    afterValues: new
+                    {
+                        payment.Status,
+                        payment.ReversalJournalEntryId,
+                        payment.ReversalPostingEventId,
+                        payment.ReversalCashTransactionId,
+                        payment.ReversalLiquidityAccountEntryId,
+                        payment.ReversalDate,
+                        ReversedAllocationCount = activeAllocations.Count,
+                        ReversedRealizedFxCount = realizedSettlements.Count
+                    },
+                    reason: reason,
+                    comment: "Posted AR receipt reversed through linked compensating Finance and operational entries.",
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                _logger.LogWarning(
+                    "Reversed AR receipt {PaymentNumber} with journal {ReversalJournalEntryId}. Reason: {Reason}",
+                    payment.PaymentNumber,
+                    payment.ReversalJournalEntryId,
+                    reason);
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment, customer);
+            }
+            catch (Exception ex)
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    // EF does not automatically restore tracked entity state after a database
+                    // rollback. Detach the failed business graph before the audit service saves
+                    // its failure event, otherwise that save could leak uncommitted corrections.
+                    _unitOfWork.ClearTrackedChanges();
+                }
+
+                await RecordArReceiptAuditAsync(
+                    FinanceAuditEvents.ArReceiptReversalFailed,
+                    initialPayment,
+                    afterValues: new { PaymentId = id, ReversalDate = reversalDate, error = ex.Message },
+                    reason: reason,
+                    comment: "AR receipt reversal failed before the correction could be committed.",
+                    cancellationToken: cancellationToken);
+                _logger.LogError(ex, "Failed to reverse AR receipt {PaymentNumber}", initialPayment.PaymentNumber);
                 throw;
             }
         }
@@ -468,6 +1182,17 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Realized FX is part of settlement accounting, so it participates in the same
             // transaction as the receipt and allocation instead of becoming a later partial commit.
             await PostRealizedFxIfRequiredAsync(payment, cancellationToken);
+
+            var customer = await GetCustomerPartnerAsync(payment.CustomerId, cancellationToken)
+                ?? throw new InvalidOperationException("Customer was not found while finalizing the AR receipt.");
+            if (payment.LiquidityAccountId.HasValue)
+            {
+                await CreateLiquidityEntryForReceiptAsync(payment, customer, cancellationToken);
+            }
+            else
+            {
+                await CreateCashTransactionForReceiptAsync(payment, customer, cancellationToken);
+            }
 
             _logger.LogInformation(
                 "Posted AR receipt {PaymentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
@@ -581,6 +1306,13 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{paymentId}' not found.");
+
+            EnsureCompatibilityCreditNoteIsReadOnly(payment);
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                payment.BankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
 
             if (payment.JournalEntryId.HasValue)
             {
@@ -859,6 +1591,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     throw new InvalidOperationException("Customer advance application exceeds the unallocated advance balance.");
 
                 var now = DateTime.UtcNow;
+                var applicationDate = await ResolveCurrentOpenPostingDateAsync(cancellationToken);
                 var result = new PaymentAllocationResultDto { Success = false };
                 var newlyApplied = 0m;
                 foreach (var requested in requestedAllocations)
@@ -886,7 +1619,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         CustomerPaymentId = payment.Id,
                         InvoiceId = invoice.Id,
                         AllocatedAmount = RoundMoney(requested.AllocatedAmount),
-                        AllocationDate = now,
+                        AllocationDate = applicationDate,
                         Notes = requested.Notes,
                         CreatedAt = now,
                         CreatedBy = UserName
@@ -922,7 +1655,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         PostingAction = "Post",
                         SourceDocumentReference = $"{payment.PaymentNumber}:{invoice.InvoiceNumber}",
                         Description = $"Apply customer advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
-                        PostingDate = now,
+                        PostingDate = applicationDate,
                         JournalType = "AR Customer Advance Application",
                         BookClassification = "IFRS",
                         FunctionalCurrencyCode = functionalCurrency,
@@ -930,8 +1663,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                         ReturnExistingOnDuplicate = true,
                         Lines = new[]
                         {
-                            BuildPostingLine(advanceAccountId, $"Apply customer advance {payment.PaymentNumber}", allocation.AllocatedAmount, 0m, functionalCurrency, functionalCurrency, 1m, now, payment.PaymentNumber, 1, "AR-CustomerAdvance"),
-                            BuildPostingLine(arAccountId, $"Apply customer advance {payment.PaymentNumber}", 0m, allocation.AllocatedAmount, functionalCurrency, functionalCurrency, 1m, now, payment.PaymentNumber, 2, "AR-Control")
+                            BuildPostingLine(advanceAccountId, $"Apply customer advance {payment.PaymentNumber}", allocation.AllocatedAmount, 0m, functionalCurrency, functionalCurrency, 1m, applicationDate, payment.PaymentNumber, 1, "AR-CustomerAdvance"),
+                            BuildPostingLine(arAccountId, $"Apply customer advance {payment.PaymentNumber}", 0m, allocation.AllocatedAmount, functionalCurrency, functionalCurrency, 1m, applicationDate, payment.PaymentNumber, 2, "AR-Control")
                         }
                     }, cancellationToken);
 
@@ -998,6 +1731,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (allocation == null)
                 throw new KeyNotFoundException($"Allocation with Id '{allocationId}' not found.");
 
+            EnsureCompatibilityCreditNoteIsReadOnly(allocation.CustomerPayment);
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                allocation.CustomerPayment.BankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
             if (allocation.IsReversal)
                 throw new InvalidOperationException("This allocation has already been reversed.");
 
@@ -1060,6 +1800,13 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{id}' not found.");
 
+            EnsureCompatibilityCreditNoteIsReadOnly(payment);
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                payment.BankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
             if (payment.JournalEntryId.HasValue)
                 throw new InvalidOperationException("Posted customer payments cannot be cleared by mutation until bank reconciliation integration is migrated to the posting engine.");
 
@@ -1087,8 +1834,18 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{id}' not found.");
 
+            EnsureCompatibilityCreditNoteIsReadOnly(payment);
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                payment.BankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
             if (payment.JournalEntryId.HasValue)
-                throw new InvalidOperationException("Posted customer payments cannot be bounced by mutation until AR receipt reversal posting is implemented.");
+            {
+                throw new InvalidOperationException(
+                    "Posted receipts cannot be bounced by mutation. Use the posted receipt reversal workflow, or the returned-cheque workflow after deposit.");
+            }
 
             var now = DateTime.UtcNow;
 
@@ -1142,6 +1899,16 @@ namespace ErpSystem.Api.Services.Finance.AR
 
         public async Task<List<PaymentAllocationDto>> GetPaymentAllocationsAsync(Guid paymentId, CancellationToken cancellationToken = default)
         {
+            var payment = await _unitOfWork.Repository<CustomerPayment>()
+                .FirstOrDefaultAsync(item => item.TenantId == TenantId && item.Id == paymentId);
+            if (payment == null)
+                throw new KeyNotFoundException($"Payment with Id '{paymentId}' not found.");
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                payment.BankAccountId,
+                FinanceAccessLevel.Read,
+                cancellationToken);
+
             var allocations = await _unitOfWork.Repository<PaymentAllocation>()
                 .GetQueryable(a => a.TenantId == TenantId && a.CustomerPaymentId == paymentId)
                 .Include(a => a.Invoice)
@@ -1158,7 +1925,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 DiscountAmount = a.DiscountAmount,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
-                IsReversal = a.IsReversal
+                IsReversal = a.IsReversal,
+                OriginalAllocationId = a.OriginalAllocationId
             }).ToList();
         }
 
@@ -1212,25 +1980,22 @@ namespace ErpSystem.Api.Services.Finance.AR
             throw new NotImplementedException("Payment receipt printing will be implemented with a PDF library.");
         }
 
-        public async Task<CustomerPaymentDto> CreateCreditNoteAsync(CreditNoteCreateDto dto, CancellationToken cancellationToken = default)
+        public Task<CustomerPaymentDto> CreateCreditNoteAsync(CreditNoteCreateDto dto, CancellationToken cancellationToken = default)
         {
-            var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
+            // Keep the compatibility endpoint long enough to return a clear domain error instead
+            // of silently producing a weaker document. The read DTO still exposes IsCreditNote so
+            // imported/history rows can be inspected without granting them a mutation lifecycle.
+            throw new InvalidOperationException(
+                "The legacy AR payment credit-note endpoint is retired. Use the Sales credit-note workflow.");
+        }
 
-            // Create a negative payment (credit note)
-            var paymentDto = new PaymentCreateDto
+        private static void EnsureCompatibilityCreditNoteIsReadOnly(CustomerPayment payment)
+        {
+            if (payment.IsCreditNote)
             {
-                CustomerId = dto.CustomerId,
-                PaymentDate = dto.CreditNoteDate,
-                TotalAmount = dto.Amount,
-                PaymentMethod = "CreditNote",
-                CurrencyCode = baseCurrencyCode,
-                ExchangeRate = 1.0m,
-                TransactionReference = dto.Reference,
-                Notes = $"Credit Note: {dto.Reason}\n{dto.Notes}",
-                IsCreditNote = true
-            };
-
-            return await CreateAsync(paymentDto, cancellationToken);
+                throw new InvalidOperationException(
+                    "Legacy CustomerPayment credit notes are read-only history. Use the Sales credit-note workflow for new credits or corrections.");
+            }
         }
 
         private async Task<string> GeneratePaymentNumberAsync(bool isCreditNote, CancellationToken cancellationToken)
@@ -1276,11 +2041,53 @@ namespace ErpSystem.Api.Services.Finance.AR
                 .SumAsync(c => c.TotalAmount, cancellationToken));
         }
 
+        private async Task<InvoiceStatus> ResolveInvoiceStatusAfterReceiptReversalAsync(
+            Invoice invoice,
+            DateTime reversalDate,
+            CancellationToken cancellationToken)
+        {
+            // Posted sales credits also settle an invoice but are not represented by PaidAmount.
+            // Recomputing with both sources prevents a receipt reversal from incorrectly reopening
+            // an invoice that remains fully or partially settled by a valid credit note.
+            var postedSalesCredits = await GetPostedSalesCreditAmountForInvoiceAsync(invoice.Id, cancellationToken);
+            var operationalOutstanding = RoundMoney(invoice.TotalAmount - invoice.PaidAmount - postedSalesCredits);
+            if (operationalOutstanding <= 0.01m)
+                return InvoiceStatus.Paid;
+            if (invoice.PaidAmount > 0m || postedSalesCredits > 0m)
+                return InvoiceStatus.PartiallyPaid;
+            return invoice.DueDate.HasValue && invoice.DueDate.Value.Date < reversalDate.Date
+                ? InvoiceStatus.Overdue
+                : InvoiceStatus.Sent;
+        }
+
+        private async Task<DateTime> ResolveCurrentOpenPostingDateAsync(CancellationToken cancellationToken)
+        {
+            // Advance application is a new accounting event, so it belongs in the latest period
+            // Finance has deliberately left open. Clamping the server date to that period also
+            // supports controlled catch-up processing after the calendar month has moved on.
+            var period = await _unitOfWork.Repository<FiscalPeriod>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.IsOpen &&
+                    !item.IsClosed &&
+                    !item.IsLocked &&
+                    !item.IsDeleted)
+                .OrderByDescending(item => item.StartDate)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("No open fiscal period is available for the customer advance application.");
+            var today = DateTime.UtcNow.Date;
+            if (today < period.StartDate.Date)
+                return period.StartDate.Date;
+            return today > period.EndDate.Date ? period.EndDate.Date : today;
+        }
+
         private async Task<CustomerPayment> LoadPaymentForPostingAsync(Guid id, CancellationToken cancellationToken)
         {
             var payment = await _unitOfWork.Repository<CustomerPayment>()
                 .GetQueryable(p => p.TenantId == TenantId && p.Id == id && !p.IsDeleted)
                 .Include(p => p.BankAccount)
+                .Include(p => p.LiquidityAccount)
+                .Include(p => p.ConfiguredPaymentMethod)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.Invoice)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -1432,23 +2239,55 @@ namespace ErpSystem.Api.Services.Finance.AR
                     throw new InvalidOperationException("Customer advance account must be a liability account.");
             }
 
-            var bankAccountId = payment.BankAccountId
-                ?? settings.DefaultBankAccountId
-                ?? throw new InvalidOperationException("Bank account is not configured for AR receipt posting.");
-            var bankAccount = await _unitOfWork.Repository<BankAccount>()
-                .GetQueryable(a => a.TenantId == tenantId && a.Id == bankAccountId && !a.IsDeleted)
-                .FirstOrDefaultAsync(cancellationToken);
+            Guid receiptDebitAccountId;
+            string receiptDebitTag;
+            if (payment.LiquidityAccountId.HasValue)
+            {
+                var liquidityAccount = await _unitOfWork.Repository<LiquidityAccount>()
+                    .GetQueryable(a =>
+                        a.TenantId == tenantId &&
+                        a.Id == payment.LiquidityAccountId.Value &&
+                        a.IsActive &&
+                        !a.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException("The selected receipt holding account was not found or is inactive.");
+                if (!liquidityAccount.Currency.Equals(paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Receipt and holding-account currencies must match.");
+                receiptDebitAccountId = liquidityAccount.GLAccountId;
+                receiptDebitTag = "AR-Liquidity";
+                payment.BankAccountId = null;
+            }
+            else
+            {
+                var bankAccountId = payment.BankAccountId
+                    ?? settings.DefaultBankAccountId
+                    ?? throw new InvalidOperationException("A bank account is required for a direct-bank AR receipt.");
+                var bankAccount = await _unitOfWork.Repository<BankAccount>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.Id == bankAccountId && !a.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken);
 
-            if (bankAccount == null)
-                throw new InvalidOperationException("AR receipt bank account was not found for this tenant.");
+                if (bankAccount == null)
+                    throw new InvalidOperationException("AR receipt bank account was not found for this tenant.");
+                if (!bankAccount.IsActive)
+                    throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is inactive.");
+                if (!bankAccount.GLAccountId.HasValue)
+                    throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is not linked to a GL account.");
+                if (!bankAccount.Currency.Equals(paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Receipt and bank-account currencies must match.");
 
-            if (!bankAccount.IsActive)
-                throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is inactive.");
+                receiptDebitAccountId = bankAccount.GLAccountId.Value;
+                receiptDebitTag = "AR-Bank";
+                payment.BankAccountId = bankAccount.Id;
+                payment.LiquidityAccountId = null;
+            }
 
-            if (!bankAccount.GLAccountId.HasValue)
-                throw new InvalidOperationException($"AR receipt bank account '{bankAccount.AccountName}' is not linked to a GL account.");
-
-            await ResolveReceiptPostingAccountAsync(bankAccount.GLAccountId.Value, "bank/cash account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+            await ResolveReceiptPostingAccountAsync(
+                receiptDebitAccountId,
+                payment.LiquidityAccountId.HasValue ? "liquidity control account" : "bank account",
+                accountCache,
+                allowControlAccount: true,
+                requireDirectPosting: false,
+                cancellationToken);
 
             var discountAllowed = RoundMoney(activeAllocations.Sum(a => a.DiscountAmount));
             var withholdingTaxAmount = RoundMoney(payment.WithholdingTaxAmount);
@@ -1466,7 +2305,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             var lineNumber = 1;
 
             postingLines.Add(BuildPostingLine(
-                bankAccount.GLAccountId.Value,
+                receiptDebitAccountId,
                 $"AR receipt {payment.PaymentNumber}",
                 debitTransactionAmount: payment.TotalAmount,
                 creditTransactionAmount: 0m,
@@ -1476,7 +2315,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 payment.PaymentDate,
                 payment.PaymentNumber,
                 lineNumber++,
-                    "AR-Bank"));
+                    receiptDebitTag));
 
             if (withholdingTaxAmount > 0m)
             {
@@ -1558,7 +2397,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
                 throw new InvalidOperationException("AR receipt posting is not balanced.");
 
-            payment.BankAccountId ??= bankAccount.Id;
             payment.IsCustomerAdvance = isCustomerAdvance;
 
             return new FinancePostingRequestDto
@@ -1985,6 +2823,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             await cashTransactionRepository.AddAsync(new CashTransaction
             {
                 Id = Guid.NewGuid(),
+                TenantId = TenantId,
                 TransactionNumber = transactionNumber,
                 TransactionDate = payment.PaymentDate,
                 TransactionType = CashTransactionType.Receipt,
@@ -2000,6 +2839,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 GLAccountId = arAccountId,
                 IsReconciled = false,
                 IsPosted = true,
+                ApprovalStatus = CashTransactionApprovalStatus.Posted,
+                JournalEntryId = payment.JournalEntryId,
                 PostedDate = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = UserName
@@ -2011,6 +2852,79 @@ namespace ErpSystem.Api.Services.Finance.AR
             bankAccount.UpdatedAt = DateTime.UtcNow;
             bankAccount.UpdatedBy = UserName;
             await bankAccountRepository.UpdateAsync(bankAccount);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        private async Task CreateLiquidityEntryForReceiptAsync(
+            CustomerPayment payment,
+            BusinessPartner customer,
+            CancellationToken cancellationToken)
+        {
+            if (payment.IsCreditNote || !payment.LiquidityAccountId.HasValue)
+            {
+                return;
+            }
+
+            var repository = _unitOfWork.Repository<LiquidityAccountEntry>();
+            var existing = await repository
+                .GetQueryable(entry =>
+                    entry.TenantId == TenantId &&
+                    entry.SourceDocumentType == nameof(CustomerPayment) &&
+                    entry.SourceDocumentId == payment.Id &&
+                    !entry.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existing != null)
+            {
+                payment.LiquidityAccountEntryId ??= existing.Id;
+                return;
+            }
+
+            var liquidityAccount = await _unitOfWork.Repository<LiquidityAccount>()
+                .GetQueryable(account =>
+                    account.TenantId == TenantId &&
+                    account.Id == payment.LiquidityAccountId.Value &&
+                    account.IsActive &&
+                    !account.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("Receipt holding account was not found.");
+            var currency = NormalizeCurrency(payment.CurrencyCode, await _tenantSettingsService.GetBaseCurrencyAsync());
+            if (!liquidityAccount.Currency.Equals(currency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Receipt and holding-account currencies must match.");
+            }
+
+            var entryNumber = await _documentNumberingService.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.LiquidityEntry,
+                TenantId,
+                payment.PaymentDate,
+                nameof(LiquidityAccountEntry),
+                cancellationToken: cancellationToken);
+            var entry = new LiquidityAccountEntry
+            {
+                TenantId = TenantId,
+                LiquidityAccountId = liquidityAccount.Id,
+                EntryNumber = entryNumber,
+                EntryDate = payment.PaymentDate,
+                EntryType = LiquidityEntryType.CustomerReceipt,
+                Direction = LiquidityEntryDirection.Increase,
+                Amount = payment.TotalAmount,
+                AllocatedAmount = 0m,
+                Currency = currency,
+                SourceDocumentType = nameof(CustomerPayment),
+                SourceDocumentId = payment.Id,
+                ReferenceNumber = payment.CheckNumber ?? payment.TransactionReference ?? payment.PaymentNumber,
+                CounterpartyName = customer.PartnerName,
+                Description = $"{payment.PaymentMethod} receipt {payment.PaymentNumber}",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = UserName
+            };
+            await repository.AddAsync(entry);
+            payment.LiquidityAccountEntryId = entry.Id;
+            payment.BankAccountId = null;
+            payment.UpdatedAt = DateTime.UtcNow;
+            payment.UpdatedBy = UserName;
+            await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
@@ -2041,17 +2955,125 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new InvalidOperationException($"The selected {label} payment method is inactive.");
             }
 
-            if (method.RequiresBankAccount && !bankAccountId.HasValue)
-            {
-                throw new InvalidOperationException($"The selected {label} payment method requires a bank account.");
-            }
-
             if (enforceReference && method.RequiresReference && string.IsNullOrWhiteSpace(referenceNumber))
             {
                 throw new InvalidOperationException($"The selected {label} payment method requires a reference number.");
             }
 
             return method;
+        }
+
+        private async Task<ReceiptDestination> ResolveReceiptDestinationAsync(
+            PaymentMethodType? configuredType,
+            string? paymentMethod,
+            Guid? bankAccountId,
+            Guid? liquidityAccountId,
+            string currency,
+            CancellationToken cancellationToken)
+        {
+            var normalizedCurrency = NormalizeCurrency(currency, await _tenantSettingsService.GetBaseCurrencyAsync());
+            var isDirectBank = configuredType is PaymentMethodType.EFT
+                or PaymentMethodType.DirectDebit
+                or PaymentMethodType.StandingOrder
+                or PaymentMethodType.BankTransfer;
+            if (!configuredType.HasValue)
+            {
+                var normalizedMethod = (paymentMethod ?? string.Empty)
+                    .Replace(" ", string.Empty, StringComparison.Ordinal)
+                    .Replace("-", string.Empty, StringComparison.Ordinal)
+                    .ToUpperInvariant();
+                isDirectBank = normalizedMethod is "BANKTRANSFER" or "EFT" or "DIRECTDEBIT" or "STANDINGORDER";
+            }
+
+            if (isDirectBank)
+            {
+                var settings = await GetFinanceSettingsAsync(cancellationToken);
+                var resolvedBankId = bankAccountId ?? settings.DefaultBankAccountId
+                    ?? throw new InvalidOperationException("Select a bank account for a direct bank receipt.");
+                var bank = await _unitOfWork.Repository<BankAccount>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.Id == resolvedBankId &&
+                        item.IsActive &&
+                        !item.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException("The selected bank account was not found or is inactive.");
+                if (!bank.Currency.Equals(normalizedCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Receipt and bank-account currencies must match.");
+                }
+                return new ReceiptDestination(bank.Id, null);
+            }
+
+            var targetType = configuredType switch
+            {
+                PaymentMethodType.Cheque => LiquidityAccountType.ChequesAwaitingDeposit,
+                PaymentMethodType.Card => LiquidityAccountType.CardSettlementClearing,
+                PaymentMethodType.MobileMoney => LiquidityAccountType.MobileMoneyClearing,
+                PaymentMethodType.Cash => LiquidityAccountType.UndepositedCash,
+                _ => InferLiquidityType(paymentMethod)
+            };
+            var liquidityQuery = _unitOfWork.Repository<LiquidityAccount>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Currency == normalizedCurrency &&
+                    item.IsActive &&
+                    !item.IsDeleted);
+            var account = liquidityAccountId.HasValue
+                ? await liquidityQuery.FirstOrDefaultAsync(item => item.Id == liquidityAccountId.Value, cancellationToken)
+                : await liquidityQuery
+                    .OrderByDescending(item => item.AccountType == targetType)
+                    .ThenBy(item => item.Code)
+                    .FirstOrDefaultAsync(item => item.AccountType == targetType, cancellationToken);
+            if (account == null)
+            {
+                throw new InvalidOperationException(
+                    $"No active {targetType} holding account exists for {normalizedCurrency}. Complete Banking & Settlement setup first.");
+            }
+            if (account.AccountType != targetType &&
+                account.AccountType != LiquidityAccountType.OtherSettlementClearing &&
+                // A physical till is a valid explicit destination only for cash. It is never
+                // selected implicitly, which preserves the general undeposited-cash queue for
+                // receipts captured outside a cashier custody session.
+                !(targetType == LiquidityAccountType.UndepositedCash &&
+                  account.AccountType == LiquidityAccountType.CashTill))
+            {
+                throw new InvalidOperationException(
+                    $"The selected holding account is not suitable for {paymentMethod ?? configuredType?.ToString() ?? "this payment method"}.");
+            }
+            if (account.AccountType == LiquidityAccountType.CashTill)
+            {
+                var hasCashierCustody = CurrentUserId != Guid.Empty &&
+                    await _unitOfWork.Repository<CashierTillSession>()
+                        .GetQueryable(session =>
+                            session.TenantId == TenantId &&
+                            session.LiquidityAccountId == account.Id &&
+                            session.CashierUserId == CurrentUserId &&
+                            session.Status == CashierTillSessionStatus.Open &&
+                            !session.IsDeleted)
+                        .AnyAsync(cancellationToken);
+                if (!hasCashierCustody)
+                {
+                    throw new InvalidOperationException(
+                        "Open this cash till under your cashier session before recording a receipt into it.");
+                }
+            }
+            return new ReceiptDestination(null, account.Id);
+        }
+
+        private static LiquidityAccountType InferLiquidityType(string? paymentMethod)
+        {
+            var value = (paymentMethod ?? string.Empty)
+                .Replace(" ", string.Empty, StringComparison.Ordinal)
+                .Replace("-", string.Empty, StringComparison.Ordinal)
+                .ToUpperInvariant();
+            if (value.Contains("CHEQUE", StringComparison.Ordinal) || value.Contains("CHECK", StringComparison.Ordinal))
+                return LiquidityAccountType.ChequesAwaitingDeposit;
+            if (value.Contains("MOBILE", StringComparison.Ordinal) || value.Contains("MOMO", StringComparison.Ordinal))
+                return LiquidityAccountType.MobileMoneyClearing;
+            if (value.Contains("CARD", StringComparison.Ordinal))
+                return LiquidityAccountType.CardSettlementClearing;
+            return LiquidityAccountType.UndepositedCash;
         }
 
         private static string MapConfiguredPaymentMethodToCustomerPaymentMethod(PaymentMethodType type)
@@ -2075,6 +3097,49 @@ namespace ErpSystem.Api.Services.Finance.AR
             FinancePostingResultDto PostingResult,
             bool WasAlreadyLinked);
 
+        private sealed record ReceiptDestination(Guid? BankAccountId, Guid? LiquidityAccountId);
+
+        private static FinancePostingTraceDto MapPostingTrace(FinancePostingEvent postingEvent)
+        {
+            var journal = postingEvent.JournalEntry;
+            return new FinancePostingTraceDto
+            {
+                PostingEventId = postingEvent.Id,
+                PostingAction = postingEvent.PostingAction,
+                PostingStatus = postingEvent.PostingStatus,
+                PostingDate = postingEvent.PostingDate,
+                PostedAt = postingEvent.PostedAt,
+                JournalEntryId = postingEvent.JournalEntryId,
+                JournalEntryNumber = journal?.JournalEntryNumber,
+                OriginalJournalEntryId = journal?.OriginalJournalEntryId,
+                ReversalJournalEntryId = journal?.ReversalJournalEntryId,
+                TotalDebitAmount = postingEvent.TotalDebitAmount,
+                TotalCreditAmount = postingEvent.TotalCreditAmount,
+                FunctionalCurrencyCode = postingEvent.FunctionalCurrencyCode,
+                Lines = journal?.Transactions
+                    .OrderBy(item => item.LineNumber)
+                    .Select(item => new FinanceJournalLineTraceDto
+                    {
+                        TransactionId = item.Id,
+                        LineNumber = item.LineNumber,
+                        AccountId = item.AccountId,
+                        AccountNumber = item.Account?.AccountNumber ?? string.Empty,
+                        AccountName = item.Account?.AccountName ?? string.Empty,
+                        Description = item.Description ?? string.Empty,
+                        DebitAmount = item.DebitAmount,
+                        CreditAmount = item.CreditAmount,
+                        // The posting event is authoritative when an older producer omitted a
+                        // line-level transaction currency.
+                        TransactionCurrency = item.TransactionCurrency ?? postingEvent.FunctionalCurrencyCode,
+                        ForeignCurrencyAmount = item.ForeignCurrencyAmount,
+                        ExchangeRate = item.ExchangeRate,
+                        OriginalTransactionId = item.OriginalTransactionId,
+                        ReversalTransactionId = item.ReversalTransactionId
+                    })
+                    .ToList() ?? new List<FinanceJournalLineTraceDto>()
+            };
+        }
+
         private CustomerPaymentDto MapToDto(CustomerPayment payment, BusinessPartner? customer = null)
         {
             return new CustomerPaymentDto
@@ -2093,7 +3158,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                 CurrencyCode = payment.CurrencyCode,
                 ExchangeRate = payment.ExchangeRate,
                 BankAccountId = payment.BankAccountId,
+                BankAccountName = payment.BankAccount?.AccountName,
+                LiquidityAccountId = payment.LiquidityAccountId,
+                LiquidityAccountName = payment.LiquidityAccount?.Name,
+                LiquidityAccountEntryId = payment.LiquidityAccountEntryId,
                 CheckNumber = payment.CheckNumber,
+                ChequeDrawerBank = payment.ChequeDrawerBank,
                 TransactionReference = payment.TransactionReference,
                 WithholdingTaxId = payment.WithholdingTaxId,
                 WithholdingTaxAccountId = payment.WithholdingTaxAccountId,
@@ -2108,6 +3178,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                 ClearedDate = payment.ClearedDate,
                 IsCreditNote = payment.IsCreditNote,
                 JournalEntryId = payment.JournalEntryId,
+                ReversalJournalEntryId = payment.ReversalJournalEntryId,
+                ReversalPostingEventId = payment.ReversalPostingEventId,
+                ReversalCashTransactionId = payment.ReversalCashTransactionId,
+                ReversalLiquidityAccountEntryId = payment.ReversalLiquidityAccountEntryId,
+                ReversalDate = payment.ReversalDate,
+                ReversedAt = payment.ReversedAt,
+                ReversedById = payment.ReversedById,
+                ReversalReason = payment.ReversalReason,
                 Allocations = payment.Allocations?.Select(a => new PaymentAllocationDto
                 {
                     Id = a.Id,
@@ -2118,7 +3196,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                     DiscountAmount = a.DiscountAmount,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
-                    IsReversal = a.IsReversal
+                    IsReversal = a.IsReversal,
+                    OriginalAllocationId = a.OriginalAllocationId
                 }).ToList() ?? new List<PaymentAllocationDto>(),
                 CreatedAt = payment.CreatedAt
             };

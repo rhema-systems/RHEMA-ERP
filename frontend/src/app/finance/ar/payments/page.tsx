@@ -115,6 +115,7 @@ export default function ReceiptsPage() {
         switch (status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
             case 'Posted': return <Badge className="bg-green-600">Posted</Badge>;
+            case 'Reversed': return <Badge className="bg-amber-600">Reversed</Badge>;
             case 'Void': return <Badge variant="outline" className="text-muted-foreground">Void</Badge>;
             case 'Bounced': return <Badge variant="destructive">Bounced</Badge>;
             default: return <Badge variant="secondary">{status}</Badge>;
@@ -162,6 +163,7 @@ export default function ReceiptsPage() {
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem onClick={() => setStatusFilter('')}>All</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Posted')}>Posted</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => setStatusFilter('Reversed')}>Reversed</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Draft')}>Draft</DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setStatusFilter('Void')}>Void</DropdownMenuItem>
                                 </DropdownMenuContent>
@@ -230,9 +232,9 @@ export default function ReceiptsPage() {
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
                                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                                        {/* <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/${payment.id}`)}>
-                              View Details
-                            </DropdownMenuItem> */}
+                                                        <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/${payment.id}`)}>
+                                                            View Details &amp; Ledger Trace
+                                                        </DropdownMenuItem>
                                                         {payment.unallocatedAmount > 0 && payment.status === 'Posted' && (
                                                             <DropdownMenuItem onClick={() => router.push(`/finance/ar/receipts/new?customerId=${payment.customerId}&paymentId=${payment.id}`)}>
                                                                 <FileText className="mr-2 h-4 w-4" /> Allocate Receipt

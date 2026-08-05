@@ -274,6 +274,7 @@ public sealed class CashBankOperationalBalanceHardeningTests
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(documentNumber);
+        var accessScope = CreateUnrestrictedFinanceAccessScope();
 
         return new CashTransactionService(
             db,
@@ -281,8 +282,20 @@ public sealed class CashBankOperationalBalanceHardeningTests
             tenantSettings.Object,
             documentNumbering.Object,
             currentUser.Object,
+            accessScope.Object,
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
+    }
+
+    private static Mock<IFinanceAccessScopeService> CreateUnrestrictedFinanceAccessScope()
+    {
+        var scope = new Mock<IFinanceAccessScopeService>();
+        scope.Setup(x => x.GetPermittedBankAccountIdsAsync(
+                It.IsAny<FinanceAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyCollection<Guid>?)null);
+        return scope;
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId)

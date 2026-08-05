@@ -186,3 +186,82 @@ public record AllocationLineResultDto(
     decimal AllocationPercent,
     decimal AllocatedAmount
 );
+
+/// <summary>
+/// DTO for creating a controlled allocation run batch.
+/// </summary>
+public record CreateAllocationRunBatchDto(
+    Guid AllocationRuleId,
+    Guid FiscalPeriodId,
+    DateTime AllocationDate,
+    string? Description
+);
+
+/// <summary>
+/// DTO for submitting a controlled allocation run batch to workflow.
+/// </summary>
+public record SubmitAllocationRunBatchDto(
+    string? Comment
+);
+
+/// <summary>
+/// DTO for rejecting a controlled allocation run batch.
+/// </summary>
+public record RejectAllocationRunBatchDto(
+    string Reason
+);
+
+/// <summary>
+/// Controlled allocation run batch with approval and posting state.
+/// </summary>
+public record AllocationRunBatchDto(
+    Guid Id,
+    string BatchNumber,
+    Guid AllocationRuleId,
+    string RuleCode,
+    string RuleName,
+    Guid FiscalPeriodId,
+    string PeriodCode,
+    string PeriodName,
+    DateTime AllocationDate,
+    string? Description,
+    string Status,
+    Guid SourceAccountId,
+    string SourceAccountNumber,
+    string SourceAccountName,
+    decimal SourcePeriodBalance,
+    decimal TotalAllocated,
+    string AllocationType,
+    string BookClassification,
+    string FunctionalCurrencyCode,
+    Guid? WorkflowInstanceId,
+    Guid? JournalEntryId,
+    string? JournalEntryNumber,
+    DateTime? SubmittedAt,
+    string? SubmittedByName,
+    DateTime? ApprovedAt,
+    string? ApprovedByName,
+    DateTime? PostedAt,
+    string? PostedByName,
+    string? RejectionReason,
+    DateTime CreatedAt,
+    List<AllocationRunBatchLineDto> Lines
+);
+
+/// <summary>
+/// Stored allocation line that was reviewed and approved for posting.
+/// </summary>
+public record AllocationRunBatchLineDto(
+    Guid Id,
+    int LineNumber,
+    Guid TargetAccountId,
+    string TargetAccountNumber,
+    string TargetAccountName,
+    Guid? TargetDriverUnitAccountId,
+    string? TargetDriverUnitAccountNumber,
+    string? TargetDriverUnitAccountName,
+    decimal AllocationBasis,
+    decimal AllocationPercent,
+    decimal AllocatedAmount,
+    string? CostCenterCode
+);

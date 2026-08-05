@@ -257,7 +257,7 @@ foreach (var itemDto in receiveDto.Items)
 
 **Implementation Approach:**
 1. Use a PDF library (e.g., QuestPDF, iTextSharp, or PdfSharpCore)
-2. Use EPPlus or ClosedXML for Excel generation
+2. Use ClosedXML for Excel generation
 3. Create report templates
 4. Add report service layer
 5. Implement caching for frequently generated reports

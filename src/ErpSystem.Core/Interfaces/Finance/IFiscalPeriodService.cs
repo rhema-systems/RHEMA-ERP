@@ -68,9 +68,22 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<PeriodCloseResultDto> ClosePeriodAsync(PeriodCloseRequestDto request, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Reopens a closed fiscal period.
+        /// Submits a controlled request to reopen a closed fiscal period. The period remains
+        /// closed until an independent higher-tier reviewer approves the request.
         /// </summary>
-        Task<FiscalPeriodDto> ReopenPeriodAsync(PeriodReopenRequestDto request, CancellationToken cancellationToken = default);
+        Task<FinancePeriodReopenRequestDto> RequestPeriodReopenAsync(
+            PeriodReopenRequestDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Records the independent reopen decision. Approval revalidates the affected-period
+        /// snapshot, reopens the period, supersedes cycle N, and creates cycle N+1 atomically.
+        /// </summary>
+        Task<FinancePeriodReopenRequestDto> ReviewPeriodReopenAsync(
+            Guid periodId,
+            Guid requestId,
+            PeriodReopenReviewDto request,
+            CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Locks a fiscal period (permanent lock).
@@ -86,6 +99,95 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// Validates if a period can be closed.
         /// </summary>
         Task<PeriodCloseValidationDto> ValidatePeriodCloseAsync(Guid periodId, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Evaluates and returns the persisted Finance close workspace for a period.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> EvaluatePeriodCloseWorkspaceAsync(Guid periodId, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Signs the preparer declaration after every mandatory automated check passes.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> PreparePeriodCloseAsync(
+            Guid periodId,
+            PeriodClosePreparationRequestDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Lists every retained close-template version for the tenant. Superseded versions remain
+        /// visible because historical cycles may refer to them.
+        /// </summary>
+        Task<IReadOnlyList<FinanceCloseTemplateDto>> GetFinanceCloseTemplatesAsync(
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Creates a new draft version. An approved version is never edited in place.
+        /// </summary>
+        Task<FinanceCloseTemplateDto> CreateFinanceCloseTemplateVersionAsync(
+            SaveFinanceCloseTemplateVersionDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Updates task design and metadata while a template version remains Draft.
+        /// </summary>
+        Task<FinanceCloseTemplateDto> UpdateFinanceCloseTemplateDraftAsync(
+            Guid templateId,
+            SaveFinanceCloseTemplateVersionDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Approves and activates a draft through maker-checker; the author cannot approve it.
+        /// </summary>
+        Task<FinanceCloseTemplateDto> ApproveFinanceCloseTemplateAsync(
+            Guid templateId,
+            ApproveFinanceCloseTemplateDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Assigns or completes a manual task in the active cycle with retained evidence.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> UpdateFinanceCloseTaskAsync(
+            Guid periodId,
+            Guid taskId,
+            UpdateFinanceCloseTaskDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Links a controlled tenant upload to an active close task as retained evidence.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> LinkFinanceCloseEvidenceAsync(
+            Guid periodId,
+            Guid taskId,
+            LinkFinanceCloseEvidenceDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Removes an unused evidence link while the close cycle remains in progress. The shared
+        /// uploaded object is retained until its normal file-retention operation runs.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> RemoveFinanceCloseEvidenceAsync(
+            Guid periodId,
+            Guid taskId,
+            Guid attachmentId,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Requests controlled acceptance of the exact failed/warning check snapshot.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> RequestFinanceCloseExceptionWaiverAsync(
+            Guid periodId,
+            Guid snapshotId,
+            RequestFinanceCloseWaiverDto request,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Records a second-person waiver decision and re-evaluates approved evidence immediately.
+        /// </summary>
+        Task<FinanceCloseWorkspaceDto> ReviewFinanceCloseExceptionWaiverAsync(
+            Guid periodId,
+            Guid waiverId,
+            ReviewFinanceCloseWaiverDto request,
+            CancellationToken cancellationToken = default);
 
         // Module-Level Locking Operations
         

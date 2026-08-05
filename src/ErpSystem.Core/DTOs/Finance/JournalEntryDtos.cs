@@ -24,6 +24,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? ReversalDate { get; set; }
         public string? ReversalReason { get; set; }
         public string? ReversalType { get; set; }
+        public Guid? JournalBatchId { get; set; }
+        public string? JournalBatchNumber { get; set; }
+        public Guid? JournalBatchItemId { get; set; }
         public DateTime? PostedDate { get; set; }
         public Guid? PostedByUserId { get; set; }
         public string? PostedByUserName { get; set; }

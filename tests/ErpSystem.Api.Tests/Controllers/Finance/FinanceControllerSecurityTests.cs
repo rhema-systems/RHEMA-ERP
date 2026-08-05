@@ -128,21 +128,41 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(JournalEntryController), "PostJournalEntry", FinancePermissions.PostJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ReverseJournalEntry", FinancePermissions.ReverseJournalEntries)]
     [InlineData(typeof(JournalEntryController), "ApproveJournalEntry", FinancePermissions.ApproveJournalEntries)]
+    [InlineData(typeof(JournalBatchController), "CreateBatch", FinancePermissions.CreateJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "ReviewStage", FinancePermissions.ApproveJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "CreatePostingRun", FinancePermissions.PostJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "CreateReversalBatch", FinancePermissions.ReverseJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "PreviewImport", FinancePermissions.ImportJournalBatches)]
+    [InlineData(typeof(JournalBatchController), "ExportBatch", FinancePermissions.ExportJournalBatches)]
     [InlineData(typeof(VendorInvoiceController), "Post", FinancePermissions.PostApInvoices)]
     [InlineData(typeof(InvoiceController), "Send", FinancePermissions.SendArInvoices)]
     [InlineData(typeof(InvoiceController), "Post", FinancePermissions.ApprovePostArInvoices)]
     [InlineData(typeof(VendorPaymentController), "Create", FinancePermissions.ProcessApPayments)]
+    [InlineData(typeof(VendorPaymentController), "ReversePayment", FinancePermissions.ReverseApPayments)]
     [InlineData(typeof(PaymentBatchController), "Approve", FinancePermissions.ApproveApPayments)]
     [InlineData(typeof(PaymentBatchController), "Process", FinancePermissions.ProcessApPayments)]
     [InlineData(typeof(PaymentController), "Create", FinancePermissions.ReceiveCustomerPayments)]
+    [InlineData(typeof(PaymentController), "ReversePayment", FinancePermissions.ReverseArPayments)]
     [InlineData(typeof(CashTransactionController), "Submit", FinancePermissions.WorkflowSubmit)]
     [InlineData(typeof(CashTransactionController), "Approve", FinancePermissions.WorkflowApprove)]
     [InlineData(typeof(CashTransactionController), "Reject", FinancePermissions.WorkflowReject)]
     [InlineData(typeof(CashTransactionController), "Return", FinancePermissions.WorkflowRequestChanges)]
     [InlineData(typeof(CashTransactionController), "Cancel", FinancePermissions.WorkflowCancel)]
     [InlineData(typeof(CashTransactionController), "Post", FinancePermissions.WorkflowPostAfterApproval)]
+    [InlineData(typeof(CashTransactionController), "Reverse", FinancePermissions.ReverseCashBankTransactions)]
     [InlineData(typeof(FinanceApprovalsController), "Approve", FinancePermissions.WorkflowApprove)]
     [InlineData(typeof(FinanceApprovalsController), "Reject", FinancePermissions.WorkflowReject)]
+    [InlineData(typeof(FiscalPeriodController), "RequestPeriodReopen", FinancePermissions.ReopenAccountingPeriods)]
+    [InlineData(typeof(FiscalPeriodController), "ReviewPeriodReopen", FinancePermissions.ApproveAccountingPeriodReopens)]
+    [InlineData(typeof(BudgetController), "GetReturns", FinancePermissions.AssignBudgetReturns)]
+    [InlineData(typeof(BudgetController), "UpdateReturn", FinancePermissions.AssignBudgetReturns)]
+    [InlineData(typeof(BudgetController), "BulkSaveEntries", FinancePermissions.EditBudgetReturns)]
+    [InlineData(typeof(BudgetController), "SubmitReturn", FinancePermissions.SubmitBudgetReturns)]
+    [InlineData(typeof(BudgetController), "OpenScenario", FinancePermissions.MaintainBudgets)]
+    [InlineData(typeof(BudgetController), "SubmitScenario", FinancePermissions.LockBudgets)]
+    [InlineData(typeof(BudgetController), "AdoptScenario", FinancePermissions.LockBudgets)]
+    [InlineData(typeof(BudgetController), "ArchiveScenario", FinancePermissions.LockBudgets)]
+    [InlineData(typeof(BudgetController), "RecallReturn", FinancePermissions.SubmitBudgetReturns)]
     [InlineData(typeof(OpeningBalancesController), "Create", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "List", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "Update", FinancePermissions.PrepareOpeningBalances)]
@@ -156,6 +176,14 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(FinanceReportExportsController), "Print", FinancePermissions.ExportFinanceReports)]
     [InlineData(typeof(WithholdingTaxCertificatesController), "GetApCertificates", FinancePermissions.RunFinanceReports)]
     [InlineData(typeof(WithholdingTaxCertificatesController), "GenerateApCertificate", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "ReissueApCertificate", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "CancelApCertificate", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "CalculateApWithholding", FinancePermissions.ViewFinance)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "CreateRemittance", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "SubmitRemittance", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "MarkRemittancePaid", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "CancelRemittance", FinancePermissions.ManageTaxConfiguration)]
+    [InlineData(typeof(WithholdingTaxCertificatesController), "ExportRegister", FinancePermissions.ExportFinanceReports)]
     [Trait("Batch", "FinanceGoLive-2")]
     [Trait("Category", "FinanceSecurity")]
     public void CriticalFinanceActions_ShouldMapToExpectedPermissions(Type controllerType, string actionName, string expectedPermission)
@@ -203,7 +231,11 @@ public sealed class FinanceControllerSecurityTests
             typeof(BankStatement),
             typeof(BankStatementLine),
             typeof(BankReconciliation),
-            typeof(ReconciliationMatch)
+            typeof(ReconciliationMatch),
+            typeof(JournalBatch),
+            typeof(JournalBatchItem),
+            typeof(JournalBatchPostingRun),
+            typeof(JournalBatchImportSession)
         };
 
         foreach (var entityType in entityTypes)

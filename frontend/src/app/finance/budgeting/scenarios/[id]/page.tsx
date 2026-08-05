@@ -11,13 +11,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { ChevronRight, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { BarChart3, ChevronRight, Landmark, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { workflowApiService } from '@/services/workflow-api.service';
-import type { BudgetScenario, BudgetReturn, BudgetAssignee, CreateBudgetReturnDto } from '@/types/budget';
+import type { BudgetScenario, BudgetReturn, BudgetAssignee, BudgetAuditEvent, CreateBudgetReturnDto } from '@/types/budget';
 import type { SegmentStructure, SegmentLookupValue } from '@/types/finance';
 
 interface PageProps {
@@ -31,9 +32,12 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const { toast } = useToast();
     const { hasPermission } = useAuth();
     const canMaintainBudget = hasPermission('Finance.Budgeting.Write');
+    const canAssignReturns = hasPermission('Finance.BudgetReturns.Assign');
+    const canLockBudget = hasPermission('Finance.Budgeting.Lock');
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
     const [returns, setReturns] = useState<BudgetReturn[]>([]);
     const [assignees, setAssignees] = useState<BudgetAssignee[]>([]);
+    const [auditHistory, setAuditHistory] = useState<BudgetAuditEvent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
     // Create Return Dialog State
@@ -50,11 +54,17 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const [returnBeingAssigned, setReturnBeingAssigned] = useState<BudgetReturn | null>(null);
     const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
     const [isAssigning, setIsAssigning] = useState(false);
+    const [isAdoptDialogOpen, setIsAdoptDialogOpen] = useState(false);
+    const [isAdopting, setIsAdopting] = useState(false);
+    const [adoptionReason, setAdoptionReason] = useState('');
+    const [adoptionEffectiveDate, setAdoptionEffectiveDate] = useState(
+        new Date().toISOString().slice(0, 10)
+    );
 
     useEffect(() => {
         loadData();
         loadSegments();
-    }, [id]);
+    }, [id, canAssignReturns]);
 
     useEffect(() => {
         if (selectedSegmentId) {
@@ -65,18 +75,23 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const [scenarioData, returnsData, assigneeData] = await Promise.all([
-                budgetDataService.getScenarioById(id),
-                budgetDataService.getReturns(id),
-                workflowApiService.getWorkflowDirectoryUsers().then(users => users.map(user => ({
+            const assigneePromise: Promise<BudgetAssignee[]> = canAssignReturns
+                ? workflowApiService.getWorkflowDirectoryUsers().then(users => users.map(user => ({
                     id: user.id,
                     displayName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.userName || user.email || 'Unknown user',
                     email: user.email || '',
                 })))
+                : Promise.resolve([]);
+            const [scenarioData, returnsData, assigneeData, auditData] = await Promise.all([
+                budgetDataService.getScenarioById(id),
+                budgetDataService.getReturns(id),
+                assigneePromise,
+                budgetDataService.getScenarioAuditHistory(id).catch(() => []),
             ]);
             setScenario(scenarioData);
             setReturns(returnsData);
             setAssignees(assigneeData);
+            setAuditHistory(auditData);
         } catch (error) {
             console.error('Failed to load scenario details:', error);
             toast({
@@ -165,6 +180,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
             setIsAssigning(true);
             await budgetDataService.updateReturn(returnBeingAssigned.id, {
                 assignedToUserId: selectedAssigneeId,
+                rowVersion: returnBeingAssigned.rowVersion,
             });
             toast({
                 title: 'Return assigned',
@@ -198,14 +214,70 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         assignees.find(user => user.id === budgetReturn.assignedToUserId)?.displayName ||
         'Unassigned';
 
-    const handleLockScenario = async () => {
-        if (!confirm('Are you sure you want to lock this budget? This action cannot be easily undone.')) return;
+    const handleOpenScenario = async () => {
+        if (!scenario || !confirm('Open this scenario for distributed budget collection?')) return;
         try {
-            await budgetDataService.lockScenario(id);
-            toast({ title: 'Success', description: 'Budget scenario locked.' });
-            loadData();
+            await budgetDataService.openScenario(id, scenario.rowVersion);
+            toast({ title: 'Collection opened', description: 'Returns can now be created and completed.' });
+            await loadData();
         } catch (error) {
-            toast({ title: 'Error', description: 'Failed to lock scenario.', variant: 'destructive' });
+            toast({ title: 'Unable to open collection', description: error instanceof Error ? error.message : 'Refresh and try again.', variant: 'destructive' });
+        }
+    };
+
+    const handleSubmitScenario = async () => {
+        if (!scenario || !confirm('Submit the completed scenario for approval? Collection will become read-only.')) return;
+        try {
+            await budgetDataService.submitScenario(id, scenario.rowVersion);
+            toast({ title: 'Scenario submitted', description: 'The scenario is now in the Finance approval queue.' });
+            await loadData();
+        } catch (error) {
+            toast({ title: 'Unable to submit scenario', description: error instanceof Error ? error.message : 'Refresh and try again.', variant: 'destructive' });
+        }
+    };
+
+    const handleArchiveScenario = async () => {
+        if (!scenario || !confirm('Archive this approved budget scenario?')) return;
+        try {
+            await budgetDataService.archiveScenario(id, scenario.rowVersion);
+            toast({ title: 'Scenario archived' });
+            await loadData();
+        } catch (error) {
+            toast({ title: 'Unable to archive scenario', description: error instanceof Error ? error.message : 'Refresh and try again.', variant: 'destructive' });
+        }
+    };
+
+    const handleAdoptScenario = async () => {
+        if (!scenario || !adoptionReason.trim() || !adoptionEffectiveDate) {
+            toast({
+                title: 'Adoption details required',
+                description: 'Enter the effective date and reason for adopting this official budget.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        try {
+            setIsAdopting(true);
+            await budgetDataService.adoptScenario(id, {
+                rowVersion: scenario.rowVersion,
+                effectiveDate: adoptionEffectiveDate,
+                reason: adoptionReason.trim(),
+            });
+            toast({
+                title: 'Official budget adopted',
+                description: `${scenario.name} is now the reporting baseline for this fiscal year.`,
+            });
+            setIsAdoptDialogOpen(false);
+            setAdoptionReason('');
+            await loadData();
+        } catch (error) {
+            toast({
+                title: 'Unable to adopt scenario',
+                description: error instanceof Error ? error.message : 'Refresh and try again.',
+                variant: 'destructive',
+            });
+        } finally {
+            setIsAdopting(false);
         }
     };
 
@@ -258,20 +330,46 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                         <span>•</span>
                         <span>{returns.length} Returns</span>
                         <span>•</span>
-                        <Badge variant={scenario.status === 'Locked' ? 'destructive' : 'default'} className="ml-2">
-                            {scenario.status === 'Locked' && <Lock className="w-3 h-3 mr-1" />}
+                        <Badge variant={scenario.status === 'Archived' ? 'secondary' : 'default'} className="ml-2">
+                            {(scenario.status === 'Approved' || scenario.status === 'Superseded' || scenario.status === 'Archived') && <Lock className="w-3 h-3 mr-1" />}
                             {scenario.status}
                         </Badge>
+                        {scenario.isActive && (
+                            <Badge className="bg-green-600 hover:bg-green-700">Official</Badge>
+                        )}
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    {scenario.status !== 'Locked' && (
-                        <div className="flex gap-2">
-                            <Button variant="outline" className="text-destructive hover:bg-destructive/10" onClick={handleLockScenario}>
-                                <Lock className="mr-2 h-4 w-4" />
-                                Lock Budget
+                    <div className="flex gap-2">
+                        <Link href={`/finance/budgeting/scenarios/${id}/consolidated`}>
+                            <Button variant="outline">
+                                <BarChart3 className="mr-2 h-4 w-4" />
+                                Consolidated Budget
                             </Button>
-                            {canMaintainBudget && <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                        </Link>
+                        {scenario.status === 'Draft' && canMaintainBudget && (
+                            <Button onClick={handleOpenScenario}>
+                                Open Collection
+                            </Button>
+                        )}
+                        {scenario.status === 'Collecting' && canLockBudget && (
+                            <Button variant="outline" onClick={handleSubmitScenario}>
+                                <Lock className="mr-2 h-4 w-4" />
+                                Submit Scenario
+                            </Button>
+                        )}
+                        {(scenario.status === 'Approved' || scenario.status === 'Superseded') && !scenario.isActive && canLockBudget && (
+                            <Button onClick={() => setIsAdoptDialogOpen(true)}>
+                                <Landmark className="mr-2 h-4 w-4" />
+                                Adopt as Official
+                            </Button>
+                        )}
+                        {(scenario.status === 'Approved' || scenario.status === 'Superseded') && canLockBudget && (
+                            <Button variant="outline" onClick={handleArchiveScenario}>
+                                Archive Scenario
+                            </Button>
+                        )}
+                        {scenario.status === 'Collecting' && canMaintainBudget && <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                                 <DialogTrigger asChild>
                                     <Button>
                                         <Plus className="mr-2 h-4 w-4" />
@@ -315,28 +413,30 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                                 </SelectContent>
                                             </Select>
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="assignee">Assign To</Label>
-                                            <Select
-                                                value={newReturnData.assignedToUserId || 'unassigned'}
-                                                onValueChange={(value) => setNewReturnData(prev => ({
-                                                    ...prev,
-                                                    assignedToUserId: value === 'unassigned' ? undefined : value,
-                                                }))}
-                                            >
-                                                <SelectTrigger id="assignee">
-                                                    <SelectValue placeholder="Select User" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="unassigned">Leave unassigned</SelectItem>
-                                                    {assignees.map(user => (
-                                                        <SelectItem key={user.id} value={user.id}>
-                                                            {user.displayName}{user.email ? ` - ${user.email}` : ''}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
+                                        {canAssignReturns && (
+                                            <div className="space-y-2">
+                                                <Label htmlFor="assignee">Assign To</Label>
+                                                <Select
+                                                    value={newReturnData.assignedToUserId || 'unassigned'}
+                                                    onValueChange={(value) => setNewReturnData(prev => ({
+                                                        ...prev,
+                                                        assignedToUserId: value === 'unassigned' ? undefined : value,
+                                                    }))}
+                                                >
+                                                    <SelectTrigger id="assignee">
+                                                        <SelectValue placeholder="Select User" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="unassigned">Leave unassigned</SelectItem>
+                                                        {assignees.map(user => (
+                                                            <SelectItem key={user.id} value={user.id}>
+                                                                {user.displayName}{user.email ? ` - ${user.email}` : ''}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
                                         <div className="space-y-2">
                                             <Label htmlFor="notes">Notes</Label>
                                             <Input
@@ -352,9 +452,8 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                         <Button onClick={handleCreateReturn}>Create</Button>
                                     </DialogFooter>
                                 </DialogContent>
-                            </Dialog>}
-                        </div>
-                    )}
+                        </Dialog>}
+                    </div>
                 </div>
             </div>
 
@@ -395,7 +494,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                         <TableCell>{formatReturnDate(ret)}</TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
-                                                {canMaintainBudget && scenario.status !== 'Locked' && (ret.status === 'Draft' || ret.status === 'Rejected') && (
+                                                {canAssignReturns && scenario.status === 'Collecting' && (ret.status === 'Draft' || ret.status === 'Rejected') && (
                                                     <Button size="sm" variant="outline" onClick={() => openAssignmentDialog(ret)}>
                                                         <UserRoundPlus className="mr-2 h-4 w-4" />
                                                         {ret.assignedToUserId ? 'Reassign' : 'Assign'}
@@ -414,6 +513,59 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                             )}
                         </TableBody>
                     </Table>
+                </CardContent>
+            </Card>
+
+            {(scenario.isActive || scenario.status === 'Superseded') && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{scenario.isActive ? 'Official Budget Baseline' : 'Superseded Baseline'}</CardTitle>
+                        <CardDescription>
+                            {scenario.isActive
+                                ? 'This scenario is used by standard budget-versus-actual reporting.'
+                                : 'This scenario remains available for audit and comparison but is no longer the official baseline.'}
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-3 text-sm">
+                        <div>
+                            <p className="text-muted-foreground">Effective date</p>
+                            <p className="font-medium">
+                                {scenario.adoptionEffectiveDate
+                                    ? new Date(scenario.adoptionEffectiveDate).toLocaleDateString()
+                                    : '—'}
+                            </p>
+                        </div>
+                        <div>
+                            <p className="text-muted-foreground">Adopted by</p>
+                            <p className="font-medium">{scenario.adoptedByUserName || '—'}</p>
+                        </div>
+                        <div>
+                            <p className="text-muted-foreground">Reason</p>
+                            <p className="font-medium">{scenario.adoptionReason || '—'}</p>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Audit History</CardTitle>
+                    <CardDescription>Scenario lifecycle and workflow events</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    {auditHistory.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No audit events recorded yet.</p>
+                    ) : auditHistory.map(event => (
+                        <div key={event.id} className="flex items-start justify-between gap-4 border-b pb-3 last:border-b-0">
+                            <div>
+                                <p className="font-medium">{event.action.replace('Finance.', '')}</p>
+                                <p className="text-sm text-muted-foreground">{event.username}</p>
+                            </div>
+                            <time className="text-sm text-muted-foreground">
+                                {new Date(event.timestamp).toLocaleString()}
+                            </time>
+                        </div>
+                    ))}
                 </CardContent>
             </Card>
 
@@ -456,6 +608,51 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                         <Button onClick={handleAssignReturn} disabled={isAssigning || !selectedAssigneeId}>
                             {isAssigning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Assign Return
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isAdoptDialogOpen} onOpenChange={setIsAdoptDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Adopt as Official Budget</DialogTitle>
+                        <DialogDescription>
+                            This makes {scenario.name} the single reporting baseline for the fiscal year.
+                            Any current official budget will be marked Superseded.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="adoption-effective-date">Effective date</Label>
+                            <Input
+                                id="adoption-effective-date"
+                                type="date"
+                                value={adoptionEffectiveDate}
+                                onChange={(event) => setAdoptionEffectiveDate(event.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="adoption-reason">Adoption reason</Label>
+                            <Textarea
+                                id="adoption-reason"
+                                value={adoptionReason}
+                                onChange={(event) => setAdoptionReason(event.target.value)}
+                                placeholder="Document the approval, board resolution, or revision being adopted."
+                                rows={4}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAdoptDialogOpen(false)} disabled={isAdopting}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleAdoptScenario}
+                            disabled={isAdopting || !adoptionEffectiveDate || !adoptionReason.trim()}
+                        >
+                            {isAdopting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Adopt Official Budget
                         </Button>
                     </DialogFooter>
                 </DialogContent>

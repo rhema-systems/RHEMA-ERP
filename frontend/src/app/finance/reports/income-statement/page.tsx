@@ -15,18 +15,21 @@ import { Download, Loader2, Printer } from 'lucide-react';
 import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
 import { ReportSegmentFilters } from '@/components/finance/reports/ReportSegmentFilters';
 import { AppliedReportSegmentFilters } from '@/components/finance/reports/AppliedReportSegmentFilters';
+import { FinancialStatementLayoutRows } from '@/components/finance/reports/FinancialStatementLayoutRows';
 import {
     buildFinanceSegmentFilters,
     toFinanceSegmentFilterQueryParameters,
     type ReportSegmentSelections,
 } from '@/lib/finance/report-segment-filters';
-import type { FinanceSegmentFilterDto, SegmentStructure } from '@/types/finance';
+import type { FinanceSegmentFilterDto, FinancialStatementLayoutSummaryDto, SegmentStructure } from '@/types/finance';
 
 export default function IncomeStatementPage() {
     const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [bookClassification, setBookClassification] = useState('IFRS');
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
+    const [layouts, setLayouts] = useState<FinancialStatementLayoutSummaryDto[]>([]);
+    const [layoutSelection, setLayoutSelection] = useState('default');
     const [loading, setLoading] = useState(true);
     const [running, setRunning] = useState(false);
     const [actionLoading, setActionLoading] = useState<'print' | 'export' | null>(null);
@@ -45,7 +48,7 @@ export default function IncomeStatementPage() {
     const loadInitialReport = async () => {
         try {
             setLoading(true);
-            const [settingsData, books, dimensions] = await Promise.all([
+            const [settingsData, books, dimensions, layoutOptions] = await Promise.all([
                 financeDataService.getFinanceSettings(),
                 financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
                 financeDataService.getReportingDimensions().catch((err) => {
@@ -53,16 +56,19 @@ export default function IncomeStatementPage() {
                     setSegmentLoadError('GL segment filters could not be loaded.');
                     return [] as SegmentStructure[];
                 }),
+                financeDataService.getFinancialStatementLayouts('IncomeStatement').catch(() => []),
             ]);
             setSettings(settingsData);
             if (books.length > 0) setAccountingBooks(books);
             setReportingDimensions(dimensions);
+            setLayouts(layoutOptions.filter((layout) => layout.isActive && layout.publishedVersionNumber));
             const data = await financeDataService.getIncomeStatement({
                 periodStart: startDate,
                 periodEnd: endDate,
                 bookClassification,
                 includeAccountDetails: true,
                 segmentFilters: [],
+                useDefaultLayout: true,
             });
             setReport(data);
         } catch (err) {
@@ -84,6 +90,10 @@ export default function IncomeStatementPage() {
                 bookClassification,
                 includeAccountDetails: true,
                 segmentFilters,
+                layoutId: layoutSelection !== 'default' && layoutSelection !== 'legacy'
+                    ? layoutSelection
+                    : undefined,
+                useDefaultLayout: layoutSelection === 'default',
             });
             setReport(data);
             setAppliedSegmentFilters(segmentFilters);
@@ -107,6 +117,10 @@ export default function IncomeStatementPage() {
             periodEnd: endDate,
             bookClassification,
             includeAccountDetails: true,
+            layoutId: layoutSelection !== 'default' && layoutSelection !== 'legacy'
+                ? layoutSelection
+                : undefined,
+            useDefaultLayout: layoutSelection === 'default',
             ...toFinanceSegmentFilterQueryParameters(appliedSegmentFilters),
         };
     };
@@ -189,7 +203,7 @@ export default function IncomeStatementPage() {
 
             <Card>
                 <CardContent className="p-6">
-                    <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-4">
+                    <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-6">
                         <div className="space-y-2">
                             <Label>From Date</Label>
                             <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
@@ -200,12 +214,35 @@ export default function IncomeStatementPage() {
                         </div>
                         <div className="space-y-2">
                             <Label>Book</Label>
-                            <Select value={bookClassification} onValueChange={setBookClassification}>
+                            <Select
+                                value={bookClassification}
+                                onValueChange={(value) => {
+                                    setBookClassification(value);
+                                    setLayoutSelection('default');
+                                }}
+                            >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     {accountingBooks.map((book) => (
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Statement Layout</Label>
+                            <Select value={layoutSelection} onValueChange={setLayoutSelection}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="default">Default layout</SelectItem>
+                                    {layouts
+                                        .filter((layout) => layout.accountingBookCode === bookClassification)
+                                        .map((layout) => (
+                                            <SelectItem key={layout.id} value={layout.id}>
+                                                {layout.name} ({layout.code}){layout.isDefault ? ' — default' : ''}
+                                            </SelectItem>
+                                        ))}
+                                    <SelectItem value="legacy">Legacy classification</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -239,21 +276,40 @@ export default function IncomeStatementPage() {
                     <p className="mt-1 font-mono text-xs text-muted-foreground">
                         Currency: {report?.currencyCode || settings?.baseCurrency || 'GHS'}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        {report?.layoutExecution
+                            ? `Layout: ${report.layoutExecution.layoutName} (${report.layoutExecution.layoutCode}) v${report.layoutExecution.versionNumber}`
+                            : 'Legacy account-classification presentation'}
+                    </p>
                 </CardHeader>
                 <CardContent className="pt-6">
                     <div className="mx-auto max-w-4xl rounded-md border bg-white p-6 shadow-sm">
                         <Table>
                             <TableBody>
-                                {(report?.sections ?? []).map(section => (
-                                    <StatementSection key={section.sectionName} section={section} formatMoney={formatMoney} />
-                                ))}
-                                <TableRow className={`border-t-4 font-bold text-xl ${report && report.netProfit >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                                    <TableCell colSpan={2} className="py-4 text-right">Net Profit</TableCell>
-                                    <TableCell className="w-[160px] py-4 text-right">{formatMoney(report?.netProfit ?? 0)}</TableCell>
-                                </TableRow>
+                                {report?.layoutExecution ? (
+                                    <FinancialStatementLayoutRows
+                                        rows={report.layoutExecution.rows}
+                                        formatMoney={formatMoney}
+                                    />
+                                ) : (
+                                    <>
+                                        {(report?.sections ?? []).map(section => (
+                                            <StatementSection key={section.sectionName} section={section} formatMoney={formatMoney} />
+                                        ))}
+                                        <TableRow className={`border-t-4 font-bold text-xl ${report && report.netProfit >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                                            <TableCell colSpan={2} className="py-4 text-right">Net Profit</TableCell>
+                                            <TableCell className="w-[160px] py-4 text-right">{formatMoney(report?.netProfit ?? 0)}</TableCell>
+                                        </TableRow>
+                                    </>
+                                )}
                             </TableBody>
                         </Table>
                     </div>
+                    {report?.layoutExecution && report.layoutExecution.reconciliation.unmappedNonZeroAccountCount > 0 && (
+                        <div className="mt-3 text-sm text-amber-700">
+                            {report.layoutExecution.reconciliation.unmappedNonZeroAccountCount} non-zero eligible GL account(s) are not mapped to this layout.
+                        </div>
+                    )}
                 </CardContent>
             </Card>
         </div>

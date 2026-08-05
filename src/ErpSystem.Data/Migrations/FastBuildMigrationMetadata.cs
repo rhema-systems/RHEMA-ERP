@@ -124,13 +124,17 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260727005601_AddProcurementSupplierPerformanceScorecards")] partial class AddProcurementSupplierPerformanceScorecards { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260727101510_AddProcurementSupplierMasterChangeRollout")] partial class AddProcurementSupplierMasterChangeRollout { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260727113854_AddProcurementSupplierApplicantAccess")] partial class AddProcurementSupplierApplicantAccess { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728145753_HardenBudgetingAssignmentsAndIntegrity")] partial class HardenBudgetingAssignmentsAndIntegrity { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728170930_AddEstateGisIntegration")] partial class AddEstateGisIntegration { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728181014_AddAccountBalances")] partial class AddAccountBalances { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728192617_AddDurableFileStorageCleanup")] partial class AddDurableFileStorageCleanup { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728210856_EnforceSupplierApplicantIntegrity")] partial class EnforceSupplierApplicantIntegrity { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260728211925_AddJournalBatches")] partial class AddJournalBatches { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260728230211_AddEstateLandDemarcations")] partial class AddEstateLandDemarcations { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729022744_AddSupplierEvidenceDmsLinks")] partial class AddSupplierEvidenceDmsLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729084856_TDC0401FrameworkAgreements")] partial class TDC0401FrameworkAgreements { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729124416_TDC0402FrameworkCallOffs")] partial class TDC0402FrameworkCallOffs { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260801160552_ReconcileFinanceMasterModelSnapshot")] partial class ReconcileFinanceMasterModelSnapshot { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260730132714_TDC0407ContractActivationGate")] partial class TDC0407ContractActivationGate { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260731140000_TDC0502ReceiptInspectionClosure")] partial class TDC0502ReceiptInspectionClosure { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260801204023_TDC0602InventoryMobileScanning")] partial class TDC0602InventoryMobileScanning { }
@@ -162,3 +166,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260731143111_MergeProcurementPhase4AndEstateReadiness")] partial class MergeProcurementPhase4AndEstateReadiness { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260801224538_HrControlledDocumentLinks")] partial class HrControlledDocumentLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260805104205_HrRemoveDuplicateShadowForeignKeys")] partial class HrRemoveDuplicateShadowForeignKeys { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260805114001_MergeFinanceControlHardeningAndSharedReporting")] partial class MergeFinanceControlHardeningAndSharedReporting { }

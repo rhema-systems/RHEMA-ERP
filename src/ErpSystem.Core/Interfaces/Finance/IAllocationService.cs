@@ -60,5 +60,40 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// Run an allocation for the specified rule and period.
         /// </summary>
         Task<AllocationResultDto> RunAllocationAsync(RunAllocationDto dto, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Get controlled allocation run batches.
+        /// </summary>
+        Task<IReadOnlyList<AllocationRunBatchDto>> GetRunBatchesAsync(string? status = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Get a controlled allocation run batch by ID.
+        /// </summary>
+        Task<AllocationRunBatchDto?> GetRunBatchByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Calculate and persist a draft allocation run batch for approval.
+        /// </summary>
+        Task<AllocationRunBatchDto> CreateRunBatchAsync(CreateAllocationRunBatchDto dto, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Submit a draft allocation run batch to workflow approval.
+        /// </summary>
+        Task<AllocationRunBatchDto> SubmitRunBatchAsync(Guid id, string? comment = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Approve the current workflow step for an allocation run batch.
+        /// </summary>
+        Task<AllocationRunBatchDto> ApproveRunBatchAsync(Guid id, string? comment = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Reject the current workflow step for an allocation run batch.
+        /// </summary>
+        Task<AllocationRunBatchDto> RejectRunBatchAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Post an approved allocation run batch to GL.
+        /// </summary>
+        Task<AllocationRunBatchDto> PostRunBatchAsync(Guid id, CancellationToken cancellationToken = default);
     }
 }

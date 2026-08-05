@@ -42,6 +42,7 @@ import {
     TableRow,
 } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import type { VendorInvoiceMatchExceptionStatus } from '@/types/ap';
 import { ProcurementFinanceReconciliation } from '@/components/finance/ProcurementFinanceReconciliation';
@@ -485,6 +486,8 @@ function CashRequirementsView() {
 }
 
 function SupplierStatementsView() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
     const [partnersLoading, setPartnersLoading] = useState(true);
 
@@ -569,6 +572,21 @@ function SupplierStatementsView() {
                 supplierIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
             })}
+            downloadPdf={(params) => accountsPayableService.downloadSupplierStatementDocument({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
+                format: 'pdf',
+            })}
+            downloadXlsx={(params) => accountsPayableService.downloadSupplierStatementDocument({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
+                format: 'xlsx',
+            })}
+            canExport={canExport}
         />
     )
 }

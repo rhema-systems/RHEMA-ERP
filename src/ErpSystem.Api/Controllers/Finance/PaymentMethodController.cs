@@ -35,7 +35,7 @@ public class PaymentMethodController : ControllerBase
             Type = PaymentMethodType.Cheque,
             Description = "Cheque payment.",
             IsActive = true,
-            RequiresBankAccount = true,
+            RequiresBankAccount = false,
             RequiresReference = true
         },
         new()
@@ -55,7 +55,17 @@ public class PaymentMethodController : ControllerBase
             Type = PaymentMethodType.MobileMoney,
             Description = "Mobile money payment.",
             IsActive = true,
-            RequiresBankAccount = true,
+            RequiresBankAccount = false,
+            RequiresReference = true
+        },
+        new()
+        {
+            Code = "CARD",
+            Name = "Card",
+            Type = PaymentMethodType.Card,
+            Description = "Card collection settled through the card clearing account.",
+            IsActive = true,
+            RequiresBankAccount = false,
             RequiresReference = true
         },
         new()

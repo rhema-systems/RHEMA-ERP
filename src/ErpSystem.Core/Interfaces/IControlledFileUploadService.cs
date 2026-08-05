@@ -15,6 +15,9 @@ public static class ControlledFileUploadCategories
     public const string DocumentManagement =
         "document-management";
 
+    public const string FinanceCloseEvidence =
+        "finance-close-evidence";
+
     // HR document families. Every one of these is personal data — CVs, identity
     // documents, sick-note certificates, disciplinary evidence, medical exam
     // results — so they are all private (see LocalFileStorageService's "hr-"
@@ -45,6 +48,7 @@ public static class ControlledFileUploadCategories
             [
                 SupplierRegistrationEvidence,
                 DocumentManagement,
+                FinanceCloseEvidence,
                 HrCandidateCv,
                 HrCandidateDocuments,
                 HrCandidatePhotos,

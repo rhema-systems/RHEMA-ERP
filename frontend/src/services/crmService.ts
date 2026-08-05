@@ -2062,8 +2062,9 @@ class CrmService {
     if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to delete SWOT analysis'));
   }
 
-  // ── Commercial Quotes Hardening ──
-  async getQuotes(
+  // Commercial quote operations use the Sales quote API; keep these names distinct
+  // from the CRM quote list/detail methods above.
+  async getSalesQuotes(
     page: number = 1,
     pageSize: number = 20,
     search?: string,
@@ -2086,7 +2087,7 @@ class CrmService {
     return parseResponse<PagedResult<QuoteSummaryDto>>(response, 'Failed to load quotes');
   }
 
-  async getQuote(id: string): Promise<QuoteDetailDto> {
+  async getSalesQuote(id: string): Promise<QuoteDetailDto> {
     const response = await fetch(`${API_BASE_URL}/sales/quotes/${id}`, {
       headers: getAuthHeaders(false),
       cache: 'no-store',

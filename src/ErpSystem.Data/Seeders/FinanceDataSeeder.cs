@@ -91,6 +91,11 @@ public class FinanceDataSeeder
             await SeedFinanceSettingsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 9.5 Seed operational liquidity masters only for this known standard/demo COA.
+            // Custom tenant COAs are deliberately handled by the Banking setup wizard.
+            await SeedBankingSettlementDefaultsAsync(tenantId, baseDate);
+            await _context.SaveChangesAsync();
+
             // 10. Seed Module Definitions
             await SeedModuleDefinitionsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
@@ -254,6 +259,9 @@ public class FinanceDataSeeder
     private async Task SeedPaymentTermsAsync(Guid tenantId, DateTime baseDate)
     {
         await PaymentTermBaselineSeeder.SeedTenantBaselineAsync(_context, tenantId);
+        // Development Finance fixtures should exercise the same approved close templates as a
+        // tenant created through the API; this avoids demo-only checklist behavior.
+        await FinanceCloseTemplateBaselineSeeder.SeedTenantBaselineAsync(_context, tenantId);
 
         _logger.LogInformation("Payment terms seeded");
     }
@@ -1255,6 +1263,31 @@ public class FinanceDataSeeder
             },
             new Account
             {
+                Id = Guid.Parse("00000005-1130-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1130",
+                AccountNumber = "1130",
+                AccountName = "Withholding Tax Receivable",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Current Assets",
+                AccountSubCategory = "Tax Receivables",
+                Description = "Control account for WHT and withholding VAT suffered on TDC customer receipts pending statutory credit/offset.",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
                 Id = Guid.Parse("00000005-1200-0000-0000-000000000001"),
                 TenantId = tenantId,
                 AccountCode = "1200",
@@ -1416,6 +1449,90 @@ public class FinanceDataSeeder
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
                 Balance = 0m,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1020-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1020",
+                AccountNumber = "1020",
+                AccountName = "Undeposited Cash",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1021-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1021",
+                AccountNumber = "1021",
+                AccountName = "Cheques Awaiting Deposit",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1022-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1022",
+                AccountNumber = "1022",
+                AccountName = "Mobile Money Clearing",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-1023-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "1023",
+                AccountNumber = "1023",
+                AccountName = "Card Settlement Clearing",
+                AccountType = AccountType.Asset,
+                AccountCategory = "Cash and Cash Equivalents",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1979,6 +2096,28 @@ public class FinanceDataSeeder
                 Balance = 32000m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
+            },
+            new Account
+            {
+                Id = Guid.Parse("00000005-6600-0000-0000-000000000001"),
+                TenantId = tenantId,
+                AccountCode = "6600",
+                AccountNumber = "6600",
+                AccountName = "Bank Charges",
+                AccountType = AccountType.Expense,
+                AccountCategory = "Finance Costs",
+                CurrencyCode = "GHS",
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = true,
+                IsBaseClassified = true,
+                IsLocalClassified = true,
+                AllowDirectPosting = false,
+                IsControlAccount = true,
+                BudgetTrackingEnabled = true,
+                Status = AccountStatus.Active,
+                CreatedAt = baseDate,
+                CreatedBy = "System"
             }
         };
     }
@@ -2193,6 +2332,145 @@ public class FinanceDataSeeder
 
     #endregion
 
+    #region Banking Settlement Seeding
+
+    private async Task SeedBankingSettlementDefaultsAsync(Guid tenantId, DateTime baseDate)
+    {
+        var definitions = new[]
+        {
+            new
+            {
+                Id = Guid.Parse("00000007-1020-0000-0000-000000000001"),
+                Code = "UNDEP-CASH-GHS",
+                Name = "Undeposited Cash (GHS)",
+                Type = LiquidityAccountType.UndepositedCash,
+                GLAccountId = Guid.Parse("00000005-1020-0000-0000-000000000001")
+            },
+            new
+            {
+                Id = Guid.Parse("00000007-1021-0000-0000-000000000001"),
+                Code = "CHQ-CLEAR-GHS",
+                Name = "Cheques Awaiting Deposit (GHS)",
+                Type = LiquidityAccountType.ChequesAwaitingDeposit,
+                GLAccountId = Guid.Parse("00000005-1021-0000-0000-000000000001")
+            },
+            new
+            {
+                Id = Guid.Parse("00000007-1022-0000-0000-000000000001"),
+                Code = "MOMO-CLEAR-GHS",
+                Name = "Mobile Money Clearing (GHS)",
+                Type = LiquidityAccountType.MobileMoneyClearing,
+                GLAccountId = Guid.Parse("00000005-1022-0000-0000-000000000001")
+            },
+            new
+            {
+                Id = Guid.Parse("00000007-1023-0000-0000-000000000001"),
+                Code = "CARD-CLEAR-GHS",
+                Name = "Card Settlement Clearing (GHS)",
+                Type = LiquidityAccountType.CardSettlementClearing,
+                GLAccountId = Guid.Parse("00000005-1023-0000-0000-000000000001")
+            },
+            new
+            {
+                // TDC begins with one controlled main cashier till. It shares the existing cash
+                // control GL account with undeposited cash while retaining separate physical
+                // custody sessions and liquidity entries; this avoids inventing a second ledger.
+                Id = Guid.Parse("00000007-1024-0000-0000-000000000001"),
+                Code = "TILL-MAIN-GHS",
+                Name = "TDC Main Cashier Till (GHS)",
+                Type = LiquidityAccountType.CashTill,
+                GLAccountId = Guid.Parse("00000005-1020-0000-0000-000000000001")
+            }
+        };
+
+        var validAccountIds = await _context.Accounts
+            .Where(account =>
+                account.TenantId == tenantId &&
+                definitions.Select(definition => definition.GLAccountId).Contains(account.Id))
+            .Select(account => account.Id)
+            .ToListAsync();
+        foreach (var definition in definitions.Where(definition => validAccountIds.Contains(definition.GLAccountId)))
+        {
+            var existing = await _context.LiquidityAccounts.FirstOrDefaultAsync(
+                account => account.TenantId == tenantId && account.Code == definition.Code);
+            if (existing != null)
+            {
+                existing.Name = definition.Name;
+                existing.AccountType = definition.Type;
+                existing.Currency = "GHS";
+                existing.GLAccountId = definition.GLAccountId;
+                existing.IsActive = true;
+                existing.IsSystemAccount = true;
+                existing.AllowsManualAllocations = true;
+                continue;
+            }
+
+            _context.LiquidityAccounts.Add(new LiquidityAccount
+            {
+                Id = definition.Id,
+                TenantId = tenantId,
+                Code = definition.Code,
+                Name = definition.Name,
+                AccountType = definition.Type,
+                Currency = "GHS",
+                GLAccountId = definition.GLAccountId,
+                IsActive = true,
+                IsSystemAccount = true,
+                AllowsManualAllocations = true,
+                CreatedAt = baseDate,
+                CreatedBy = "System",
+                Notes = "Standard Banking & Settlement control account."
+            });
+        }
+
+        var mappedBankIds = await _context.LiquidityAccounts
+            .Where(account => account.TenantId == tenantId && account.BankAccountId.HasValue)
+            .Select(account => account.BankAccountId!.Value)
+            .ToListAsync();
+        var banks = await _context.BankAccounts
+            .Where(bank =>
+                bank.TenantId == tenantId &&
+                bank.IsActive &&
+                bank.GLAccountId.HasValue &&
+                !mappedBankIds.Contains(bank.Id))
+            .ToListAsync();
+        foreach (var bank in banks)
+        {
+            _context.LiquidityAccounts.Add(new LiquidityAccount
+            {
+                TenantId = tenantId,
+                Code = $"BANK-{bank.Id.ToString("N")[..8]}".ToUpperInvariant(),
+                Name = bank.AccountName,
+                AccountType = LiquidityAccountType.Bank,
+                Currency = bank.Currency,
+                GLAccountId = bank.GLAccountId!.Value,
+                BankAccountId = bank.Id,
+                IsActive = true,
+                IsSystemAccount = true,
+                AllowsManualAllocations = false,
+                CreatedAt = baseDate,
+                CreatedBy = "System",
+                Notes = "Bank subtype created from the existing bank account master."
+            });
+        }
+
+        var returnedChequeBankChargeAccountId =
+            Guid.Parse("00000005-6600-0000-0000-000000000001");
+        var hasReturnedChequeBankChargeAccount = await _context.Accounts.AnyAsync(account =>
+            account.TenantId == tenantId &&
+            account.Id == returnedChequeBankChargeAccountId &&
+            !account.IsDeleted);
+        var settings = await _context.FinanceSettings.FirstOrDefaultAsync(item => item.TenantId == tenantId);
+        if (settings != null &&
+            !settings.ReturnedChequeBankChargeAccountId.HasValue &&
+            hasReturnedChequeBankChargeAccount)
+        {
+            settings.ReturnedChequeBankChargeAccountId = returnedChequeBankChargeAccountId;
+        }
+    }
+
+    #endregion
+
     #region Finance Settings Seeding
 
     private async Task SeedFinanceSettingsAsync(Guid tenantId, DateTime baseDate)
@@ -2387,6 +2665,27 @@ public class FinanceDataSeeder
         
         // 1.6 WHT 3% (Goods)
         var whtGoods = await GetOrCreateTaxAsync(tenantId, "WHT-GOODS", "Withholding Tax (Goods)", 3.0m, TaxApplicability.Purchases, TaxCategory.Withholding, false, baseDate, systemUserId, 2000m);
+
+        // 1.7 WHT 5% (Works). GRA currently applies the same GH¢2,000 annual
+        // supplier threshold to resident goods, works and entity-service payments.
+        var whtWorks = await GetOrCreateTaxAsync(tenantId, "WHT-WORKS", "Withholding Tax (Works)", 5.0m, TaxApplicability.Purchases, TaxCategory.Withholding, false, baseDate, systemUserId, 2000m);
+
+        // AR receipts record tax suffered by TDC rather than calculating a payable deduction.
+        // Separate sales-side configurations keep account direction explicit and avoid exposing
+        // an AP payable tax accidentally on the customer receipt screen.
+        var whtReceivable = await GetOrCreateTaxAsync(tenantId, "WHT-REC-SERV", "WHT Receivable (Services)", 7.5m, TaxApplicability.Sales, TaxCategory.Withholding, false, baseDate, systemUserId);
+        var vatWithholdingReceivable = await GetOrCreateTaxAsync(tenantId, "VAT-WHT-REC", "VAT Withholding Receivable", 7.0m, TaxApplicability.Sales, TaxCategory.VatWithholding, false, baseDate, systemUserId);
+
+        var taxPayableAccountId = Guid.Parse("00000005-2200-0000-0000-000000000001");
+        var taxReceivableAccountId = Guid.Parse("00000005-1130-0000-0000-000000000001");
+        foreach (var purchaseWht in new[] { whtServices, whtGoods, whtWorks })
+        {
+            // Preserve tenant overrides. These are baseline defaults only for installations that
+            // have not yet mapped a statutory control account.
+            purchaseWht.TaxPayableAccountId ??= taxPayableAccountId;
+        }
+        whtReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
+        vatWithholdingReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
 
         await _context.SaveChangesAsync();
 

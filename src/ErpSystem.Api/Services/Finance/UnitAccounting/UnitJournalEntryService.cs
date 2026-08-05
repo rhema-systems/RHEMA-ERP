@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -125,53 +126,27 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitJournalEntryDto> CreateAsync(CreateUnitJournalEntryDto dto, CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(dto);
+
             var entryNumber = await GenerateEntryNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
-
-            // Get current fiscal period if not specified
-            Guid fiscalPeriodId;
-            Guid fiscalYearId;
-            if (dto.FiscalPeriodId.HasValue)
-            {
-                var period = await _unitOfWork.Repository<FiscalPeriod>()
-                    .FirstOrDefaultAsync(p => p.TenantId == TenantId && p.Id == dto.FiscalPeriodId.Value && !p.IsDeleted);
-                if (period == null)
-                    throw new ArgumentException($"Fiscal period with ID '{dto.FiscalPeriodId}' not found.");
-                fiscalPeriodId = period.Id;
-                fiscalYearId = period.FiscalYearId;
-            }
-            else
-            {
-                // Find current open period
-                var currentPeriod = await _unitOfWork.Repository<FiscalPeriod>()
-                    .FirstOrDefaultAsync(p => p.TenantId == TenantId && p.IsOpen && !p.IsDeleted);
-                if (currentPeriod == null)
-                    throw new InvalidOperationException("No open fiscal period found.");
-                fiscalPeriodId = currentPeriod.Id;
-                fiscalYearId = currentPeriod.FiscalYearId;
-            }
+            var period = await ResolvePostingPeriodAsync(dto.EntryDate, dto.FiscalPeriodId, requireOpenPeriod: true, cancellationToken);
+            await ValidateCreateLinesAsync(dto.Lines, cancellationToken);
 
             var entry = new UnitJournalEntry
             {
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 EntryNumber = entryNumber,
-                EntryDate = dto.EntryDate,
-                Description = dto.Description,
-                SourceDocument = dto.SourceDocument,
-                FiscalPeriodId = fiscalPeriodId,
-                FiscalYearId = fiscalYearId,
+                EntryDate = dto.EntryDate.Date,
+                Description = NormalizeOptional(dto.Description),
+                SourceDocument = NormalizeOptional(dto.SourceDocument),
+                FiscalPeriodId = period.Id,
+                FiscalYearId = period.FiscalYearId,
                 Status = UnitJournalEntryStatus.Draft,
                 CreatedAt = now,
                 CreatedBy = UserName
             };
-
-            var unitAccountIds = dto.Lines.Select(line => line.UnitAccountId).Distinct().ToList();
-            var validUnitAccountCount = await _unitOfWork.Repository<UnitAccount>()
-                .GetQueryable(a => a.TenantId == TenantId && unitAccountIds.Contains(a.Id) && !a.IsDeleted)
-                .CountAsync(cancellationToken);
-            if (validUnitAccountCount != unitAccountIds.Count)
-                throw new ArgumentException("One or more unit journal line accounts were not found for the current tenant.");
 
             await _unitOfWork.Repository<UnitJournalEntry>().AddAsync(entry);
 
@@ -187,7 +162,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     LineNumber = lineNumber++,
                     UnitAccountId = lineDto.UnitAccountId,
                     Quantity = lineDto.Quantity,
-                    Description = lineDto.Description,
+                    Description = NormalizeOptional(lineDto.Description),
                     CreatedAt = now,
                     CreatedBy = UserName
                 };
@@ -211,8 +186,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (entry == null)
                 throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
 
-            if (entry.Status != UnitJournalEntryStatus.Draft)
-                throw new InvalidOperationException("Only draft entries can be modified.");
+            if (entry.Status is not (UnitJournalEntryStatus.Draft or UnitJournalEntryStatus.Rejected))
+                throw new InvalidOperationException("Only draft or rejected entries can be modified.");
 
             entry.Description = dto.Description ?? entry.Description;
             entry.SourceDocument = dto.SourceDocument ?? entry.SourceDocument;
@@ -235,8 +210,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (entry == null)
                 return;
 
-            if (entry.Status != UnitJournalEntryStatus.Draft)
-                throw new InvalidOperationException("Only draft entries can be deleted.");
+            if (entry.Status is not (UnitJournalEntryStatus.Draft or UnitJournalEntryStatus.Rejected))
+                throw new InvalidOperationException("Only draft or rejected entries can be deleted.");
 
             entry.IsDeleted = true;
             entry.DeletedAt = DateTime.UtcNow;
@@ -258,13 +233,15 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (entry == null)
                 throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
 
-            if (entry.Status != UnitJournalEntryStatus.Draft)
-                throw new InvalidOperationException("Only draft entries can be submitted for approval.");
+            if (entry.Status is not (UnitJournalEntryStatus.Draft or UnitJournalEntryStatus.Rejected))
+                throw new InvalidOperationException("Only draft or rejected entries can be submitted for approval.");
 
-            if (!entry.Lines.Any(l => !l.IsDeleted))
-                throw new InvalidOperationException("Cannot submit an entry with no lines.");
+            await ValidateEntryReadyForPostingAsync(entry, requireOpenPeriod: true, cancellationToken);
 
+            var previousStatus = entry.Status;
+            var previousRejectionReason = entry.RejectionReason;
             entry.Status = UnitJournalEntryStatus.PendingApproval;
+            entry.RejectionReason = null;
             entry.UpdatedAt = DateTime.UtcNow;
             entry.UpdatedBy = UserName;
 
@@ -274,7 +251,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             var workflowResult = await _workflowService.StartApprovalWorkflowAsync("UnitJournalEntry", id);
             if (!workflowResult.Success)
             {
-                entry.Status = UnitJournalEntryStatus.Draft;
+                entry.Status = previousStatus;
+                entry.RejectionReason = previousRejectionReason;
                 entry.UpdatedAt = DateTime.UtcNow;
                 entry.UpdatedBy = UserName;
                 await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
@@ -383,142 +361,161 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitJournalEntryDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            var entry = await _unitOfWork.Repository<UnitJournalEntry>()
-                .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
-                .Include(e => e.Lines)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (entry == null)
-                throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
-
-            if (entry.Status != UnitJournalEntryStatus.Approved)
-                throw new InvalidOperationException("Only approved entries can be posted.");
-
-            // Update account balances
-            foreach (var line in entry.Lines.Where(l => !l.IsDeleted))
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                var account = await _unitOfWork.Repository<UnitAccount>()
-                    .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == line.UnitAccountId && !a.IsDeleted);
-
-                if (account != null)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
                 {
-                    account.CurrentBalance += line.Quantity;
-                    account.UpdatedAt = DateTime.UtcNow;
-                    account.UpdatedBy = "system";
-                    await _unitOfWork.Repository<UnitAccount>().UpdateAsync(account);
+                    var entry = await _unitOfWork.Repository<UnitJournalEntry>()
+                        .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
+                        .Include(e => e.Lines)
+                        .FirstOrDefaultAsync(cancellationToken);
+
+                    if (entry == null)
+                        throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
+
+                    if (entry.Status != UnitJournalEntryStatus.Approved)
+                        throw new InvalidOperationException("Only approved entries can be posted.");
+
+                    var period = await ValidateEntryReadyForPostingAsync(entry, requireOpenPeriod: true, cancellationToken);
+                    var now = DateTime.UtcNow;
+                    await ApplyUnitBalanceMovementsAsync(period, entry.Lines.Where(l => !l.IsDeleted), now, cancellationToken);
+
+                    entry.Status = UnitJournalEntryStatus.Posted;
+                    entry.PostedAt = now;
+                    entry.PostedBy = UserId;
+                    entry.PostedByName = UserName;
+                    entry.UpdatedAt = now;
+                    entry.UpdatedBy = UserName;
+
+                    await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    _logger.LogInformation("Unit journal entry {EntryNumber} posted by {User}", entry.EntryNumber, UserName);
+
+                    return MapToDto(entry);
                 }
-            }
-
-            entry.Status = UnitJournalEntryStatus.Posted;
-            entry.PostedAt = DateTime.UtcNow;
-            entry.PostedBy = UserId;
-            entry.PostedByName = UserName;
-            entry.UpdatedAt = DateTime.UtcNow;
-            entry.UpdatedBy = UserName;
-
-            await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Unit journal entry {EntryNumber} posted by {User}", entry.EntryNumber, UserName);
-
-            return MapToDto(entry);
+                catch
+                {
+                    await TryRollbackAsync(cancellationToken);
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         public async Task<UnitJournalEntryDto> ReverseAsync(Guid id, string reason, CancellationToken cancellationToken = default)
         {
-            var original = await _unitOfWork.Repository<UnitJournalEntry>()
-                .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
-                .Include(e => e.Lines)
-                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A reversal reason is required.", nameof(reason));
 
-            if (original == null)
-                throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
-
-            if (original.Status != UnitJournalEntryStatus.Posted)
-                throw new InvalidOperationException("Only posted entries can be reversed.");
-
-            var now = DateTime.UtcNow;
-            var reversalNumber = await GenerateEntryNumberAsync(cancellationToken);
-
-            // Create reversal entry
-            var reversal = new UnitJournalEntry
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                Id = Guid.NewGuid(),
-                TenantId = TenantId,
-                EntryNumber = reversalNumber,
-                EntryDate = now,
-                Description = $"Reversal of {original.EntryNumber}: {reason}",
-                FiscalYearId = original.FiscalYearId,
-                FiscalPeriodId = original.FiscalPeriodId,
-                Status = UnitJournalEntryStatus.Posted,
-                IsReversal = true,
-                ReversedEntryId = original.Id,
-                ReversalReason = reason,
-                PostedAt = now,
-                PostedBy = UserId,
-                PostedByName = UserName,
-                CreatedAt = now,
-                CreatedBy = UserName
-            };
-
-            await _unitOfWork.Repository<UnitJournalEntry>().AddAsync(reversal);
-
-            // Create reversed lines and update balances
-            int lineNumber = 1;
-            foreach (var origLine in original.Lines.Where(l => !l.IsDeleted))
-            {
-                // Reverse quantity
-                var reversalLine = new UnitJournalEntryLine
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
                 {
-                    Id = Guid.NewGuid(),
-                    TenantId = TenantId,
-                    UnitJournalEntryId = reversal.Id,
-                    LineNumber = lineNumber++,
-                    UnitAccountId = origLine.UnitAccountId,
-                    Quantity = -origLine.Quantity,
-                    Description = $"Reversal: {origLine.Description}",
-                    CreatedAt = now,
-                    CreatedBy = UserName
-                };
-                await _unitOfWork.Repository<UnitJournalEntryLine>().AddAsync(reversalLine);
+                    var original = await _unitOfWork.Repository<UnitJournalEntry>()
+                        .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
+                        .Include(e => e.Lines)
+                        .FirstOrDefaultAsync(cancellationToken);
 
-                // Update account balance
-                var account = await _unitOfWork.Repository<UnitAccount>()
-                    .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == origLine.UnitAccountId && !a.IsDeleted);
+                    if (original == null)
+                        throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
 
-                if (account != null)
-                {
-                    account.CurrentBalance -= origLine.Quantity;
-                    account.UpdatedAt = now;
-                    account.UpdatedBy = "system";
-                    await _unitOfWork.Repository<UnitAccount>().UpdateAsync(account);
+                    if (original.Status != UnitJournalEntryStatus.Posted)
+                        throw new InvalidOperationException("Only posted entries can be reversed.");
+
+                    if (original.ReversalEntryId.HasValue)
+                        throw new InvalidOperationException("This unit journal entry has already been reversed.");
+
+                    var now = DateTime.UtcNow;
+                    var reversalNumber = await GenerateEntryNumberAsync(cancellationToken);
+                    var reversalPeriod = await ResolvePostingPeriodAsync(now.Date, null, requireOpenPeriod: true, cancellationToken);
+
+                    // Reversals are posted into the currently open period instead of mutating a closed historical period.
+                    var reversal = new UnitJournalEntry
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = TenantId,
+                        EntryNumber = reversalNumber,
+                        EntryDate = now.Date,
+                        Description = $"Reversal of {original.EntryNumber}: {reason.Trim()}",
+                        SourceDocument = original.EntryNumber,
+                        FiscalYearId = reversalPeriod.FiscalYearId,
+                        FiscalPeriodId = reversalPeriod.Id,
+                        Status = UnitJournalEntryStatus.Posted,
+                        IsReversal = true,
+                        ReversedEntryId = original.Id,
+                        ReversalReason = reason.Trim(),
+                        PostedAt = now,
+                        PostedBy = UserId,
+                        PostedByName = UserName,
+                        CreatedAt = now,
+                        CreatedBy = UserName
+                    };
+
+                    await _unitOfWork.Repository<UnitJournalEntry>().AddAsync(reversal);
+
+                    var reversalLines = new List<UnitJournalEntryLine>();
+                    int lineNumber = 1;
+                    foreach (var origLine in original.Lines.Where(l => !l.IsDeleted).OrderBy(l => l.LineNumber))
+                    {
+                        var reversalLine = new UnitJournalEntryLine
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = TenantId,
+                            UnitJournalEntryId = reversal.Id,
+                            LineNumber = lineNumber++,
+                            UnitAccountId = origLine.UnitAccountId,
+                            Quantity = -origLine.Quantity,
+                            Description = $"Reversal: {NormalizeOptional(origLine.Description) ?? original.EntryNumber}",
+                            CreatedAt = now,
+                            CreatedBy = UserName
+                        };
+                        reversalLines.Add(reversalLine);
+                        await _unitOfWork.Repository<UnitJournalEntryLine>().AddAsync(reversalLine);
+                    }
+
+                    await ValidateJournalLinesAsync(reversalLines, cancellationToken);
+                    await ApplyUnitBalanceMovementsAsync(reversalPeriod, reversalLines, now, cancellationToken);
+
+                    original.Status = UnitJournalEntryStatus.Reversed;
+                    original.ReversalEntryId = reversal.Id;
+                    original.UpdatedAt = now;
+                    original.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(original);
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    _logger.LogInformation("Unit journal entry {EntryNumber} reversed by {User}. Reversal: {ReversalNumber}",
+                        original.EntryNumber, UserName, reversalNumber);
+
+                    return MapToDto(reversal);
                 }
-            }
-
-            // Mark original as reversed
-            original.Status = UnitJournalEntryStatus.Reversed;
-            original.ReversalEntryId = reversal.Id;
-            original.UpdatedAt = now;
-            original.UpdatedBy = UserName;
-            await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(original);
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Unit journal entry {EntryNumber} reversed by {User}. Reversal: {ReversalNumber}", 
-                original.EntryNumber, UserName, reversalNumber);
-
-            return MapToDto(reversal);
+                catch
+                {
+                    await TryRollbackAsync(cancellationToken);
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         public async Task<bool> ValidateEntryAsync(Guid id, CancellationToken cancellationToken = default)
         {
             var entry = await _unitOfWork.Repository<UnitJournalEntry>()
-                .GetQueryable(e => e.Id == id && !e.IsDeleted)
+                .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
                 .Include(e => e.Lines)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (entry == null) return false;
-            return entry.Lines.Any(l => !l.IsDeleted);
+            try
+            {
+                await ValidateEntryReadyForPostingAsync(entry, requireOpenPeriod: false, cancellationToken);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public async Task<string> GenerateEntryNumberAsync(CancellationToken cancellationToken = default)
@@ -530,6 +527,257 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 DateTime.UtcNow,
                 nameof(UnitJournalEntry),
                 cancellationToken: cancellationToken);
+        }
+
+        private async Task<FiscalPeriod> ResolvePostingPeriodAsync(
+            DateTime entryDate,
+            Guid? fiscalPeriodId,
+            bool requireOpenPeriod,
+            CancellationToken cancellationToken)
+        {
+            var normalizedDate = entryDate.Date;
+            IQueryable<FiscalPeriod> query = _unitOfWork.Repository<FiscalPeriod>()
+                .GetQueryable(p => p.TenantId == TenantId && !p.IsDeleted);
+
+            query = fiscalPeriodId.HasValue
+                ? query.Where(p => p.Id == fiscalPeriodId.Value)
+                : query.Where(p => p.StartDate <= normalizedDate && p.EndDate >= normalizedDate);
+
+            var period = await query
+                .OrderBy(p => p.StartDate)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (period == null)
+            {
+                throw fiscalPeriodId.HasValue
+                    ? new ArgumentException($"Fiscal period with ID '{fiscalPeriodId}' not found.")
+                    : new InvalidOperationException("No fiscal period was found for the unit journal entry date.");
+            }
+
+            if (normalizedDate < period.StartDate.Date || normalizedDate > period.EndDate.Date)
+                throw new InvalidOperationException("Unit journal entry date does not fall inside the selected fiscal period.");
+
+            if (requireOpenPeriod && (!period.IsOpen || period.IsClosed || period.IsLocked))
+                throw new InvalidOperationException("Unit journal posting period is not open.");
+
+            return period;
+        }
+
+        private async Task ValidateCreateLinesAsync(
+            IReadOnlyCollection<CreateUnitJournalEntryLineDto> lines,
+            CancellationToken cancellationToken)
+        {
+            if (lines == null || lines.Count == 0)
+                throw new InvalidOperationException("At least one unit journal line is required.");
+
+            if (lines.Any(l => l.UnitAccountId == Guid.Empty))
+                throw new InvalidOperationException("Each unit journal line must have a unit account.");
+
+            if (lines.Any(l => l.Quantity == 0m))
+                throw new InvalidOperationException("Unit journal line quantities cannot be zero.");
+
+            await ValidateLineAccountsAsync(lines.Select(l => l.UnitAccountId).Distinct().ToList(), cancellationToken);
+        }
+
+        private async Task<FiscalPeriod> ValidateEntryReadyForPostingAsync(
+            UnitJournalEntry entry,
+            bool requireOpenPeriod,
+            CancellationToken cancellationToken)
+        {
+            var lines = entry.Lines.Where(l => !l.IsDeleted).ToList();
+            if (lines.Count == 0)
+                throw new InvalidOperationException("Cannot process a unit journal entry with no lines.");
+
+            await ValidateJournalLinesAsync(lines, cancellationToken);
+            return await ResolvePostingPeriodAsync(entry.EntryDate, entry.FiscalPeriodId, requireOpenPeriod, cancellationToken);
+        }
+
+        private async Task ValidateJournalLinesAsync(
+            IReadOnlyCollection<UnitJournalEntryLine> lines,
+            CancellationToken cancellationToken)
+        {
+            if (lines.Any(l => l.UnitAccountId == Guid.Empty))
+                throw new InvalidOperationException("Each unit journal line must have a unit account.");
+
+            if (lines.Any(l => l.Quantity == 0m))
+                throw new InvalidOperationException("Unit journal line quantities cannot be zero.");
+
+            await ValidateLineAccountsAsync(lines.Select(l => l.UnitAccountId).Distinct().ToList(), cancellationToken);
+        }
+
+        private async Task ValidateLineAccountsAsync(
+            IReadOnlyCollection<Guid> unitAccountIds,
+            CancellationToken cancellationToken)
+        {
+            var accounts = await _unitOfWork.Repository<UnitAccount>()
+                .GetQueryable(a => a.TenantId == TenantId && unitAccountIds.Contains(a.Id) && !a.IsDeleted)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.AccountNumber,
+                    a.IsActive,
+                    a.IsPostingAccount,
+                    HasChildren = a.ChildAccounts.Any(c => !c.IsDeleted)
+                })
+                .ToListAsync(cancellationToken);
+
+            if (accounts.Count != unitAccountIds.Count)
+                throw new ArgumentException("One or more unit journal line accounts were not found for the current tenant.");
+
+            var inactive = accounts.FirstOrDefault(a => !a.IsActive);
+            if (inactive != null)
+                throw new InvalidOperationException($"Unit account '{inactive.AccountNumber}' is inactive and cannot receive postings.");
+
+            var nonPosting = accounts.FirstOrDefault(a => !a.IsPostingAccount || a.HasChildren);
+            if (nonPosting != null)
+                throw new InvalidOperationException($"Unit account '{nonPosting.AccountNumber}' is a summary account and cannot receive direct postings.");
+        }
+
+        private async Task ApplyUnitBalanceMovementsAsync(
+            FiscalPeriod period,
+            IEnumerable<UnitJournalEntryLine> sourceLines,
+            DateTime now,
+            CancellationToken cancellationToken)
+        {
+            var deltas = sourceLines
+                .Where(l => !l.IsDeleted)
+                .GroupBy(l => l.UnitAccountId)
+                .Select(g => new { UnitAccountId = g.Key, Quantity = g.Sum(l => l.Quantity) })
+                .Where(g => g.Quantity != 0m)
+                .ToList();
+
+            foreach (var delta in deltas)
+            {
+                await ApplyBalanceDeltaToAccountAndParentsAsync(
+                    delta.UnitAccountId,
+                    period,
+                    delta.Quantity,
+                    now,
+                    cancellationToken);
+            }
+        }
+
+        private async Task ApplyBalanceDeltaToAccountAndParentsAsync(
+            Guid unitAccountId,
+            FiscalPeriod period,
+            decimal quantityDelta,
+            DateTime now,
+            CancellationToken cancellationToken)
+        {
+            var visitedAccountIds = new HashSet<Guid>();
+            Guid? currentAccountId = unitAccountId;
+
+            while (currentAccountId.HasValue)
+            {
+                if (!visitedAccountIds.Add(currentAccountId.Value))
+                    throw new InvalidOperationException("Unit account hierarchy contains a cycle.");
+
+                var account = await _unitOfWork.Repository<UnitAccount>()
+                    .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == currentAccountId.Value && !a.IsDeleted);
+
+                if (account == null)
+                    throw new ArgumentException("One or more unit journal line accounts were not found for the current tenant.");
+
+                account.CurrentBalance += quantityDelta;
+                account.UpdatedAt = now;
+                account.UpdatedBy = UserName;
+                await _unitOfWork.Repository<UnitAccount>().UpdateAsync(account);
+
+                await ApplyPeriodBalanceDeltaAsync(account.Id, period, quantityDelta, now, cancellationToken);
+                currentAccountId = account.ParentAccountId;
+            }
+        }
+
+        private async Task ApplyPeriodBalanceDeltaAsync(
+            Guid unitAccountId,
+            FiscalPeriod period,
+            decimal quantityDelta,
+            DateTime now,
+            CancellationToken cancellationToken)
+        {
+            var balance = await _unitOfWork.Repository<UnitAccountBalance>()
+                .FirstOrDefaultAsync(b => b.TenantId == TenantId
+                    && b.UnitAccountId == unitAccountId
+                    && b.FiscalPeriodId == period.Id
+                    && !b.IsDeleted);
+
+            if (balance == null)
+            {
+                var openingBalance = await GetPriorClosingBalanceAsync(unitAccountId, period, cancellationToken);
+                balance = new UnitAccountBalance
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    UnitAccountId = unitAccountId,
+                    FiscalYearId = period.FiscalYearId,
+                    FiscalPeriodId = period.Id,
+                    OpeningBalance = openingBalance,
+                    PeriodActivity = 0m,
+                    ClosingBalance = openingBalance,
+                    CreatedAt = now,
+                    CreatedBy = UserName
+                };
+                await _unitOfWork.Repository<UnitAccountBalance>().AddAsync(balance);
+            }
+
+            balance.PeriodActivity += quantityDelta;
+            balance.ClosingBalance = balance.OpeningBalance + balance.PeriodActivity;
+            balance.UpdatedAt = now;
+            balance.UpdatedBy = UserName;
+            await _unitOfWork.Repository<UnitAccountBalance>().UpdateAsync(balance);
+
+            // If an adjustment is posted into an earlier open period, later period snapshots must carry the same delta forward.
+            var futureBalances = await _unitOfWork.Repository<UnitAccountBalance>()
+                .GetQueryable(b => b.TenantId == TenantId
+                    && b.UnitAccountId == unitAccountId
+                    && b.FiscalPeriodId != period.Id
+                    && !b.IsDeleted)
+                .Include(b => b.FiscalPeriod)
+                .Where(b => b.FiscalPeriod!.StartDate > period.StartDate)
+                .OrderBy(b => b.FiscalPeriod!.StartDate)
+                .ToListAsync(cancellationToken);
+
+            foreach (var futureBalance in futureBalances)
+            {
+                futureBalance.OpeningBalance += quantityDelta;
+                futureBalance.ClosingBalance += quantityDelta;
+                futureBalance.UpdatedAt = now;
+                futureBalance.UpdatedBy = UserName;
+                await _unitOfWork.Repository<UnitAccountBalance>().UpdateAsync(futureBalance);
+            }
+        }
+
+        private async Task<decimal> GetPriorClosingBalanceAsync(
+            Guid unitAccountId,
+            FiscalPeriod period,
+            CancellationToken cancellationToken)
+        {
+            var priorBalance = await _unitOfWork.Repository<UnitAccountBalance>()
+                .GetQueryable(b => b.TenantId == TenantId
+                    && b.UnitAccountId == unitAccountId
+                    && !b.IsDeleted)
+                .Include(b => b.FiscalPeriod)
+                .Where(b => b.FiscalPeriod!.EndDate < period.StartDate)
+                .OrderByDescending(b => b.FiscalPeriod!.EndDate)
+                .Select(b => (decimal?)b.ClosingBalance)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return priorBalance ?? 0m;
+        }
+
+        private static string? NormalizeOptional(string? value)
+            => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        private async Task TryRollbackAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                // CommitAsync already rolls back and clears the active transaction when SaveChanges fails.
+            }
         }
 
         private UnitJournalEntryDto MapToDto(UnitJournalEntry entry)

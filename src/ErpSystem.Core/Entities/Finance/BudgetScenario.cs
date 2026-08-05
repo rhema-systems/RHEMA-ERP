@@ -39,7 +39,7 @@ public class BudgetScenario : TenantEntity
 
     /// <summary>
     /// Status of the overall budget scenario.
-    /// Values: Draft, Open, Locked, Archived.
+    /// Values: Draft, Collecting, InReview, Approved, Superseded, Archived.
     /// </summary>
     [Required]
     [MaxLength(20)]
@@ -51,6 +51,44 @@ public class BudgetScenario : TenantEntity
     public DateTime? LockedDate { get; set; }
 
     public Guid? LockedByUserId { get; set; }
+
+    [ForeignKey(nameof(LockedByUserId))]
+    public virtual ApplicationUser? LockedByUser { get; set; }
+
+    /// <summary>
+    /// Date and time when this approved scenario was explicitly adopted as the
+    /// official reporting baseline.
+    /// </summary>
+    public DateTime? AdoptedAt { get; set; }
+
+    /// <summary>
+    /// Business-effective date of the official budget adoption.
+    /// </summary>
+    public DateTime? AdoptionEffectiveDate { get; set; }
+
+    public Guid? AdoptedByUserId { get; set; }
+
+    [ForeignKey(nameof(AdoptedByUserId))]
+    public virtual ApplicationUser? AdoptedByUser { get; set; }
+
+    [MaxLength(1000)]
+    public string? AdoptionReason { get; set; }
+
+    /// <summary>
+    /// Populated when another approved scenario replaces this one as the official baseline.
+    /// </summary>
+    public DateTime? SupersededAt { get; set; }
+
+    public Guid? SupersededByUserId { get; set; }
+
+    [ForeignKey(nameof(SupersededByUserId))]
+    public virtual ApplicationUser? SupersededByUser { get; set; }
+
+    [MaxLength(1000)]
+    public string? SupersessionReason { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public virtual ICollection<BudgetReturn> BudgetReturns { get; set; } = new List<BudgetReturn>();
 }

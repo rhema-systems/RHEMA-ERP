@@ -179,6 +179,20 @@ export interface WorkflowApprovalConfigDto {
   requireDistinctApprovers: boolean;
   conflictRules: WorkflowApprovalConflictRuleDto[];
   signaturePolicy?: WorkflowSignaturePolicyDto;
+  evidenceRequirements?: WorkflowEvidenceRequirementDto[];
+  allowEvidenceException?: boolean;
+  evidenceExceptionApproverRole?: string;
+  minimumExceptionReasonLength?: number;
+  requiresManagingDirectorApproval?: boolean;
+  managingDirectorApproverRole?: string;
+}
+
+export interface WorkflowEvidenceRequirementDto {
+  requirementKey: string;
+  documentName: string;
+  documentType?: string;
+  minimumDocuments: number;
+  requireVerification: boolean;
 }
 
 export enum WorkflowSignatureMethod { Attestation = 0, DigitalCertificate = 1, ExternalProvider = 2 }

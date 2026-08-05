@@ -67,8 +67,10 @@ export function CustomerTransactionHistory({ customerId }: CustomerTransactionHi
             id: pay.id,
             date: new Date(pay.paymentDate),
             type: 'Payment' as const,
-            reference: pay.paymentReference,
-            amount: pay.amount,
+            // paymentNumber is the canonical AR receipt reference. The optional legacy aliases
+            // remain fallbacks for older API projections while the application is still in dev.
+            reference: pay.paymentNumber || pay.paymentReference || pay.referenceNumber || pay.id,
+            amount: pay.totalAmount ?? pay.amount,
             status: pay.status,
             currencyCode: pay.currencyCode
         }))

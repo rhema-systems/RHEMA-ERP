@@ -1,7 +1,7 @@
 'use client';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileText, TrendingUp, TrendingDown, AlertCircle, Calculator } from 'lucide-react';
+import { FileText, TrendingUp, TrendingDown, AlertCircle, Calculator, Send } from 'lucide-react';
 import Link from 'next/link';
 
 export default function TaxReportsPage() {
@@ -79,7 +79,7 @@ export default function TaxReportsPage() {
             {/* Withholding Tax Reports */}
             <div>
                 <h2 className="text-xl font-semibold mb-4">Withholding Tax Reports</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Link href="/finance/tax/reports/withholding-tax">
                         <Card className="hover:bg-accent cursor-pointer transition-colors h-full">
                             <CardHeader>
@@ -113,6 +113,23 @@ export default function TaxReportsPage() {
                             <CardContent>
                                 <p className="text-sm text-muted-foreground">
                                     Generate and print AP withholding tax certificates from posted supplier payments
+                                </p>
+                            </CardContent>
+                        </Card>
+                    </Link>
+
+                    <Link href="/finance/tax/reports/wht-remittances">
+                        <Card className="hover:bg-accent cursor-pointer transition-colors h-full">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <Send className="h-5 w-5 text-blue-600" />
+                                    WHT Remittances
+                                </CardTitle>
+                                <CardDescription>Track submission and payment evidence</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-sm text-muted-foreground">
+                                    Group posted WHT liabilities, retain GRA references, and monitor statutory settlement status
                                 </p>
                             </CardContent>
                         </Card>

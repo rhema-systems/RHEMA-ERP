@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -17,6 +18,7 @@ public class CustomerService : ICustomerService
     private readonly ICurrentUserService _currentUser;
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ISubledgerSettlementReadModelService _settlementReadModelService;
+    private readonly IFinanceAccessScopeService _financeAccessScopeService;
     private readonly ILogger<CustomerService> _logger;
 
     public CustomerService(
@@ -24,12 +26,14 @@ public class CustomerService : ICustomerService
         ICurrentUserService currentUser,
         IDocumentNumberingService documentNumberingService,
         ISubledgerSettlementReadModelService settlementReadModelService,
+        IFinanceAccessScopeService financeAccessScopeService,
         ILogger<CustomerService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _documentNumberingService = documentNumberingService;
         _settlementReadModelService = settlementReadModelService;
+        _financeAccessScopeService = financeAccessScopeService;
         _logger = logger;
     }
 
@@ -322,7 +326,19 @@ public class CustomerService : ICustomerService
     {
         var partner = await EnsureCustomerExistsAsync(customerId, cancellationToken);
 
-        var payments = await GetCustomerPaymentsQuery(customerId)
+        var paymentsQuery = GetCustomerPaymentsQuery(customerId);
+        var permittedBankAccountIds = await _financeAccessScopeService
+            .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
+        if (permittedBankAccountIds != null)
+        {
+            // This customer-centric route must not become a side door around the receipt list's
+            // bank scope. Liquidity-held receipts remain tenant-wide only until that dimension is assignable.
+            paymentsQuery = paymentsQuery.Where(payment =>
+                payment.BankAccountId.HasValue &&
+                permittedBankAccountIds.Contains(payment.BankAccountId.Value));
+        }
+
+        var payments = await paymentsQuery
             .Include(p => p.Allocations)
             .ThenInclude(a => a.Invoice)
             .Include(p => p.BankAccount)
@@ -541,6 +557,14 @@ public class CustomerService : ICustomerService
             ClearedDate = payment.ClearedDate,
             IsCreditNote = payment.IsCreditNote,
             JournalEntryId = payment.JournalEntryId,
+            ReversalJournalEntryId = payment.ReversalJournalEntryId,
+            ReversalPostingEventId = payment.ReversalPostingEventId,
+            ReversalCashTransactionId = payment.ReversalCashTransactionId,
+            ReversalLiquidityAccountEntryId = payment.ReversalLiquidityAccountEntryId,
+            ReversalDate = payment.ReversalDate,
+            ReversedAt = payment.ReversedAt,
+            ReversedById = payment.ReversedById,
+            ReversalReason = payment.ReversalReason,
             Allocations = payment.Allocations.Select(a => new PaymentAllocationDto
             {
                 Id = a.Id,
@@ -552,7 +576,8 @@ public class CustomerService : ICustomerService
                 DiscountAmount = a.DiscountAmount,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
-                IsReversal = a.IsReversal
+                IsReversal = a.IsReversal,
+                OriginalAllocationId = a.OriginalAllocationId
             }).ToList(),
             CreatedAt = payment.CreatedAt
         };

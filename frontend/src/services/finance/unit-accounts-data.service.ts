@@ -20,6 +20,12 @@ import type {
     CreateBudgetDto,
     UpdateBudgetDto,
     CreateAllocationRuleDto,
+    UpdateAllocationRuleDto,
+    RunAllocationDto,
+    AllocationRunResult,
+    AllocationRunBatch,
+    AllocationRunBatchStatus,
+    CreateAllocationRunBatchDto,
     AllocationType,
 } from '@/types/unit-accounts';
 import { apiService } from '@/services/api.service';
@@ -64,13 +70,25 @@ class UnitAccountsDataService {
         isActive?: boolean;
         isPostingAccount?: boolean;
     }): Promise<UnitAccount[]> {
-        const queryParams = new URLSearchParams();
-        if (filters?.unitTypeId) queryParams.append('unitTypeId', filters.unitTypeId);
-        if (filters?.isActive !== undefined) queryParams.append('isActive', String(filters.isActive));
-        if (filters?.isPostingAccount !== undefined) queryParams.append('isPostingAccount', String(filters.isPostingAccount));
+        let accounts: UnitAccount[];
 
-        const endpoint = `/finance/unit-accounts${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<UnitAccount[]>(endpoint);
+        if (filters?.unitTypeId) {
+            accounts = await apiService.get<UnitAccount[]>(`/finance/unit-accounts/by-type/${filters.unitTypeId}`);
+        } else if (filters?.isPostingAccount) {
+            accounts = await apiService.get<UnitAccount[]>('/finance/unit-accounts/posting');
+        } else {
+            accounts = await apiService.get<UnitAccount[]>('/finance/unit-accounts');
+        }
+
+        // The backend exposes purpose-built routes rather than query filters here.
+        // Keep the remaining filters client-side so callers get a stable service contract.
+        return accounts.filter((account) => {
+            const matchesPosting =
+                filters?.isPostingAccount === undefined || account.isPostingAccount === filters.isPostingAccount;
+            const matchesActive =
+                filters?.isActive === undefined || account.isActive === filters.isActive;
+            return matchesPosting && matchesActive;
+        });
     }
 
     async getUnitAccountById(id: string): Promise<UnitAccount> {
@@ -95,18 +113,27 @@ class UnitAccountsDataService {
         startDate?: string;
         endDate?: string;
         status?: string;
+        fiscalPeriodId?: string;
     }): Promise<UnitJournalEntry[]> {
         const queryParams = new URLSearchParams();
         if (filters?.startDate) queryParams.append('startDate', filters.startDate);
         if (filters?.endDate) queryParams.append('endDate', filters.endDate);
         if (filters?.status) queryParams.append('status', filters.status);
+        if (filters?.fiscalPeriodId) queryParams.append('fiscalPeriodId', filters.fiscalPeriodId);
 
-        const endpoint = `/finance/unit-journal-entries${queryParams.toString() ? `?${queryParams}` : ''}`;
+        const basePath = queryParams.toString()
+            ? '/finance/unit-journal-entries/filter'
+            : '/finance/unit-journal-entries';
+        const endpoint = `${basePath}${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<UnitJournalEntry[]>(endpoint);
     }
 
     async getUnitJournalEntryById(id: string): Promise<UnitJournalEntry> {
         return apiService.get<UnitJournalEntry>(`/finance/unit-journal-entries/${id}`);
+    }
+
+    async getPendingUnitJournalApprovals(): Promise<UnitJournalEntry[]> {
+        return apiService.get<UnitJournalEntry[]>('/finance/unit-journal-entries/pending-approval');
     }
 
     async createUnitJournalEntry(dto: CreateUnitJournalEntryDto): Promise<UnitJournalEntry> {
@@ -115,6 +142,22 @@ class UnitAccountsDataService {
 
     async postUnitJournalEntry(id: string): Promise<UnitJournalEntry> {
         return apiService.post<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/post`, {});
+    }
+
+    async submitUnitJournalEntry(id: string): Promise<UnitJournalEntry> {
+        return apiService.post<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/submit`, {});
+    }
+
+    async approveUnitJournalEntry(id: string): Promise<UnitJournalEntry> {
+        return apiService.post<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/approve`, {});
+    }
+
+    async rejectUnitJournalEntry(id: string, reason: string): Promise<UnitJournalEntry> {
+        return apiService.post<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/reject`, { reason });
+    }
+
+    async reverseUnitJournalEntry(id: string, reason: string): Promise<UnitJournalEntry> {
+        return apiService.post<UnitJournalEntry>(`/finance/unit-journal-entries/${id}/reverse`, { reason });
     }
 
     async deleteUnitJournalEntry(id: string): Promise<void> {
@@ -133,13 +176,19 @@ class UnitAccountsDataService {
         fiscalYearId?: string;
         fiscalPeriodId?: string;
     }): Promise<UnitAccountBalance[]> {
-        const queryParams = new URLSearchParams();
-        if (filters?.unitAccountId) queryParams.append('unitAccountId', filters.unitAccountId);
-        if (filters?.fiscalYearId) queryParams.append('fiscalYearId', filters.fiscalYearId);
-        if (filters?.fiscalPeriodId) queryParams.append('fiscalPeriodId', filters.fiscalPeriodId);
+        if (!filters?.unitAccountId) {
+            throw new Error('unitAccountId is required when loading unit account balances.');
+        }
 
-        const endpoint = `/finance/unit-account-balances${queryParams.toString() ? `?${queryParams}` : ''}`;
-        return apiService.get<UnitAccountBalance[]>(endpoint);
+        const queryParams = new URLSearchParams();
+        if (filters.fiscalYearId) queryParams.append('fiscalYearId', filters.fiscalYearId);
+
+        const endpoint = `/finance/unit-accounts/${filters.unitAccountId}/balances${queryParams.toString() ? `?${queryParams}` : ''}`;
+        const balances = await apiService.get<UnitAccountBalance[]>(endpoint);
+
+        return filters.fiscalPeriodId
+            ? balances.filter((balance) => balance.fiscalPeriodId === filters.fiscalPeriodId)
+            : balances;
     }
 
     // ===== RATIO DEFINITIONS =====
@@ -159,7 +208,18 @@ class UnitAccountsDataService {
     }
 
     async createRatioDefinition(dto: CreateRatioDefinitionDto): Promise<RatioDefinition> {
-        return apiService.post<RatioDefinition>('/finance/ratio-definitions', dto);
+        const payload = {
+            ...dto,
+            numeratorConstantValue: dto.numeratorConstantValue ?? dto.numeratorConstant,
+            denominatorConstantValue: dto.denominatorConstantValue ?? dto.denominatorConstant,
+            formatPrecision: dto.formatPrecision ?? dto.decimalPlaces ?? 2,
+        };
+
+        delete (payload as any).numeratorConstant;
+        delete (payload as any).denominatorConstant;
+        delete (payload as any).decimalPlaces;
+
+        return apiService.post<RatioDefinition>('/finance/ratio-definitions', payload);
     }
 
     async updateRatioDefinition(id: string, dto: Partial<RatioDefinition>): Promise<RatioDefinition> {
@@ -224,7 +284,7 @@ class UnitAccountsDataService {
         return apiService.post<AllocationRule>('/finance/allocations/rules', dto);
     }
 
-    async updateAllocationRule(id: string, dto: Partial<AllocationRule>): Promise<AllocationRule> {
+    async updateAllocationRule(id: string, dto: UpdateAllocationRuleDto): Promise<AllocationRule> {
         return apiService.put<AllocationRule>(`/finance/allocations/rules/${id}`, dto);
     }
 
@@ -232,8 +292,55 @@ class UnitAccountsDataService {
         return apiService.delete(`/finance/allocations/rules/${id}`);
     }
 
-    async executeAllocationRule(id: string): Promise<void> {
-        return apiService.post<void>(`/finance/allocations/rules/${id}/run`, {});
+    async runAllocationRule(id: string, dto: Omit<RunAllocationDto, 'allocationRuleId'>): Promise<AllocationRunResult> {
+        return apiService.post<AllocationRunResult>(`/finance/allocations/rules/${id}/run`, {
+            ...dto,
+            allocationRuleId: id,
+        });
+    }
+
+    async executeAllocationRule(id: string, dto: Omit<RunAllocationDto, 'allocationRuleId'>): Promise<AllocationRunResult> {
+        return this.runAllocationRule(id, dto);
+    }
+
+    async getAllocationRunBatches(filters?: {
+        status?: AllocationRunBatchStatus;
+    }): Promise<AllocationRunBatch[]> {
+        const queryParams = new URLSearchParams();
+        if (filters?.status) queryParams.append('status', filters.status);
+
+        const endpoint = `/finance/allocations/runs${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<AllocationRunBatch[]>(endpoint);
+    }
+
+    async getAllocationRunBatchById(id: string): Promise<AllocationRunBatch> {
+        return apiService.get<AllocationRunBatch>(`/finance/allocations/runs/${id}`);
+    }
+
+    async createAllocationRunBatch(
+        ruleId: string,
+        dto: Omit<CreateAllocationRunBatchDto, 'allocationRuleId'>
+    ): Promise<AllocationRunBatch> {
+        return apiService.post<AllocationRunBatch>(`/finance/allocations/rules/${ruleId}/runs`, {
+            ...dto,
+            allocationRuleId: ruleId,
+        });
+    }
+
+    async submitAllocationRunBatch(id: string, comment?: string): Promise<AllocationRunBatch> {
+        return apiService.post<AllocationRunBatch>(`/finance/allocations/runs/${id}/submit`, { comment });
+    }
+
+    async approveAllocationRunBatch(id: string, comment?: string): Promise<AllocationRunBatch> {
+        return apiService.post<AllocationRunBatch>(`/finance/allocations/runs/${id}/approve`, { comment });
+    }
+
+    async rejectAllocationRunBatch(id: string, reason: string): Promise<AllocationRunBatch> {
+        return apiService.post<AllocationRunBatch>(`/finance/allocations/runs/${id}/reject`, { reason });
+    }
+
+    async postAllocationRunBatch(id: string): Promise<AllocationRunBatch> {
+        return apiService.post<AllocationRunBatch>(`/finance/allocations/runs/${id}/post`, {});
     }
 
     // ===== ALLOCATION TARGETS =====

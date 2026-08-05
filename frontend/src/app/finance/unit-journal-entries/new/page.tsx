@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FileSpreadsheet, Plus, Save, Trash2, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
     Table,
@@ -15,30 +17,14 @@ import {
     TableCell,
     TableHead,
     TableHeader,
-    TableRow
+    TableRow,
 } from '@/components/ui/table';
-import { FileSpreadsheet, Save, X, Plus, Trash2 } from 'lucide-react';
-import Link from 'next/link';
-import { toast } from 'sonner';
-import type { UnitAccount, UnitType } from '@/types/unit-accounts';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 import { useDocumentSequence } from '@/hooks/use-document-sequence';
 import { FinanceDocumentTypes } from '@/types/document-numbering';
-
-// MOCK DATA
-const MOCK_UNIT_TYPES: UnitType[] = [
-    { id: 'ut-1', code: 'EMP', name: 'Employees', decimalPlaces: 0, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ut-2', code: 'SQFT', name: 'Square Footage', decimalPlaces: 2, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ut-3', code: 'HRS', name: 'Hours', decimalPlaces: 2, isActive: true, createdAt: '', createdBy: '' },
-];
-
-const MOCK_ACCOUNTS: UnitAccount[] = [
-    { id: 'ua-2', accountNumber: 'U-1100', name: 'Operations Department', unitTypeId: 'ut-1', unitType: MOCK_UNIT_TYPES[0], accountLevel: 2, isPostingAccount: true, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ua-3', accountNumber: 'U-1200', name: 'Sales Department', unitTypeId: 'ut-1', unitType: MOCK_UNIT_TYPES[0], accountLevel: 2, isPostingAccount: true, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ua-4', accountNumber: 'U-1300', name: 'Admin Department', unitTypeId: 'ut-1', unitType: MOCK_UNIT_TYPES[0], accountLevel: 2, isPostingAccount: true, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ua-6', accountNumber: 'U-2100', name: 'Head Office', unitTypeId: 'ut-2', unitType: MOCK_UNIT_TYPES[1], accountLevel: 2, isPostingAccount: true, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ua-7', accountNumber: 'U-2200', name: 'Branch Offices', unitTypeId: 'ut-2', unitType: MOCK_UNIT_TYPES[1], accountLevel: 2, isPostingAccount: true, isActive: true, createdAt: '', createdBy: '' },
-    { id: 'ua-8', accountNumber: 'U-3000', name: 'Machine Hours', unitTypeId: 'ut-3', unitType: MOCK_UNIT_TYPES[2], accountLevel: 1, isPostingAccount: true, isActive: true, createdAt: '', createdBy: '' },
-];
+import type { FiscalPeriod } from '@/types/finance';
+import type { UnitAccount } from '@/types/unit-accounts';
 
 interface EntryLine {
     id: string;
@@ -47,99 +33,197 @@ interface EntryLine {
     description: string;
 }
 
+function inputDate(value?: string) {
+    if (!value) return '';
+    return value.includes('T') ? value.split('T')[0] : value.slice(0, 10);
+}
+
+function isOpenPeriod(period: FiscalPeriod) {
+    const status = period.status ?? period.periodStatus;
+    return (period.isOpen ?? status === 'Open') && !period.isClosed && !period.isLocked;
+}
+
+function isDateInPeriod(date: string, period?: FiscalPeriod) {
+    if (!date || !period) return false;
+    return date >= inputDate(period.startDate) && date <= inputDate(period.endDate);
+}
+
+function defaultDateForPeriod(period: FiscalPeriod, currentDate: string) {
+    return isDateInPeriod(currentDate, period) ? currentDate : inputDate(period.endDate);
+}
+
 export default function NewUnitJournalEntryPage() {
     const router = useRouter();
+    const entrySequence = useDocumentSequence('Finance', FinanceDocumentTypes.UnitJournalEntry);
+    const today = new Date().toISOString().split('T')[0];
+
     const [formData, setFormData] = useState({
-        entryDate: new Date().toISOString().split('T')[0],
+        entryDate: today,
+        fiscalPeriodId: '',
         description: '',
         sourceDocument: '',
     });
-    const entrySequence = useDocumentSequence('Finance', FinanceDocumentTypes.UnitJournalEntry);
     const [lines, setLines] = useState<EntryLine[]>([
         { id: '1', unitAccountId: '', quantity: '', description: '' },
     ]);
+    const [accounts, setAccounts] = useState<UnitAccount[]>([]);
+    const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [isLoadingLookups, setIsLoadingLookups] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadLookups = async () => {
+            try {
+                setIsLoadingLookups(true);
+                const [postingAccounts, fiscalPeriods] = await Promise.all([
+                    unitAccountsDataService.getUnitAccounts({ isActive: true, isPostingAccount: true }),
+                    financeDataService.getFiscalPeriods(),
+                ]);
+                const openPeriods = fiscalPeriods.filter(isOpenPeriod);
+
+                if (!isMounted) return;
+
+                setAccounts(postingAccounts);
+                setPeriods(openPeriods);
+
+                if (openPeriods.length > 0) {
+                    const matchingPeriod = openPeriods.find((period) => isDateInPeriod(today, period)) ?? openPeriods[0];
+                    setFormData((current) => ({
+                        ...current,
+                        fiscalPeriodId: matchingPeriod.id,
+                        entryDate: defaultDateForPeriod(matchingPeriod, current.entryDate),
+                    }));
+                }
+            } catch (error: any) {
+                toast.error(error?.message || 'Failed to load unit journal entry lookups.');
+            } finally {
+                if (isMounted) {
+                    setIsLoadingLookups(false);
+                }
+            }
+        };
+
+        loadLookups();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [today]);
+
+    const selectedPeriod = useMemo(
+        () => periods.find((period) => period.id === formData.fiscalPeriodId),
+        [periods, formData.fiscalPeriodId]
+    );
 
     const addLine = () => {
-        setLines([
-            ...lines,
+        setLines((current) => [
+            ...current,
             { id: Date.now().toString(), unitAccountId: '', quantity: '', description: '' },
         ]);
     };
 
     const removeLine = (id: string) => {
-        if (lines.length > 1) {
-            setLines(lines.filter((line) => line.id !== id));
-        }
+        setLines((current) => current.length > 1 ? current.filter((line) => line.id !== id) : current);
     };
 
     const updateLine = (id: string, field: keyof EntryLine, value: string) => {
-        setLines(lines.map((line) =>
-            line.id === id ? { ...line, [field]: value } : line
-        ));
+        setLines((current) =>
+            current.map((line) => line.id === id ? { ...line, [field]: value } : line)
+        );
     };
 
     const getAccountInfo = (accountId: string) => {
-        return MOCK_ACCOUNTS.find((acc) => acc.id === accountId);
+        return accounts.find((acc) => acc.id === accountId);
     };
 
     const getTotalQuantity = () => {
-        return lines.reduce((sum, line) => sum + (parseFloat(line.quantity) || 0), 0);
+        return lines.reduce((sum, line) => sum + (Number.parseFloat(line.quantity) || 0), 0);
+    };
+
+    const handlePeriodChange = (periodId: string) => {
+        const period = periods.find((candidate) => candidate.id === periodId);
+        setFormData((current) => ({
+            ...current,
+            fiscalPeriodId: periodId,
+            entryDate: period ? defaultDateForPeriod(period, current.entryDate) : current.entryDate,
+        }));
     };
 
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
 
-        if (!formData.entryDate) {
-            newErrors.entryDate = 'Entry date is required';
+        if (!formData.fiscalPeriodId) {
+            newErrors.fiscalPeriodId = 'Fiscal period is required';
         }
 
-        const hasValidLine = lines.some((line) => line.unitAccountId && line.quantity);
-        if (!hasValidLine) {
-            newErrors.lines = 'At least one line with account and quantity is required';
+        if (!formData.entryDate) {
+            newErrors.entryDate = 'Entry date is required';
+        } else if (!isDateInPeriod(formData.entryDate, selectedPeriod)) {
+            newErrors.entryDate = 'Entry date must fall within the selected fiscal period';
+        }
+
+        const validLines = lines.filter((line) => {
+            const quantity = Number.parseFloat(line.quantity);
+            return line.unitAccountId && Number.isFinite(quantity) && quantity !== 0;
+        });
+
+        if (validLines.length === 0) {
+            newErrors.lines = 'At least one line with an account and non-zero quantity is required';
         }
 
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
 
-    const handleSubmit = (e: React.FormEvent, saveAsDraft: boolean = true) => {
+    const handleSubmit = async (e: React.FormEvent, submitForApproval = false) => {
         e.preventDefault();
 
-        if (!validateForm()) {
-            return;
+        if (!validateForm()) return;
+
+        try {
+            setIsSaving(true);
+            const created = await unitAccountsDataService.createUnitJournalEntry({
+                entryDate: formData.entryDate,
+                fiscalPeriodId: formData.fiscalPeriodId,
+                description: formData.description.trim() || undefined,
+                sourceDocument: formData.sourceDocument.trim() || undefined,
+                lines: lines
+                    .filter((line) => line.unitAccountId && Number.parseFloat(line.quantity))
+                    .map((line) => ({
+                        unitAccountId: line.unitAccountId,
+                        quantity: Number.parseFloat(line.quantity),
+                        description: line.description.trim() || undefined,
+                    })),
+            });
+
+            if (submitForApproval) {
+                await unitAccountsDataService.submitUnitJournalEntry(created.id);
+                toast.success(`Unit journal entry ${created.entryNumber} submitted for approval.`);
+            } else {
+                toast.success(`Unit journal entry ${created.entryNumber} saved as draft.`);
+            }
+
+            router.push(`/finance/unit-journal-entries/${created.id}`);
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to save unit journal entry.');
+        } finally {
+            setIsSaving(false);
         }
-
-        const data = {
-            ...formData,
-            status: saveAsDraft ? 'Draft' : 'PendingApproval',
-            lines: lines.filter((line) => line.unitAccountId && line.quantity).map((line) => ({
-                unitAccountId: line.unitAccountId,
-                quantity: parseFloat(line.quantity),
-                description: line.description,
-            })),
-        };
-
-        console.log('Creating unit journal entry:', data);
-        console.log('Creating unit journal entry:', data);
-
-        router.push('/finance/unit-journal-entries');
     };
 
     return (
         <div className="space-y-6">
-            {/* Page Header */}
             <div>
                 <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                     <FileSpreadsheet className="h-8 w-8" />
                     New Unit Journal Entry
                 </h1>
-                <p className="text-muted-foreground">
-                    Record unit quantities to accounts
-                </p>
+                <p className="text-muted-foreground">Record unit quantities to accounts</p>
             </div>
 
-            {/* Breadcrumbs */}
             <Breadcrumb>
                 <BreadcrumbList>
                     <BreadcrumbItem>
@@ -160,18 +244,14 @@ export default function NewUnitJournalEntryPage() {
                 </BreadcrumbList>
             </Breadcrumb>
 
-            <form onSubmit={(e) => handleSubmit(e, true)}>
-                {/* Header Card */}
+            <form onSubmit={(e) => handleSubmit(e, false)}>
                 <Card className="mb-6">
                     <CardHeader>
                         <CardTitle>Entry Header</CardTitle>
-                        <CardDescription>
-                            Basic information for the journal entry
-                        </CardDescription>
+                        <CardDescription>Basic information for the journal entry</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {/* Entry ID */}
                             <div className="space-y-2">
                                 <Label htmlFor="entryId">Entry ID</Label>
                                 <Input
@@ -183,7 +263,31 @@ export default function NewUnitJournalEntryPage() {
                                 <p className="text-xs text-muted-foreground">Assigned by the configured Unit Journal Entry sequence when saved.</p>
                             </div>
 
-                            {/* Entry Date */}
+                            <div className="space-y-2">
+                                <Label htmlFor="fiscalPeriod">
+                                    Fiscal Period <span className="text-destructive">*</span>
+                                </Label>
+                                <Select
+                                    value={formData.fiscalPeriodId}
+                                    onValueChange={handlePeriodChange}
+                                    disabled={isLoadingLookups || periods.length === 0}
+                                >
+                                    <SelectTrigger id="fiscalPeriod" className={errors.fiscalPeriodId ? 'border-destructive' : ''}>
+                                        <SelectValue placeholder="Select open period..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {periods.map((period) => (
+                                            <SelectItem key={period.id} value={period.id}>
+                                                {period.periodCode} - {period.periodName}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {errors.fiscalPeriodId && (
+                                    <p className="text-sm text-destructive">{errors.fiscalPeriodId}</p>
+                                )}
+                            </div>
+
                             <div className="space-y-2">
                                 <Label htmlFor="entryDate">
                                     Entry Date <span className="text-destructive">*</span>
@@ -192,6 +296,8 @@ export default function NewUnitJournalEntryPage() {
                                     id="entryDate"
                                     type="date"
                                     value={formData.entryDate}
+                                    min={selectedPeriod ? inputDate(selectedPeriod.startDate) : undefined}
+                                    max={selectedPeriod ? inputDate(selectedPeriod.endDate) : undefined}
                                     onChange={(e) => setFormData({ ...formData, entryDate: e.target.value })}
                                     className={errors.entryDate ? 'border-destructive' : ''}
                                 />
@@ -200,7 +306,6 @@ export default function NewUnitJournalEntryPage() {
                                 )}
                             </div>
 
-                            {/* Source Document */}
                             <div className="space-y-2">
                                 <Label htmlFor="sourceDocument">Source Document</Label>
                                 <Input
@@ -211,8 +316,7 @@ export default function NewUnitJournalEntryPage() {
                                 />
                             </div>
 
-                            {/* Description */}
-                            <div className="space-y-2 md:col-span-1">
+                            <div className="space-y-2 md:col-span-2">
                                 <Label htmlFor="description">Description</Label>
                                 <Input
                                     id="description"
@@ -225,15 +329,12 @@ export default function NewUnitJournalEntryPage() {
                     </CardContent>
                 </Card>
 
-                {/* Lines Card */}
                 <Card className="mb-6">
                     <CardHeader>
                         <div className="flex justify-between items-center">
                             <div>
                                 <CardTitle>Entry Lines</CardTitle>
-                                <CardDescription>
-                                    Add unit accounts and quantities
-                                </CardDescription>
+                                <CardDescription>Add unit accounts and quantities</CardDescription>
                             </div>
                             <Button type="button" variant="outline" onClick={addLine}>
                                 <Plus className="mr-2 h-4 w-4" />
@@ -261,19 +362,18 @@ export default function NewUnitJournalEntryPage() {
                                     const accountInfo = getAccountInfo(line.unitAccountId);
                                     return (
                                         <TableRow key={line.id}>
-                                            <TableCell className="text-muted-foreground">
-                                                {index + 1}
-                                            </TableCell>
+                                            <TableCell className="text-muted-foreground">{index + 1}</TableCell>
                                             <TableCell>
                                                 <Select
                                                     value={line.unitAccountId}
                                                     onValueChange={(value) => updateLine(line.id, 'unitAccountId', value)}
+                                                    disabled={isLoadingLookups || accounts.length === 0}
                                                 >
                                                     <SelectTrigger>
                                                         <SelectValue placeholder="Select account..." />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        {MOCK_ACCOUNTS.map((acc) => (
+                                                        {accounts.map((acc) => (
                                                             <SelectItem key={acc.id} value={acc.id}>
                                                                 {acc.accountNumber} - {acc.name}
                                                             </SelectItem>
@@ -282,7 +382,7 @@ export default function NewUnitJournalEntryPage() {
                                                 </Select>
                                             </TableCell>
                                             <TableCell className="text-muted-foreground">
-                                                {accountInfo?.unitType?.name || '-'}
+                                                {accountInfo?.unitTypeName || accountInfo?.unitType?.name || '-'}
                                             </TableCell>
                                             <TableCell>
                                                 <Input
@@ -318,10 +418,9 @@ export default function NewUnitJournalEntryPage() {
                             </TableBody>
                         </Table>
 
-                        {/* Totals */}
                         <div className="flex justify-end mt-4 pt-4 border-t">
                             <div className="text-right">
-                                <p className="text-sm text-muted-foreground">Total Quantity</p>
+                                <p className="text-sm text-muted-foreground">Net Quantity</p>
                                 <p className="text-2xl font-bold font-mono">
                                     {getTotalQuantity().toLocaleString(undefined, {
                                         minimumFractionDigits: 0,
@@ -333,7 +432,6 @@ export default function NewUnitJournalEntryPage() {
                     </CardContent>
                 </Card>
 
-                {/* Actions */}
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex justify-between items-center">
@@ -344,13 +442,14 @@ export default function NewUnitJournalEntryPage() {
                                 </Button>
                             </Link>
                             <div className="flex gap-2">
-                                <Button type="submit" variant="secondary">
+                                <Button type="submit" variant="secondary" disabled={isSaving || isLoadingLookups}>
                                     <Save className="mr-2 h-4 w-4" />
                                     Save as Draft
                                 </Button>
                                 <Button
                                     type="button"
-                                    onClick={(e) => handleSubmit(e, false)}
+                                    onClick={(e) => handleSubmit(e, true)}
+                                    disabled={isSaving || isLoadingLookups}
                                 >
                                     Submit for Approval
                                 </Button>

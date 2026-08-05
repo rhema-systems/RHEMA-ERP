@@ -12,7 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatCurrencyAmount } from '@/lib/currency';
 import { taxDataService } from '@/services/finance/tax-data.service';
 import type { FinancePagedResult, WhtCertificate } from '@/types/tax';
-import { ArrowLeft, Eye, FileText, Filter, Printer, RotateCcw, Search } from 'lucide-react';
+import { ArrowLeft, Ban, Download, Eye, FileText, Filter, Printer, RotateCcw, Search } from 'lucide-react';
 
 const pageSize = 20;
 
@@ -43,10 +43,14 @@ function formatDate(value?: string | null) {
 
 function statusClass(status: string) {
     switch (status) {
-        case 'Generated':
+        case 'Issued':
             return 'bg-green-50 text-green-700 border-green-200';
         case 'NumberOnly':
             return 'bg-amber-50 text-amber-700 border-amber-200';
+        case 'Cancelled':
+            return 'bg-red-50 text-red-700 border-red-200';
+        case 'Superseded':
+            return 'bg-blue-50 text-blue-700 border-blue-200';
         default:
             return 'bg-slate-50 text-slate-700 border-slate-200';
     }
@@ -62,6 +66,8 @@ export default function WhtCertificatesPage() {
     const [page, setPage] = useState(1);
     const [generatingId, setGeneratingId] = useState<string | null>(null);
     const [printingId, setPrintingId] = useState<string | null>(null);
+    const [lifecycleId, setLifecycleId] = useState<string | null>(null);
+    const [exporting, setExporting] = useState(false);
     const { toast } = useToast();
 
     const rows = result?.items ?? [];
@@ -69,8 +75,8 @@ export default function WhtCertificatesPage() {
     const totals = useMemo(() => ({
         taxableBase: rows.reduce((sum, row) => sum + row.taxableBase, 0),
         withholdingAmount: rows.reduce((sum, row) => sum + row.withholdingAmount, 0),
-        generated: rows.filter(row => row.certificateStatus === 'Generated').length,
-        missing: rows.filter(row => row.certificateStatus !== 'Generated').length,
+        generated: rows.filter(row => row.certificateStatus === 'Issued').length,
+        missing: rows.filter(row => row.certificateStatus === 'Missing').length,
     }), [rows]);
 
     const loadCertificates = async (pageToLoad = page) => {
@@ -147,7 +153,7 @@ export default function WhtCertificatesPage() {
 
         setPrintingId(certificate.vendorPaymentId);
         try {
-            const printable = certificate.certificateStatus === 'Generated'
+            const printable = certificate.certificateStatus === 'Issued'
                 ? certificate
                 : await generateCertificate(certificate);
 
@@ -169,6 +175,53 @@ export default function WhtCertificatesPage() {
             });
         } finally {
             setPrintingId(null);
+        }
+    };
+
+    const reissueCertificate = async (certificate: WhtCertificate) => {
+        const reason = window.prompt('Reason for certificate reissue (minimum 10 characters):');
+        if (!reason) return;
+        setLifecycleId(certificate.vendorPaymentId);
+        try {
+            const updated = await taxDataService.reissueWhtCertificate(certificate.vendorPaymentId, reason);
+            replaceCertificate(updated);
+            toast({ title: 'Certificate reissued', description: updated.certificateNumber || 'Replacement issued.', variant: 'success' });
+        } catch (error: any) {
+            toast({ title: 'Reissue failed', description: error?.message || 'Unable to reissue certificate.', variant: 'destructive' });
+        } finally {
+            setLifecycleId(null);
+        }
+    };
+
+    const cancelCertificate = async (certificate: WhtCertificate) => {
+        const reason = window.prompt('Reason for certificate cancellation (minimum 10 characters):');
+        if (!reason) return;
+        setLifecycleId(certificate.vendorPaymentId);
+        try {
+            const updated = await taxDataService.cancelWhtCertificate(certificate.vendorPaymentId, reason);
+            replaceCertificate(updated);
+            toast({ title: 'Certificate cancelled', description: updated.certificateNumber || 'Certificate retained as cancelled evidence.' });
+        } catch (error: any) {
+            toast({ title: 'Cancellation failed', description: error?.message || 'Unable to cancel certificate.', variant: 'destructive' });
+        } finally {
+            setLifecycleId(null);
+        }
+    };
+
+    const exportRegister = async () => {
+        setExporting(true);
+        try {
+            const blob = await taxDataService.downloadWhtRegister(fromDate, toDate);
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `wht-statutory-register-${fromDate}-${toDate}.csv`;
+            link.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error: any) {
+            toast({ title: 'Export failed', description: error?.message || 'Unable to export WHT register.', variant: 'destructive' });
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -196,10 +249,15 @@ export default function WhtCertificatesPage() {
                         </div>
                     </div>
                 </div>
-                <Button onClick={() => loadCertificates(1)} disabled={loading}>
-                    <Filter className="mr-2 h-4 w-4" />
-                    Apply Filters
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                    <Link href="/finance/tax/reports/wht-remittances"><Button variant="outline">Remittances</Button></Link>
+                    <Button variant="outline" onClick={exportRegister} disabled={exporting}>
+                        <Download className="mr-2 h-4 w-4" /> Export Register
+                    </Button>
+                    <Button onClick={() => loadCertificates(1)} disabled={loading}>
+                        <Filter className="mr-2 h-4 w-4" /> Apply Filters
+                    </Button>
+                </div>
             </div>
 
             <Card>
@@ -253,8 +311,8 @@ export default function WhtCertificatesPage() {
                                 <SelectContent>
                                     <SelectItem value="All">All</SelectItem>
                                     <SelectItem value="Missing">Missing</SelectItem>
-                                    <SelectItem value="Generated">Generated</SelectItem>
-                                    <SelectItem value="NumberOnly">Number only</SelectItem>
+                                    <SelectItem value="Issued">Issued</SelectItem>
+                                    <SelectItem value="Cancelled">Cancelled</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -279,7 +337,7 @@ export default function WhtCertificatesPage() {
                 </Card>
                 <Card>
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">Generated On Page</CardTitle>
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Issued On Page</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-green-700">{totals.generated}</div>
@@ -335,7 +393,7 @@ export default function WhtCertificatesPage() {
                                 </thead>
                                 <tbody>
                                     {rows.map(row => {
-                                        const busy = generatingId === row.vendorPaymentId || printingId === row.vendorPaymentId;
+                                        const busy = generatingId === row.vendorPaymentId || printingId === row.vendorPaymentId || lifecycleId === row.vendorPaymentId;
                                         return (
                                             <tr key={row.vendorPaymentId} className="border-b hover:bg-accent">
                                                 <td className="p-3">
@@ -366,6 +424,12 @@ export default function WhtCertificatesPage() {
                                                             <span className="text-muted-foreground"> | {formatDate(row.certificateDate)}</span>
                                                         </div>
                                                     )}
+                                                    <div className="mt-1 text-xs text-muted-foreground">
+                                                        {row.remittanceNumber ? `${row.remittanceNumber} · ${row.remittanceStatus}` : 'Unremitted'}
+                                                    </div>
+                                                    {row.versions.length > 1 && (
+                                                        <div className="mt-1 text-xs text-muted-foreground">{row.versions.length} controlled versions retained</div>
+                                                    )}
                                                 </td>
                                                 <td className="p-3">
                                                     <div className="flex justify-end gap-2">
@@ -374,7 +438,7 @@ export default function WhtCertificatesPage() {
                                                                 <Eye className="h-4 w-4" />
                                                             </Button>
                                                         </Link>
-                                                        {row.certificateStatus !== 'Generated' && (
+                                                        {row.certificateStatus === 'Missing' && (
                                                             <Button
                                                                 variant="outline"
                                                                 size="sm"
@@ -385,10 +449,20 @@ export default function WhtCertificatesPage() {
                                                                 Generate
                                                             </Button>
                                                         )}
+                                                        {row.certificateStatus !== 'Missing' && (
+                                                            <Button variant="outline" size="sm" onClick={() => reissueCertificate(row)} disabled={busy}>
+                                                                <RotateCcw className="mr-2 h-4 w-4" /> Reissue
+                                                            </Button>
+                                                        )}
+                                                        {row.certificateStatus === 'Issued' && (
+                                                            <Button variant="ghost" size="icon" onClick={() => cancelCertificate(row)} disabled={busy} aria-label="Cancel certificate">
+                                                                <Ban className="h-4 w-4 text-red-600" />
+                                                            </Button>
+                                                        )}
                                                         <Button
                                                             size="sm"
                                                             onClick={() => printCertificate(row)}
-                                                            disabled={busy}
+                                                            disabled={busy || row.certificateStatus !== 'Issued'}
                                                         >
                                                             <Printer className="mr-2 h-4 w-4" />
                                                             Print

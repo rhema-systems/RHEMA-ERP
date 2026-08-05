@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,8 +11,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { useDocumentSequence } from '@/hooks/use-document-sequence';
 import { FinanceDocumentTypes } from '@/types/document-numbering';
 
-export default function ReceivePOPage({ params }: { params: { id: string } }) {
+export default function ReceivePOPage() {
     const router = useRouter();
+    const params = useParams<{ id: string }>();
     const { toast } = useToast();
     const [po, setPo] = useState<FinancePurchaseOrder | null>(null);
     const [loading, setLoading] = useState(true);

@@ -126,6 +126,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<CurrencyLinkDto> AddCurrencyLinkAsync(AddCurrencyLinkDto dto);
         Task<CurrencyLinkRemovalResultDto> RemoveCurrencyLinkAsync(RemoveCurrencyLinkDto dto);
         Task<CurrencyLinkDto> InactivateCurrencyLinkAsync(Guid accountId, string currencyCode);
+        Task<CurrencyLinkDto> UpdateCurrencyLinkRatePolicyAsync(Guid accountId, string currencyCode, UpdateCurrencyLinkRatePolicyDto dto);
         Task<List<CurrencyLinkDto>> GetAccountCurrencyLinksAsync(Guid accountId, bool includeInactive = false);
     }
 }

@@ -55,6 +55,141 @@ public sealed class BankReconciliationPostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-CrossCurrencyBankTransfer")]
+    [Trait("Category", "CashBank")]
+    public async Task CrossCurrencyTransferLegs_ShouldReconcileIndependentlyInEachBankCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var sourceSetup = SeedBankSetup(db, tenantId, "BANK-USD", 500m, glAccountNumber: "1020-USD");
+        var destinationSetup = SeedBankSetup(db, tenantId, "BANK-EUR", 50m, glAccountNumber: "1030-EUR");
+        sourceSetup.BankAccount.Currency = "USD";
+        sourceSetup.BankGlAccount.CurrencyCode = "USD";
+        destinationSetup.BankAccount.Currency = "EUR";
+        destinationSetup.BankGlAccount.CurrencyCode = "EUR";
+        var pairId = Guid.NewGuid();
+        var journal = new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryNumber = "JE-XCCY-0001",
+            JournalType = "Bank Transfer",
+            EntryDate = new DateTime(2026, 7, 5),
+            PostingDate = new DateTime(2026, 7, 5),
+            Description = "Posted cross-currency transfer",
+            SourceModule = "CASHBANK",
+            SourceDocumentType = "CashBankTransfer",
+            TotalDebitAmount = 1_520m,
+            TotalCreditAmount = 1_520m,
+            IsBalanced = true,
+            FiscalPeriodId = db.FiscalPeriods.Local.Single(p => p.TenantId == tenantId).Id,
+            PostingStatus = "Posted",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var outgoing = new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TransactionNumber = "XCCY-SOURCE-LEG",
+            TransactionDate = new DateTime(2026, 7, 5),
+            TransactionType = CashTransactionType.Transfer,
+            BankAccountId = sourceSetup.BankAccount.Id,
+            ToBankAccountId = destinationSetup.BankAccount.Id,
+            TransferPairId = pairId,
+            TransferLeg = BankTransferLeg.Outgoing,
+            Amount = 100m,
+            Currency = "USD",
+            ExchangeRate = 15.20m,
+            BaseAmount = 1_520m,
+            TransferCrossRate = 0.90m,
+            TransferFxGainLossBaseAmount = -8m,
+            IsPosted = true,
+            ApprovalStatus = CashTransactionApprovalStatus.Posted,
+            JournalEntryId = journal.Id,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var incoming = new CashTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TransactionNumber = "XCCY-DESTINATION-LEG",
+            TransactionDate = new DateTime(2026, 7, 5),
+            TransactionType = CashTransactionType.Transfer,
+            BankAccountId = destinationSetup.BankAccount.Id,
+            ToBankAccountId = sourceSetup.BankAccount.Id,
+            TransferPairId = pairId,
+            TransferLeg = BankTransferLeg.Incoming,
+            Amount = 90m,
+            Currency = "EUR",
+            ExchangeRate = 16.80m,
+            BaseAmount = 1_512m,
+            TransferCrossRate = 0.90m,
+            TransferFxGainLossBaseAmount = -8m,
+            IsPosted = true,
+            ApprovalStatus = CashTransactionApprovalStatus.Posted,
+            JournalEntryId = journal.Id,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var sourceStatementLine = SeedStatementLine(
+            db,
+            tenantId,
+            sourceSetup.BankAccount.Id,
+            debitAmount: 100m);
+        var destinationStatementLine = SeedStatementLine(
+            db,
+            tenantId,
+            destinationSetup.BankAccount.Id,
+            creditAmount: 90m);
+        db.JournalEntries.Add(journal);
+        db.Set<CashTransaction>().AddRange(outgoing, incoming);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId);
+
+        var sourceReconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = sourceSetup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 400m,
+            StatementId = sourceStatementLine.BankStatementId
+        });
+        var destinationReconciliation = await service.StartReconciliationAsync(new StartReconciliationDto
+        {
+            BankAccountId = destinationSetup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 140m,
+            StatementId = destinationStatementLine.BankStatementId
+        });
+
+        await service.CreateManualMatchAsync(new CreateManualMatchDto
+        {
+            ReconciliationId = sourceReconciliation.Id,
+            CashTransactionId = outgoing.Id,
+            BankStatementLineId = sourceStatementLine.Id
+        });
+        await service.CreateManualMatchAsync(new CreateManualMatchDto
+        {
+            ReconciliationId = destinationReconciliation.Id,
+            CashTransactionId = incoming.Id,
+            BankStatementLineId = destinationStatementLine.Id
+        });
+
+        // CreateManualMatch returns the write acknowledgement; the workspace read model carries
+        // statement-side amounts used by reviewers, so verify those same production projections.
+        var sourceMatch = (await service.GetMatchesAsync(sourceReconciliation.Id)).Single();
+        var destinationMatch = (await service.GetMatchesAsync(destinationReconciliation.Id)).Single();
+
+        sourceMatch.CashTransactionAmount.Should().Be(100m);
+        sourceMatch.StatementDebitAmount.Should().Be(100m);
+        destinationMatch.CashTransactionAmount.Should().Be(90m);
+        destinationMatch.StatementCreditAmount.Should().Be(90m);
+        outgoing.ReconciliationId.Should().Be(sourceReconciliation.Id);
+        incoming.ReconciliationId.Should().Be(destinationReconciliation.Id);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
     public async Task ManualMatch_ShouldRejectUnpostedCashTransaction()
@@ -547,6 +682,7 @@ public sealed class BankReconciliationPostingMigrationTests
                 It.IsAny<Guid?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => $"{documentPrefix}-{++counter:0000}");
+        var accessScope = CreateUnrestrictedFinanceAccessScope();
 
         return new CashTransactionService(
             db,
@@ -554,8 +690,20 @@ public sealed class BankReconciliationPostingMigrationTests
             tenantSettings.Object,
             documentNumbering.Object,
             currentUser,
+            accessScope.Object,
+            new FinanceReversalPolicyService(db, currentUser),
             postingEngine,
             auditService);
+    }
+
+    private static Mock<IFinanceAccessScopeService> CreateUnrestrictedFinanceAccessScope()
+    {
+        var scope = new Mock<IFinanceAccessScopeService>();
+        scope.Setup(x => x.GetPermittedBankAccountIdsAsync(
+                It.IsAny<FinanceAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyCollection<Guid>?)null);
+        return scope;
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId)

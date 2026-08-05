@@ -7,7 +7,15 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { ArrowLeft, ArrowRight, ArrowRightLeft, CalendarIcon, FileText, Loader2 } from 'lucide-react';
+import {
+    ArrowLeft,
+    ArrowRight,
+    ArrowRightLeft,
+    CalendarIcon,
+    Calculator,
+    Loader2,
+    ShieldCheck,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -38,15 +46,18 @@ import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
-import { financeService } from '@/services/finance.service';
-import type { BankAccount, CreateBankTransferDto } from '@/types/cash-management';
+import type {
+    BankAccount,
+    BankTransferPreview,
+    CreateBankTransferDto,
+} from '@/types/cash-management';
 
 const transferSchema = z.object({
     transactionDate: z.date({ message: 'Date is required' }),
     fromBankAccountId: z.string().min(1, 'Source bank account is required'),
     toBankAccountId: z.string().min(1, 'Destination bank account is required'),
-    amount: z.number().min(0.01, 'Amount must be greater than 0'),
-    exchangeRate: z.number().min(0.0001, 'Exchange rate must be greater than 0'),
+    amount: z.number().min(0.01, 'Source amount must be greater than 0'),
+    destinationAmount: z.number().nonnegative('Destination amount cannot be negative'),
     referenceNumber: z.string().optional(),
     description: z.string().optional(),
 }).refine((data) => data.fromBankAccountId !== data.toBankAccountId, {
@@ -56,10 +67,40 @@ const transferSchema = z.object({
 
 type TransferFormValues = z.infer<typeof transferSchema>;
 
+function formatMoney(value: number | undefined, currency = 'GHS') {
+    return `${currency} ${(value ?? 0).toLocaleString('en-GH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
+}
+
+function formatAccount(account: BankAccount) {
+    return `${account.accountName} (${account.currency}) - ${account.bankName}`;
+}
+
+function buildPreviewRequest(
+    data: Pick<TransferFormValues, 'transactionDate' | 'fromBankAccountId' | 'toBankAccountId' | 'amount' | 'destinationAmount'>
+): CreateBankTransferDto {
+    return {
+        transactionDate: data.transactionDate.toISOString(),
+        fromBankAccountId: data.fromBankAccountId,
+        toBankAccountId: data.toBankAccountId,
+        amount: data.amount,
+        destinationAmount: data.destinationAmount > 0 ? data.destinationAmount : undefined,
+    };
+}
+
 export default function RecordBankTransferPage() {
     const router = useRouter();
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [transferPairId, setTransferPairId] = useState('');
+
+    // The pair id is generated once per screen visit and reused if a network retry occurs. The
+    // database's unique OUT/IN pair guard then returns the first transfer instead of duplicating it.
+    useEffect(() => {
+        setTransferPairId(globalThis.crypto.randomUUID());
+    }, []);
 
     const { data: bankAccounts, isLoading: accountsLoading } = useQuery({
         queryKey: ['bank-accounts', 'active'],
@@ -70,104 +111,133 @@ export default function RecordBankTransferPage() {
         resolver: zodResolver(transferSchema),
         defaultValues: {
             transactionDate: new Date(),
+            fromBankAccountId: '',
+            toBankAccountId: '',
             amount: 0,
-            exchangeRate: 1,
+            destinationAmount: 0,
+            referenceNumber: '',
+            description: '',
         },
     });
 
+    const transactionDate = form.watch('transactionDate');
     const fromBankAccountId = form.watch('fromBankAccountId');
     const toBankAccountId = form.watch('toBankAccountId');
     const amount = form.watch('amount');
-    const exchangeRate = form.watch('exchangeRate');
+    const destinationAmount = form.watch('destinationAmount');
 
     const fromAccount = useMemo(
         () => bankAccounts?.find((account) => account.id === fromBankAccountId),
         [bankAccounts, fromBankAccountId]
     );
-
     const toAccount = useMemo(
         () => bankAccounts?.find((account) => account.id === toBankAccountId),
         [bankAccounts, toBankAccountId]
     );
-
     const destinationAccounts = useMemo(
-        () => bankAccounts?.filter((account) =>
-            account.id !== fromBankAccountId &&
-            (!fromAccount || account.currency === fromAccount.currency)
-        ) ?? [],
-        [bankAccounts, fromBankAccountId, fromAccount]
+        () => bankAccounts?.filter((account) => account.id !== fromBankAccountId) ?? [],
+        [bankAccounts, fromBankAccountId]
+    );
+    const isCrossCurrency = Boolean(
+        fromAccount && toAccount && fromAccount.currency !== toAccount.currency
     );
 
-    const transferCurrency = fromAccount?.currency ?? 'GHS';
-    const requiresExchangeRate = [fromAccount?.currency, toAccount?.currency]
-        .filter(Boolean)
-        .some((currency) => currency !== 'GHS');
-
     useEffect(() => {
-        if (
-            fromBankAccountId &&
-            toBankAccountId &&
-            (fromBankAccountId === toBankAccountId || fromAccount?.currency !== toAccount?.currency)
-        ) {
+        if (fromBankAccountId === toBankAccountId && toBankAccountId) {
             form.setValue('toBankAccountId', '');
         }
-    }, [fromBankAccountId, toBankAccountId, fromAccount?.currency, toAccount?.currency, form]);
+    }, [form, fromBankAccountId, toBankAccountId]);
 
     useEffect(() => {
-        const currencyForRate = fromAccount?.currency !== 'GHS'
-            ? fromAccount?.currency
-            : toAccount?.currency !== 'GHS'
-                ? toAccount?.currency
-                : 'GHS';
+        // A previously quoted destination amount belongs to its old account pair. Clearing it
+        // forces the API to derive a fresh indicative amount from the new approved rate set.
+        form.setValue('destinationAmount', 0);
+    }, [form, fromBankAccountId, toBankAccountId]);
 
-        if (!currencyForRate || currencyForRate === 'GHS') {
-            form.setValue('exchangeRate', 1);
+    const previewQuery = useQuery<BankTransferPreview>({
+        queryKey: [
+            'bank-transfer-preview',
+            transactionDate?.toISOString(),
+            fromBankAccountId,
+            toBankAccountId,
+            amount,
+            destinationAmount,
+        ],
+        queryFn: () => cashManagementDataService.previewBankTransfer(buildPreviewRequest({
+            transactionDate,
+            fromBankAccountId,
+            toBankAccountId,
+            amount,
+            destinationAmount,
+        })),
+        enabled: Boolean(
+            transactionDate
+            && fromBankAccountId
+            && toBankAccountId
+            && fromBankAccountId !== toBankAccountId
+            && amount > 0
+        ),
+        retry: false,
+        staleTime: 15_000,
+    });
+
+    useEffect(() => {
+        if (previewQuery.data?.destinationAmountWasDerived && destinationAmount <= 0) {
+            // The derived value is a starting quotation, not a hidden accounting assumption.
+            // It is written into the form so Finance must see and submit the actual amount.
+            form.setValue('destinationAmount', previewQuery.data.destinationAmount, {
+                shouldValidate: true,
+            });
+        }
+    }, [destinationAmount, form, previewQuery.data]);
+
+    const onSubmit = async (data: TransferFormValues) => {
+        if (isCrossCurrency && data.destinationAmount <= 0) {
+            form.setError('destinationAmount', {
+                message: 'Confirm the destination amount for a cross-currency transfer',
+            });
             return;
         }
 
-        void financeService.getCurrentExchangeRate(currencyForRate)
-            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-            .catch(() => form.setValue('exchangeRate', 1));
-    }, [fromAccount?.currency, toAccount?.currency, form]);
+        const preview = previewQuery.data;
+        if (!preview || previewQuery.isError) {
+            toast({
+                title: 'Valuation required',
+                description: 'Resolve the transfer preview before recording this transfer.',
+                variant: 'destructive',
+            });
+            return;
+        }
 
-    const formatCurrency = (value: number | undefined, currency = 'GHS') => {
-        return `${currency} ${(value ?? 0).toLocaleString('en-GH', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        })}`;
-    };
-
-    const formatAccount = (account: BankAccount) => {
-        return `${account.accountName} (${account.currency}) - ${account.bankName}`;
-    };
-
-    const onSubmit = async (data: TransferFormValues) => {
         setIsSubmitting(true);
         try {
             const payload: CreateBankTransferDto = {
-                transactionDate: data.transactionDate.toISOString(),
-                fromBankAccountId: data.fromBankAccountId,
-                toBankAccountId: data.toBankAccountId,
-                amount: data.amount,
-                exchangeRate: requiresExchangeRate ? data.exchangeRate : undefined,
-                referenceNumber: data.referenceNumber,
-                description: data.description,
+                ...buildPreviewRequest(data),
+                transferPairId: transferPairId || undefined,
+                // Sending the exact approved records from the preview prevents a rate changing
+                // between the user's review and the server's final capture validation.
+                sourceExchangeRateId: preview.sourceExchangeRateId,
+                destinationExchangeRateId: preview.destinationExchangeRateId,
+                referenceNumber: data.referenceNumber?.trim() || undefined,
+                description: data.description?.trim() || undefined,
             };
 
             await cashManagementDataService.createBankTransfer(payload);
-
             toast({
-                title: 'Transfer Recorded',
-                description: 'The bank transfer has been recorded successfully.',
+                title: 'Transfer recorded',
+                description: preview.isCrossCurrency
+                    ? `The ${preview.sourceCurrency}/${preview.destinationCurrency} pair and its FX valuation were captured for approval.`
+                    : 'The paired bank transfer was captured for approval.',
             });
-
             router.push('/finance/cash/transactions');
             router.refresh();
         } catch (error) {
             console.error(error);
             toast({
-                title: 'Error',
-                description: 'Failed to record bank transfer. Please try again.',
+                title: 'Transfer not recorded',
+                description: error instanceof Error
+                    ? error.message
+                    : 'Review the transfer valuation and try again.',
                 variant: 'destructive',
             });
         } finally {
@@ -175,8 +245,13 @@ export default function RecordBankTransferPage() {
         }
     };
 
+    const preview = previewQuery.data;
+    const previewError = previewQuery.error instanceof Error
+        ? previewQuery.error.message
+        : 'The approved rate preview could not be calculated.';
+
     return (
-        <div className="space-y-6 p-8 max-w-[1200px] mx-auto">
+        <div className="space-y-6 p-8 max-w-[1280px] mx-auto">
             <div className="flex items-center space-x-4">
                 <Button variant="ghost" size="icon" onClick={() => router.back()}>
                     <ArrowLeft className="h-4 w-4" />
@@ -184,42 +259,42 @@ export default function RecordBankTransferPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Bank Transfer</h1>
                     <p className="text-muted-foreground">
-                        Transfer funds between company bank accounts.
+                        Move funds between TDC bank accounts with controlled FX valuation.
                     </p>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="lg:col-span-2">
                     <Card>
                         <form onSubmit={form.handleSubmit(onSubmit)}>
                             <CardHeader>
-                                <CardTitle>Transfer Details</CardTitle>
-                                <CardDescription>Enter the source, destination, and transfer amount.</CardDescription>
+                                <CardTitle>Transfer details</CardTitle>
+                                <CardDescription>
+                                    Each bank keeps its own currency amount; the system values both legs in the functional currency.
+                                </CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <CardContent className="space-y-5">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                     <div className="space-y-2">
-                                        <Label>Transaction Date</Label>
+                                        <Label>Transaction date</Label>
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <Button
                                                     variant="outline"
                                                     className={cn(
                                                         'w-full justify-start text-left font-normal',
-                                                        !form.watch('transactionDate') && 'text-muted-foreground'
+                                                        !transactionDate && 'text-muted-foreground'
                                                     )}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {form.watch('transactionDate')
-                                                        ? format(form.watch('transactionDate'), 'PPP')
-                                                        : <span>Pick a date</span>}
+                                                    {transactionDate ? format(transactionDate, 'PPP') : 'Pick a date'}
                                                 </Button>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-auto p-0">
                                                 <Calendar
                                                     mode="single"
-                                                    selected={form.watch('transactionDate')}
+                                                    selected={transactionDate}
                                                     onSelect={(date) => date && form.setValue('transactionDate', date)}
                                                     initialFocus
                                                 />
@@ -227,17 +302,17 @@ export default function RecordBankTransferPage() {
                                         </Popover>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Reference Number</Label>
-                                        <Input {...form.register('referenceNumber')} placeholder="e.g. TRF-001" />
+                                        <Label>Bank reference</Label>
+                                        <Input {...form.register('referenceNumber')} placeholder="e.g. SWIFT / bank advice reference" />
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 items-start">
+                                <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[1fr_auto_1fr]">
                                     <div className="space-y-2">
-                                        <Label>From Bank Account</Label>
+                                        <Label>From bank account</Label>
                                         <Select
                                             onValueChange={(value) => form.setValue('fromBankAccountId', value)}
-                                            value={form.watch('fromBankAccountId') || ''}
+                                            value={fromBankAccountId}
                                             disabled={accountsLoading}
                                         >
                                             <SelectTrigger>
@@ -256,27 +331,19 @@ export default function RecordBankTransferPage() {
                                         )}
                                     </div>
 
-                                    <div className="hidden md:flex h-10 items-center justify-center pt-8">
+                                    <div className="hidden h-10 items-center justify-center pt-8 md:flex">
                                         <ArrowRight className="h-5 w-5 text-muted-foreground" />
                                     </div>
 
                                     <div className="space-y-2">
-                                        <Label>To Bank Account</Label>
+                                        <Label>To bank account</Label>
                                         <Select
                                             onValueChange={(value) => form.setValue('toBankAccountId', value)}
-                                            value={form.watch('toBankAccountId') || ''}
+                                            value={toBankAccountId}
                                             disabled={accountsLoading || !fromBankAccountId}
                                         >
                                             <SelectTrigger>
-                                                <SelectValue
-                                                    placeholder={
-                                                        !fromBankAccountId
-                                                            ? 'Select source first'
-                                                            : destinationAccounts.length === 0
-                                                                ? 'No same-currency accounts'
-                                                                : 'Select destination account'
-                                                    }
-                                                />
+                                                <SelectValue placeholder={!fromBankAccountId ? 'Select source first' : 'Select destination account'} />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {destinationAccounts.map((account) => (
@@ -292,15 +359,16 @@ export default function RecordBankTransferPage() {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                     <div className="space-y-2">
-                                        <Label>Amount</Label>
+                                        <Label>Amount leaving source</Label>
                                         <div className="relative">
-                                            <span className="absolute left-3 top-2.5 text-gray-500 text-sm font-medium">
-                                                {transferCurrency}
+                                            <span className="absolute left-3 top-2.5 text-sm font-medium text-gray-500">
+                                                {fromAccount?.currency ?? '---'}
                                             </span>
                                             <Input
                                                 type="number"
+                                                min="0"
                                                 step="0.01"
                                                 className="pl-12"
                                                 {...form.register('amount', { valueAsNumber: true })}
@@ -311,34 +379,47 @@ export default function RecordBankTransferPage() {
                                         )}
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Exchange Rate</Label>
-                                        <Input
-                                            type="number"
-                                            step="0.000001"
-                                            disabled={!requiresExchangeRate}
-                                            {...form.register('exchangeRate', { valueAsNumber: true })}
-                                        />
+                                        <Label>Amount arriving at destination</Label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-2.5 text-sm font-medium text-gray-500">
+                                                {toAccount?.currency ?? '---'}
+                                            </span>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                className="pl-12"
+                                                disabled={!isCrossCurrency}
+                                                {...form.register('destinationAmount', { valueAsNumber: true })}
+                                                value={isCrossCurrency ? destinationAmount : (amount || 0)}
+                                            />
+                                        </div>
                                         <p className="text-xs text-muted-foreground">
-                                            1 transfer currency = {exchangeRate || 1} GHS
+                                            {isCrossCurrency
+                                                ? 'Confirm the amount stated on the bank conversion advice.'
+                                                : 'Same-currency transfers move an equal amount.'}
                                         </p>
-                                        {form.formState.errors.exchangeRate && (
-                                            <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
+                                        {form.formState.errors.destinationAmount && (
+                                            <p className="text-sm text-red-500">{form.formState.errors.destinationAmount.message}</p>
                                         )}
                                     </div>
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label>Description</Label>
-                                    <Textarea {...form.register('description')} placeholder="Transfer notes..." />
+                                    <Textarea {...form.register('description')} placeholder="Purpose of transfer and supporting advice details..." />
                                 </div>
                             </CardContent>
                             <CardFooter className="justify-end space-x-2">
                                 <Button variant="ghost" type="button" onClick={() => router.back()}>
                                     Cancel
                                 </Button>
-                                <Button type="submit" disabled={isSubmitting}>
+                                <Button
+                                    type="submit"
+                                    disabled={isSubmitting || previewQuery.isFetching || !preview || previewQuery.isError}
+                                >
                                     {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Record Transfer
+                                    Record transfer
                                 </Button>
                             </CardFooter>
                         </form>
@@ -348,43 +429,153 @@ export default function RecordBankTransferPage() {
                 <div className="space-y-6">
                     <Card className="bg-muted/50">
                         <CardHeader>
-                            <CardTitle className="text-sm font-medium">Transfer Preview</CardTitle>
+                            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                                <Calculator className="h-4 w-4 text-blue-600" />
+                                Controlled valuation preview
+                            </CardTitle>
+                            <CardDescription>
+                                Approved tenant rates selected by the posting policy.
+                            </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4 text-sm">
-                            <div className="flex gap-2">
-                                <ArrowRightLeft className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                                <div className="min-w-0">
-                                    <p className="font-medium">Account Movement</p>
-                                    <p className="text-muted-foreground break-words">
-                                        {fromAccount ? fromAccount.accountName : 'Source account'}
-                                        {' to '}
-                                        {toAccount ? toAccount.accountName : 'destination account'}
-                                    </p>
+                            {!preview && !previewQuery.isFetching && !previewQuery.isError && (
+                                <p className="text-muted-foreground">Select both accounts and enter a source amount.</p>
+                            )}
+                            {previewQuery.isFetching && (
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Resolving approved rates...
                                 </div>
-                            </div>
-                            <div className="rounded-md border bg-background p-3 space-y-2">
-                                <div className="flex items-center justify-between gap-3">
-                                    <span className="text-muted-foreground">Debit source</span>
-                                    <span className="font-medium text-red-600">
-                                        {formatCurrency(amount, transferCurrency)}
-                                    </span>
+                            )}
+                            {previewQuery.isError && (
+                                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700">
+                                    {previewError}
                                 </div>
-                                <div className="flex items-center justify-between gap-3">
-                                    <span className="text-muted-foreground">Credit destination</span>
-                                    <span className="font-medium text-green-600">
-                                        {formatCurrency(amount, toAccount?.currency ?? transferCurrency)}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="flex gap-2">
-                                <FileText className="h-4 w-4 text-slate-500 flex-shrink-0" />
-                                <p className="text-muted-foreground">
-                                    The transfer creates linked OUT and IN cash transaction records for reconciliation.
-                                </p>
-                            </div>
+                            )}
+                            {preview && (
+                                <>
+                                    <div className="flex gap-2">
+                                        <ArrowRightLeft className="h-4 w-4 flex-shrink-0 text-blue-500" />
+                                        <div className="min-w-0">
+                                            <p className="font-medium">Account movement</p>
+                                            <p className="break-words text-muted-foreground">
+                                                {preview.fromBankAccountName} to {preview.toBankAccountName}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 rounded-md border bg-background p-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-muted-foreground">Leaves source</span>
+                                            <span className="font-medium text-red-600">
+                                                {formatMoney(preview.sourceAmount, preview.sourceCurrency)}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-muted-foreground">Arrives destination</span>
+                                            <span className="font-medium text-green-600">
+                                                {formatMoney(preview.destinationAmount, preview.destinationCurrency)}
+                                            </span>
+                                        </div>
+                                        {preview.isCrossCurrency && (
+                                            <div className="flex items-center justify-between gap-3 border-t pt-2">
+                                                <span className="text-muted-foreground">Cross rate</span>
+                                                <span className="font-mono text-xs">
+                                                    1 {preview.sourceCurrency} = {preview.crossRate.toFixed(8)} {preview.destinationCurrency}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <RateSnapshot
+                                        label="Source valuation"
+                                        currency={preview.sourceCurrency}
+                                        functionalCurrency={preview.functionalCurrency}
+                                        rate={preview.sourceExchangeRate}
+                                        rateSource={preview.sourceExchangeRateSource}
+                                        rateDate={preview.sourceExchangeRateDate}
+                                        quoteSide={preview.sourceExchangeRateQuoteSide}
+                                        baseAmount={preview.sourceBaseAmount}
+                                    />
+                                    <RateSnapshot
+                                        label="Destination valuation"
+                                        currency={preview.destinationCurrency}
+                                        functionalCurrency={preview.functionalCurrency}
+                                        rate={preview.destinationExchangeRate}
+                                        rateSource={preview.destinationExchangeRateSource}
+                                        rateDate={preview.destinationExchangeRateDate}
+                                        quoteSide={preview.destinationExchangeRateQuoteSide}
+                                        baseAmount={preview.destinationBaseAmount}
+                                    />
+
+                                    <div className={cn(
+                                        'rounded-md border p-3',
+                                        preview.realizedFxOutcome === 'Gain' && 'border-green-200 bg-green-50',
+                                        preview.realizedFxOutcome === 'Loss' && 'border-amber-200 bg-amber-50',
+                                        preview.realizedFxOutcome === 'None' && 'bg-background'
+                                    )}>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="font-medium">Projected realised FX</span>
+                                            <span className="font-semibold">
+                                                {preview.realizedFxOutcome}: {formatMoney(
+                                                    Math.abs(preview.realizedFxGainLossBaseAmount),
+                                                    preview.functionalCurrency
+                                                )}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Posted automatically to the configured realised FX {preview.realizedFxOutcome === 'Loss' ? 'loss' : 'gain'} account.
+                                        </p>
+                                    </div>
+
+                                    <div className="flex gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+                                        <ShieldCheck className="h-4 w-4 flex-shrink-0" />
+                                        <p>
+                                            Both bank legs retain their own amount and approved rate evidence, and reconcile independently to their bank statements.
+                                        </p>
+                                    </div>
+                                </>
+                            )}
                         </CardContent>
                     </Card>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function RateSnapshot({
+    label,
+    currency,
+    functionalCurrency,
+    rate,
+    rateSource,
+    rateDate,
+    quoteSide,
+    baseAmount,
+}: {
+    label: string;
+    currency: string;
+    functionalCurrency: string;
+    rate: number;
+    rateSource: string;
+    rateDate: string;
+    quoteSide: string;
+    baseAmount: number;
+}) {
+    return (
+        <div className="space-y-1 rounded-md border bg-background p-3">
+            <div className="flex items-center justify-between gap-3">
+                <span className="font-medium">{label}</span>
+                <span className="font-mono text-xs">1 {currency} = {rate.toFixed(6)} {functionalCurrency}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>{rateSource} · {quoteSide}</span>
+                <span>{new Date(rateDate).toLocaleDateString('en-GH')}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t pt-1 text-xs">
+                <span className="text-muted-foreground">Functional value</span>
+                <span className="font-medium">{formatMoney(baseAmount, functionalCurrency)}</span>
             </div>
         </div>
     );

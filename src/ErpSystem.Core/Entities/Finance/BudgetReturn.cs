@@ -30,10 +30,16 @@ public class BudgetReturn : TenantEntity
     /// </summary>
     public Guid? AssignedToUserId { get; set; }
 
+    [ForeignKey(nameof(AssignedToUserId))]
+    public virtual ApplicationUser? AssignedToUser { get; set; }
+
     /// <summary>
     /// User authorized to approve this budget return.
     /// </summary>
     public Guid? ApproverUserId { get; set; }
+
+    [ForeignKey(nameof(ApproverUserId))]
+    public virtual ApplicationUser? ApproverUser { get; set; }
 
     /// <summary>
     /// Status of this specific return packet.
@@ -51,6 +57,9 @@ public class BudgetReturn : TenantEntity
 
     public DateTime? SubmittedDate { get; set; }
     public DateTime? ApprovedDate { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public virtual ICollection<BudgetEntry> BudgetEntries { get; set; } = new List<BudgetEntry>();
 }

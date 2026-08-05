@@ -61,7 +61,13 @@ public enum VendorPaymentStatus
     Cleared = 5,
     Voided = 6,
     Failed = 7,
-    Reconciled = 8
+    Reconciled = 8,
+
+    /// <summary>
+    /// The payment remains in history, but a linked compensating journal and allocation records
+    /// have fully reversed its accounting and subledger effect.
+    /// </summary>
+    Reversed = 9
 }
 
 /// <summary>
@@ -467,6 +473,28 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
+    /// <summary>
+    /// Gross settlement base evaluated by the configured WHT policy. This is persisted rather
+    /// than reconstructed from net cash so threshold and certificate evidence remain exact.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxBaseAmount { get; set; }
+
+    /// <summary>
+    /// Cumulative eligible supplier payments before this transaction. Together with the
+    /// configured threshold snapshot it explains why WHT did or did not apply at entry time.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxCumulativeBefore { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? WithholdingTaxThresholdAmount { get; set; }
+
+    public bool WithholdingTaxThresholdApplied { get; set; }
+
+    [MaxLength(500)]
+    public string? WithholdingTaxCalculationNote { get; set; }
+
     public Guid? WithholdingTaxId { get; set; }
     public virtual Tax? WithholdingTax { get; set; }
 
@@ -486,6 +514,58 @@ public class VendorPayment : TenantEntity
     // ── Status & Authorization ──────────────────────────────────────────
 
     public VendorPaymentStatus Status { get; set; } = VendorPaymentStatus.Draft;
+
+    /// <summary>
+    /// Direct payments use the platform workflow just like payment batches. These fields retain
+    /// the submission and selected authority route on the canonical payment instead of requiring
+    /// auditors to infer them from mutable workflow configuration.
+    /// </summary>
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? AppliedApprovalPolicySetId { get; set; }
+
+    [MaxLength(100)]
+    public string? AppliedApprovalPolicyCode { get; set; }
+
+    /// <summary>
+    /// Immutable JSON snapshot and SHA-256 digest of the effective approval/evidence policy used
+    /// at submission. Published policies are immutable, but the snapshot also protects an in-flight
+    /// payment if an administrator later retires the source policy.
+    /// </summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ApprovalControlSnapshotJson { get; set; }
+
+    [MaxLength(64)]
+    public string? ApprovalControlSnapshotHash { get; set; }
+
+    /// <summary>
+    /// Exceptional payments are deliberately declared by the maker and always enter the Managing
+    /// Director authority route. This is separate from automatic high-value routing so both the
+    /// policy reason and the operator's exceptional-business reason remain visible.
+    /// </summary>
+    public bool IsExceptionalPayment { get; set; }
+
+    [MaxLength(1000)]
+    public string? ExceptionalPaymentReason { get; set; }
+
+    public bool RequiresManagingDirectorApproval { get; set; }
+    public Guid? ManagingDirectorApprovedById { get; set; }
+    public DateTime? ManagingDirectorApprovedAt { get; set; }
+
+    /// <summary>
+    /// A requested evidence exception is not an automatic waiver. It is finalized only when the
+    /// workflow completes through the configured Managing Director approval group.
+    /// </summary>
+    public bool EvidenceExceptionRequested { get; set; }
+
+    [MaxLength(1000)]
+    public string? EvidenceExceptionReason { get; set; }
+
+    public Guid? EvidenceExceptionRequestedById { get; set; }
+    public DateTime? EvidenceExceptionRequestedAt { get; set; }
+    public Guid? EvidenceExceptionApprovedById { get; set; }
+    public DateTime? EvidenceExceptionApprovedAt { get; set; }
 
     public Guid? AuthorizedById { get; set; }
     public DateTime? AuthorizedDate { get; set; }
@@ -507,6 +587,20 @@ public class VendorPayment : TenantEntity
     // ── GL Posting ──────────────────────────────────────────────────────
 
     public Guid? JournalEntryId { get; set; }
+
+    /// <summary>
+    /// Explicit links to the compensating posting created for a posted-payment reversal. These are
+    /// stored on the payment so operational screens do not have to infer reversal state from
+    /// journal flags alone. The original payment and posting remain immutable audit evidence.
+    /// </summary>
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversalDate { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    public Guid? ReversedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReversalReason { get; set; }
 
     // ── Notes ───────────────────────────────────────────────────────────
 

@@ -66,6 +66,18 @@ public class FxRealizedSettlement : TenantEntity
 
     public Guid? PostingEventId { get; set; }
 
+    /// <summary>
+    /// Realized FX is a separate accounting event from the settlement journal. A source-payment
+    /// reversal must therefore reverse and link this event as well; otherwise the gain/loss would
+    /// remain in the ledger after the underlying settlement was removed.
+    /// </summary>
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReversalReason { get; set; }
+
     [Required]
     [MaxLength(30)]
     public string Status { get; set; } = "Posted";

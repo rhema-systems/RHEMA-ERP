@@ -8,16 +8,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { CashTransaction } from '@/types/cash-management';
-import { ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Filter, Search } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Eye, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
 
 export default function CashTransactionsPage() {
+    const now = new Date();
+    const defaultEndDate = now.toISOString().slice(0, 10);
+    const defaultStartDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
     const [transactions, setTransactions] = useState<CashTransaction[]>([]);
     const [filteredTransactions, setFilteredTransactions] = useState<CashTransaction[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [startDate, setStartDate] = useState('2024-12-01');
-    const [endDate, setEndDate] = useState('2024-12-31');
+    const [startDate, setStartDate] = useState(defaultStartDate);
+    const [endDate, setEndDate] = useState(defaultEndDate);
 
     useEffect(() => {
         loadTransactions();
@@ -197,8 +200,8 @@ export default function CashTransactionsPage() {
                                 variant="outline"
                                 onClick={() => {
                                     setSearchTerm('');
-                                    setStartDate('2024-12-01');
-                                    setEndDate('2024-12-31');
+                                    setStartDate(defaultStartDate);
+                                    setEndDate(defaultEndDate);
                                     loadTransactions();
                                 }}
                                 className="w-full"
@@ -238,6 +241,7 @@ export default function CashTransactionsPage() {
                                         <th className="text-left p-3 font-semibold">Description</th>
                                         <th className="text-right p-3 font-semibold">Amount</th>
                                         <th className="text-center p-3 font-semibold">Status</th>
+                                        <th className="text-right p-3 font-semibold">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -262,15 +266,26 @@ export default function CashTransactionsPage() {
                                                 {formatCurrency(transaction.amount, transaction.currency)}
                                             </td>
                                             <td className="p-3 text-center">
-                                                {transaction.isReconciled ? (
+                                                {transaction.isReversed ? (
+                                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Reversed</Badge>
+                                                ) : transaction.reversalOfCashTransactionId ? (
+                                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200">Correction</Badge>
+                                                ) : transaction.isReconciled ? (
                                                     <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                                                         Reconciled
                                                     </Badge>
+                                                ) : transaction.isPosted ? (
+                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Posted</Badge>
                                                 ) : (
                                                     <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
                                                         Pending
                                                     </Badge>
                                                 )}
+                                            </td>
+                                            <td className="p-3 text-right">
+                                                <Button asChild variant="ghost" size="sm">
+                                                    <Link href={`/finance/cash/transactions/${transaction.id}`}><Eye className="mr-2 h-4 w-4" /> View</Link>
+                                                </Button>
                                             </td>
                                         </tr>
                                     ))}

@@ -12,7 +12,9 @@ import type {
     CustomerDetailedLedgerReport,
     CollectionsDashboardStats,
     PaymentAllocation,
-    PaymentAllocationResultDto
+    PaymentAllocationResultDto,
+    CustomerPaymentTrace,
+    ReverseCustomerPaymentRequest
 } from '../types/ar';
 
 // Pagination and Filtering Types
@@ -58,7 +60,7 @@ export interface PaymentQuery {
 
 export type EstateArSource = 'facilities' | 'property-management';
 
-// Estate/Finance integration: Estate requests billing work, but Finance AR remains the owner of invoices and payments.
+// Estate requests billing work, while Finance AR remains the owner of invoices and payments.
 export interface EstateArResultNotificationRequest {
     actionType: string;
     financeArEntityId?: string | null;
@@ -157,6 +159,18 @@ class ArService {
         return apiService.get<CustomerPayment>(`${this.baseUrl}/payments/${id}`);
     }
 
+    public async getPaymentTrace(id: string): Promise<CustomerPaymentTrace> {
+        return apiService.get<CustomerPaymentTrace>(`${this.baseUrl}/payments/${id}/trace`);
+    }
+
+    /**
+     * Posts an immutable correction rather than editing the receipt. The service name mirrors
+     * the accounting action so callers do not confuse this with deletion or legacy voiding.
+     */
+    public async reversePayment(id: string, request: ReverseCustomerPaymentRequest): Promise<CustomerPayment> {
+        return apiService.post<CustomerPayment>(`${this.baseUrl}/payments/${id}/reverse`, request);
+    }
+
     public async createPayment(data: PaymentCreateRequest): Promise<CustomerPayment> {
         return apiService.post<CustomerPayment>(`${this.baseUrl}/payments`, data);
     }
@@ -248,7 +262,6 @@ class ArService {
     }
 
     public async notifyEstateArResult(source: EstateArSource, data: EstateArResultNotificationRequest): Promise<void> {
-        // Estate/Finance integration: post Finance AR outcomes back to the correct Estate workspace without duplicating AR logic.
         const basePath = source === 'facilities'
             ? '/estate/facilities/ar-billing/results'
             : '/estate/property-management/ar-billing/results';
