@@ -17,7 +17,9 @@ public class LocationContactController : ControllerBase
     private readonly ILocationContactService _locationContactService;
     private readonly ILogger<LocationContactController> _logger;
 
-    public LocationContactController(ILocationContactService locationContactService, ILogger<LocationContactController> logger)
+    public LocationContactController(
+        ILocationContactService locationContactService,
+        ILogger<LocationContactController> logger)
     {
         _locationContactService = locationContactService;
         _logger = logger;

@@ -1,0 +1,502 @@
+using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Exceptions;
+using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ErpSystem.Api.Controllers.HR;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class EmployeeGoalsController : ControllerBase
+{
+    private readonly IEmployeeGoalService _employeeGoalService;
+    private readonly IGoalWorkflowCommandService _workflowService;
+    private readonly ILogger<EmployeeGoalsController> _logger;
+
+    public EmployeeGoalsController(
+        IEmployeeGoalService employeeGoalService,
+        IGoalWorkflowCommandService workflowService,
+        ILogger<EmployeeGoalsController> logger)
+    {
+        _employeeGoalService = employeeGoalService;
+        _workflowService     = workflowService;
+        _logger              = logger;
+    }
+
+    /// <summary>Get employee goals with pagination</summary>
+    [HttpGet("paged")]
+    [ProducesResponseType(typeof(PagedResult<EmployeeGoalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, [FromQuery] Guid? employeeId = null, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetPagedAsync(pageNumber, pageSize, employeeId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving paged employee goals");
+            return StatusCode(500, "An error occurred while retrieving employee goals");
+        }
+    }
+
+    /// <summary>Get an employee goal by ID</summary>
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(EmployeeGoalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetByIdAsync(id, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving employee goal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving the employee goal");
+        }
+    }
+
+    /// <summary>Get goals for a specific employee, optionally filtered by cycle</summary>
+    [HttpGet("by-employee/{employeeId:guid}")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeGoalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetByEmployee(Guid employeeId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving goals for employee {EmployeeId}", employeeId);
+            return StatusCode(500, "An error occurred while retrieving employee goals");
+        }
+    }
+
+    /// <summary>Get goals linked to a specific appraisal</summary>
+    [HttpGet("by-appraisal/{appraisalId:guid}")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeGoalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetByAppraisal(Guid appraisalId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetByAppraisalIdAsync(appraisalId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving goals for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving employee goals");
+        }
+    }
+
+    /// <summary>Get goals pending approval for a manager, optionally filtered by cycle</summary>
+    [HttpGet("pending-approval/{managerId:guid}")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeGoalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPendingApproval(Guid managerId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetPendingApprovalAsync(managerId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving pending approval goals for manager {ManagerId}", managerId);
+            return StatusCode(500, "An error occurred while retrieving pending approval goals");
+        }
+    }
+
+    /// <summary>Get the goal summary for an employee in a cycle</summary>
+    [HttpGet("summary/{employeeId:guid}/{cycleId:guid}")]
+    [ProducesResponseType(typeof(EmployeeGoalSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGoalSummary(Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetGoalSummaryAsync(employeeId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving goal summary for employee {EmployeeId} in cycle {CycleId}", employeeId, cycleId);
+            return StatusCode(500, "An error occurred while retrieving the goal summary");
+        }
+    }
+
+    /// <summary>Get the goal summary for a manager's team in a cycle</summary>
+    [HttpGet("team-summary/{managerId:guid}/{cycleId:guid}")]
+    [ProducesResponseType(typeof(IEnumerable<TeamGoalSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTeamGoalSummary(Guid managerId, Guid cycleId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetTeamGoalSummaryAsync(managerId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving team goal summary for manager {ManagerId} in cycle {CycleId}", managerId, cycleId);
+            return StatusCode(500, "An error occurred while retrieving the team goal summary");
+        }
+    }
+
+    /// <summary>Create a new employee goal</summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(EmployeeGoalDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Create([FromBody] CreateEmployeeGoalDto createDto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.CreateAsync(createDto, cancellationToken);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating employee goal");
+            return StatusCode(500, "An error occurred while creating the employee goal");
+        }
+    }
+
+    /// <summary>Update an existing employee goal</summary>
+    [HttpPut("{id:guid}")]
+    [ProducesResponseType(typeof(EmployeeGoalDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateEmployeeGoalDto updateDto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.UpdateAsync(updateDto, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating employee goal {Id}", id);
+            return StatusCode(500, "An error occurred while updating the employee goal");
+        }
+    }
+
+    /// <summary>Delete an employee goal</summary>
+    [HttpDelete("{id:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.DeleteAsync(id, cancellationToken);
+            if (!result) return NotFound(new { message = "Employee goal not found" });
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting employee goal {Id}", id);
+            return StatusCode(500, "An error occurred while deleting the employee goal");
+        }
+    }
+
+    // ── Approval workflow ─────────────────────────────────────────────────
+    //
+    // All four commands below are served by IGoalWorkflowCommandService.
+    // The service resolves the calling user from ICurrentUserService internally,
+    // so no managerId / employeeId is accepted from the request — that would
+    // allow callers to impersonate other users.
+    //
+    // HTTP status mapping for GoalWorkflowException.Reason:
+    //   UnauthorizedAccess → 403
+    //   GoalNotFound       → 404
+    //   InvalidTransition
+    //   GoalLocked
+    //   MissingFeedback    → 422
+
+    /// <summary>
+    /// Submit a goal for manager approval.
+    /// Transitions: Draft → PendingApproval, Rejected → PendingApproval.
+    /// The submission target manager is derived from the employee's HR record.
+    /// </summary>
+    [HttpPost("{goalId:guid}/submit")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Submit(Guid goalId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _workflowService.SubmitGoalAsync(goalId, cancellationToken);
+            return NoContent();
+        }
+        catch (GoalWorkflowException ex)
+        {
+            return WorkflowError(ex, goalId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting goal {GoalId}", goalId);
+            return StatusCode(500, new { message = "An error occurred while submitting the goal." });
+        }
+    }
+
+    /// <summary>
+    /// Approve a pending goal (manager action).
+    /// Transition: PendingApproval → Approved.
+    /// The calling user must be the direct manager of the goal's employee.
+    /// </summary>
+    [HttpPost("{goalId:guid}/approve")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Approve(Guid goalId, [FromBody] ApproveGoalRequest? request = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _workflowService.ApproveGoalAsync(goalId, request?.Feedback, cancellationToken);
+            return NoContent();
+        }
+        catch (GoalWorkflowException ex)
+        {
+            return WorkflowError(ex, goalId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error approving goal {GoalId}", goalId);
+            return StatusCode(500, new { message = "An error occurred while approving the goal." });
+        }
+    }
+
+    /// <summary>
+    /// Reject a pending goal (manager action).
+    /// Transition: PendingApproval → Rejected.
+    /// Non-empty feedback is required.
+    /// The calling user must be the direct manager of the goal's employee.
+    /// </summary>
+    [HttpPost("{goalId:guid}/reject")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Reject(
+        Guid goalId,
+        [FromBody] RejectGoalRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request?.Feedback))
+            return UnprocessableEntity(new { message = "Rejection feedback is required." });
+
+        try
+        {
+            await _workflowService.RejectGoalAsync(goalId, request.Feedback, cancellationToken);
+            return NoContent();
+        }
+        catch (GoalWorkflowException ex)
+        {
+            return WorkflowError(ex, goalId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rejecting goal {GoalId}", goalId);
+            return StatusCode(500, new { message = "An error occurred while rejecting the goal." });
+        }
+    }
+
+    /// <summary>
+    /// Lock a goal (manager action).
+    /// Permitted on goals in Approved / InProgress / AtRisk / OnTrack / Completed status.
+    /// Once locked, no further workflow transitions are permitted.
+    /// </summary>
+    [HttpPost("{goalId:guid}/lock")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Lock(Guid goalId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _workflowService.LockGoalAsync(goalId, cancellationToken);
+            return NoContent();
+        }
+        catch (GoalWorkflowException ex)
+        {
+            return WorkflowError(ex, goalId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error locking goal {GoalId}", goalId);
+            return StatusCode(500, new { message = "An error occurred while locking the goal." });
+        }
+    }
+
+    /// <summary>Unlock a goal</summary>
+    [HttpPost("{goalId:guid}/unlock")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Unlock(Guid goalId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.UnlockGoalAsync(goalId, cancellationToken);
+            if (!result) return NotFound(new { message = "Employee goal not found" });
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error unlocking goal {GoalId}", goalId);
+            return StatusCode(500, "An error occurred while unlocking the goal");
+        }
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Maps a <see cref="GoalWorkflowException"/> to the correct HTTP status code
+    /// using the typed <see cref="GoalWorkflowFailureReason"/> on the exception.
+    /// </summary>
+    private IActionResult WorkflowError(GoalWorkflowException ex, Guid goalId)
+    {
+        _logger.LogWarning(
+            "Goal workflow rejected: goalId={GoalId}, reason={Reason}, message={Message}",
+            goalId, ex.Reason, ex.Message);
+
+        return ex.Reason switch
+        {
+            GoalWorkflowFailureReason.GoalNotFound       => NotFound(new { message = ex.Message }),
+            GoalWorkflowFailureReason.UnauthorizedAccess => StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }),
+            _                                            => UnprocessableEntity(new { message = ex.Message }),
+        };
+    }
+
+    // ── Progress entries ──────────────────────────────────────────────────
+
+    /// <summary>Add a progress entry to a goal</summary>
+    [HttpPost("{goalId:guid}/progress")]
+    [ProducesResponseType(typeof(GoalProgressEntryDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddProgressEntry(Guid goalId, [FromBody] CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.AddProgressEntryAsync(goalId, dto, cancellationToken);
+            return StatusCode(201, result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding progress entry to goal {GoalId}", goalId);
+            return StatusCode(500, "An error occurred while adding the progress entry");
+        }
+    }
+
+    /// <summary>Get progress entries for a goal</summary>
+    [HttpGet("{goalId:guid}/progress")]
+    [ProducesResponseType(typeof(IEnumerable<GoalProgressEntryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetProgressEntries(Guid goalId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.GetProgressEntriesAsync(goalId, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving progress entries for goal {GoalId}", goalId);
+            return StatusCode(500, "An error occurred while retrieving progress entries");
+        }
+    }
+
+    /// <summary>Update a progress entry</summary>
+    [HttpPut("{goalId:guid}/progress/{entryId:guid}")]
+    [ProducesResponseType(typeof(GoalProgressEntryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateProgressEntry(Guid goalId, Guid entryId, [FromBody] UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.UpdateProgressEntryAsync(goalId, dto, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating progress entry {EntryId} for goal {GoalId}", entryId, goalId);
+            return StatusCode(500, "An error occurred while updating the progress entry");
+        }
+    }
+
+    /// <summary>Delete a progress entry</summary>
+    [HttpDelete("{goalId:guid}/progress/{entryId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteProgressEntry(Guid goalId, Guid entryId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _employeeGoalService.DeleteProgressEntryAsync(goalId, entryId, cancellationToken);
+            if (!result) return NotFound(new { message = "Progress entry not found" });
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting progress entry {EntryId} for goal {GoalId}", entryId, goalId);
+            return StatusCode(500, "An error occurred while deleting the progress entry");
+        }
+    }
+}
+
+/// <summary>
+/// Request body for <c>POST {goalId}/reject</c>.
+/// Feedback is mandatory — rejection without explanation is a domain rule violation.
+/// </summary>
+public sealed record RejectGoalRequest(string? Feedback);
+
+/// <summary>
+/// Optional request body for <c>POST {goalId}/approve</c>.
+/// Allows the manager to attach a brief approval comment.
+/// </summary>
+public sealed record ApproveGoalRequest(string? Feedback);

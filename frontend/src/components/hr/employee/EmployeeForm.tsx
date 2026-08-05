@@ -1,0 +1,577 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Loader2, Save } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import {
+  GENDER_OPTIONS,
+  MARITAL_STATUS_OPTIONS,
+  STAFF_STATUS_OPTIONS,
+  EMPLOYMENT_TYPE_OPTIONS,
+  BLOOD_TYPE_OPTIONS,
+} from '@/types/hr/employee';
+import type { EmployeePosition } from '@/types/hr/position';
+import type { OrganizationLevel } from '@/types/hr/organization';
+import type { Location, LocationLevel } from '@/types/hr/location';
+
+const opt = z.string().optional().or(z.literal(''));
+
+export const employeeSchema = z.object({
+  employeeNumber: opt,
+  firstName: z.string().min(1, 'First name is required').max(100),
+  middleName: opt,
+  lastName: z.string().min(1, 'Last name is required').max(100),
+  title: opt,
+  gender: opt,
+  dateOfBirth: opt,
+  maritalStatus: opt,
+  religion: opt,
+  bloodType: opt,
+  isExpatriate: z.boolean(),
+  emailAddress: z.string().email('Invalid email address'),
+  mobileNumber: opt,
+  telephoneNumber: opt,
+  address: opt,
+  city: opt,
+  state: opt,
+  postalCode: opt,
+  digitalAddress: opt,
+  positionId: z.string().min(1, 'Position is required'),
+  organizationUnitId: z.string().min(1, 'Select a position to set the organization unit'),
+  locationId: z.string().min(1, 'Location is required'),
+  managerId: opt,
+  employmentType: z.string().min(1),
+  staffStatus: z.string().min(1),
+  dateEmployed: opt,
+  probationPeriodDays: z.coerce.number().int('Must be a whole number').min(0),
+  isFullTime: z.boolean(),
+  salary: opt,
+  taxNumber: opt,
+  socialSecurityNumber: opt,
+  tinNumber: opt,
+  payTax: z.boolean(),
+  ssFund: z.boolean(),
+  grossUp: z.boolean(),
+  tier2Only: z.boolean(),
+  overtime: z.boolean(),
+  badgeNumber: opt,
+  notes: opt,
+});
+
+export type EmployeeFormValues = z.infer<typeof employeeSchema>;
+
+export const emptyEmployee: EmployeeFormValues = {
+  employeeNumber: '',
+  firstName: '',
+  middleName: '',
+  lastName: '',
+  title: '',
+  gender: '',
+  dateOfBirth: '',
+  maritalStatus: '',
+  religion: '',
+  bloodType: '',
+  isExpatriate: false,
+  emailAddress: '',
+  mobileNumber: '',
+  telephoneNumber: '',
+  address: '',
+  city: '',
+  state: '',
+  postalCode: '',
+  digitalAddress: '',
+  positionId: '',
+  organizationUnitId: '',
+  locationId: '',
+  managerId: '',
+  employmentType: 'Permanent',
+  staffStatus: 'Active',
+  dateEmployed: '',
+  probationPeriodDays: 90,
+  isFullTime: true,
+  salary: '',
+  taxNumber: '',
+  socialSecurityNumber: '',
+  tinNumber: '',
+  payTax: false,
+  ssFund: false,
+  grossUp: false,
+  tier2Only: false,
+  overtime: false,
+  badgeNumber: '',
+  notes: '',
+};
+
+interface EmployeeFormProps {
+  positions: EmployeePosition[];
+  orgLevels: OrganizationLevel[];
+  locations: Location[];
+  locationLevels: LocationLevel[];
+  defaultValues: EmployeeFormValues;
+  onSubmit: (values: EmployeeFormValues) => Promise<void>;
+  submitting: boolean;
+  submitLabel: string;
+  onCancel: () => void;
+  initialManagerLabel?: string | null;
+  /** The employee's saved location level, to seed the location cascade on edit. */
+  initialLocationLevelId?: string | null;
+}
+
+// Sort comparators: levels by number then name; everything else alphabetical.
+const byLevelThenName = (a: { levelNumber: number; name: string }, b: { levelNumber: number; name: string }) =>
+  a.levelNumber - b.levelNumber || a.name.localeCompare(b.name);
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+const byTitle = (a: { title: string }, b: { title: string }) => a.title.localeCompare(b.title);
+
+// --- small presentational helpers ---
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-5 border-t pt-6 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  error,
+  hint,
+  children,
+  className,
+}: {
+  label: string;
+  htmlFor?: string;
+  error?: string;
+  hint?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`space-y-2 ${className ?? ''}`}>
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint && !error && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {error && <p className="text-sm text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function SwitchRow({
+  id,
+  label,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-md border px-3 py-2.5">
+      <Label htmlFor={id} className="cursor-pointer">
+        {label}
+      </Label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+function OptionalSelect({
+  value,
+  onChange,
+  placeholder,
+  options,
+  id,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  options: { value: string; label: string }[];
+  id?: string;
+}) {
+  const NONE = '__none__';
+  return (
+    <Select value={value || NONE} onValueChange={(v) => onChange(v === NONE ? '' : v)}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NONE}>{placeholder}</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+const GRID3 = 'grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3';
+
+export function EmployeeForm({
+  positions,
+  orgLevels,
+  locations,
+  locationLevels,
+  defaultValues,
+  onSubmit,
+  submitting,
+  submitLabel,
+  onCancel,
+  initialManagerLabel,
+  initialLocationLevelId,
+}: EmployeeFormProps) {
+  const form = useForm<EmployeeFormValues>({
+    resolver: zodResolver(employeeSchema) as any,
+    defaultValues,
+  });
+
+  const positionId = form.watch('positionId');
+  const locationId = form.watch('locationId');
+  const managerId = form.watch('managerId') || null;
+  const selectedPosition = positions.find((p) => p.id === positionId);
+
+  // Org level name derived from the position (its DTO carries the level id, but
+  // the level name isn't always populated — resolve it against the levels list).
+  const orgLevelName = orgLevels.find((l) => l.id === selectedPosition?.organizationLevelId)?.name;
+
+  // Sorted option lists for the dropdowns.
+  const sortedPositions = useMemo(() => [...positions].sort(byTitle), [positions]);
+  const sortedLocationLevels = useMemo(() => [...locationLevels].sort(byLevelThenName), [locationLevels]);
+
+  // Location cascade: pick a location level, then the location is filtered to it.
+  // The level itself is not submitted (server derives it from the location).
+  // Seed it (edit mode) directly from the employee's saved location level.
+  const [locationLevelId, setLocationLevelId] = useState(initialLocationLevelId ?? '');
+
+  // Fallback: if no initial level was provided, derive it from the saved location
+  // once the locations list has loaded.
+  useEffect(() => {
+    if (!locationLevelId && locationId) {
+      const loc = locations.find((l) => l.id === locationId);
+      if (loc?.locationLevelId) setLocationLevelId(loc.locationLevelId);
+    }
+  }, [locations, locationId, locationLevelId]);
+
+  const locationsForLevel = useMemo(
+    () => locations.filter((l) => l.locationLevelId === locationLevelId).sort(byName),
+    [locations, locationLevelId],
+  );
+
+  const handlePositionChange = (value: string) => {
+    form.setValue('positionId', value, { shouldValidate: true });
+    const pos = positions.find((p) => p.id === value);
+    // Employee's org unit must equal the position's org unit (backend-enforced).
+    form.setValue('organizationUnitId', pos?.organizationUnitId ?? '', { shouldValidate: true });
+  };
+
+  const handleLocationLevelChange = (value: string) => {
+    setLocationLevelId(value);
+    const stillValid = locations.some((l) => l.id === locationId && l.locationLevelId === value);
+    if (!stillValid) form.setValue('locationId', '', { shouldValidate: true });
+  };
+
+  const err = (name: keyof EmployeeFormValues) =>
+    form.formState.errors[name]?.message as string | undefined;
+
+  return (
+    <Card>
+      <form onSubmit={form.handleSubmit(onSubmit)}>
+        <CardHeader>
+          <CardTitle>Employee Details</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-8">
+          {/* Identity & Personal */}
+          <Section title="Identity & Personal">
+            <div className={GRID3}>
+              <Field label="First Name" htmlFor="firstName" error={err('firstName')}>
+                <Input id="firstName" {...form.register('firstName')} />
+              </Field>
+              <Field label="Middle Name" htmlFor="middleName">
+                <Input id="middleName" {...form.register('middleName')} />
+              </Field>
+              <Field label="Last Name" htmlFor="lastName" error={err('lastName')}>
+                <Input id="lastName" {...form.register('lastName')} />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Employee Number" htmlFor="employeeNumber" hint="Auto-generated if left blank">
+                <Input id="employeeNumber" {...form.register('employeeNumber')} />
+              </Field>
+              <Field label="Title" htmlFor="title">
+                <Input id="title" placeholder="Mr / Ms / Dr" {...form.register('title')} />
+              </Field>
+              <Field label="Gender" htmlFor="gender">
+                <OptionalSelect
+                  id="gender"
+                  value={form.watch('gender') ?? ''}
+                  onChange={(v) => form.setValue('gender', v)}
+                  placeholder="Not set"
+                  options={GENDER_OPTIONS}
+                />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Date of Birth" htmlFor="dateOfBirth">
+                <Input id="dateOfBirth" type="date" {...form.register('dateOfBirth')} />
+              </Field>
+              <Field label="Marital Status" htmlFor="maritalStatus">
+                <OptionalSelect
+                  id="maritalStatus"
+                  value={form.watch('maritalStatus') ?? ''}
+                  onChange={(v) => form.setValue('maritalStatus', v)}
+                  placeholder="Not set"
+                  options={MARITAL_STATUS_OPTIONS}
+                />
+              </Field>
+              <Field label="Blood Type" htmlFor="bloodType">
+                <OptionalSelect
+                  id="bloodType"
+                  value={form.watch('bloodType') ?? ''}
+                  onChange={(v) => form.setValue('bloodType', v)}
+                  placeholder="Not set"
+                  options={BLOOD_TYPE_OPTIONS}
+                />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Religion" htmlFor="religion">
+                <Input id="religion" {...form.register('religion')} />
+              </Field>
+            </div>
+          </Section>
+
+          {/* Contact */}
+          <Section title="Contact">
+            <div className={GRID3}>
+              <Field label="Email" htmlFor="emailAddress" error={err('emailAddress')}>
+                <Input id="emailAddress" type="email" {...form.register('emailAddress')} />
+              </Field>
+              <Field label="Mobile" htmlFor="mobileNumber">
+                <Input id="mobileNumber" {...form.register('mobileNumber')} />
+              </Field>
+              <Field label="Telephone" htmlFor="telephoneNumber">
+                <Input id="telephoneNumber" {...form.register('telephoneNumber')} />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Address" htmlFor="address" className="sm:col-span-2">
+                <Input id="address" {...form.register('address')} />
+              </Field>
+              <Field label="City" htmlFor="city">
+                <Input id="city" {...form.register('city')} />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="State / Region" htmlFor="state">
+                <Input id="state" {...form.register('state')} />
+              </Field>
+              <Field label="Postal Code" htmlFor="postalCode">
+                <Input id="postalCode" {...form.register('postalCode')} />
+              </Field>
+              <Field label="Digital Address" htmlFor="digitalAddress">
+                <Input id="digitalAddress" {...form.register('digitalAddress')} />
+              </Field>
+            </div>
+          </Section>
+
+          {/* Employment */}
+          <Section title="Employment">
+            <div className={GRID3}>
+              <Field label="Position" htmlFor="positionId" error={err('positionId')}>
+                <Select value={positionId || undefined} onValueChange={handlePositionChange}>
+                  <SelectTrigger id="positionId">
+                    <SelectValue placeholder="Select a position" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sortedPositions.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.title}
+                        {p.organizationUnitName ? ` · ${p.organizationUnitName}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Organization Level" hint="From the selected position">
+                <Input value={orgLevelName ?? ''} placeholder="—" readOnly disabled />
+              </Field>
+              <Field label="Organization Unit" hint="From the selected position" error={err('organizationUnitId')}>
+                <Input value={selectedPosition?.organizationUnitName ?? ''} placeholder="—" readOnly disabled />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Location Level">
+                <Select value={locationLevelId || undefined} onValueChange={handleLocationLevelChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a location level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sortedLocationLevels.length === 0 ? (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">No location levels.</div>
+                    ) : (
+                      sortedLocationLevels.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>
+                          {l.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Location" htmlFor="locationId" error={err('locationId')}>
+                <Select
+                  value={locationId || undefined}
+                  disabled={!locationLevelId}
+                  onValueChange={(v) => form.setValue('locationId', v, { shouldValidate: true })}
+                >
+                  <SelectTrigger id="locationId">
+                    <SelectValue placeholder={locationLevelId ? 'Select a location' : 'Select a level first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locationsForLevel.length === 0 ? (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">No locations at this level.</div>
+                    ) : (
+                      locationsForLevel.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>
+                          {l.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Manager">
+                <EmployeePicker
+                  value={managerId}
+                  initialLabel={initialManagerLabel}
+                  onChange={(id) => form.setValue('managerId', id ?? '')}
+                  placeholder="Search for a manager…"
+                />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Employment Type" htmlFor="employmentType">
+                <Select
+                  value={form.watch('employmentType')}
+                  onValueChange={(v) => form.setValue('employmentType', v)}
+                >
+                  <SelectTrigger id="employmentType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EMPLOYMENT_TYPE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Staff Status" htmlFor="staffStatus">
+                <Select
+                  value={form.watch('staffStatus')}
+                  onValueChange={(v) => form.setValue('staffStatus', v)}
+                >
+                  <SelectTrigger id="staffStatus">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STAFF_STATUS_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Date Employed" htmlFor="dateEmployed">
+                <Input id="dateEmployed" type="date" {...form.register('dateEmployed')} />
+              </Field>
+            </div>
+            <div className={GRID3}>
+              <Field label="Probation (days)" htmlFor="probationPeriodDays" error={err('probationPeriodDays')}>
+                <Input id="probationPeriodDays" type="number" min={0} {...form.register('probationPeriodDays')} />
+              </Field>
+              <div className="grid grid-cols-2 gap-4 sm:col-span-2 lg:col-span-1 lg:self-end">
+                <SwitchRow
+                  id="isFullTime"
+                  label="Full-time"
+                  checked={form.watch('isFullTime')}
+                  onChange={(v) => form.setValue('isFullTime', v)}
+                />
+                <SwitchRow
+                  id="isExpatriate"
+                  label="Expatriate"
+                  checked={form.watch('isExpatriate')}
+                  onChange={(v) => form.setValue('isExpatriate', v)}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Compensation & Tax */}
+          <Section title="Compensation & Tax">
+            <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Salary (GHS)" htmlFor="salary">
+                <Input id="salary" type="number" step="0.01" min={0} {...form.register('salary')} />
+              </Field>
+              <Field label="Tax Number" htmlFor="taxNumber">
+                <Input id="taxNumber" {...form.register('taxNumber')} />
+              </Field>
+              <Field label="SSNIT Number" htmlFor="socialSecurityNumber">
+                <Input id="socialSecurityNumber" {...form.register('socialSecurityNumber')} />
+              </Field>
+              <Field label="TIN" htmlFor="tinNumber">
+                <Input id="tinNumber" {...form.register('tinNumber')} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+              <SwitchRow id="payTax" label="Pay Tax" checked={form.watch('payTax')} onChange={(v) => form.setValue('payTax', v)} />
+              <SwitchRow id="ssFund" label="SS Fund" checked={form.watch('ssFund')} onChange={(v) => form.setValue('ssFund', v)} />
+              <SwitchRow id="grossUp" label="Gross Up" checked={form.watch('grossUp')} onChange={(v) => form.setValue('grossUp', v)} />
+              <SwitchRow id="tier2Only" label="Tier 2 Only" checked={form.watch('tier2Only')} onChange={(v) => form.setValue('tier2Only', v)} />
+              <SwitchRow id="overtime" label="Overtime" checked={form.watch('overtime')} onChange={(v) => form.setValue('overtime', v)} />
+            </div>
+            <Field label="Notes" htmlFor="notes">
+              <Textarea id="notes" rows={3} {...form.register('notes')} />
+            </Field>
+          </Section>
+        </CardContent>
+        <CardFooter className="flex justify-end gap-2 border-t pt-6">
+          <Button variant="outline" type="button" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {submitLabel}
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
+  );
+}

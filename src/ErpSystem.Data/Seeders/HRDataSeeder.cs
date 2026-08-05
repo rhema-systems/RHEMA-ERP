@@ -119,6 +119,10 @@ public class HRDataSeeder
             return;
         }
 
+        // [HR-MODULE-PORT] Positions now REQUIRE OrganizationUnitId + OrganizationLevelId (DepartmentId
+        // anchoring was removed). Resolve a default org unit/level for the tenant so SaveChanges succeeds.
+        var (orgUnitId, orgLevelId) = await SeederOrgDefaults.EnsureDefaultUnitAsync(_context, tenantId);
+
         var positions = new[]
         {
             // Maintenance positions
@@ -147,7 +151,10 @@ public class HRDataSeeder
                     Title = pos.Title,
                     Code = pos.Code,
                     Level = pos.Level,
-                    DepartmentId = pos.DeptId,
+                    // [HR-MODULE-PORT] Positions anchor to the org structure via the REQUIRED
+                    // OrganizationUnitId + OrganizationLevelId (DepartmentId was removed).
+                    OrganizationUnitId = orgUnitId,
+                    OrganizationLevelId = orgLevelId,
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = "System"

@@ -105,8 +105,9 @@ namespace ErpSystem.Api.Controllers
                     e => e.Position,
                     e => e.Section!,
                     e => e.Manager!,
-                    e => e.Country!,
-                    e => e.Shift!);
+                    // [HR-MODULE-PORT] Employee.Shift removed by the HR port (superseded by
+                    // HRApi's ShiftAssignment / EmployeeWorkSchedule attendance model).
+                    e => e.Country!);
 
                 if (employee == null)
                 {

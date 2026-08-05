@@ -30,6 +30,17 @@ public class OrganizationStructureService : IOrganizationStructureService
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global tenant
+    // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
+    // this service scopes reads/writes to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
     public async Task<OrganizationStructureDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _repository.GetByIdAsync(id);
@@ -52,22 +63,26 @@ public class OrganizationStructureService : IOrganizationStructureService
 
     public async Task<IEnumerable<OrganizationStructureDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToDtoList();
     }
 
     public async Task<IEnumerable<OrganizationStructureSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToSummaryDtoList();
     }
 
     public async Task<PagedResult<OrganizationStructureDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var pagedEntities = await query
+            .OrderBy(e => e.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -92,6 +107,7 @@ public class OrganizationStructureService : IOrganizationStructureService
             throw new InvalidOperationException($"Organization structure with code '{createDto.Code}' already exists.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -105,7 +121,7 @@ public class OrganizationStructureService : IOrganizationStructureService
     {
         var entity = await _repository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Organization structure with ID '{updateDto.Id}' not found.");
 
         // Validate unique name
@@ -130,7 +146,7 @@ public class OrganizationStructureService : IOrganizationStructureService
     {
         var entity = await _repository.GetByIdAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Organization structure with ID '{id}' not found.");
 
         await _repository.DeleteAsync(entity);
@@ -151,7 +167,7 @@ public class OrganizationStructureService : IOrganizationStructureService
     {
         var entity = await _repository.GetByIdAsync(id);
 
-        if (entity == null)
+        if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Organization structure with ID '{id}' not found.");
 
         // Unset all defaults for this tenant
@@ -182,18 +198,33 @@ public class OrganizationLevelService : IOrganizationLevelService
     private readonly IOrganizationLevelRepository _repository;
     private readonly IOrganizationStructureRepository _structureRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<OrganizationLevelService> _logger;
 
     public OrganizationLevelService(
         IOrganizationLevelRepository repository,
         IOrganizationStructureRepository structureRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<OrganizationLevelService> logger)
     {
         _repository = repository;
         _structureRepository = structureRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global
+    // tenant query-filter and TenantId auto-stamp are inert. Following the
+    // RHEMA convention (see finance services), this service scopes reads/writes
+    // to the current tenant explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<OrganizationLevelDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -218,28 +249,38 @@ public class OrganizationLevelService : IOrganizationLevelService
 
     public async Task<IEnumerable<OrganizationLevelDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.LevelNumber).ThenBy(e => e.Name).ToDtoList();
     }
 
     public async Task<IEnumerable<OrganizationLevelSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.LevelNumber).ThenBy(e => e.Name).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<OrganizationLevelDto>> GetByStructureIdAsync(Guid structureId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetByStructureIdOrderedAsync(structureId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<PagedResult<OrganizationLevelDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // Include the structure so the list DTO can populate StructureName
+        // (GetQueryable() is bare — no includes).
         var pagedEntities = await query
+            .Include(l => l.OrganizationStructure)
+            .OrderBy(l => l.LevelNumber)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -273,6 +314,7 @@ public class OrganizationLevelService : IOrganizationLevelService
             throw new InvalidOperationException($"Level number '{createDto.LevelNumber}' is already used in this structure.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -361,6 +403,18 @@ public class OrganizationUnitService : IOrganizationUnitService
         _logger = logger;
     }
 
+    // The ApplicationDbContext is registered without a tenant, so its global
+    // tenant query-filter and TenantId auto-stamp are inert. Following the
+    // RHEMA convention, this service scopes reads/writes to the current tenant
+    // explicitly.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
+    }
+
     public async Task<OrganizationUnitDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await _repository.GetWithDetailsAsync(id);
@@ -387,20 +441,30 @@ public class OrganizationUnitService : IOrganizationUnitService
 
     public async Task<IEnumerable<OrganizationUnitDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetAllAsync();
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToDtoList();
     }
 
     public async Task<IEnumerable<OrganizationUnitSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await _repository.GetAllAsync();
+        var tenantId = GetTenantId();
+        // Include the level/parent navigations so the summary DTO can populate
+        // LevelName / ParentUnitName (GetAllAsync is bare — no includes).
+        var entities = await _repository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .Include(e => e.OrganizationLevel)
+            .Include(e => e.ParentUnit)
+            .OrderBy(e => e.Name)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<OrganizationUnitDto>> GetByLevelIdAsync(Guid levelId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entities = await _repository.GetByLevelIdAsync(levelId);
-        return entities.ToDtoList();
+        return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
 
     public async Task<IEnumerable<OrganizationUnitDto>> GetChildUnitsAsync(Guid parentUnitId, CancellationToken cancellationToken = default)
@@ -441,10 +505,18 @@ public class OrganizationUnitService : IOrganizationUnitService
 
     public async Task<PagedResult<OrganizationUnitDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _repository.GetQueryable();
+        var tenantId = GetTenantId();
+        var query = _repository.GetQueryable().Where(e => e.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // Include navigations so the list DTO can populate LevelName / ParentUnitName /
+        // HeadEmployeeName (GetQueryable() is bare — no includes). These are all
+        // single-valued references, so no cartesian explosion with paging.
         var pagedEntities = await query
+            .Include(u => u.OrganizationLevel)
+            .Include(u => u.ParentUnit)
+            .Include(u => u.HeadEmployee)
+            .OrderBy(u => u.Name)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -471,8 +543,8 @@ public class OrganizationUnitService : IOrganizationUnitService
         if (level == null)
             throw new ArgumentException($"Organization level with ID '{createDto.OrganizationLevelId}' not found.");
 
-        if (level.RequiresHead && !createDto.HeadEmployeeId.HasValue)
-            throw new InvalidOperationException("This level requires a unit head.");
+        // Head is optional at creation (org structure is typically set up before
+        // employees exist); a head can be assigned later via change-head.
 
         if (createDto.ParentUnitId.HasValue)
         {
@@ -483,9 +555,11 @@ public class OrganizationUnitService : IOrganizationUnitService
             if (parent.OrganizationLevel.StructureId != level.StructureId)
                 throw new InvalidOperationException("Parent unit must belong to the same organization structure as the selected level.");
 
-            var expectedChildLevelNumber = parent.OrganizationLevel.LevelNumber + 1;
-            if (level.LevelNumber != expectedChildLevelNumber)
-                throw new InvalidOperationException($"Invalid hierarchy: child level must be exactly one level below the parent (expected LevelNumber {expectedChildLevelNumber}).");
+            // Parent must sit at a higher tier (lower LevelNumber). Level-skipping
+            // is allowed to accommodate real-world structures; same-level or
+            // inverted nesting is rejected.
+            if (level.LevelNumber <= parent.OrganizationLevel.LevelNumber)
+                throw new InvalidOperationException("Invalid hierarchy: a unit's level must be below its parent's level.");
         }
         else
         {
@@ -506,6 +580,7 @@ public class OrganizationUnitService : IOrganizationUnitService
             throw new InvalidOperationException($"Organization unit with name '{createDto.Name}' already exists in this level.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = GetTenantId();
 
         // Build path
         if (createDto.ParentUnitId.HasValue)
@@ -569,9 +644,9 @@ public class OrganizationUnitService : IOrganizationUnitService
                 if (parent.OrganizationLevel.StructureId != entity.OrganizationLevel.StructureId)
                     throw new InvalidOperationException("Parent unit must belong to the same organization structure.");
 
-                var expectedChildLevelNumber = parent.OrganizationLevel.LevelNumber + 1;
-                if (entity.OrganizationLevel.LevelNumber != expectedChildLevelNumber)
-                    throw new InvalidOperationException($"Invalid hierarchy: child level must be exactly one level below the parent (expected LevelNumber {expectedChildLevelNumber}).");
+                // Parent must sit at a higher tier (lower LevelNumber); level-skipping allowed.
+                if (entity.OrganizationLevel.LevelNumber <= parent.OrganizationLevel.LevelNumber)
+                    throw new InvalidOperationException("Invalid hierarchy: a unit's level must be below its parent's level.");
 
                 // Keep path in sync for this node (descendants are handled elsewhere if needed)
                 entity.Path = $"{parent.Path}/{entity.Id}";

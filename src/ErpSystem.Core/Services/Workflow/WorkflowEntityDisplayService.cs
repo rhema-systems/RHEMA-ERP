@@ -138,6 +138,102 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("LeaveRequest") || key == Normalize("LEAVE_REQUEST") || key == Normalize("Leave Request"))
+            {
+                var leaveRequest = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeaveRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "LeaveRequest";
+                info.EntityNumber = leaveRequest?.RequestNumber;
+                info.EntityName = leaveRequest == null
+                    ? null
+                    : $"{leaveRequest.StartDate:dd MMM yyyy} - {leaveRequest.EndDate:dd MMM yyyy} ({leaveRequest.TotalDays:0.##} days)";
+                info.ActionUrl = $"/hr/leave/requests/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("LeavePlan") || key == Normalize("LEAVE_PLAN") || key == Normalize("Leave Plan"))
+            {
+                var leavePlan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeavePlan>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "LeavePlan";
+                info.EntityName = leavePlan == null
+                    ? null
+                    : $"{leavePlan.Year} plan ({leavePlan.StartDate:dd MMM} - {leavePlan.EndDate:dd MMM})";
+                info.ActionUrl = $"/hr/leave/plans?planId={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("LeaveEncashment") || key == Normalize("LEAVE_ENCASHMENT") || key == Normalize("Leave Encashment"))
+            {
+                var encashment = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeaveEncashment>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "LeaveEncashment";
+                info.EntityName = encashment == null
+                    ? null
+                    : $"{encashment.DaysEncashed:0.##} days ({encashment.Year})";
+                info.ActionUrl = $"/hr/leave/encashments?encashmentId={entityId}";
+                return info;
+            }
+
+            if (key == Normalize("StaffAttendanceRegularization") || key == Normalize("STAFF_ATTENDANCE_REGULARIZATION") || key == Normalize("Attendance Regularization"))
+            {
+                var regularization = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffAttendanceRegularization>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffAttendanceRegularization";
+                info.EntityNumber = regularization?.RegularizationNumber;
+                info.EntityName = regularization == null
+                    ? null
+                    : $"{regularization.Type} on {regularization.AttendanceDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/attendance/regularizations/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("StaffOvertimeRequest") || key == Normalize("STAFF_OVERTIME_REQUEST") || key == Normalize("Overtime Request"))
+            {
+                var overtime = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffOvertimeRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffOvertimeRequest";
+                info.EntityNumber = overtime?.RequestNumber;
+                info.EntityName = overtime == null
+                    ? null
+                    : $"{overtime.PlannedOvertimeHours:0.##} hrs on {overtime.OvertimeDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/attendance/overtime/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("RemoteWorkRequest") || key == Normalize("REMOTE_WORK_REQUEST") || key == Normalize("Remote Work Request"))
+            {
+                var remoteWork = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.RemoteWorkRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "RemoteWorkRequest";
+                info.EntityNumber = remoteWork?.RequestNumber;
+                info.EntityName = remoteWork == null
+                    ? null
+                    : $"{remoteWork.StartDate:dd MMM} - {remoteWork.EndDate:dd MMM yyyy} ({remoteWork.RequestedDays} days)";
+                info.ActionUrl = $"/hr/attendance/remote-work/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("ConsultantTimesheet") || key == Normalize("CONSULTANT_TIMESHEET") || key == Normalize("Consultant Timesheet"))
+            {
+                var timesheet = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.ConsultantTimesheet>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "ConsultantTimesheet";
+                info.EntityNumber = timesheet?.TimesheetNumber;
+                info.EntityName = timesheet == null
+                    ? null
+                    : $"{timesheet.PeriodStartDate:dd MMM} - {timesheet.PeriodEndDate:dd MMM yyyy} ({timesheet.TotalHours:0.##} hrs)";
+                info.ActionUrl = $"/hr/consulting/timesheets/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
+            {
+                info.EntityType = "TrainingNomination";
+                info.ActionUrl = $"/hr/training/nominations?nominationId={entityId}";
+                return info;
+            }
+
             if (key == Normalize("FleetTrip") || key == Normalize("FLEET_TRIP") || key == Normalize("Fleet Trip"))
             {
                 var trip = await _unitOfWork.Repository<ErpSystem.Core.Entities.Maintenance.FleetTrip>()
