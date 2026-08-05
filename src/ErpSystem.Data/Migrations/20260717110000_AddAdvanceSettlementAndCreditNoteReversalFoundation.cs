@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -8,91 +9,94 @@ namespace ErpSystem.Data.Migrations;
 /// Adds controlled AP/AR advance application references and an immutable Sales credit-note
 /// reversal trail. The unapplied balance table is rebuildable reporting state, not source GL.
 /// </summary>
+[DbContext(typeof(ApplicationDbContext))]
+[Migration("20260717110000_AddAdvanceSettlementAndCreditNoteReversalFoundation")]
 public partial class AddAdvanceSettlementAndCreditNoteReversalFoundation : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.AddColumn<Guid>(name: "SupplierAdvanceAccountId", table: "FinanceSettings", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<Guid>(name: "CustomerAdvanceAccountId", table: "FinanceSettings", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<bool>(name: "IsSupplierAdvance", table: "VendorPayment", type: "bit", nullable: false, defaultValue: false);
-        migrationBuilder.AddColumn<bool>(name: "IsCustomerAdvance", table: "CustomerPayment", type: "bit", nullable: false, defaultValue: false);
+        // This hand-authored migration temporarily lost its discovery attributes during branch
+        // integration. Some development databases therefore received later compatibility columns
+        // without receiving this complete foundation. Every operation is conditional so restoring
+        // discovery safely repairs those databases and remains correct for a brand-new database.
+        migrationBuilder.Sql("""
+            IF COL_LENGTH('dbo.FinanceSettings', 'SupplierAdvanceAccountId') IS NULL ALTER TABLE dbo.FinanceSettings ADD SupplierAdvanceAccountId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.FinanceSettings', 'CustomerAdvanceAccountId') IS NULL ALTER TABLE dbo.FinanceSettings ADD CustomerAdvanceAccountId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.VendorPayment', 'IsSupplierAdvance') IS NULL ALTER TABLE dbo.VendorPayment ADD IsSupplierAdvance bit NOT NULL CONSTRAINT DF_VendorPayment_IsSupplierAdvance DEFAULT 0;
+            IF COL_LENGTH('dbo.CustomerPayment', 'IsCustomerAdvance') IS NULL ALTER TABLE dbo.CustomerPayment ADD IsCustomerAdvance bit NOT NULL CONSTRAINT DF_CustomerPayment_IsCustomerAdvance DEFAULT 0;
+            IF COL_LENGTH('dbo.VendorPaymentAllocation', 'ApplicationJournalEntryId') IS NULL ALTER TABLE dbo.VendorPaymentAllocation ADD ApplicationJournalEntryId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.VendorPaymentAllocation', 'ApplicationPostingEventId') IS NULL ALTER TABLE dbo.VendorPaymentAllocation ADD ApplicationPostingEventId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.PaymentAllocation', 'ApplicationJournalEntryId') IS NULL ALTER TABLE dbo.PaymentAllocation ADD ApplicationJournalEntryId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.PaymentAllocation', 'ApplicationPostingEventId') IS NULL ALTER TABLE dbo.PaymentAllocation ADD ApplicationPostingEventId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.CreditNotes', 'ReversalJournalEntryId') IS NULL ALTER TABLE dbo.CreditNotes ADD ReversalJournalEntryId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.CreditNotes', 'ReversalPostingEventId') IS NULL ALTER TABLE dbo.CreditNotes ADD ReversalPostingEventId uniqueidentifier NULL;
+            IF COL_LENGTH('dbo.CreditNotes', 'ReversedAt') IS NULL ALTER TABLE dbo.CreditNotes ADD ReversedAt datetime2 NULL;
+            IF COL_LENGTH('dbo.CreditNotes', 'ReversalReason') IS NULL ALTER TABLE dbo.CreditNotes ADD ReversalReason nvarchar(500) NULL;
 
-        migrationBuilder.AddColumn<Guid>(name: "ApplicationJournalEntryId", table: "VendorPaymentAllocation", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<Guid>(name: "ApplicationPostingEventId", table: "VendorPaymentAllocation", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<Guid>(name: "ApplicationJournalEntryId", table: "PaymentAllocation", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<Guid>(name: "ApplicationPostingEventId", table: "PaymentAllocation", type: "uniqueidentifier", nullable: true);
+            IF OBJECT_ID(N'dbo.SubledgerUnappliedSettlementBalances', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.SubledgerUnappliedSettlementBalances (
+                    Id uniqueidentifier NOT NULL,
+                    TenantId uniqueidentifier NOT NULL,
+                    SourceModule nvarchar(10) NOT NULL,
+                    CounterpartyId uniqueidentifier NOT NULL,
+                    SettlementSourceType nvarchar(50) NOT NULL,
+                    SettlementSourceId uniqueidentifier NOT NULL,
+                    SettlementSourceNumber nvarchar(100) NOT NULL,
+                    Classification nvarchar(50) NOT NULL,
+                    SettlementPostingEventId uniqueidentifier NULL,
+                    SettlementJournalEntryId uniqueidentifier NULL,
+                    SettlementDate datetime2 NOT NULL,
+                    DocumentCurrencyCode nvarchar(3) NOT NULL,
+                    FunctionalCurrencyCode nvarchar(3) NOT NULL,
+                    OriginalAmount decimal(18,2) NOT NULL,
+                    AppliedAmount decimal(18,2) NOT NULL,
+                    UnappliedAmount decimal(18,2) NOT NULL,
+                    RebuildBatchId uniqueidentifier NOT NULL,
+                    LastRebuiltAt datetime2 NOT NULL,
+                    HasDiagnostics bit NOT NULL,
+                    DiagnosticFlags nvarchar(1000) NULL,
+                    ReferenceNumber nvarchar(50) NOT NULL,
+                    Status nvarchar(50) NOT NULL,
+                    EffectiveDate datetime2 NULL,
+                    ExpirationDate datetime2 NULL,
+                    Metadata nvarchar(max) NULL,
+                    Tags nvarchar(500) NULL,
+                    Priority int NOT NULL,
+                    CreatedAt datetime2 NOT NULL,
+                    UpdatedAt datetime2 NULL,
+                    CreatedBy nvarchar(max) NULL,
+                    UpdatedBy nvarchar(max) NULL,
+                    CreatedById uniqueidentifier NULL,
+                    LastModifiedById uniqueidentifier NULL,
+                    IsDeleted bit NOT NULL,
+                    DeletedAt datetime2 NULL,
+                    DeletedBy nvarchar(max) NULL,
+                    CONSTRAINT PK_SubledgerUnappliedSettlementBalances PRIMARY KEY (Id),
+                    CONSTRAINT FK_SubledgerUnappliedSettlementBalances_Tenants_TenantId FOREIGN KEY (TenantId) REFERENCES dbo.Tenants(Id),
+                    CONSTRAINT FK_SubledgerUnappliedSettlementBalances_FinancePostingEvents_SettlementPostingEventId FOREIGN KEY (SettlementPostingEventId) REFERENCES dbo.FinancePostingEvents(Id),
+                    CONSTRAINT FK_SubledgerUnappliedSettlementBalances_JournalEntries_SettlementJournalEntryId FOREIGN KEY (SettlementJournalEntryId) REFERENCES dbo.JournalEntries(Id)
+                );
+            END;
 
-        migrationBuilder.AddColumn<Guid>(name: "ReversalJournalEntryId", table: "CreditNotes", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<Guid>(name: "ReversalPostingEventId", table: "CreditNotes", type: "uniqueidentifier", nullable: true);
-        migrationBuilder.AddColumn<DateTime>(name: "ReversedAt", table: "CreditNotes", type: "datetime2", nullable: true);
-        migrationBuilder.AddColumn<string>(name: "ReversalReason", table: "CreditNotes", type: "nvarchar(500)", maxLength: 500, nullable: true);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.SubledgerUnappliedSettlementBalances') AND name=N'IX_SubledgerUnappliedSettlementBalances_TenantId_SourceModule_SettlementSourceType_SettlementSourceId') CREATE UNIQUE INDEX IX_SubledgerUnappliedSettlementBalances_TenantId_SourceModule_SettlementSourceType_SettlementSourceId ON dbo.SubledgerUnappliedSettlementBalances(TenantId, SourceModule, SettlementSourceType, SettlementSourceId) WHERE IsDeleted = 0;
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.SubledgerUnappliedSettlementBalances') AND name=N'IX_SubledgerUnappliedSettlementBalances_TenantId_SourceModule_CounterpartyId_SettlementDate') CREATE INDEX IX_SubledgerUnappliedSettlementBalances_TenantId_SourceModule_CounterpartyId_SettlementDate ON dbo.SubledgerUnappliedSettlementBalances(TenantId, SourceModule, CounterpartyId, SettlementDate);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.SubledgerUnappliedSettlementBalances') AND name=N'IX_SubledgerUnappliedSettlementBalances_TenantId_SettlementPostingEventId') CREATE INDEX IX_SubledgerUnappliedSettlementBalances_TenantId_SettlementPostingEventId ON dbo.SubledgerUnappliedSettlementBalances(TenantId, SettlementPostingEventId);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.SubledgerUnappliedSettlementBalances') AND name=N'IX_SubledgerUnappliedSettlementBalances_TenantId_SettlementJournalEntryId') CREATE INDEX IX_SubledgerUnappliedSettlementBalances_TenantId_SettlementJournalEntryId ON dbo.SubledgerUnappliedSettlementBalances(TenantId, SettlementJournalEntryId);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.VendorPaymentAllocation') AND name=N'IX_VendorPaymentAllocation_TenantId_ApplicationPostingEventId') CREATE INDEX IX_VendorPaymentAllocation_TenantId_ApplicationPostingEventId ON dbo.VendorPaymentAllocation(TenantId, ApplicationPostingEventId);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.PaymentAllocation') AND name=N'IX_PaymentAllocation_TenantId_ApplicationPostingEventId') CREATE INDEX IX_PaymentAllocation_TenantId_ApplicationPostingEventId ON dbo.PaymentAllocation(TenantId, ApplicationPostingEventId);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.CreditNotes') AND name=N'IX_CreditNotes_TenantId_ReversalJournalEntryId') CREATE INDEX IX_CreditNotes_TenantId_ReversalJournalEntryId ON dbo.CreditNotes(TenantId, ReversalJournalEntryId);
+            IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.CreditNotes') AND name=N'IX_CreditNotes_TenantId_ReversalPostingEventId') CREATE INDEX IX_CreditNotes_TenantId_ReversalPostingEventId ON dbo.CreditNotes(TenantId, ReversalPostingEventId);
 
-        migrationBuilder.CreateTable(
-            name: "SubledgerUnappliedSettlementBalances",
-            columns: table => new
-            {
-                Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                TenantId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                SourceModule = table.Column<string>(type: "nvarchar(10)", maxLength: 10, nullable: false),
-                CounterpartyId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                SettlementSourceType = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                SettlementSourceId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                SettlementSourceNumber = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
-                Classification = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                SettlementPostingEventId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                SettlementJournalEntryId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                SettlementDate = table.Column<DateTime>(type: "datetime2", nullable: false),
-                DocumentCurrencyCode = table.Column<string>(type: "nvarchar(3)", maxLength: 3, nullable: false),
-                FunctionalCurrencyCode = table.Column<string>(type: "nvarchar(3)", maxLength: 3, nullable: false),
-                OriginalAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                AppliedAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                UnappliedAmount = table.Column<decimal>(type: "decimal(18,2)", nullable: false),
-                RebuildBatchId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                LastRebuiltAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                HasDiagnostics = table.Column<bool>(type: "bit", nullable: false),
-                DiagnosticFlags = table.Column<string>(type: "nvarchar(1000)", maxLength: 1000, nullable: true),
-                ReferenceNumber = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false),
-                EffectiveDate = table.Column<DateTime>(type: "datetime2", nullable: true),
-                ExpirationDate = table.Column<DateTime>(type: "datetime2", nullable: true),
-                Metadata = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                Tags = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
-                Priority = table.Column<int>(type: "int", nullable: false),
-                CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                UpdatedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                UpdatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                CreatedById = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                LastModifiedById = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
-                IsDeleted = table.Column<bool>(type: "bit", nullable: false),
-                DeletedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                DeletedBy = table.Column<string>(type: "nvarchar(max)", nullable: true)
-            },
-            constraints: table =>
-            {
-                table.PrimaryKey("PK_SubledgerUnappliedSettlementBalances", x => x.Id);
-                table.ForeignKey("FK_SubledgerUnappliedSettlementBalances_Tenants_TenantId", x => x.TenantId, "Tenants", "Id", onDelete: ReferentialAction.Restrict);
-                table.ForeignKey("FK_SubledgerUnappliedSettlementBalances_FinancePostingEvents_SettlementPostingEventId", x => x.SettlementPostingEventId, "FinancePostingEvents", "Id", onDelete: ReferentialAction.Restrict);
-                table.ForeignKey("FK_SubledgerUnappliedSettlementBalances_JournalEntries_SettlementJournalEntryId", x => x.SettlementJournalEntryId, "JournalEntries", "Id", onDelete: ReferentialAction.Restrict);
-            });
-
-        migrationBuilder.CreateIndex(name: "IX_SubledgerUnappliedSettlementBalances_TenantId_SourceModule_SettlementSourceType_SettlementSourceId", table: "SubledgerUnappliedSettlementBalances", columns: new[] { "TenantId", "SourceModule", "SettlementSourceType", "SettlementSourceId" }, unique: true, filter: "[IsDeleted] = 0");
-        migrationBuilder.CreateIndex(name: "IX_SubledgerUnappliedSettlementBalances_TenantId_SourceModule_CounterpartyId_SettlementDate", table: "SubledgerUnappliedSettlementBalances", columns: new[] { "TenantId", "SourceModule", "CounterpartyId", "SettlementDate" });
-        migrationBuilder.CreateIndex(name: "IX_SubledgerUnappliedSettlementBalances_TenantId_SettlementPostingEventId", table: "SubledgerUnappliedSettlementBalances", columns: new[] { "TenantId", "SettlementPostingEventId" });
-        migrationBuilder.CreateIndex(name: "IX_SubledgerUnappliedSettlementBalances_TenantId_SettlementJournalEntryId", table: "SubledgerUnappliedSettlementBalances", columns: new[] { "TenantId", "SettlementJournalEntryId" });
-        migrationBuilder.CreateIndex(name: "IX_VendorPaymentAllocation_TenantId_ApplicationPostingEventId", table: "VendorPaymentAllocation", columns: new[] { "TenantId", "ApplicationPostingEventId" });
-        migrationBuilder.CreateIndex(name: "IX_PaymentAllocation_TenantId_ApplicationPostingEventId", table: "PaymentAllocation", columns: new[] { "TenantId", "ApplicationPostingEventId" });
-        migrationBuilder.CreateIndex(name: "IX_CreditNotes_TenantId_ReversalJournalEntryId", table: "CreditNotes", columns: new[] { "TenantId", "ReversalJournalEntryId" });
-        migrationBuilder.CreateIndex(name: "IX_CreditNotes_TenantId_ReversalPostingEventId", table: "CreditNotes", columns: new[] { "TenantId", "ReversalPostingEventId" });
-
-        migrationBuilder.AddForeignKey(name: "FK_FinanceSettings_Accounts_SupplierAdvanceAccountId", table: "FinanceSettings", column: "SupplierAdvanceAccountId", principalTable: "Accounts", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_FinanceSettings_Accounts_CustomerAdvanceAccountId", table: "FinanceSettings", column: "CustomerAdvanceAccountId", principalTable: "Accounts", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_VendorPaymentAllocation_JournalEntries_ApplicationJournalEntryId", table: "VendorPaymentAllocation", column: "ApplicationJournalEntryId", principalTable: "JournalEntries", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_VendorPaymentAllocation_FinancePostingEvents_ApplicationPostingEventId", table: "VendorPaymentAllocation", column: "ApplicationPostingEventId", principalTable: "FinancePostingEvents", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_PaymentAllocation_JournalEntries_ApplicationJournalEntryId", table: "PaymentAllocation", column: "ApplicationJournalEntryId", principalTable: "JournalEntries", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_PaymentAllocation_FinancePostingEvents_ApplicationPostingEventId", table: "PaymentAllocation", column: "ApplicationPostingEventId", principalTable: "FinancePostingEvents", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_CreditNotes_JournalEntries_ReversalJournalEntryId", table: "CreditNotes", column: "ReversalJournalEntryId", principalTable: "JournalEntries", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
-        migrationBuilder.AddForeignKey(name: "FK_CreditNotes_FinancePostingEvents_ReversalPostingEventId", table: "CreditNotes", column: "ReversalPostingEventId", principalTable: "FinancePostingEvents", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_FinanceSettings_Accounts_SupplierAdvanceAccountId') ALTER TABLE dbo.FinanceSettings ADD CONSTRAINT FK_FinanceSettings_Accounts_SupplierAdvanceAccountId FOREIGN KEY (SupplierAdvanceAccountId) REFERENCES dbo.Accounts(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_FinanceSettings_Accounts_CustomerAdvanceAccountId') ALTER TABLE dbo.FinanceSettings ADD CONSTRAINT FK_FinanceSettings_Accounts_CustomerAdvanceAccountId FOREIGN KEY (CustomerAdvanceAccountId) REFERENCES dbo.Accounts(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_VendorPaymentAllocation_JournalEntries_ApplicationJournalEntryId') ALTER TABLE dbo.VendorPaymentAllocation ADD CONSTRAINT FK_VendorPaymentAllocation_JournalEntries_ApplicationJournalEntryId FOREIGN KEY (ApplicationJournalEntryId) REFERENCES dbo.JournalEntries(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_VendorPaymentAllocation_FinancePostingEvents_ApplicationPostingEventId') ALTER TABLE dbo.VendorPaymentAllocation ADD CONSTRAINT FK_VendorPaymentAllocation_FinancePostingEvents_ApplicationPostingEventId FOREIGN KEY (ApplicationPostingEventId) REFERENCES dbo.FinancePostingEvents(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_PaymentAllocation_JournalEntries_ApplicationJournalEntryId') ALTER TABLE dbo.PaymentAllocation ADD CONSTRAINT FK_PaymentAllocation_JournalEntries_ApplicationJournalEntryId FOREIGN KEY (ApplicationJournalEntryId) REFERENCES dbo.JournalEntries(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_PaymentAllocation_FinancePostingEvents_ApplicationPostingEventId') ALTER TABLE dbo.PaymentAllocation ADD CONSTRAINT FK_PaymentAllocation_FinancePostingEvents_ApplicationPostingEventId FOREIGN KEY (ApplicationPostingEventId) REFERENCES dbo.FinancePostingEvents(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_CreditNotes_JournalEntries_ReversalJournalEntryId') ALTER TABLE dbo.CreditNotes ADD CONSTRAINT FK_CreditNotes_JournalEntries_ReversalJournalEntryId FOREIGN KEY (ReversalJournalEntryId) REFERENCES dbo.JournalEntries(Id);
+            IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_CreditNotes_FinancePostingEvents_ReversalPostingEventId') ALTER TABLE dbo.CreditNotes ADD CONSTRAINT FK_CreditNotes_FinancePostingEvents_ReversalPostingEventId FOREIGN KEY (ReversalPostingEventId) REFERENCES dbo.FinancePostingEvents(Id);
+            """);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
