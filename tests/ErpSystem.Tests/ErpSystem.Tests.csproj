@@ -36,4 +36,28 @@
     <Compile Remove="Repositories\TechnicianScheduleRepositoryTests.cs" />
   </ItemGroup>
 
+  <!--
+    These tests target finance services/repositories that were removed by the
+    FinancePostingEngine and DbContext-based service migrations. Keep this list
+    explicit so obsolete files cannot silently break or dilute the active test
+    gate. See LEGACY_TEST_MIGRATION.md for replacement coverage and ownership.
+  -->
+  <ItemGroup>
+    <Compile Remove="Services\GeneralLedgerServiceTests.cs" />
+    <Compile Remove="Services\LandedCostServiceTests.cs" />
+    <Compile Remove="Services\Finance\CreditNotePostingIntegrationTests.cs" />
+    <Compile Remove="Services\Finance\ExchangeRateServiceTests.cs" />
+    <Compile Remove="Services\Finance\GL\JournalEntryAttachmentTests.cs" />
+    <Compile Remove="Services\Finance\GL\JournalEntryBudgetTests.cs" />
+    <Compile Remove="Services\Finance\InvoicePostingIntegrationTests.cs" />
+    <Compile Remove="Services\Finance\JournalEntryReversalTests.cs" />
+    <Compile Remove="Services\Finance\JournalEntryServicePeriodTests.cs" />
+    <Compile Remove="Services\Finance\SubledgerJournalServiceIntegrationTests.cs" />
+    <Compile Remove="Services\Finance\TaxReportServiceTests.cs" />
+    <Compile Remove="Services\Finance\TransactionTaxIntegrationTests.cs" />
+    <Compile Remove="Services\Finance\VendorInvoiceServiceTests.cs" />
+    <Compile Remove="Services\Sales\CustomerReturnServiceTests.cs" />
+    <Compile Remove="Services\Sales\ReturnOrderIntegrationTests.cs" />
+  </ItemGroup>
+
 </Project>

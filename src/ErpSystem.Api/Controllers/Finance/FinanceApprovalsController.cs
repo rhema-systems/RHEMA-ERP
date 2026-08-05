@@ -19,6 +19,10 @@ using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
@@ -27,6 +31,12 @@ namespace ErpSystem.Api.Controllers.Finance;
 [Route("api/finance/approvals")]
 public class FinanceApprovalsController : ControllerBase
 {
+    private static readonly JsonSerializerOptions PaymentControlJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private static readonly HashSet<string> FinanceWorkflowEntityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         Normalize("JournalEntry"),
@@ -49,6 +59,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("UnitJournalEntry"),
         Normalize("UnitAccountBudget"),
         Normalize("AllocationRule"),
+        Normalize("AllocationRunBatch"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
         Normalize("OpeningBalanceBatch"),
@@ -361,6 +372,10 @@ public class FinanceApprovalsController : ControllerBase
                 detail: "The submitter cannot approve or reject this high-risk finance workflow item.");
         }
 
+        // The workflow assignment check above answers "is this item assigned to me?"; the
+        // Finance permission check answers the separate question "may I approve AP payments?".
+        // Preserve both gates before evaluating evidence so an unauthorised user cannot probe
+        // payment-control details through validation messages.
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
             (Normalize(entityType) is "VENDORPAYMENT" or "PAYMENTBATCH") &&
             !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded)
@@ -371,6 +386,37 @@ public class FinanceApprovalsController : ControllerBase
                 detail: $"Your roles do not include {FinancePermissions.ApproveApPayments}.");
         }
 
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("VendorPayment"))
+        {
+            var evidenceError = await ValidateVendorPaymentEvidenceForApprovalAsync(
+                tenantId,
+                instance,
+                cancellationToken);
+            if (evidenceError != null)
+            {
+                await RecordFinanceWorkflowAuditAsync(
+                    tenantId,
+                    "WORKFLOW",
+                    entityType,
+                    instance.EntityId,
+                    FinanceAuditEvents.ApPaymentEvidenceApprovalBlocked,
+                    new { approvalId, currentUserId, reason = evidenceError },
+                    comments,
+                    cancellationToken);
+                return BadRequest(new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = instance.CurrentStepId,
+                    Message = evidenceError
+                });
+            }
+        }
+
+        // Batch approval is a domain operation rather than a generic workflow-only transition:
+        // the service freezes allocations and rechecks the same payment controls transactionally.
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
             Normalize(entityType) == Normalize("PaymentBatch"))
         {
@@ -442,6 +488,124 @@ public class FinanceApprovalsController : ControllerBase
         }
 
         return Ok(workflowResult);
+    }
+
+    private async Task<string?> ValidateVendorPaymentEvidenceForApprovalAsync(
+        Guid tenantId,
+        WorkflowInstance instance,
+        CancellationToken cancellationToken)
+    {
+        var payment = await _db.Set<VendorPayment>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId &&
+                item.Id == instance.EntityId &&
+                !item.IsDeleted,
+                cancellationToken);
+        if (payment == null)
+            return "The vendor payment no longer exists for this tenant.";
+        if (string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotJson) ||
+            string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotHash))
+        {
+            return "The payment has no immutable approval/evidence policy snapshot. Return it to Draft and resubmit under a published policy.";
+        }
+
+        var calculatedSnapshotHash = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(payment.ApprovalControlSnapshotJson)));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(calculatedSnapshotHash),
+                TryDecodeHex(payment.ApprovalControlSnapshotHash)))
+        {
+            // A database or application defect must not be able to change evidence/authority
+            // requirements after submission while leaving an apparently valid workflow in place.
+            return "The payment approval/evidence snapshot integrity check failed. Administrator review and controlled resubmission are required.";
+        }
+
+        WorkflowApprovalConfigDto control;
+        try
+        {
+            control = JsonSerializer.Deserialize<WorkflowApprovalConfigDto>(
+                payment.ApprovalControlSnapshotJson,
+                PaymentControlJsonOptions)
+                ?? throw new JsonException("Empty payment control snapshot.");
+        }
+        catch (JsonException)
+        {
+            return "The payment approval/evidence policy snapshot is invalid and requires administrator review.";
+        }
+
+        // An evidence exception is never a silent bypass. Submission has already forced the MD
+        // approval group, and final outcome handling verifies that this group actually approved.
+        if (payment.EvidenceExceptionRequested)
+        {
+            return control.AllowEvidenceException
+                ? null
+                : "The snapshotted payment policy does not permit an evidence exception.";
+        }
+
+        var stepIds = await _db.WorkflowStepInstances
+            .AsNoTracking()
+            .Where(item =>
+                item.TenantId == tenantId &&
+                item.WorkflowInstanceId == instance.Id &&
+                !item.IsDeleted)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var evidence = await _db.WorkflowEvidenceDocuments
+            .AsNoTracking()
+            .Where(item =>
+                item.TenantId == tenantId &&
+                stepIds.Contains(item.StepInstanceId) &&
+                item.IsCurrent &&
+                !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        var failures = new List<string>();
+        foreach (var requirement in control.EvidenceRequirements
+                     .Where(item => !string.IsNullOrWhiteSpace(item.RequirementKey)))
+        {
+            var valid = evidence.Where(item =>
+                string.Equals(item.RequirementKey, requirement.RequirementKey, StringComparison.OrdinalIgnoreCase) &&
+                item.MalwareScanStatus == WorkflowMalwareScanStatus.Clean &&
+                (!item.ExpiryDate.HasValue || item.ExpiryDate.Value >= DateTime.UtcNow));
+            if (requirement.RequireVerification)
+            {
+                // Verification by the uploader would collapse evidence preparation and checking
+                // into the same act. Count only an independently verified clean document.
+                valid = valid.Where(item =>
+                    item.VerificationStatus == WorkflowEvidenceVerificationStatus.Verified &&
+                    item.VerifiedById.HasValue &&
+                    item.VerifiedById.Value != item.UploadedById);
+            }
+
+            var requiredCount = Math.Max(requirement.MinimumDocuments, 1);
+            var actualCount = valid.Count();
+            if (actualCount < requiredCount)
+            {
+                var label = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                    ? requirement.RequirementKey
+                    : requirement.DocumentName;
+                failures.Add($"{label}: {actualCount} of {requiredCount} acceptable document(s)");
+            }
+        }
+
+        return failures.Count == 0
+            ? null
+            : $"Payment approval is blocked by supporting-evidence policy: {string.Join("; ", failures)}. Upload clean evidence and have a different authorized reviewer verify it, or resubmit with an allowed evidence-exception request.";
+    }
+
+    private static byte[] TryDecodeHex(string value)
+    {
+        try
+        {
+            return Convert.FromHexString(value);
+        }
+        catch (FormatException)
+        {
+            // FixedTimeEquals also requires equal length. Returning a deliberately different
+            // length turns malformed stored hashes into a safe integrity failure.
+            return Array.Empty<byte>();
+        }
     }
 
     private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync(
@@ -671,6 +835,17 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new(item.Code, item.Name, item.ApprovalStatus, item.LastRunDate, null, null);
         }
 
+        if (key == Normalize("AllocationRunBatch"))
+        {
+            var item = await _db.Set<AllocationRunBatch>()
+                .AsNoTracking()
+                .Include(x => x.AllocationRule)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(item.BatchNumber, item.AllocationRule?.Name ?? item.Description, item.Status.ToString(), item.AllocationDate, item.TotalAllocated, item.FunctionalCurrencyCode);
+        }
+
         if (key == Normalize("CashTransaction"))
         {
             var item = await _db.Set<CashTransaction>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -855,9 +1030,72 @@ public class FinanceApprovalsController : ControllerBase
                 return;
             }
 
+            WorkflowApprovalConfigDto? control = null;
+            if (!string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotJson))
+            {
+                try
+                {
+                    control = JsonSerializer.Deserialize<WorkflowApprovalConfigDto>(
+                        payment.ApprovalControlSnapshotJson,
+                        PaymentControlJsonOptions);
+                }
+                catch (JsonException)
+                {
+                    throw new InvalidOperationException(
+                        "The payment approval policy snapshot is invalid; authorization cannot be finalized.");
+                }
+            }
+
+            var approvedWorkflowRoles = payment.WorkflowInstanceId.HasValue
+                ? await _db.WorkflowApprovals
+                    .AsNoTracking()
+                    .Where(approval =>
+                        approval.TenantId == tenantId &&
+                        !approval.IsDeleted &&
+                        approval.Status == WorkflowApprovalStatus.Approved &&
+                        approval.StepInstance.WorkflowInstanceId == payment.WorkflowInstanceId.Value)
+                    .Select(approval => new
+                    {
+                        approval.ApproverRole,
+                        approval.ProcessedById,
+                        approval.ProcessedDate
+                    })
+                    .ToListAsync(cancellationToken)
+                : [];
+
+            var managingDirectorRole = string.IsNullOrWhiteSpace(control?.ManagingDirectorApproverRole)
+                ? "Managing Director"
+                : control.ManagingDirectorApproverRole.Trim();
+            var managingDirectorApproval = approvedWorkflowRoles
+                .Where(item => string.Equals(item.ApproverRole, managingDirectorRole, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.ProcessedDate)
+                .FirstOrDefault();
+            if (payment.RequiresManagingDirectorApproval && managingDirectorApproval == null)
+            {
+                throw new InvalidOperationException(
+                    $"Payment authorization cannot complete without the configured '{managingDirectorRole}' approval.");
+            }
+
+            var evidenceExceptionRole = string.IsNullOrWhiteSpace(control?.EvidenceExceptionApproverRole)
+                ? managingDirectorRole
+                : control.EvidenceExceptionApproverRole.Trim();
+            var evidenceExceptionApproval = approvedWorkflowRoles
+                .Where(item => string.Equals(item.ApproverRole, evidenceExceptionRole, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.ProcessedDate)
+                .FirstOrDefault();
+            if (payment.EvidenceExceptionRequested && evidenceExceptionApproval == null)
+            {
+                throw new InvalidOperationException(
+                    $"The requested evidence exception requires completed '{evidenceExceptionRole}' approval.");
+            }
+
             payment.Status = VendorPaymentStatus.Authorized;
             payment.AuthorizedById = userId;
             payment.AuthorizedDate = now;
+            payment.ManagingDirectorApprovedById = managingDirectorApproval?.ProcessedById;
+            payment.ManagingDirectorApprovedAt = managingDirectorApproval?.ProcessedDate;
+            payment.EvidenceExceptionApprovedById = evidenceExceptionApproval?.ProcessedById;
+            payment.EvidenceExceptionApprovedAt = evidenceExceptionApproval?.ProcessedDate;
             payment.InvoicePaymentSodControlEventId = invoicePaymentSodControlEventId;
             payment.UpdatedAt = now;
             payment.UpdatedBy = _currentUserService.UserName ?? "system";
@@ -871,7 +1109,16 @@ public class FinanceApprovalsController : ControllerBase
                 {
                     payment.Status,
                     payment.AuthorizedById,
-                    payment.AuthorizedDate
+                    payment.AuthorizedDate,
+                    payment.AppliedApprovalPolicySetId,
+                    payment.AppliedApprovalPolicyCode,
+                    payment.ApprovalControlSnapshotHash,
+                    payment.RequiresManagingDirectorApproval,
+                    payment.ManagingDirectorApprovedById,
+                    payment.ManagingDirectorApprovedAt,
+                    payment.EvidenceExceptionRequested,
+                    payment.EvidenceExceptionApprovedById,
+                    payment.EvidenceExceptionApprovedAt
                 },
                 comments,
                 cancellationToken);
@@ -933,24 +1180,65 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("AllocationRunBatch"))
+        {
+            await UpdateIfFoundAsync(_db.Set<AllocationRunBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = AllocationRunBatchStatus.Approved;
+                item.ApprovedAt = now;
+                item.ApprovedBy = userId;
+                item.ApprovedByName = _currentUserService.UserName;
+            }, cancellationToken);
+            return;
+        }
+
         if (key == Normalize("BudgetReturn"))
         {
             await UpdateIfFoundAsync(_db.BudgetReturns, tenantId, entityId, item =>
             {
                 item.Status = "Approved";
                 item.ApprovedDate = now;
+                item.ApproverUserId = userId;
+                item.RejectionReason = null;
             }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetReturn",
+                entityId,
+                FinanceAuditEvents.BudgetReturnApproved,
+                "Submitted",
+                "Approved",
+                comments,
+                cancellationToken);
             return;
         }
 
         if (key == Normalize("BudgetScenario"))
         {
-            await UpdateIfFoundAsync(_db.BudgetScenarios, tenantId, entityId, item =>
-            {
-                item.Status = "Locked";
-                item.LockedDate = now;
-                item.LockedByUserId = userId;
-            }, cancellationToken);
+            var scenario = await _db.BudgetScenarios.FirstOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == entityId && !item.IsDeleted,
+                cancellationToken);
+            if (scenario == null)
+                return;
+
+            scenario.Status = "Approved";
+            // Approval authorizes and locks the scenario. Adoption as the official
+            // reporting baseline is a separate, explicit Budgeting action.
+            scenario.IsActive = false;
+            scenario.LockedDate = now;
+            scenario.LockedByUserId = userId;
+            scenario.UpdatedAt = now;
+            scenario.LastModifiedById = userId;
+            await _db.SaveChangesAsync(cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetScenario",
+                entityId,
+                FinanceAuditEvents.BudgetScenarioApproved,
+                "InReview",
+                "Approved",
+                comments,
+                cancellationToken);
             return;
         }
 
@@ -1316,8 +1604,30 @@ public class FinanceApprovalsController : ControllerBase
                 return;
             }
 
-            payment.Status = VendorPaymentStatus.Failed;
+            var rejectedPolicyCode = payment.AppliedApprovalPolicyCode;
+            var rejectedWorkflowInstanceId = payment.WorkflowInstanceId;
+            payment.Status = VendorPaymentStatus.Draft;
             payment.Notes = AppendReason(payment.Notes, reason);
+            // Rejection returns an unposted direct payment to its maker. Clear the applied route so
+            // resubmission must resolve and snapshot the policy that is effective at the new date.
+            payment.SubmittedById = null;
+            payment.SubmittedAt = null;
+            payment.WorkflowInstanceId = null;
+            payment.AppliedApprovalPolicySetId = null;
+            payment.AppliedApprovalPolicyCode = null;
+            payment.ApprovalControlSnapshotJson = null;
+            payment.ApprovalControlSnapshotHash = null;
+            payment.IsExceptionalPayment = false;
+            payment.ExceptionalPaymentReason = null;
+            payment.RequiresManagingDirectorApproval = false;
+            payment.ManagingDirectorApprovedById = null;
+            payment.ManagingDirectorApprovedAt = null;
+            payment.EvidenceExceptionRequested = false;
+            payment.EvidenceExceptionReason = null;
+            payment.EvidenceExceptionRequestedById = null;
+            payment.EvidenceExceptionRequestedAt = null;
+            payment.EvidenceExceptionApprovedById = null;
+            payment.EvidenceExceptionApprovedAt = null;
             payment.UpdatedAt = DateTime.UtcNow;
             payment.UpdatedBy = _currentUserService.UserName ?? "system";
             await _db.SaveChangesAsync(cancellationToken);
@@ -1329,7 +1639,9 @@ public class FinanceApprovalsController : ControllerBase
                 new
                 {
                     payment.Status,
-                    payment.Notes
+                    payment.Notes,
+                    rejectedPolicyCode,
+                    rejectedWorkflowInstanceId
                 },
                 reason,
                 cancellationToken);
@@ -1384,13 +1696,54 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
+        if (key == Normalize("AllocationRunBatch"))
+        {
+            await UpdateIfFoundAsync(_db.Set<AllocationRunBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = AllocationRunBatchStatus.Rejected;
+                item.RejectionReason = reason;
+            }, cancellationToken);
+            return;
+        }
+
         if (key == Normalize("BudgetReturn"))
         {
             await UpdateIfFoundAsync(_db.BudgetReturns, tenantId, entityId, item =>
             {
                 item.Status = "Rejected";
                 item.RejectionReason = reason;
+                item.ApprovedDate = null;
             }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetReturn",
+                entityId,
+                FinanceAuditEvents.BudgetReturnRejected,
+                "Submitted",
+                "Rejected",
+                reason,
+                cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("BudgetScenario"))
+        {
+            await UpdateIfFoundAsync(_db.BudgetScenarios, tenantId, entityId, item =>
+            {
+                item.Status = "Collecting";
+                item.LockedDate = null;
+                item.LockedByUserId = null;
+                item.Description = AppendReason(item.Description, reason);
+            }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetScenario",
+                entityId,
+                FinanceAuditEvents.BudgetScenarioRejected,
+                "InReview",
+                "Collecting",
+                reason,
+                cancellationToken);
             return;
         }
 
@@ -1900,6 +2253,38 @@ public class FinanceApprovalsController : ControllerBase
         }, cancellationToken);
     }
 
+    private async Task RecordBudgetAuditAsync(
+        Guid tenantId,
+        string entityType,
+        Guid entityId,
+        string eventType,
+        string fromStatus,
+        string toStatus,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+            return;
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = eventType,
+            TenantId = tenantId,
+            SourceModule = "BUDGETING",
+            SourceDocumentType = entityType,
+            SourceDocumentId = entityId,
+            BeforeValues = new { Status = fromStatus },
+            AfterValues = new { Status = toStatus },
+            Comment = comment,
+            Reason = eventType is FinanceAuditEvents.BudgetReturnRejected
+                or FinanceAuditEvents.BudgetScenarioRejected
+                    ? comment
+                    : null,
+            Resource = $"Finance.{entityType}",
+            ResourceId = entityId.ToString()
+        }, cancellationToken);
+    }
+
     private async Task UpdateIfFoundAsync<TEntity>(DbSet<TEntity> set, Guid tenantId, Guid id, Action<TEntity> apply, CancellationToken cancellationToken)
         where TEntity : class
     {
@@ -1931,6 +2316,8 @@ public class FinanceApprovalsController : ControllerBase
     {
         var key = Normalize(entityType);
         return key is "EXCHANGERATE"
+            or "VENDORPAYMENT"
+            or "PAYMENTBATCH"
             or "OPENINGBALANCEBATCH"
             or "FIXEDASSET"
             or "FIXEDASSETDEPRECIATIONRUN"

@@ -1,11 +1,14 @@
-﻿'use client';
+'use client';
 
-import React, { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Calendar as CalendarIcon, Eye, FileSpreadsheet, Filter, Plus, Search } from 'lucide-react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
     Table,
@@ -13,149 +16,99 @@ import {
     TableCell,
     TableHead,
     TableHeader,
-    TableRow
+    TableRow,
 } from '@/components/ui/table';
-import { FileSpreadsheet, Plus, Search, Eye, Filter, Calendar as CalendarIcon } from 'lucide-react';
-import Link from 'next/link';
+import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 import type { UnitJournalEntry, UnitJournalEntryStatus } from '@/types/unit-accounts';
 
-// MOCK DATA
-const MOCK_ENTRIES: UnitJournalEntry[] = [
-    {
-        id: 'uje-1',
-        entryNumber: 'UJE-2024-00001',
-        entryDate: '2024-12-31T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-12',
-        description: 'December 2024 Employee Headcount',
-        status: 'Posted',
-        lines: [
-            { id: 'l1', unitJournalEntryId: 'uje-1', lineNumber: 1, unitAccountId: 'ua-2', quantity: 3, description: 'New hires in Operations' },
-        ],
-        approvedAt: '2024-12-31T10:00:00Z',
-        approvedBy: 'manager',
-        postedAt: '2024-12-31T10:30:00Z',
-        postedBy: 'manager',
-        createdAt: '2024-12-31T09:00:00Z',
-        createdBy: 'admin',
-    },
-    {
-        id: 'uje-2',
-        entryNumber: 'UJE-2024-00002',
-        entryDate: '2024-12-15T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-12',
-        description: 'Machine Hours - Week 50',
-        status: 'PendingApproval',
-        lines: [
-            { id: 'l2', unitJournalEntryId: 'uje-2', lineNumber: 1, unitAccountId: 'ua-8', quantity: 168.5 },
-        ],
-        createdAt: '2024-12-15T14:00:00Z',
-        createdBy: 'operator',
-    },
-    {
-        id: 'uje-3',
-        entryNumber: 'UJE-2024-00003',
-        entryDate: '2024-12-10T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-12',
-        description: 'Office Space Update - New Branch',
-        status: 'Draft',
-        lines: [
-            { id: 'l3', unitJournalEntryId: 'uje-3', lineNumber: 1, unitAccountId: 'ua-7', quantity: 2500 },
-        ],
-        createdAt: '2024-12-10T11:00:00Z',
-        createdBy: 'admin',
-    },
-    {
-        id: 'uje-4',
-        entryNumber: 'UJE-2024-00004',
-        entryDate: '2024-11-30T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-11',
-        description: 'November 2024 Employee Count',
-        status: 'Posted',
-        lines: [
-            { id: 'l4', unitJournalEntryId: 'uje-4', lineNumber: 1, unitAccountId: 'ua-2', quantity: 2 },
-            { id: 'l5', unitJournalEntryId: 'uje-4', lineNumber: 2, unitAccountId: 'ua-3', quantity: 1 },
-        ],
-        approvedAt: '2024-11-30T16:00:00Z',
-        approvedBy: 'manager',
-        postedAt: '2024-11-30T16:30:00Z',
-        postedBy: 'manager',
-        createdAt: '2024-11-30T15:00:00Z',
-        createdBy: 'admin',
-    },
-    {
-        id: 'uje-5',
-        entryNumber: 'UJE-2024-00005',
-        entryDate: '2024-12-01T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-12',
-        description: 'Staff Reduction - Sales Dept',
-        status: 'Rejected',
-        rejectionReason: 'Please verify the headcount with HR before resubmitting.',
-        lines: [
-            { id: 'l6', unitJournalEntryId: 'uje-5', lineNumber: 1, unitAccountId: 'ua-3', quantity: -5 },
-        ],
-        createdAt: '2024-12-01T09:00:00Z',
-        createdBy: 'admin',
-    },
+const statusOptions: UnitJournalEntryStatus[] = [
+    'Draft',
+    'PendingApproval',
+    'Approved',
+    'Posted',
+    'Rejected',
+    'Reversed',
 ];
 
+function getStatusBadge(status: UnitJournalEntryStatus) {
+    const styles: Record<UnitJournalEntryStatus, string> = {
+        Draft: 'bg-gray-500 hover:bg-gray-600',
+        PendingApproval: 'bg-orange-500 hover:bg-orange-600',
+        Approved: 'bg-blue-500 hover:bg-blue-600',
+        Posted: 'bg-green-600 hover:bg-green-700',
+        Rejected: 'bg-red-500 hover:bg-red-600',
+        Reversed: 'bg-purple-500 hover:bg-purple-600',
+    };
+
+    const labels: Record<UnitJournalEntryStatus, string> = {
+        Draft: 'Draft',
+        PendingApproval: 'Pending Approval',
+        Approved: 'Approved',
+        Posted: 'Posted',
+        Rejected: 'Rejected',
+        Reversed: 'Reversed',
+    };
+
+    return <Badge className={styles[status] ?? 'bg-gray-500'}>{labels[status] ?? status}</Badge>;
+}
+
+function formatDate(dateString: string) {
+    return new Date(dateString).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+}
+
 export default function UnitJournalEntriesPage() {
-    const [entries] = useState<UnitJournalEntry[]>(MOCK_ENTRIES);
+    const [entries, setEntries] = useState<UnitJournalEntry[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [isLoading, setIsLoading] = useState(true);
 
-    const filteredEntries = entries.filter((entry) => {
-        const matchesSearch =
-            searchTerm === '' ||
-            entry.entryNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            entry.description?.toLowerCase().includes(searchTerm.toLowerCase());
+    useEffect(() => {
+        let isMounted = true;
 
-        const matchesStatus = statusFilter === 'all' || entry.status === statusFilter;
-
-        return matchesSearch && matchesStatus;
-    });
-
-    const getStatusBadge = (status: UnitJournalEntryStatus) => {
-        const styles: Record<UnitJournalEntryStatus, string> = {
-            Draft: 'bg-gray-500 hover:bg-gray-600',
-            PendingApproval: 'bg-orange-500 hover:bg-orange-600',
-            Approved: 'bg-blue-500 hover:bg-blue-600',
-            Posted: 'bg-green-600 hover:bg-green-700',
-            Rejected: 'bg-red-500 hover:bg-red-600',
-            Reversed: 'bg-purple-500 hover:bg-purple-600',
+        const loadEntries = async () => {
+            try {
+                setIsLoading(true);
+                const data = await unitAccountsDataService.getUnitJournalEntries();
+                if (isMounted) {
+                    setEntries(data);
+                }
+            } catch (error: any) {
+                toast.error(error?.message || 'Failed to load unit journal entries.');
+            } finally {
+                if (isMounted) {
+                    setIsLoading(false);
+                }
+            }
         };
 
-        const labels: Record<UnitJournalEntryStatus, string> = {
-            Draft: 'Draft',
-            PendingApproval: 'Pending Approval',
-            Approved: 'Approved',
-            Posted: 'Posted',
-            Rejected: 'Rejected',
-            Reversed: 'Reversed',
+        loadEntries();
+
+        return () => {
+            isMounted = false;
         };
+    }, []);
 
-        return <Badge className={styles[status]}>{labels[status]}</Badge>;
-    };
+    const filteredEntries = useMemo(() => {
+        return entries.filter((entry) => {
+            const query = searchTerm.trim().toLowerCase();
+            const matchesSearch =
+                query === '' ||
+                entry.entryNumber.toLowerCase().includes(query) ||
+                entry.description?.toLowerCase().includes(query) ||
+                entry.sourceDocument?.toLowerCase().includes(query);
 
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
+            const matchesStatus = statusFilter === 'all' || entry.status === statusFilter;
+
+            return matchesSearch && matchesStatus;
         });
-    };
-
-    const getTotalQuantity = (entry: UnitJournalEntry) => {
-        return entry.lines.reduce((sum, line) => sum + line.quantity, 0);
-    };
+    }, [entries, searchTerm, statusFilter]);
 
     return (
         <div className="space-y-6">
-            {/* Page Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -168,9 +121,7 @@ export default function UnitJournalEntriesPage() {
                 </div>
                 <div className="flex gap-2">
                     <Link href="/finance/unit-journal-entries/approvals">
-                        <Button variant="outline">
-                            Approval Queue
-                        </Button>
+                        <Button variant="outline">Approval Queue</Button>
                     </Link>
                     <Link href="/finance/unit-journal-entries/new">
                         <Button>
@@ -181,7 +132,6 @@ export default function UnitJournalEntriesPage() {
                 </div>
             </div>
 
-            {/* Breadcrumbs */}
             <Breadcrumb>
                 <BreadcrumbList>
                     <BreadcrumbItem>
@@ -198,7 +148,6 @@ export default function UnitJournalEntriesPage() {
                 </BreadcrumbList>
             </Breadcrumb>
 
-            {/* Search and Filters */}
             <Card>
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -211,37 +160,33 @@ export default function UnitJournalEntriesPage() {
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                             <Input
-                                placeholder="Search by entry number or description..."
+                                placeholder="Search by number, description, or source..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="pl-10"
                             />
                         </div>
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-[200px]">
+                            <SelectTrigger className="w-[220px]">
                                 <SelectValue placeholder="All Status" />
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Status</SelectItem>
-                                <SelectItem value="Draft">Draft</SelectItem>
-                                <SelectItem value="PendingApproval">Pending Approval</SelectItem>
-                                <SelectItem value="Approved">Approved</SelectItem>
-                                <SelectItem value="Posted">Posted</SelectItem>
-                                <SelectItem value="Rejected">Rejected</SelectItem>
-                                <SelectItem value="Reversed">Reversed</SelectItem>
+                                {statusOptions.map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                        {status === 'PendingApproval' ? 'Pending Approval' : status}
+                                    </SelectItem>
+                                ))}
                             </SelectContent>
                         </Select>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* Entries Table */}
             <Card>
                 <CardHeader>
                     <CardTitle>Journal Entries ({filteredEntries.length})</CardTitle>
-                    <CardDescription>
-                        List of all unit journal entries
-                    </CardDescription>
+                    <CardDescription>List of all unit journal entries</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <Table>
@@ -250,14 +195,21 @@ export default function UnitJournalEntriesPage() {
                                 <TableHead>Entry Number</TableHead>
                                 <TableHead>Date</TableHead>
                                 <TableHead>Description</TableHead>
+                                <TableHead>Source</TableHead>
                                 <TableHead className="text-center">Lines</TableHead>
-                                <TableHead className="text-right">Total Qty</TableHead>
                                 <TableHead className="text-center">Status</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {filteredEntries.map((entry) => (
+                            {isLoading && (
+                                <TableRow>
+                                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                                        Loading unit journal entries...
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                            {!isLoading && filteredEntries.map((entry) => (
                                 <TableRow key={entry.id}>
                                     <TableCell className="font-mono font-semibold text-blue-600">
                                         <Link href={`/finance/unit-journal-entries/${entry.id}`} className="hover:underline">
@@ -273,28 +225,25 @@ export default function UnitJournalEntriesPage() {
                                     <TableCell className="max-w-xs truncate">
                                         {entry.description || '-'}
                                     </TableCell>
-                                    <TableCell className="text-center">
-                                        <Badge variant="outline">{entry.lines.length}</Badge>
+                                    <TableCell className="max-w-xs truncate">
+                                        {entry.sourceDocument || '-'}
                                     </TableCell>
-                                    <TableCell className="text-right font-mono">
-                                        {getTotalQuantity(entry).toLocaleString(undefined, {
-                                            minimumFractionDigits: 0,
-                                            maximumFractionDigits: 2,
-                                        })}
+                                    <TableCell className="text-center">
+                                        <Badge variant="outline">{entry.lineCount ?? entry.lines?.length ?? 0}</Badge>
                                     </TableCell>
                                     <TableCell className="text-center">
                                         {getStatusBadge(entry.status)}
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <Link href={`/finance/unit-journal-entries/${entry.id}`}>
-                                            <Button variant="ghost" size="sm">
+                                            <Button variant="ghost" size="sm" title="View details">
                                                 <Eye className="h-4 w-4" />
                                             </Button>
                                         </Link>
                                     </TableCell>
                                 </TableRow>
                             ))}
-                            {filteredEntries.length === 0 && (
+                            {!isLoading && filteredEntries.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                                         No entries found matching your filters.

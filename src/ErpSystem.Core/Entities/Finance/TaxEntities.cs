@@ -93,6 +93,11 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual ICollection<TaxRateHistory> RateHistory { get; set; } = new List<TaxRateHistory>();
 
         /// <summary>
+        /// Immutable snapshots of every superseded complete tax configuration.
+        /// </summary>
+        public virtual ICollection<TaxConfigurationVersion> ConfigurationVersions { get; set; } = new List<TaxConfigurationVersion>();
+
+        /// <summary>
         /// Navigation property for group components this tax belongs to
         /// </summary>
         public virtual ICollection<TaxGroupComponent> GroupComponents { get; set; } = new List<TaxGroupComponent>();
@@ -147,6 +152,66 @@ namespace ErpSystem.Core.Entities.Finance
         /// <summary>
         /// Navigation property for tax
         /// </summary>
+        [ForeignKey(nameof(TaxId))]
+        public virtual Tax Tax { get; set; } = null!;
+    }
+
+    /// <summary>
+    /// Immutable full-configuration snapshot captured whenever a tax is changed.
+    /// The current configuration remains on <see cref="Tax"/>; this table preserves
+    /// every superseded version for audit and UI display.
+    /// </summary>
+    [Table("TaxConfigurationVersions")]
+    public class TaxConfigurationVersion : TenantEntity
+    {
+        [Required]
+        public Guid TaxId { get; set; }
+
+        [Required]
+        public int VersionNumber { get; set; }
+
+        [Required]
+        [StringLength(50)]
+        public string Code { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [StringLength(500)]
+        public string? Description { get; set; }
+
+        [Required]
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal Rate { get; set; }
+
+        [Required]
+        public DateTime EffectiveFrom { get; set; }
+
+        [Required]
+        public TaxApplicability Applicability { get; set; }
+
+        [Required]
+        public TaxCategory Category { get; set; }
+
+        public bool IsActive { get; set; }
+        public bool IsInputTaxDeductible { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? ThresholdAmount { get; set; }
+
+        public Guid? TaxPayableAccountId { get; set; }
+        public Guid? TaxReceivableAccountId { get; set; }
+
+        [Required]
+        public DateTime ValidFrom { get; set; }
+
+        [Required]
+        public DateTime ValidTo { get; set; }
+
+        [StringLength(500)]
+        public string? ChangeReason { get; set; }
+
         [ForeignKey(nameof(TaxId))]
         public virtual Tax Tax { get; set; } = null!;
     }

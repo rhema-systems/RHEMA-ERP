@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Edit, Trash2, DollarSign, Loader2, Plus, Link2, X, RefreshCcw, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { Account, AccountType, AccountStatus, AccountCurrencyLink, Currency, AddCurrencyLinkDto } from '@/types/finance';
+import type { Account, AccountType, AccountStatus, AccountCurrencyLink, Currency, AddCurrencyLinkDto, ExchangeRateQuoteSide, UpdateCurrencyLinkRatePolicyDto } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 
@@ -29,6 +29,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     const [addDialogOpen, setAddDialogOpen] = useState(false);
     const [addingLink, setAddingLink] = useState(false);
     const [removingLinkId, setRemovingLinkId] = useState<string | null>(null);
+    const [editingLink, setEditingLink] = useState<AccountCurrencyLink | null>(null);
+    const [savingPolicy, setSavingPolicy] = useState(false);
+    const [policyForm, setPolicyForm] = useState<UpdateCurrencyLinkRatePolicyDto | null>(null);
 
     // New link form data
     const [newLink, setNewLink] = useState<Partial<AddCurrencyLinkDto>>({
@@ -36,7 +39,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         revaluationRequired: true,
         revaluationFrequency: 'Monthly',
         transactionRateType: 'Spot',
+        transactionQuoteSide: 'Mid',
         revaluationRateType: 'MonthEnd',
+        revaluationQuoteSide: 'Mid',
         notes: '',
     });
 
@@ -138,7 +143,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                 revaluationRequired: true,
                 revaluationFrequency: 'Monthly',
                 transactionRateType: 'Spot',
+                transactionQuoteSide: 'Mid',
                 revaluationRateType: 'MonthEnd',
+                revaluationQuoteSide: 'Mid',
                 notes: '',
             });
         } catch (error: any) {
@@ -171,6 +178,39 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
             });
         } finally {
             setRemovingLinkId(null);
+        }
+    };
+
+    const openRatePolicyDialog = (link: AccountCurrencyLink) => {
+        setEditingLink(link);
+        setPolicyForm({
+            revaluationRequired: link.revaluationRequired,
+            revaluationFrequency: link.revaluationFrequency,
+            transactionRateType: link.transactionRateType,
+            transactionQuoteSide: link.transactionQuoteSide || 'Mid',
+            revaluationRateType: link.revaluationRateType,
+            revaluationQuoteSide: link.revaluationQuoteSide || 'Mid',
+            notes: link.notes,
+        });
+    };
+
+    const handleSaveRatePolicy = async () => {
+        if (!editingLink || !policyForm) return;
+        try {
+            setSavingPolicy(true);
+            const updated = await financeDataService.updateAccountCurrencyLinkRatePolicy(
+                id,
+                editingLink.linkedCurrencyCode,
+                policyForm
+            );
+            setCurrencyLinks(current => current.map(link => link.id === updated.id ? updated : link));
+            setEditingLink(null);
+            setPolicyForm(null);
+            toast({ title: 'Success', description: `${updated.linkedCurrencyCode} rate policy updated` });
+        } catch (error: any) {
+            toast({ title: 'Error', description: error?.message || 'Failed to update rate policy', variant: 'destructive' });
+        } finally {
+            setSavingPolicy(false);
         }
     };
 
@@ -404,6 +444,37 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                     </div>
                                                 </div>
 
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <Label>Transaction Quote Side</Label>
+                                                        <Select
+                                                            value={newLink.transactionQuoteSide || 'Mid'}
+                                                            onValueChange={(v: ExchangeRateQuoteSide) => setNewLink({ ...newLink, transactionQuoteSide: v })}
+                                                        >
+                                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="Mid">Mid / Reference</SelectItem>
+                                                                <SelectItem value="Buying">Buying (bank buys FX)</SelectItem>
+                                                                <SelectItem value="Selling">Selling (bank sells FX)</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label>Revaluation Quote Side</Label>
+                                                        <Select
+                                                            value={newLink.revaluationQuoteSide || 'Mid'}
+                                                            onValueChange={(v: ExchangeRateQuoteSide) => setNewLink({ ...newLink, revaluationQuoteSide: v })}
+                                                        >
+                                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="Mid">Mid / Reference</SelectItem>
+                                                                <SelectItem value="Buying">Buying (bank buys FX)</SelectItem>
+                                                                <SelectItem value="Selling">Selling (bank sells FX)</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </div>
+
                                                 <div className="space-y-2">
                                                     <Label>Notes</Label>
                                                     <Input
@@ -489,25 +560,44 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 </p>
                                                             </div>
                                                         </div>
+                                                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                                                            <Badge variant="outline">
+                                                                Transactions: {link.transactionRateType} / {link.transactionQuoteSide || 'Mid'}
+                                                            </Badge>
+                                                            <Badge variant="outline">
+                                                                Revaluation: {link.revaluationRateType} / {link.revaluationQuoteSide || 'Mid'}
+                                                            </Badge>
+                                                        </div>
                                                         {link.notes && (
                                                             <p className="text-xs text-muted-foreground mt-2">
                                                                 {link.notes}
                                                             </p>
                                                         )}
                                                     </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="text-destructive hover:text-destructive"
-                                                        onClick={() => handleRemoveCurrencyLink(link)}
-                                                        disabled={removingLinkId === link.id}
-                                                    >
-                                                        {removingLinkId === link.id ? (
-                                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                                        ) : (
-                                                            <X className="h-4 w-4" />
-                                                        )}
-                                                    </Button>
+                                                    <div className="flex items-center">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => openRatePolicyDialog(link)}
+                                                            disabled={!link.isActive}
+                                                            aria-label={`Edit ${link.linkedCurrencyCode} rate policy`}
+                                                        >
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="text-destructive hover:text-destructive"
+                                                            onClick={() => handleRemoveCurrencyLink(link)}
+                                                            disabled={removingLinkId === link.id}
+                                                        >
+                                                            {removingLinkId === link.id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                <X className="h-4 w-4" />
+                                                            )}
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
@@ -522,6 +612,84 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                             )}
                         </Card>
                     )}
+
+                    <Dialog open={Boolean(editingLink)} onOpenChange={(open) => {
+                        if (!open) {
+                            setEditingLink(null);
+                            setPolicyForm(null);
+                        }
+                    }}>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Edit {editingLink?.linkedCurrencyCode} Rate Policy</DialogTitle>
+                                <DialogDescription>
+                                    These defaults apply to foreign-currency GL posting. AR/AP document policy remains authoritative for customer and supplier subledgers.
+                                </DialogDescription>
+                            </DialogHeader>
+                            {policyForm && (
+                                <div className="space-y-4 py-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label>Transaction Rate Type</Label>
+                                            <Select value={policyForm.transactionRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, transactionRateType: value })}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Spot">Spot</SelectItem>
+                                                    <SelectItem value="Daily">Daily</SelectItem>
+                                                    <SelectItem value="Average">Average</SelectItem>
+                                                    <SelectItem value="Fixed">Fixed</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Transaction Quote Side</Label>
+                                            <Select value={policyForm.transactionQuoteSide} onValueChange={(value: ExchangeRateQuoteSide) => setPolicyForm({ ...policyForm, transactionQuoteSide: value })}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Mid">Mid / Reference</SelectItem>
+                                                    <SelectItem value="Buying">Buying (bank buys FX)</SelectItem>
+                                                    <SelectItem value="Selling">Selling (bank sells FX)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Revaluation Rate Type</Label>
+                                            <Select value={policyForm.revaluationRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationRateType: value })}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="MonthEnd">Month End</SelectItem>
+                                                    <SelectItem value="QuarterEnd">Quarter End</SelectItem>
+                                                    <SelectItem value="YearEnd">Year End</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Revaluation Quote Side</Label>
+                                            <Select value={policyForm.revaluationQuoteSide} onValueChange={(value: ExchangeRateQuoteSide) => setPolicyForm({ ...policyForm, revaluationQuoteSide: value })}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Mid">Mid / Reference</SelectItem>
+                                                    <SelectItem value="Buying">Buying (bank buys FX)</SelectItem>
+                                                    <SelectItem value="Selling">Selling (bank sells FX)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Notes</Label>
+                                        <Input value={policyForm.notes || ''} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} />
+                                    </div>
+                                </div>
+                            )}
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setEditingLink(null)}>Cancel</Button>
+                                <Button onClick={handleSaveRatePolicy} disabled={savingPolicy}>
+                                    {savingPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Save Policy
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
 
                     {/* Transaction History Placeholder */}
                     <Card>

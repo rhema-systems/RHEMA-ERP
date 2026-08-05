@@ -122,6 +122,14 @@ namespace ErpSystem.Core.Entities.Finance
         public ExchangeRateType RateType { get; set; }
 
         /// <summary>
+        /// Quote side from the rate provider/bank perspective. Buying means the
+        /// provider buys the foreign (target) currency; Selling means it sells it.
+        /// Mid is the neutral accounting/reference quote.
+        /// </summary>
+        [Required]
+        public ExchangeRateQuoteSide QuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+
+        /// <summary>
         /// Indicates if this is the current active rate for its type and currency pair.
         /// 
         /// Only ONE rate can be active per currency pair per rate type at any time.
@@ -405,6 +413,16 @@ namespace ErpSystem.Core.Entities.Finance
         /// Real-time spot rate (rarely stored, typically for reference).
         /// </summary>
         Spot = 8
+    }
+
+    /// <summary>
+    /// Provider/bank perspective for a foreign-currency quote.
+    /// </summary>
+    public enum ExchangeRateQuoteSide
+    {
+        Mid = 1,
+        Buying = 2,
+        Selling = 3
     }
 
     /// <summary>

@@ -8,8 +8,7 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
-using OfficeOpenXml;
-using OfficeOpenXml.Style;
+using ClosedXML.Excel;
 using System.Globalization;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets
@@ -477,14 +476,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
     public async Task<BulkImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName, bool dryRun = false)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        
         var result = new BulkImportResultDto { IsDryRun = dryRun };
         var rowsToImport = new List<ValidatedAssetImportRow>();
 
-        using var package = new ExcelPackage(fileStream);
-        var worksheet = package.Workbook.Worksheets.FirstOrDefault();
-        if (worksheet?.Dimension == null)
+        using var workbook = new XLWorkbook(fileStream);
+        var worksheet = workbook.Worksheets.FirstOrDefault();
+        if (worksheet?.LastCellUsed() == null)
         {
             result.Errors.Add(new BulkImportErrorDto
             {
@@ -496,7 +493,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             return result;
         }
 
-        var rowCount = worksheet.Dimension?.Rows ?? 0;
+        var rowCount = worksheet.LastRowUsed()?.RowNumber() ?? 0;
 
         if (rowCount < 2)
         {
@@ -780,10 +777,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
     public async Task<byte[]> GenerateImportTemplateAsync()
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        
-        using var package = new ExcelPackage();
-        var worksheet = package.Workbook.Worksheets.Add("Assets");
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("Assets");
 
         // Headers
         var headers = new[]
@@ -797,64 +792,63 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         for (int i = 0; i < headers.Length; i++)
         {
-            worksheet.Cells[1, i + 1].Value = headers[i];
-            worksheet.Cells[1, i + 1].Style.Font.Bold = true;
-            worksheet.Cells[1, i + 1].Style.Fill.PatternType = ExcelFillStyle.Solid;
-            worksheet.Cells[1, i + 1].Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightBlue);
+            worksheet.Cell(1, i + 1).Value = headers[i];
+            worksheet.Cell(1, i + 1).Style.Font.Bold = true;
+            worksheet.Cell(1, i + 1).Style.Fill.BackgroundColor = XLColor.LightBlue;
         }
 
         // Sample data row
-        worksheet.Cells[2, 1].Value = "FA-2024-001";
-        worksheet.Cells[2, 2].Value = "Dell Laptop";
-        worksheet.Cells[2, 3].Value = "Core i7, 16GB RAM";
-        worksheet.Cells[2, 4].Value = "Head Office - IT Room";
-        worksheet.Cells[2, 5].Value = "COMP-HW";
-        worksheet.Cells[2, 6].Value = new DateTime(2024, 1, 15);
-        worksheet.Cells[2, 7].Value = new DateTime(2024, 1, 15);
-        worksheet.Cells[2, 8].Value = "IFRS";
-        worksheet.Cells[2, 9].Value = 1500.00;
-        worksheet.Cells[2, 10].Value = 50.00;
-        worksheet.Cells[2, 11].Value = 195.00;
-        worksheet.Cells[2, 12].Value = 250.00;
-        worksheet.Cells[2, 13].Value = 1495.00;
-        worksheet.Cells[2, 14].Value = DateTime.UtcNow.Date;
-        worksheet.Cells[2, 15].Value = 40.00;
-        worksheet.Cells[2, 16].Value = 30;
-        worksheet.Cells[2, 17].Value = 36;
-        worksheet.Cells[2, 18].Value = 100.00;
-        worksheet.Cells[2, 19].Value = "SN123456";
-        worksheet.Cells[2, 20].Value = "Draft";
+        worksheet.Cell(2, 1).Value = "FA-2024-001";
+        worksheet.Cell(2, 2).Value = "Dell Laptop";
+        worksheet.Cell(2, 3).Value = "Core i7, 16GB RAM";
+        worksheet.Cell(2, 4).Value = "Head Office - IT Room";
+        worksheet.Cell(2, 5).Value = "COMP-HW";
+        worksheet.Cell(2, 6).Value = new DateTime(2024, 1, 15);
+        worksheet.Cell(2, 7).Value = new DateTime(2024, 1, 15);
+        worksheet.Cell(2, 8).Value = "IFRS";
+        worksheet.Cell(2, 9).Value = 1500.00;
+        worksheet.Cell(2, 10).Value = 50.00;
+        worksheet.Cell(2, 11).Value = 195.00;
+        worksheet.Cell(2, 12).Value = 250.00;
+        worksheet.Cell(2, 13).Value = 1495.00;
+        worksheet.Cell(2, 14).Value = DateTime.UtcNow.Date;
+        worksheet.Cell(2, 15).Value = 40.00;
+        worksheet.Cell(2, 16).Value = 30;
+        worksheet.Cell(2, 17).Value = 36;
+        worksheet.Cell(2, 18).Value = 100.00;
+        worksheet.Cell(2, 19).Value = "SN123456";
+        worksheet.Cell(2, 20).Value = "Draft";
 
-        worksheet.Cells[2, 6, 2, 7].Style.Numberformat.Format = "yyyy-mm-dd";
-        worksheet.Cells[2, 14].Style.Numberformat.Format = "yyyy-mm-dd";
-        worksheet.Cells[2, 9, 2, 15].Style.Numberformat.Format = "#,##0.00";
-        worksheet.View.FreezePanes(2, 1);
+        worksheet.Range(2, 6, 2, 7).Style.DateFormat.Format = "yyyy-mm-dd";
+        worksheet.Cell(2, 14).Style.DateFormat.Format = "yyyy-mm-dd";
+        worksheet.Range(2, 9, 2, 15).Style.NumberFormat.Format = "#,##0.00";
+        worksheet.SheetView.FreezeRows(1);
 
-        var instructions = package.Workbook.Worksheets.Add("Instructions");
-        instructions.Cells[1, 1].Value = "Fixed Asset Import Instructions";
-        instructions.Cells[1, 1].Style.Font.Bold = true;
-        instructions.Cells[3, 1].Value = "Required fields";
-        instructions.Cells[3, 2].Value = "Asset Code, Name, Category Code, Purchase Date, Purchase Price, Useful Life (Months)";
-        instructions.Cells[4, 1].Value = "Location";
-        instructions.Cells[4, 2].Value = "Optional finance-owned asset location. This does not depend on the Maintenance module.";
-        instructions.Cells[5, 1].Value = "Status";
-        instructions.Cells[5, 2].Value = "Optional. Supported values include Draft, Pending Approval, Rejected, Active, Fully Depreciated, Disposed, Held for Sale, Written Off, Under Construction, On Hold.";
-        instructions.Cells[6, 1].Value = "Dates";
-        instructions.Cells[6, 2].Value = "Use yyyy-mm-dd, or a valid Excel date cell.";
-        instructions.Cells[7, 1].Value = "Category Code";
-        instructions.Cells[7, 2].Value = "Use an existing fixed asset category code from the Categories sheet.";
-        instructions.Cells[8, 1].Value = "Book Code";
-        instructions.Cells[8, 2].Value = "Optional. Leave blank or use ALL_ACTIVE_BOOKS to import the same values to all active books; use IFRS, LOCAL_STATUTORY, or MANAGEMENT for book-specific rows.";
-        instructions.Cells[9, 1].Value = "Opening values";
-        instructions.Cells[9, 2].Value = "Accumulated Depreciation and Net Book Value are optional, but if both are supplied NBV must equal acquisition cost less accumulated depreciation.";
-        instructions.Cells[10, 1].Value = "Repeated asset codes";
-        instructions.Cells[10, 2].Value = "Allowed only for book-specific rows. Master data must match across rows for the same asset code.";
-        instructions.Cells.AutoFitColumns();
+        var instructions = workbook.Worksheets.Add("Instructions");
+        instructions.Cell(1, 1).Value = "Fixed Asset Import Instructions";
+        instructions.Cell(1, 1).Style.Font.Bold = true;
+        instructions.Cell(3, 1).Value = "Required fields";
+        instructions.Cell(3, 2).Value = "Asset Code, Name, Category Code, Purchase Date, Purchase Price, Useful Life (Months)";
+        instructions.Cell(4, 1).Value = "Location";
+        instructions.Cell(4, 2).Value = "Optional finance-owned asset location. This does not depend on the Maintenance module.";
+        instructions.Cell(5, 1).Value = "Status";
+        instructions.Cell(5, 2).Value = "Optional. Supported values include Draft, Pending Approval, Rejected, Active, Fully Depreciated, Disposed, Held for Sale, Written Off, Under Construction, On Hold.";
+        instructions.Cell(6, 1).Value = "Dates";
+        instructions.Cell(6, 2).Value = "Use yyyy-mm-dd, or a valid Excel date cell.";
+        instructions.Cell(7, 1).Value = "Category Code";
+        instructions.Cell(7, 2).Value = "Use an existing fixed asset category code from the Categories sheet.";
+        instructions.Cell(8, 1).Value = "Book Code";
+        instructions.Cell(8, 2).Value = "Optional. Leave blank or use ALL_ACTIVE_BOOKS to import the same values to all active books; use IFRS, LOCAL_STATUTORY, or MANAGEMENT for book-specific rows.";
+        instructions.Cell(9, 1).Value = "Opening values";
+        instructions.Cell(9, 2).Value = "Accumulated Depreciation and Net Book Value are optional, but if both are supplied NBV must equal acquisition cost less accumulated depreciation.";
+        instructions.Cell(10, 1).Value = "Repeated asset codes";
+        instructions.Cell(10, 2).Value = "Allowed only for book-specific rows. Master data must match across rows for the same asset code.";
+        instructions.ColumnsUsed().AdjustToContents();
 
-        var categoriesSheet = package.Workbook.Worksheets.Add("Categories");
-        categoriesSheet.Cells[1, 1].Value = "Category Code";
-        categoriesSheet.Cells[1, 2].Value = "Category Name";
-        categoriesSheet.Cells[1, 1, 1, 2].Style.Font.Bold = true;
+        var categoriesSheet = workbook.Worksheets.Add("Categories");
+        categoriesSheet.Cell(1, 1).Value = "Category Code";
+        categoriesSheet.Cell(1, 2).Value = "Category Name";
+        categoriesSheet.Range(1, 1, 1, 2).Style.Font.Bold = true;
 
         var categories = await _context.FixedAssetCategories
             .Where(c => c.TenantId == TenantId)
@@ -864,32 +858,34 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         for (int i = 0; i < categories.Count; i++)
         {
-            categoriesSheet.Cells[i + 2, 1].Value = categories[i].Code;
-            categoriesSheet.Cells[i + 2, 2].Value = categories[i].Name;
+            categoriesSheet.Cell(i + 2, 1).Value = categories[i].Code;
+            categoriesSheet.Cell(i + 2, 2).Value = categories[i].Name;
         }
 
-        categoriesSheet.Cells.AutoFitColumns();
+        categoriesSheet.ColumnsUsed().AdjustToContents();
 
-        var booksSheet = package.Workbook.Worksheets.Add("Accounting Books");
-        booksSheet.Cells[1, 1].Value = "Book Code";
-        booksSheet.Cells[1, 2].Value = "Book Name";
-        booksSheet.Cells[1, 3].Value = "Default";
-        booksSheet.Cells[1, 1, 1, 3].Style.Font.Bold = true;
+        var booksSheet = workbook.Worksheets.Add("Accounting Books");
+        booksSheet.Cell(1, 1).Value = "Book Code";
+        booksSheet.Cell(1, 2).Value = "Book Name";
+        booksSheet.Cell(1, 3).Value = "Default";
+        booksSheet.Range(1, 1, 1, 3).Style.Font.Bold = true;
 
         var books = await GetActivePostingBooksAsync();
         for (int i = 0; i < books.Count; i++)
         {
-            booksSheet.Cells[i + 2, 1].Value = books[i].Code;
-            booksSheet.Cells[i + 2, 2].Value = books[i].Name;
-            booksSheet.Cells[i + 2, 3].Value = books[i].IsDefault ? "Yes" : "No";
+            booksSheet.Cell(i + 2, 1).Value = books[i].Code;
+            booksSheet.Cell(i + 2, 2).Value = books[i].Name;
+            booksSheet.Cell(i + 2, 3).Value = books[i].IsDefault ? "Yes" : "No";
         }
 
-        booksSheet.Cells.AutoFitColumns();
+        booksSheet.ColumnsUsed().AdjustToContents();
 
         // Auto-fit columns
-        worksheet.Cells.AutoFitColumns();
+        worksheet.ColumnsUsed().AdjustToContents();
 
-        return package.GetAsByteArray();
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
 
     private sealed record ValidatedAssetImportRow(
@@ -1102,15 +1098,15 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         return errors;
     }
 
-    private static DateTime? ParseDate(ExcelWorksheet worksheet, int row, int column)
+    private static DateTime? ParseDate(IXLWorksheet worksheet, int row, int column)
     {
         if (column <= 0) return null;
 
-        var cell = worksheet.Cells[row, column];
-        if (cell.Value is DateTime dateValue)
+        var cell = worksheet.Cell(row, column);
+        if (cell.TryGetValue<DateTime>(out var dateValue))
             return dateValue.Date;
 
-        if (TryConvertToDouble(cell.Value, out var serial))
+        if (cell.TryGetValue<double>(out var serial))
         {
             try
             {
@@ -1146,15 +1142,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         return null;
     }
 
-    private static decimal? ParseDecimal(ExcelWorksheet worksheet, int row, int column)
+    private static decimal? ParseDecimal(IXLWorksheet worksheet, int row, int column)
     {
         if (column <= 0) return null;
 
-        var cell = worksheet.Cells[row, column];
-        if (cell.Value is decimal decimalValue) return decimalValue;
-        if (cell.Value is double doubleValue) return Convert.ToDecimal(doubleValue);
-        if (cell.Value is int intValue) return intValue;
-        if (cell.Value is long longValue) return longValue;
+        var cell = worksheet.Cell(row, column);
+        if (cell.TryGetValue<decimal>(out var decimalValue)) return decimalValue;
 
         var value = GetCellText(worksheet, row, column);
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -1164,7 +1157,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             : null;
     }
 
-    private static int? ParseInt(ExcelWorksheet worksheet, int row, int column)
+    private static int? ParseInt(IXLWorksheet worksheet, int row, int column)
     {
         var decimalValue = ParseDecimal(worksheet, row, column);
         if (decimalValue.HasValue)
@@ -1175,14 +1168,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         return int.TryParse(value, out var number) ? number : null;
     }
 
-    private static Dictionary<string, int> BuildHeaderMap(ExcelWorksheet worksheet)
+    private static Dictionary<string, int> BuildHeaderMap(IXLWorksheet worksheet)
     {
         var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var columnCount = worksheet.Dimension?.Columns ?? 0;
+        var columnCount = worksheet.LastColumnUsed()?.ColumnNumber() ?? 0;
 
         for (var column = 1; column <= columnCount; column++)
         {
-            var header = NormalizeHeader(worksheet.Cells[1, column].Text);
+            var header = NormalizeHeader(worksheet.Cell(1, column).GetFormattedString());
             if (!string.IsNullOrWhiteSpace(header) && !map.ContainsKey(header))
             {
                 map[header] = column;
@@ -1235,23 +1228,18 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
-    private static string? GetCellText(ExcelWorksheet worksheet, int row, int column)
+    private static string? GetCellText(IXLWorksheet worksheet, int row, int column)
     {
         if (column <= 0) return null;
 
-        var cell = worksheet.Cells[row, column];
-        var text = cell.Text?.Trim();
-        if (string.IsNullOrWhiteSpace(text) && cell.Value != null)
-        {
-            text = Convert.ToString(cell.Value, CultureInfo.InvariantCulture)?.Trim();
-        }
+        var text = worksheet.Cell(row, column).GetFormattedString().Trim();
 
         return NormalizeOptionalText(text);
     }
 
-    private static bool IsRowEmpty(ExcelWorksheet worksheet, int row)
+    private static bool IsRowEmpty(IXLWorksheet worksheet, int row)
     {
-        var columnCount = worksheet.Dimension?.Columns ?? 0;
+        var columnCount = worksheet.LastColumnUsed()?.ColumnNumber() ?? 0;
         for (var column = 1; column <= columnCount; column++)
         {
             if (!string.IsNullOrWhiteSpace(GetCellText(worksheet, row, column)))
@@ -1269,28 +1257,6 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         if (!string.IsNullOrWhiteSpace(normalizedKey) && !lookup.ContainsKey(normalizedKey))
         {
             lookup[normalizedKey] = value;
-        }
-    }
-
-    private static bool TryConvertToDouble(object? value, out double result)
-    {
-        switch (value)
-        {
-            case double doubleValue:
-                result = doubleValue;
-                return true;
-            case decimal decimalValue:
-                result = Convert.ToDouble(decimalValue);
-                return true;
-            case int intValue:
-                result = intValue;
-                return true;
-            case long longValue:
-                result = longValue;
-                return true;
-            default:
-                result = 0;
-                return false;
         }
     }
 

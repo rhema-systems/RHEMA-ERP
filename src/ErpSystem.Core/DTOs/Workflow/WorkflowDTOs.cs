@@ -229,6 +229,50 @@ public class WorkflowApprovalConfigDto
     /// </summary>
     public List<WorkflowApprovalConflictRuleDto> ConflictRules { get; set; } = new();
     public WorkflowSignaturePolicyDto? SignaturePolicy { get; set; }
+
+    /// <summary>
+    /// Controlled documents that must support the transaction before its approval workflow may
+    /// complete. Keeping these requirements on the effective-dated approval policy means an audit
+    /// can recover the exact evidence rule that accompanied the monetary authority route.
+    /// </summary>
+    public List<WorkflowEvidenceRequirementDto> EvidenceRequirements { get; set; } = new();
+
+    /// <summary>
+    /// Whether the policy permits a specifically requested evidence exception. The exception does
+    /// not silently waive evidence: it forces the senior authority route and retains the request,
+    /// reason, requester and final approver on the source transaction.
+    /// </summary>
+    public bool AllowEvidenceException { get; set; }
+
+    public string EvidenceExceptionApproverRole { get; set; } = "Managing Director";
+
+    /// <summary>
+    /// Minimum narrative length for exceptional-payment and evidence-exception reasons. This is
+    /// configuration rather than a controller constant so TDC can strengthen it without a release.
+    /// </summary>
+    public int MinimumExceptionReasonLength { get; set; } = 30;
+
+    /// <summary>
+    /// Marks amount/payment-type bands that require Managing Director authority even when the
+    /// transaction has not been manually classified as exceptional.
+    /// </summary>
+    public bool RequiresManagingDirectorApproval { get; set; }
+
+    public string ManagingDirectorApproverRole { get; set; } = "Managing Director";
+}
+
+/// <summary>
+/// One named evidence requirement embedded in an effective-dated workflow approval policy.
+/// Multiple current documents can satisfy the same key where a policy requires, for example,
+/// both an instruction and a bank confirmation under one evidence class.
+/// </summary>
+public class WorkflowEvidenceRequirementDto
+{
+    public string RequirementKey { get; set; } = string.Empty;
+    public string DocumentName { get; set; } = string.Empty;
+    public string? DocumentType { get; set; }
+    public int MinimumDocuments { get; set; } = 1;
+    public bool RequireVerification { get; set; } = true;
 }
 
 public class WorkflowSignaturePolicyDto

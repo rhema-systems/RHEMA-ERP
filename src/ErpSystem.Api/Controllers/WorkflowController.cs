@@ -2111,6 +2111,7 @@ public class WorkflowController : ControllerBase
             var tenantId = _currentUserService.TenantId ?? Guid.Empty;
             var stepInstance = await _db.WorkflowStepInstances
                 .Include(si => si.WorkflowStep)
+                .Include(si => si.WorkflowInstance)
                 .FirstOrDefaultAsync(si => si.Id == id && si.TenantId == tenantId && !si.IsDeleted);
 
             if (stepInstance == null)
@@ -2150,6 +2151,7 @@ public class WorkflowController : ControllerBase
             string? checklistItemId = null;
             var checklist = GetChecklistFromStepConfiguration(stepInstance.WorkflowStep?.Configuration);
             WorkflowQualityCheckDto? checklistItem = null;
+            WorkflowDocumentRequirementDto? stepDocumentRequirement = null;
 
             if (!string.IsNullOrWhiteSpace(safeRequirementKey) && checklist.Count > 0)
             {
@@ -2176,7 +2178,20 @@ public class WorkflowController : ControllerBase
 
             if (stepInstance.WorkflowStep?.StepType == WorkflowStepType.Approval && checklistItem == null)
             {
-                return BadRequest(new { message = "The selected checklist item does not require document evidence" });
+                // Finance payment evidence is policy-driven rather than an approval check-box. The
+                // workflow step advertises the allowed named keys through TaskConfig, while the AP
+                // approval gate evaluates the effective policy snapshot and verification status.
+                var taskConfig = GetTaskConfigFromStepConfiguration(stepInstance.WorkflowStep.Configuration);
+                stepDocumentRequirement = taskConfig?.DocumentRequirements.FirstOrDefault(requirement =>
+                    string.Equals(requirement.RequirementKey, safeRequirementKey, StringComparison.OrdinalIgnoreCase));
+                if (stepDocumentRequirement == null)
+                {
+                    return BadRequest(new { message = "The selected workflow step does not define this document requirement" });
+                }
+
+                safeRequirementKey = stepDocumentRequirement.RequirementKey;
+                documentName = stepDocumentRequirement.DocumentName;
+                documentType = stepDocumentRequirement.DocumentType;
             }
 
             if (stepInstance.WorkflowStep?.StepType != WorkflowStepType.Approval && checklistItem == null)
@@ -3004,6 +3019,15 @@ public class WorkflowController : ControllerBase
         if (stepInstance.WorkflowStep?.StepType != WorkflowStepType.Approval)
         {
             return false;
+        }
+
+        // The workflow initiator remains responsible for assembling requested support while the
+        // approval is pending. They may upload, but cannot verify or approve their own payment;
+        // those controls are enforced independently by evidence verification and SOD guards.
+        if (stepInstance.WorkflowInstance?.InitiatedById == currentUserId ||
+            stepInstance.WorkflowInstance?.StartedById == currentUserId)
+        {
+            return true;
         }
 
         var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);

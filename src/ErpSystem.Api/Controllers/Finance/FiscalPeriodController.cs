@@ -390,6 +390,268 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Evaluates the live Finance close controls and appends immutable check evidence to the
+        /// active numbered close cycle.
+        /// </summary>
+        [HttpPost("periods/{id}/close-workspace/evaluate")]
+        [Authorize(Policy = FinancePermissions.MaintainCloseWorkspace)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> EvaluatePeriodCloseWorkspace(Guid id)
+        {
+            try
+            {
+                return Ok(await _fiscalPeriodService.EvaluatePeriodCloseWorkspaceAsync(id));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Lists active, draft and superseded close-template versions for the current tenant.
+        /// Historical versions remain visible because completed cycles retain their template ID.
+        /// </summary>
+        [HttpGet("close-templates")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<IReadOnlyList<FinanceCloseTemplateDto>>> GetFinanceCloseTemplates()
+            => Ok(await _fiscalPeriodService.GetFinanceCloseTemplatesAsync());
+
+        /// <summary>
+        /// Creates the next draft version for a template code. Approval is deliberately separate
+        /// so the author cannot activate their own control design.
+        /// </summary>
+        [HttpPost("close-templates/versions")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult<FinanceCloseTemplateDto>> CreateFinanceCloseTemplateVersion(
+            [FromBody] SaveFinanceCloseTemplateVersionDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close template request is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.CreateFinanceCloseTemplateVersionAsync(dto));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Updates a draft only. Approved and superseded versions are immutable evidence.
+        /// </summary>
+        [HttpPut("close-templates/{id}")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult<FinanceCloseTemplateDto>> UpdateFinanceCloseTemplateDraft(
+            Guid id,
+            [FromBody] SaveFinanceCloseTemplateVersionDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close template request is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.UpdateFinanceCloseTemplateDraftAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Activates a reviewed draft and supersedes the prior active template for the same type.
+        /// </summary>
+        [HttpPost("close-templates/{id}/approve")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult<FinanceCloseTemplateDto>> ApproveFinanceCloseTemplate(
+            Guid id,
+            [FromBody] ApproveFinanceCloseTemplateDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close template approval is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.ApproveFinanceCloseTemplateAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Signs the maker declaration after the persisted mandatory checks pass. A different
+        /// authorised user must subsequently review the evidence and close the period.
+        /// </summary>
+        [HttpPost("periods/{id}/close-workspace/prepare")]
+        [Authorize(Policy = FinancePermissions.MaintainCloseWorkspace)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> PreparePeriodClose(
+            Guid id,
+            [FromBody] PeriodClosePreparationRequestDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Period close preparation request is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.PreparePeriodCloseAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Assigns, schedules or completes a manual task in the active close cycle. Automated
+        /// tasks and maker-checker certification continue through their dedicated operations.
+        /// </summary>
+        [HttpPut("periods/{periodId}/close-workspace/tasks/{taskId}")]
+        [Authorize(Policy = FinancePermissions.MaintainCloseWorkspace)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> UpdateFinanceCloseTask(
+            Guid periodId,
+            Guid taskId,
+            [FromBody] UpdateFinanceCloseTaskDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close task update is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.UpdateFinanceCloseTaskAsync(periodId, taskId, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Links a file already uploaded through the shared controlled-upload service to one task
+        /// in the active close cycle. Linking is separate from upload so failed network retries do
+        /// not create duplicate business evidence rows.
+        /// </summary>
+        [HttpPost("periods/{periodId}/close-workspace/tasks/{taskId}/evidence")]
+        [Authorize(Policy = FinancePermissions.MaintainCloseWorkspace)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> LinkFinanceCloseEvidence(
+            Guid periodId,
+            Guid taskId,
+            [FromBody] LinkFinanceCloseEvidenceDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close evidence link request is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.LinkFinanceCloseEvidenceAsync(periodId, taskId, dto));
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+        }
+
+        /// <summary>
+        /// Removes an unused evidence association while retaining the shared uploaded object. Any
+        /// evidence already cited by a waiver or completed manual task is immutable.
+        /// </summary>
+        [HttpDelete("periods/{periodId}/close-workspace/tasks/{taskId}/evidence/{attachmentId}")]
+        [Authorize(Policy = FinancePermissions.MaintainCloseWorkspace)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> RemoveFinanceCloseEvidence(
+            Guid periodId,
+            Guid taskId,
+            Guid attachmentId)
+        {
+            try
+            {
+                return Ok(await _fiscalPeriodService.RemoveFinanceCloseEvidenceAsync(periodId, taskId, attachmentId));
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+        }
+
+        /// <summary>
+        /// Requests acceptance of one eligible failed/warning check using evidence attached to the
+        /// same task. Fundamental ledger controls are rejected by the domain service.
+        /// </summary>
+        [HttpPost("periods/{periodId}/close-workspace/checks/{snapshotId}/waivers")]
+        [Authorize(Policy = FinancePermissions.RequestCloseExceptionWaivers)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> RequestFinanceCloseExceptionWaiver(
+            Guid periodId,
+            Guid snapshotId,
+            [FromBody] RequestFinanceCloseWaiverDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close waiver request is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.RequestFinanceCloseExceptionWaiverAsync(periodId, snapshotId, dto));
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+        }
+
+        /// <summary>
+        /// Records an independent waiver decision. Approval triggers an immediate full evaluation;
+        /// it produces Waived only when the current exception fingerprint still matches.
+        /// </summary>
+        [HttpPost("periods/{periodId}/close-workspace/waivers/{waiverId}/review")]
+        [Authorize(Policy = FinancePermissions.ApproveCloseExceptionWaivers)]
+        public async Task<ActionResult<FinanceCloseWorkspaceDto>> ReviewFinanceCloseExceptionWaiver(
+            Guid periodId,
+            Guid waiverId,
+            [FromBody] ReviewFinanceCloseWaiverDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Finance close waiver review is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.ReviewFinanceCloseExceptionWaiverAsync(periodId, waiverId, dto));
+            }
+            catch (ArgumentException ex) { return NotFound(ex.Message); }
+            catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+        }
+
+        /// <summary>
         /// Closes a fiscal period, preventing new transactions from being posted.
         /// </summary>
         /// <remarks>
@@ -449,7 +711,7 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Reopens a closed fiscal period to allow posting corrections.
+        /// Submits a controlled request to reopen a closed fiscal period.
         /// </summary>
         /// <remarks>
         /// Typically used by Finance module for period adjustments. Other modules should not call this.
@@ -457,24 +719,27 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Business Rules:**
         /// - Period must be Closed (not Locked) to be reopened
         /// - Cannot reopen locked periods
-        /// - Requires approval/authorization
+        /// - The requester cannot approve the same request
+        /// - Later closed/locked periods block the request so periods are reopened backwards
+        /// - The books remain closed until a higher-tier approval is recorded
         ///
         /// **Effects:**
-        /// - Period status changes to "Open"
-        /// - Transactions can be posted again
-        /// - Other modules can post to this period
+        /// - No posting state changes at request time
+        /// - The affected-period snapshot is retained for stale-decision protection
         ///
         /// **Authorization:** Requires Finance.PeriodReopen permission
         /// </remarks>
-        /// <param name="id">Fiscal period ID to reopen</param>
-        /// <returns>Success message</returns>
-        /// <response code="200">Period reopened successfully</response>
+        /// <param name="id">Fiscal period ID requested for reopen</param>
+        /// <returns>Persisted request awaiting independent review</returns>
+        /// <response code="200">Reopen request submitted successfully</response>
         /// <response code="400">Cannot reopen - period is locked</response>
         /// <response code="404">Fiscal period not found</response>
         /// <response code="500">Internal server error</response>
-        [HttpPost("periods/{id}/reopen")]
+        [HttpPost("periods/{id}/reopen-requests")]
         [Authorize(Policy = FinancePermissions.ReopenAccountingPeriods)]
-        public async Task<ActionResult> ReopenPeriod(Guid id, [FromBody] PeriodReopenRequestDto dto)
+        public async Task<ActionResult<FinancePeriodReopenRequestDto>> RequestPeriodReopen(
+            Guid id,
+            [FromBody] PeriodReopenRequestDto dto)
         {
             if (dto == null)
                 return BadRequest("Period reopen request is required.");
@@ -485,8 +750,48 @@ namespace ErpSystem.Api.Controllers.Finance
             try
             {
                 dto.FiscalPeriodId = id;
-                var result = await _fiscalPeriodService.ReopenPeriodAsync(dto);
+                var result = await _fiscalPeriodService.RequestPeriodReopenAsync(dto);
                 return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Records a higher-tier decision on a pending accounting-period reopen request.
+        /// </summary>
+        /// <remarks>
+        /// Approval re-runs the immutable affected-period validation, supersedes the old signed
+        /// certificate, reopens the books, and starts cycle N+1 in one serialised transaction.
+        /// Rejection retains the request and reviewer declaration without changing posting state.
+        ///
+        /// **Authorization:** Requires Finance.PeriodReopen.Approve permission.
+        /// </remarks>
+        [HttpPost("periods/{periodId}/reopen-requests/{requestId}/review")]
+        [Authorize(Policy = FinancePermissions.ApproveAccountingPeriodReopens)]
+        public async Task<ActionResult<FinancePeriodReopenRequestDto>> ReviewPeriodReopen(
+            Guid periodId,
+            Guid requestId,
+            [FromBody] PeriodReopenReviewDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Period reopen review is required.");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                return Ok(await _fiscalPeriodService.ReviewPeriodReopenAsync(periodId, requestId, dto));
             }
             catch (ArgumentException ex)
             {

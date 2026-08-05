@@ -1,8 +1,7 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useMemo, use } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,35 +10,30 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
-import { Save, Send, CheckCircle, XCircle, ChevronLeft, Loader2, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Save, Send, CheckCircle, Loader2, ArrowLeft, RotateCcw } from 'lucide-react';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { BudgetReturn, BudgetScenario, BudgetEntry, BudgetEntryDto, SubmitBudgetReturnDto } from '@/types/budget';
-import type { Account, FiscalYear, FiscalPeriod } from '@/types/finance';
+import { useAuth } from '@/hooks/use-auth';
+import type { BudgetReturn, BudgetScenario, BudgetEntryDto, BudgetAuditEvent } from '@/types/budget';
+import type { Account, FiscalPeriod } from '@/types/finance';
 
 interface PageProps {
-    params: {
+    params: Promise<{
         id: string;
-    };
+    }>;
 }
 
-// Helper to safely parse numbers
-const parseNum = (val: string | number) => {
-    const num = typeof val === 'string' ? parseFloat(val.replace(/,/g, '')) : val;
-    return isNaN(num) ? 0 : num;
-};
-
 export default function BudgetReturnEditorPage({ params }: PageProps) {
+    const { id } = use(params);
     const { toast } = useToast();
-    const router = useRouter();
+    const { user, hasPermission } = useAuth();
 
     // Data State
     const [budgetReturn, setBudgetReturn] = useState<BudgetReturn | null>(null);
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
-    const [fiscalYear, setFiscalYear] = useState<FiscalYear | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
-    const [entries, setEntries] = useState<BudgetEntry[]>([]);
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
+    const [auditHistory, setAuditHistory] = useState<BudgetAuditEvent[]>([]);
 
     // UI State
     const [isLoading, setIsLoading] = useState(true);
@@ -54,30 +48,30 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
 
     useEffect(() => {
         loadData();
-    }, [params.id]);
+    }, [id]);
 
     const loadData = async () => {
         try {
             setIsLoading(true);
             // 1. Get Return
-            const ret = await budgetDataService.getReturnById(params.id);
+            const ret = await budgetDataService.getReturnById(id);
             setBudgetReturn(ret);
 
             // 2. Get Scenario & Entries & Accounts (Parallel)
-            const [scen, ent, allAccounts] = await Promise.all([
+            const [scen, ent, allAccounts, auditData] = await Promise.all([
                 budgetDataService.getScenarioById(ret.budgetScenarioId),
-                budgetDataService.getEntries(params.id),
-                financeDataService.getAccounts({ status: 'Active' }) // Get all active accounts
+                budgetDataService.getEntries(id),
+                financeDataService.getAccounts({ status: 'Active' }),
+                budgetDataService.getReturnAuditHistory(id).catch(() => []),
             ]);
             setScenario(scen);
-            setEntries(ent);
-            setAccounts(allAccounts);
+            setAccounts(allAccounts.filter(account => account.status === 'Active' && account.allowDirectPosting));
+            setAuditHistory(auditData);
 
             // 3. Get Fiscal Year for Periods
             const fy = await financeDataService.getFiscalYearById(scen.fiscalYearId);
-            setFiscalYear(fy);
             // Sort periods by number
-            const sortedPeriods = (fy.periods || []).sort((a, b) => a.periodNumber - b.periodNumber);
+            const sortedPeriods = [...(fy.periods || [])].sort((a, b) => a.periodNumber - b.periodNumber);
             setPeriods(sortedPeriods);
 
             // 4. Build Grid Data
@@ -122,8 +116,8 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
         return Object.values(row).reduce((sum, val) => sum + (val || 0), 0);
     };
 
-    const handleSave = async () => {
-        if (!budgetReturn || !scenario) return;
+    const handleSave = async (): Promise<BudgetReturn | null> => {
+        if (!budgetReturn || !scenario) return null;
         setIsSaving(true);
 
         try {
@@ -149,43 +143,76 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         accountId: accountId,
                         fiscalPeriodId: periodId,
                         amount: amount,
-                        currencyCode: 'GHS', // Default to Base for now, complex multi-currency omitted for MVP
+                        currencyCode: scenario.baseCurrencyCode,
                         exchangeRate: 1.0
                     });
                 });
             });
 
-            await budgetDataService.bulkSaveEntries({
+            const updatedReturn = await budgetDataService.bulkSaveEntries({
                 returnId: budgetReturn.id,
+                returnRowVersion: budgetReturn.rowVersion,
                 entries: entriesToSave
             });
 
+            setBudgetReturn(updatedReturn);
+            setAuditHistory(await budgetDataService.getReturnAuditHistory(updatedReturn.id));
             setHasUnsavedChanges(false);
             toast({ title: 'Saved', description: 'Budget entries saved successfully.' });
-
-            // Reload entries to get IDs back? Not strictly necessary if we rely on matrix logic.
+            return updatedReturn;
         } catch (error) {
             console.error('Save failed:', error);
-            toast({ title: 'Error', description: 'Failed to save changes.', variant: 'destructive' });
+            toast({
+                title: 'Error',
+                description: error instanceof Error ? error.message : 'Failed to save changes.',
+                variant: 'destructive'
+            });
+            return null;
         } finally {
             setIsSaving(false);
         }
     };
 
     const handleSubmit = async () => {
+        if (!budgetReturn) return;
+        let currentReturn = budgetReturn;
         if (hasUnsavedChanges) {
             if (!confirm('You have unsaved changes. Save them first?')) return;
-            await handleSave();
+            const saved = await handleSave();
+            if (!saved) return;
+            currentReturn = saved;
         }
         if (!confirm('Are you sure you want to submit this budget for approval? You will not be able to edit it afterwards.')) return;
 
         setIsSubmitting(true);
         try {
-            await budgetDataService.submitReturn({ returnId: budgetReturn!.id });
+            await budgetDataService.submitReturn({
+                returnId: currentReturn.id,
+                rowVersion: currentReturn.rowVersion,
+            });
             toast({ title: 'Submitted', description: 'Budget submitted for approval.' });
-            loadData(); // Reload to update status
+            await loadData();
         } catch (error) {
-            toast({ title: 'Error', description: 'Failed to submit budget.', variant: 'destructive' });
+            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to submit budget.', variant: 'destructive' });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleRecall = async () => {
+        if (!budgetReturn || !confirm('Recall this submitted return for changes?')) return;
+        setIsSubmitting(true);
+        try {
+            const recalled = await budgetDataService.recallReturn(
+                budgetReturn.id,
+                budgetReturn.rowVersion,
+                'Recalled by preparer for changes.',
+            );
+            setBudgetReturn(recalled);
+            setAuditHistory(await budgetDataService.getReturnAuditHistory(recalled.id));
+            toast({ title: 'Return recalled', description: 'The worksheet is editable again.' });
+        } catch (error) {
+            toast({ title: 'Recall failed', description: error instanceof Error ? error.message : 'Refresh and try again.', variant: 'destructive' });
         } finally {
             setIsSubmitting(false);
         }
@@ -195,7 +222,22 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
     if (isLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
     if (!budgetReturn || !scenario) return <div className="p-8">Return not found</div>;
 
-    const isEditable = budgetReturn.status === 'Draft' || budgetReturn.status === 'Rejected';
+    const normalizedRoles = new Set((user?.roles || []).map(role => role.toLowerCase()));
+    const isPrivileged = normalizedRoles.has('admin')
+        || normalizedRoles.has('tenantadmin')
+        || normalizedRoles.has('superadmin');
+    const isAssignedUser = budgetReturn.assignedToUserId === user?.id;
+    const isDraftLike = budgetReturn.status === 'Draft' || budgetReturn.status === 'Rejected';
+    const scenarioIsCollecting = scenario.status === 'Collecting';
+    const isEditable = isDraftLike
+        && scenarioIsCollecting
+        && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Edit')));
+    const canSubmit = isDraftLike
+        && scenarioIsCollecting
+        && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Submit')));
+    const canRecall = budgetReturn.status === 'Submitted'
+        && scenarioIsCollecting
+        && (isPrivileged || (isAssignedUser && hasPermission('Finance.BudgetReturns.Submit')));
 
     const renderGrid = (accountList: Account[]) => (
         <div className="h-full min-h-0 border rounded-md overflow-auto">
@@ -279,19 +321,29 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </p>
                     </div>
                     <div className="flex gap-2">
-                        {isEditable && (
+                        {(isEditable || canSubmit || canRecall) && (
                             <>
-                                <Button variant="outline" onClick={handleSave} disabled={isSaving || !hasUnsavedChanges}>
-                                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                                    Save Draft
-                                </Button>
-                                <Button onClick={handleSubmit} disabled={isSubmitting}>
-                                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    Submit Budget
-                                </Button>
+                                {isEditable && (
+                                    <Button variant="outline" onClick={handleSave} disabled={isSaving || !hasUnsavedChanges}>
+                                        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                        Save Draft
+                                    </Button>
+                                )}
+                                {canSubmit && (
+                                    <Button onClick={handleSubmit} disabled={isSubmitting || isSaving}>
+                                        {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                        Submit Budget
+                                    </Button>
+                                )}
+                                {canRecall && (
+                                    <Button variant="outline" onClick={handleRecall} disabled={isSubmitting}>
+                                        <RotateCcw className="mr-2 h-4 w-4" />
+                                        Recall
+                                    </Button>
+                                )}
                             </>
                         )}
-                        {!isEditable && (
+                        {!isEditable && !canSubmit && !canRecall && (
                             <div className="flex items-center px-4 py-2 bg-muted rounded text-sm text-muted-foreground">
                                 <CheckCircle className="w-4 h-4 mr-2" />
                                 Read Only
@@ -299,6 +351,21 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         )}
                     </div>
                 </div>
+                <details className="rounded-md border bg-muted/20 px-4 py-2">
+                    <summary className="cursor-pointer text-sm font-medium">
+                        Audit history ({auditHistory.length})
+                    </summary>
+                    <div className="mt-3 max-h-36 space-y-2 overflow-auto">
+                        {auditHistory.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No audit events recorded yet.</p>
+                        ) : auditHistory.map(event => (
+                            <div key={event.id} className="flex justify-between gap-4 text-sm">
+                                <span>{event.action.replace('Finance.', '')} · {event.username}</span>
+                                <time className="text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time>
+                            </div>
+                        ))}
+                    </div>
+                </details>
             </div>
 
             {/* Content - Full Height Grid */}
@@ -311,7 +378,7 @@ export default function BudgetReturnEditorPage({ params }: PageProps) {
                         </TabsList>
                         <div className="text-sm">
                             Current Total: <span className="font-bold">{
-                                new Intl.NumberFormat('en-US', { style: 'currency', currency: 'GHS' }).format(
+                                new Intl.NumberFormat('en-US', { style: 'currency', currency: scenario.baseCurrencyCode }).format(
                                     accounts.reduce((sum, acc) => {
                                         // Filter by active tab logic if needed, or show grand total
                                         // Let's show Tab Total

@@ -53,6 +53,7 @@ import { inventoryManagementService } from '@/services/inventoryManagementServic
 import { taxDataService } from '@/services/finance/tax-data.service';
 import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
+import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
@@ -86,6 +87,7 @@ const invoiceSchema = z.object({
     notes: z.string().optional(),
     reference: z.string().optional(),
     taxGroupId: z.string().optional(),
+    withholdingTaxId: z.string().optional().default('none'),
     withholdingTaxRate: z.coerce.number().min(0).max(100).optional().default(0),
     isOpeningBalance: z.boolean().default(false),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
@@ -155,6 +157,11 @@ export default function CreateVendorInvoicePage() {
         queryFn: () => taxDataService.getTaxGroups({ isActive: true, applicability: 'Purchases' }),
     });
 
+    const { data: withholdingTaxes = [] } = useQuery({
+        queryKey: ['taxes', 'ap-invoice-withholding'],
+        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+    });
+
     const { data: warehousesData } = useQuery({
         queryKey: ['warehouses'],
         queryFn: () => inventoryManagementService.getWarehouses(),
@@ -209,6 +216,8 @@ export default function CreateVendorInvoicePage() {
             exchangeRateDate: new Date(),
             exchangeRateSource: 'Daily',
             isOpeningBalance: defaultOpeningBalance,
+            withholdingTaxId: 'none',
+            withholdingTaxRate: 0,
             notes: '',
             lineItems: [
                 { lineItemType: 'Expense', description: '', quantity: 1, unitPrice: 0, discountPercentage: 0, taxGroupId: 'none' }
@@ -232,7 +241,15 @@ export default function CreateVendorInvoicePage() {
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchIsOpeningBalance = form.watch('isOpeningBalance');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
-    const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(form.watch('withholdingTaxRate')) || 0;
+    const watchWithholdingTaxId = form.watch('withholdingTaxId');
+    const withholdingTaxOptions = (withholdingTaxes as Tax[]).filter(tax =>
+        tax.isActive && (
+            tax.applicability === TaxApplicability.Purchases ||
+            tax.applicability === TaxApplicability.Both
+        )
+    );
+    const selectedWithholdingTax = withholdingTaxOptions.find(tax => tax.id === watchWithholdingTaxId);
+    const watchWithholdingTaxRate = watchIsOpeningBalance ? 0 : Number(selectedWithholdingTax?.rate || 0);
     const watchLineItems = form.watch('lineItems') || [];
 
     useEffect(() => {
@@ -241,6 +258,7 @@ export default function CreateVendorInvoicePage() {
         // Opening bills bring forward gross AP balances only; tax and WHT history is not
         // reposted through the migration clearing entry created by the posting service.
         form.setValue('taxGroupId', 'none');
+        form.setValue('withholdingTaxId', 'none');
         form.setValue('withholdingTaxRate', 0);
         form.getValues('lineItems').forEach((_, index) => {
             form.setValue(`lineItems.${index}.taxGroupId`, 'none');
@@ -445,13 +463,25 @@ export default function CreateVendorInvoicePage() {
         setIsSubmitting(true);
         try {
             const isOpeningBalance = data.isOpeningBalance;
+            if (!isOpeningBalance && selectedWithholdingTax && !selectedWithholdingTax.taxPayableAccountId) {
+                toast({
+                    title: 'WHT account missing',
+                    description: `${selectedWithholdingTax.code} needs a payable account in Tax Configuration before it can be used.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
             await accountsPayableService.createInvoice({
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
-                withholdingTaxRate: isOpeningBalance ? 0 : Number(data.withholdingTaxRate) || 0,
+                // The backend resolves rate/account again from this tax id. Sending the displayed
+                // values keeps the compatibility DTO descriptive but grants them no authority.
+                withholdingTaxId: isOpeningBalance || data.withholdingTaxId === 'none' ? null : data.withholdingTaxId,
+                withholdingTaxRate: isOpeningBalance ? 0 : watchWithholdingTaxRate,
+                withholdingTaxAccountId: isOpeningBalance ? null : selectedWithholdingTax?.taxPayableAccountId || null,
                 isOpeningBalance,
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
@@ -786,25 +816,32 @@ export default function CreateVendorInvoicePage() {
                         )}
 
                         <div className="space-y-2">
-                            <Label>Withholding Tax (WHT) Rate</Label>
+                            <Label>Expected Withholding Tax (WHT)</Label>
                             <Controller
                                 control={form.control}
-                                name="withholdingTaxRate"
+                                name="withholdingTaxId"
                                 render={({ field }) => (
-                                    <Select value={watchIsOpeningBalance ? '0' : String(field.value || 0)} onValueChange={field.onChange} disabled={watchIsOpeningBalance}>
+                                    <Select value={watchIsOpeningBalance ? 'none' : String(field.value || 'none')} onValueChange={field.onChange} disabled={watchIsOpeningBalance}>
                                         <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                             <SelectValue placeholder="No WHT" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="0">No WHT (0%)</SelectItem>
-                                            <SelectItem value="3">WHT Goods (3%)</SelectItem>
-                                            <SelectItem value="5">WHT Works (5%)</SelectItem>
-                                            <SelectItem value="7.5">WHT Services (7.5%)</SelectItem>
-                                            <SelectItem value="15">WHT Rent/Other (15%)</SelectItem>
+                                            <SelectItem value="none">No WHT</SelectItem>
+                                            {withholdingTaxOptions.map(tax => (
+                                                <SelectItem key={tax.id} value={tax.id}>
+                                                    {tax.code} - {tax.name} ({Number(tax.rate || 0)}%)
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
                                 )}
                             />
+                            <p className="text-xs text-muted-foreground">
+                                Invoice WHT is an estimate from tenant setup. The annual supplier threshold and final deduction are recalculated at payment.
+                            </p>
+                            {selectedWithholdingTax && !selectedWithholdingTax.taxPayableAccountId && (
+                                <p className="text-xs text-destructive">This WHT configuration needs a payable account before the invoice can be saved.</p>
+                            )}
                         </div>
 
                         <div className="space-y-2 lg:col-span-3">

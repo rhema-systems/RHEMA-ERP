@@ -174,12 +174,14 @@ public sealed class WorkflowEvidenceController : ControllerBase
     }
 
     [HttpPost("{id:guid}/verify")]
-    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager,InternalAudit")]
+    [Authorize(Roles = "SystemAdmin,WorkflowAdmin,SuperAdmin,TenantAdmin,Manager,InternalAudit,Finance Manager,Financial Controller,Chief Accountant,Managing Director")]
     public async Task<IActionResult> Verify(Guid id, [FromBody] VerifyWorkflowEvidenceRequest request,
         CancellationToken cancellationToken)
     {
         var evidence = await Find(id, cancellationToken);
         if (evidence == null) return NotFound();
+        if (request.Accepted && evidence.UploadedById == UserId)
+            return Conflict("The evidence uploader cannot verify the same document. A different authorized reviewer is required.");
         var notes = request.Notes?.Trim();
         if (!request.Accepted && string.IsNullOrWhiteSpace(notes))
             return BadRequest("A rejection reason is required.");

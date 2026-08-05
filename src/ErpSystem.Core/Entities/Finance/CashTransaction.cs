@@ -27,6 +27,19 @@ public class CashTransaction : BaseEntity
     /// </summary>
     public Guid? ToBankAccountId { get; set; }
 
+    /// <summary>
+    /// Stable idempotency and lineage key shared by the OUT and IN rows of one bank transfer.
+    /// It replaces document-number parsing as the primary way to locate the paired leg while
+    /// leaving the human-readable OUT/IN suffix available to Finance users.
+    /// </summary>
+    public Guid? TransferPairId { get; set; }
+
+    /// <summary>
+    /// The bank-account side represented by this transfer row. Non-transfer transactions leave
+    /// the value null because they do not participate in a paired movement.
+    /// </summary>
+    public BankTransferLeg? TransferLeg { get; set; }
+
     public decimal Amount { get; set; }
 
     [Required]
@@ -39,9 +52,36 @@ public class CashTransaction : BaseEntity
     public decimal? ExchangeRate { get; set; }
 
     /// <summary>
+    /// Immutable tenant exchange-rate record selected for this bank leg. Retaining the record id,
+    /// source, date and quote side lets the posting engine and later auditors reproduce the exact
+    /// functional-currency valuation instead of depending on whatever rate is current later.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+
+    [MaxLength(100)]
+    public string? ExchangeRateSource { get; set; }
+
+    public DateTime? ExchangeRateDate { get; set; }
+
+    public ExchangeRateQuoteSide? ExchangeRateQuoteSide { get; set; }
+
+    /// <summary>
     /// Amount in base currency (GHS)
     /// </summary>
     public decimal BaseAmount { get; set; }
+
+    /// <summary>
+    /// Destination-currency units received for one source-currency unit. Both legs retain the
+    /// same cross-rate snapshot so either bank statement can explain the conversion.
+    /// </summary>
+    public decimal? TransferCrossRate { get; set; }
+
+    /// <summary>
+    /// Signed functional-currency difference between the destination and source valuations.
+    /// Positive is a realised gain; negative is a realised loss. The amount is informational on
+    /// both operational legs and is posted exactly once by the source leg's journal.
+    /// </summary>
+    public decimal TransferFxGainLossBaseAmount { get; set; }
 
     public Guid? PaymentMethodId { get; set; }
 
@@ -111,6 +151,42 @@ public class CashTransaction : BaseEntity
 
     public Guid? PostedBy { get; set; }
 
+    /// <summary>
+    /// True when this posted operational row has been corrected by a controlled compensating
+    /// transaction. The original row remains posted and immutable because changing it would
+    /// break both the bank-reconciliation trail and the source-to-ledger evidence.
+    /// </summary>
+    public bool IsReversed { get; set; }
+
+    /// <summary>
+    /// Populated on a compensating cash row to identify the original operational movement it
+    /// offsets. Transfer reversals use one link per bank leg so each account has a complete trail.
+    /// </summary>
+    public Guid? ReversalOfCashTransactionId { get; set; }
+
+    /// <summary>
+    /// Populated on an original cash row with the compensating operational row. This makes the
+    /// correction idempotent and lets reconciliation reviewers navigate in both directions.
+    /// </summary>
+    public Guid? ReversalCashTransactionId { get; set; }
+
+    /// <summary>
+    /// Journal and posting-event lineage for the compensating GL entry. For a transfer both
+    /// original legs share the same reversal journal and posting event.
+    /// </summary>
+    public Guid? ReversalJournalEntryId { get; set; }
+
+    public Guid? ReversalPostingEventId { get; set; }
+
+    public DateTime? ReversalDate { get; set; }
+
+    public DateTime? ReversedAt { get; set; }
+
+    public Guid? ReversedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReversalReason { get; set; }
+
     // Navigation properties
     public virtual BankAccount BankAccount { get; set; } = null!;
     public virtual BankAccount? ToBankAccount { get; set; }
@@ -118,4 +194,12 @@ public class CashTransaction : BaseEntity
     public virtual Cheque? Cheque { get; set; }
     public virtual BankReconciliation? Reconciliation { get; set; }
     public virtual JournalEntry? JournalEntry { get; set; }
+    public virtual ExchangeRate? ExchangeRateRecord { get; set; }
+
+    // Explicit self-references preserve immutable operational lineage without relying on
+    // transaction-number conventions when a reviewer follows a correction.
+    public virtual CashTransaction? ReversalOfCashTransaction { get; set; }
+    public virtual CashTransaction? ReversalCashTransaction { get; set; }
+    public virtual JournalEntry? ReversalJournalEntry { get; set; }
+    public virtual FinancePostingEvent? ReversalPostingEvent { get; set; }
 }

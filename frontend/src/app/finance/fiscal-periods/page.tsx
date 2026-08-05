@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -9,12 +10,14 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, CheckCircle2, RotateCw } from 'lucide-react';
+import { CalendarDays, Lock, Unlock, LockKeyhole, AlertTriangle, FileDown, Loader2, RotateCw } from 'lucide-react';
 import type { FiscalPeriod, ModuleDefinition } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { ModuleLockManager } from '@/components/finance/fiscal-periods/ModuleLockManager';
+import { CloseWorkspaceDialog } from '@/components/finance/fiscal-periods/CloseWorkspaceDialog';
+import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-output.service';
 
 export default function FiscalPeriodsPage() {
     const { toast } = useToast();
@@ -22,14 +25,18 @@ export default function FiscalPeriodsPage() {
     const canAdminister = hasPermission('Finance.Admin');
     const canClose = hasPermission('Finance.PeriodClose');
     const canReopen = hasPermission('Finance.PeriodReopen');
+    const canApproveReopen = hasPermission('Finance.PeriodReopen.Approve');
+    const canExportFinanceReports = hasPermission('Finance.Reports.Export');
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [modules, setModules] = useState<ModuleDefinition[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterYear, setFilterYear] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
-    const [selectedPeriod, setSelectedPeriod] = useState<FiscalPeriod | null>(null);
     const [reopenReason, setReopenReason] = useState('');
+    const [reopenImpactAssessment, setReopenImpactAssessment] = useState('');
+    const [reopenReviewComment, setReopenReviewComment] = useState('');
     const [processing, setProcessing] = useState(false);
+    const [downloadingClosePackId, setDownloadingClosePackId] = useState<string | null>(null);
 
     const loadData = useCallback(async () => {
         try {
@@ -71,31 +78,14 @@ export default function FiscalPeriodsPage() {
         return true;
     });
 
-    const handleClosePeriod = async (periodId: string) => {
-        try {
-            setProcessing(true);
-            await financeDataService.closeFiscalPeriod(periodId);
-            toast({ title: "Success", description: "Fiscal period closed successfully" });
-            loadData();
-            setSelectedPeriod(null);
-        } catch (error: any) {
-            toast({
-                title: 'Error',
-                description: error.message || 'Failed to close period',
-                variant: 'destructive',
-            });
-        } finally {
-            setProcessing(false);
-        }
-    };
-
-    const handleReopenPeriod = async (periodId: string) => {
+    const handleRequestReopen = async (periodId: string) => {
         const reason = reopenReason.trim();
+        const assessment = reopenImpactAssessment.trim();
 
-        if (!reason) {
+        if (reason.length < 20 || assessment.length < 20) {
             toast({
-                title: 'Reason required',
-                description: 'Enter a reason before reopening this fiscal period.',
+                title: 'More detail required',
+                description: 'Provide at least 20 characters for both the reason and affected-period assessment.',
                 variant: 'destructive',
             });
             return;
@@ -103,14 +93,76 @@ export default function FiscalPeriodsPage() {
 
         try {
             setProcessing(true);
-            await financeDataService.reopenFiscalPeriod(periodId, reason);
-            toast({ title: "Success", description: "Fiscal period reopened successfully" });
+            await financeDataService.requestFiscalPeriodReopen(periodId, reason, assessment);
+            toast({
+                title: 'Reopen request submitted',
+                description: 'The period remains closed until an independent higher-tier reviewer approves it.'
+            });
             setReopenReason('');
+            setReopenImpactAssessment('');
             await loadData();
         } catch (error: any) {
             toast({
                 title: 'Error',
                 description: error.message || 'Failed to reopen period',
+                variant: 'destructive',
+            });
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const downloadClosePack = async (period: FiscalPeriod) => {
+        if (!period.latestClosePackCycleId) return;
+
+        try {
+            setDownloadingClosePackId(period.latestClosePackCycleId);
+            // The generic document-output service preserves the API-provided filename and routes
+            // the request through the Finance export permission. The cycle identity guarantees
+            // that a reopened period downloads its historical signed certificate, not live data.
+            await documentOutputService.downloadDocument(
+                DOCUMENT_TYPES.financeClosePack,
+                period.latestClosePackCycleId,
+                { format: 'pdf', copyType: 'Original' }
+            );
+            toast({ title: 'Close pack downloaded', description: `${period.periodName} signed Finance evidence pack is ready.` });
+        } catch (error: any) {
+            toast({
+                title: 'Close pack download failed',
+                description: error?.message || 'The signed Finance close pack could not be generated.',
+                variant: 'destructive',
+            });
+        } finally {
+            setDownloadingClosePackId(null);
+        }
+    };
+
+    const handleReviewReopen = async (periodId: string, requestId: string, approved: boolean) => {
+        const reviewComment = reopenReviewComment.trim();
+        if (reviewComment.length < 20) {
+            toast({
+                title: 'Review declaration required',
+                description: 'Enter at least 20 characters explaining the approval or rejection decision.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        try {
+            setProcessing(true);
+            await financeDataService.reviewFiscalPeriodReopen(periodId, requestId, approved, reviewComment);
+            toast({
+                title: approved ? 'Period reopened' : 'Reopen request rejected',
+                description: approved
+                    ? 'The old certificate was superseded and a new close cycle was started.'
+                    : 'The period remains closed and the review decision has been retained.'
+            });
+            setReopenReviewComment('');
+            await loadData();
+        } catch (error: any) {
+            toast({
+                title: 'Review failed',
+                description: error.message || 'The period reopen review could not be recorded.',
                 variant: 'destructive',
             });
         } finally {
@@ -174,10 +226,17 @@ export default function FiscalPeriodsPage() {
                         Manage accounting periods and period close process
                     </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
-                    <RotateCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                    Refresh
-                </Button>
+                <div className="flex gap-2">
+                    {canAdminister ? (
+                        <Button variant="outline" size="sm" asChild>
+                            <Link href="/administration/finance/close-templates">Close templates</Link>
+                        </Button>
+                    ) : null}
+                    <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+                        <RotateCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </Button>
+                </div>
             </div>
 
             {/* Breadcrumbs */}
@@ -269,6 +328,9 @@ export default function FiscalPeriodsPage() {
                                     ) : (
                                         filteredPeriods.map((period) => {
                                             const status = getPeriodStatus(period);
+                                            const pendingReopen = period.latestReopenRequest?.status === 'PendingApproval'
+                                                ? period.latestReopenRequest
+                                                : undefined;
 
                                             return (
                                             <tr key={period.id} className="border-b hover:bg-muted/50">
@@ -302,89 +364,137 @@ export default function FiscalPeriodsPage() {
 
                                                         {/* Period Actions */}
                                                         {canClose && status === 'Open' && (
+                                                            <CloseWorkspaceDialog period={period} onClosed={loadData} />
+                                                        )}
+                                                        {pendingReopen && (
+                                                            <Badge variant="outline" className="w-fit border-amber-300 bg-amber-50 text-amber-800">
+                                                                Reopen approval pending
+                                                            </Badge>
+                                                        )}
+                                                        {canExportFinanceReports && period.latestClosePackCycleId && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => void downloadClosePack(period)}
+                                                                disabled={downloadingClosePackId === period.latestClosePackCycleId}
+                                                                title="Download the signed certificate, control results, exceptions, evidence and reopen history"
+                                                            >
+                                                                {downloadingClosePackId === period.latestClosePackCycleId ? (
+                                                                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                                                ) : (
+                                                                    <FileDown className="mr-1 h-4 w-4" />
+                                                                )}
+                                                                Close pack
+                                                            </Button>
+                                                        )}
+                                                        {pendingReopen && canApproveReopen && status === 'Closed' && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button
                                                                         variant="outline"
                                                                         size="sm"
-                                                                        onClick={() => setSelectedPeriod(period)}
+                                                                        onClick={() => setReopenReviewComment('')}
                                                                     >
-                                                                        <Lock className="h-4 w-4 mr-1" />
-                                                                        Close
+                                                                        Review reopen
                                                                     </Button>
                                                                 </DialogTrigger>
-                                                                <DialogContent>
+                                                                <DialogContent className="max-w-2xl">
                                                                     <DialogHeader>
-                                                                        <DialogTitle>Close Period: {period.periodName}?</DialogTitle>
+                                                                        <DialogTitle>Review Reopen: {period.periodName}</DialogTitle>
                                                                         <DialogDescription>
-                                                                            Review the checklist before closing this period
+                                                                            Close cycle {pendingReopen.closedCycleNumber} remains protected until this independent decision is approved.
                                                                         </DialogDescription>
                                                                     </DialogHeader>
-                                                                    <div className="space-y-4 py-4">
-                                                                        <div className="space-y-2">
-                                                                            <p className="text-sm font-semibold">Period Close Checklist:</p>
-                                                                            <div className="space-y-2">
-                                                                                <div className="flex items-start gap-2">
-                                                                                    <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
-                                                                                    <span className="text-sm">All journal entries posted</span>
-                                                                                </div>
-                                                                                <div className="flex items-start gap-2">
-                                                                                    <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
-                                                                                    <span className="text-sm">Bank reconciliations complete</span>
-                                                                                </div>
-                                                                                <div className="flex items-start gap-2">
-                                                                                    <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
-                                                                                    <span className="text-sm">Currency revaluation run</span>
-                                                                                </div>
-                                                                                <div className="flex items-start gap-2">
-                                                                                    <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5" />
-                                                                                    <span className="text-sm">Trial balance reviewed</span>
+                                                                    <div className="max-h-[65vh] space-y-4 overflow-y-auto py-2 pr-1 text-sm">
+                                                                        <div className="rounded border p-3">
+                                                                            <p className="font-semibold">Request by {pendingReopen.requestedByUserName}</p>
+                                                                            <p className="mt-2 whitespace-pre-wrap"><span className="font-medium">Reason:</span> {pendingReopen.reason}</p>
+                                                                            <p className="mt-2 whitespace-pre-wrap"><span className="font-medium">Impact assessment:</span> {pendingReopen.affectedPeriodAssessment}</p>
+                                                                        </div>
+                                                                        {pendingReopen.validationWarnings.map((warning) => (
+                                                                            <div key={warning} className="rounded bg-amber-50 p-3 text-amber-900">
+                                                                                <AlertTriangle className="mr-2 inline h-4 w-4" />
+                                                                                {warning}
+                                                                            </div>
+                                                                        ))}
+                                                                        {pendingReopen.affectedPeriods.length > 0 && (
+                                                                            <div className="rounded border p-3">
+                                                                                <p className="mb-2 font-semibold">Later affected periods</p>
+                                                                                <div className="space-y-1">
+                                                                                    {pendingReopen.affectedPeriods.map((affected) => (
+                                                                                        <div key={affected.fiscalPeriodId} className="flex justify-between gap-4">
+                                                                                            <span>{affected.periodCode} — {affected.periodName}</span>
+                                                                                            <Badge variant="outline">{affected.periodStatus}</Badge>
+                                                                                        </div>
+                                                                                    ))}
                                                                                 </div>
                                                                             </div>
-                                                                        </div>
-                                                                        <div className="bg-blue-50 p-3 rounded text-sm">
-                                                                            <p className="font-semibold mb-1">Note:</p>
-                                                                            <p>Closing a period prevents new transactions from being posted to it. You can reopen it later if needed.</p>
+                                                                        )}
+                                                                        <div className="space-y-2">
+                                                                            <Label htmlFor={`reopen-review-${period.id}`}>Reviewer declaration</Label>
+                                                                            <Textarea
+                                                                                id={`reopen-review-${period.id}`}
+                                                                                value={reopenReviewComment}
+                                                                                onChange={(event) => setReopenReviewComment(event.target.value)}
+                                                                                placeholder="Document your independent review and decision (minimum 20 characters)."
+                                                                                maxLength={2000}
+                                                                                rows={4}
+                                                                            />
                                                                         </div>
                                                                     </div>
                                                                     <DialogFooter>
-                                                                        <Button variant="outline">Cancel</Button>
-                                                                        <Button onClick={() => {
-                                                                            handleClosePeriod(period.id);
-                                                                            setSelectedPeriod(null);
-                                                                        }} disabled={processing}>
-                                                                            {processing ? 'Closing...' : 'Close Period'}
+                                                                        <DialogClose asChild>
+                                                                            <Button variant="outline" disabled={processing}>Cancel</Button>
+                                                                        </DialogClose>
+                                                                        <Button
+                                                                            variant="destructive"
+                                                                            onClick={() => handleReviewReopen(period.id, pendingReopen.id, false)}
+                                                                            disabled={processing}
+                                                                        >
+                                                                            Reject
+                                                                        </Button>
+                                                                        <Button
+                                                                            onClick={() => handleReviewReopen(period.id, pendingReopen.id, true)}
+                                                                            disabled={processing}
+                                                                        >
+                                                                            {processing ? 'Applying decision...' : 'Approve and Reopen'}
                                                                         </Button>
                                                                     </DialogFooter>
                                                                 </DialogContent>
                                                             </Dialog>
                                                         )}
-                                                        {canReopen && status === 'Closed' && (
+                                                        {pendingReopen && !canApproveReopen && (
+                                                            <Badge variant="secondary">Higher-tier review pending</Badge>
+                                                        )}
+                                                        {canReopen && status === 'Closed' && !pendingReopen && (
                                                             <Dialog>
                                                                 <DialogTrigger asChild>
                                                                     <Button
                                                                         variant="outline"
                                                                         size="sm"
-                                                                        onClick={() => setReopenReason('')}
+                                                                        onClick={() => {
+                                                                            setReopenReason('');
+                                                                            setReopenImpactAssessment('');
+                                                                        }}
                                                                     >
                                                                         <Unlock className="h-4 w-4 mr-1" />
-                                                                        Reopen
+                                                                        Request Reopen
                                                                     </Button>
                                                                 </DialogTrigger>
                                                                 <DialogContent>
                                                                     <DialogHeader>
-                                                                        <DialogTitle>Reopen Period: {period.periodName}?</DialogTitle>
+                                                                        <DialogTitle>Request Reopen: {period.periodName}</DialogTitle>
                                                                         <DialogDescription>
-                                                                            This will allow new transactions to be posted to this period
+                                                                            The period remains closed until an independent higher-tier reviewer approves the request.
                                                                         </DialogDescription>
                                                                     </DialogHeader>
                                                                     <div className="space-y-4 py-4">
                                                                         <div className="bg-yellow-50 p-3 rounded text-sm">
                                                                             <p className="font-semibold mb-1 flex items-center gap-2">
                                                                                 <AlertTriangle className="h-4 w-4" />
-                                                                                Warning:
+                                                                                Controlled sequence
                                                                             </p>
-                                                                            <p>Reopening a period will allow modifications to financial data for this period. Ensure this is necessary and authorized.</p>
+                                                                            <p>Later closed or locked periods block the request. Approval supersedes this signed close cycle and starts a new certification cycle.</p>
                                                                         </div>
                                                                         <div className="space-y-2">
                                                                             <Label htmlFor={`reopen-reason-${period.id}`}>Reason</Label>
@@ -392,20 +502,34 @@ export default function FiscalPeriodsPage() {
                                                                                 id={`reopen-reason-${period.id}`}
                                                                                 value={reopenReason}
                                                                                 onChange={(event) => setReopenReason(event.target.value)}
-                                                                                placeholder="Why is this period being reopened?"
+                                                                                placeholder="Describe the accounting correction requiring reopening (minimum 20 characters)."
                                                                                 maxLength={1000}
                                                                                 rows={3}
+                                                                            />
+                                                                        </div>
+                                                                        <div className="space-y-2">
+                                                                            <Label htmlFor={`reopen-impact-${period.id}`}>Affected-period assessment</Label>
+                                                                            <Textarea
+                                                                                id={`reopen-impact-${period.id}`}
+                                                                                value={reopenImpactAssessment}
+                                                                                onChange={(event) => setReopenImpactAssessment(event.target.value)}
+                                                                                placeholder="Explain the expected adjustment and impact on later reporting periods (minimum 20 characters)."
+                                                                                maxLength={2000}
+                                                                                rows={4}
                                                                             />
                                                                         </div>
                                                                     </div>
                                                                     <DialogFooter>
                                                                         <DialogClose asChild>
-                                                                            <Button variant="outline" onClick={() => setReopenReason('')}>
+                                                                            <Button variant="outline" onClick={() => {
+                                                                                setReopenReason('');
+                                                                                setReopenImpactAssessment('');
+                                                                            }}>
                                                                                 Cancel
                                                                             </Button>
                                                                         </DialogClose>
-                                                                        <Button onClick={() => handleReopenPeriod(period.id)} disabled={processing}>
-                                                                            {processing ? 'Reopening...' : 'Reopen Period'}
+                                                                        <Button onClick={() => handleRequestReopen(period.id)} disabled={processing}>
+                                                                            {processing ? 'Submitting...' : 'Submit Reopen Request'}
                                                                         </Button>
                                                                     </DialogFooter>
                                                                 </DialogContent>

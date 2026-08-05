@@ -8,10 +8,9 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using OfficeOpenXml;
-using OfficeOpenXml.Style;
 
 namespace ErpSystem.Api.Services.Maintenance;
 
@@ -813,13 +812,12 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
     public async Task<MaintenanceAssetImportResultDto> ImportAssetsFromExcelAsync(Stream fileStream, string fileName)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
         var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
         var result = new MaintenanceAssetImportResultDto();
 
-        using var package = new ExcelPackage(fileStream);
-        var worksheet = package.Workbook.Worksheets.FirstOrDefault();
-        var rowCount = worksheet?.Dimension?.Rows ?? 0;
+        using var workbook = new XLWorkbook(fileStream);
+        var worksheet = workbook.Worksheets.FirstOrDefault();
+        var rowCount = worksheet?.LastRowUsed(XLCellsUsedOptions.AllContents)?.RowNumber() ?? 0;
         if (worksheet == null || rowCount < 2)
         {
             result.Errors.Add(new MaintenanceAssetImportErrorDto { RowNumber = 0, Field = "File", Error = "The spreadsheet has no asset rows" });
@@ -856,9 +854,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
         for (var row = 2; row <= rowCount; row++)
         {
-            var assetNumber = worksheet.Cells[row, 1].Text.Trim();
-            var name = worksheet.Cells[row, 2].Text.Trim();
-            var categoryKey = worksheet.Cells[row, 3].Text.Trim();
+            var assetNumber = CellText(worksheet, row, 1);
+            var name = CellText(worksheet, row, 2);
+            var categoryKey = CellText(worksheet, row, 3);
             var errors = new List<MaintenanceAssetImportErrorDto>();
 
             void AddError(string field, string error) => errors.Add(new MaintenanceAssetImportErrorDto
@@ -875,13 +873,14 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             if (string.IsNullOrWhiteSpace(categoryKey)) AddError("Category Code", "Required");
             else if (!categories.ContainsKey(categoryKey)) AddError("Category Code", "Category was not found");
 
-            var projectCode = worksheet.Cells[row, 5].Text.Trim();
-            var siteCode = worksheet.Cells[row, 6].Text.Trim();
+            var projectCode = CellText(worksheet, row, 5);
+            var siteCode = CellText(worksheet, row, 6);
             if (!string.IsNullOrWhiteSpace(projectCode) && !projects.ContainsKey(projectCode)) AddError("Project Code", "Project was not found");
             if (!string.IsNullOrWhiteSpace(siteCode) && !sites.ContainsKey(siteCode)) AddError("Site Code", "Site/location was not found");
 
-            var purchaseDate = ParseImportDate(worksheet.Cells[row, 11].Text);
-            if (!string.IsNullOrWhiteSpace(worksheet.Cells[row, 11].Text) && !purchaseDate.HasValue) AddError("Purchase Date", "Invalid date");
+            var purchaseDateText = CellText(worksheet, row, 11);
+            var purchaseDate = ParseImportDate(purchaseDateText);
+            if (!string.IsNullOrWhiteSpace(purchaseDateText) && !purchaseDate.HasValue) AddError("Purchase Date", "Invalid date");
 
             if (errors.Count > 0)
             {
@@ -893,9 +892,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             var category = categories[categoryKey];
             projects.TryGetValue(projectCode, out var project);
             sites.TryGetValue(siteCode, out var site);
-            var statusText = worksheet.Cells[row, 14].Text.Trim();
-            var criticalityText = worksheet.Cells[row, 15].Text.Trim();
-            var ownershipText = worksheet.Cells[row, 19].Text.Trim();
+            var statusText = CellText(worksheet, row, 14);
+            var criticalityText = CellText(worksheet, row, 15);
+            var ownershipText = CellText(worksheet, row, 19);
 
             var asset = new MaintenanceAsset
             {
@@ -903,24 +902,24 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 AssetNumber = assetNumber,
                 Name = name,
                 AssetCategoryId = category.Id,
-                Description = NullIfEmpty(worksheet.Cells[row, 4].Text),
+                Description = NullIfEmpty(CellText(worksheet, row, 4)),
                 CurrentProjectId = project?.Id,
                 CurrentSiteLocationId = site?.Id,
-                Location = NullIfEmpty(worksheet.Cells[row, 7].Text) ?? site?.Name,
-                Manufacturer = NullIfEmpty(worksheet.Cells[row, 8].Text),
-                Model = NullIfEmpty(worksheet.Cells[row, 9].Text),
-                SerialNumber = NullIfEmpty(worksheet.Cells[row, 10].Text),
+                Location = NullIfEmpty(CellText(worksheet, row, 7)) ?? site?.Name,
+                Manufacturer = NullIfEmpty(CellText(worksheet, row, 8)),
+                Model = NullIfEmpty(CellText(worksheet, row, 9)),
+                SerialNumber = NullIfEmpty(CellText(worksheet, row, 10)),
                 PurchaseDate = purchaseDate,
-                PurchasePrice = ParseImportDecimal(worksheet.Cells[row, 12].Text),
-                CurrentValue = ParseImportDecimal(worksheet.Cells[row, 13].Text),
+                PurchasePrice = ParseImportDecimal(CellText(worksheet, row, 12)),
+                CurrentValue = ParseImportDecimal(CellText(worksheet, row, 13)),
                 Status = Enum.TryParse<AssetStatus>(statusText, true, out var status) ? status : AssetStatus.Active,
                 Criticality = Enum.TryParse<AssetCriticality>(criticalityText, true, out var criticality) ? criticality : AssetCriticality.Medium,
-                IsFleetAsset = ParseImportBool(worksheet.Cells[row, 16].Text),
-                LicensePlate = NullIfEmpty(worksheet.Cells[row, 17].Text),
-                VIN = NullIfEmpty(worksheet.Cells[row, 18].Text),
+                IsFleetAsset = ParseImportBool(CellText(worksheet, row, 16)),
+                LicensePlate = NullIfEmpty(CellText(worksheet, row, 17)),
+                VIN = NullIfEmpty(CellText(worksheet, row, 18)),
                 OwnershipType = Enum.TryParse<AssetOwnershipType>(ownershipText, true, out var ownership) ? ownership : AssetOwnershipType.Owned,
-                FuelType = NullIfEmpty(worksheet.Cells[row, 20].Text),
-                Year = int.TryParse(worksheet.Cells[row, 21].Text, out var year) ? year : null,
+                FuelType = NullIfEmpty(CellText(worksheet, row, 20)),
+                Year = int.TryParse(CellText(worksheet, row, 21), out var year) ? year : null,
                 CreatedBy = _currentUserService.UserName
             };
 
@@ -952,9 +951,8 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
     public Task<byte[]> GenerateImportTemplateAsync()
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var worksheet = package.Workbook.Worksheets.Add("Maintenance Assets");
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("Maintenance Assets");
         var headers = new[]
         {
             "Asset Number*", "Name*", "Category Code*", "Description", "Project Code", "Site Code",
@@ -965,10 +963,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
 
         for (var column = 0; column < headers.Length; column++)
         {
-            worksheet.Cells[1, column + 1].Value = headers[column];
-            worksheet.Cells[1, column + 1].Style.Font.Bold = true;
-            worksheet.Cells[1, column + 1].Style.Fill.PatternType = ExcelFillStyle.Solid;
-            worksheet.Cells[1, column + 1].Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightBlue);
+            worksheet.Cell(1, column + 1).Value = headers[column];
+            worksheet.Cell(1, column + 1).Style.Font.Bold = true;
+            worksheet.Cell(1, column + 1).Style.Fill.BackgroundColor = XLColor.LightBlue;
         }
 
         var sample = new object?[]
@@ -979,12 +976,38 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         };
         for (var column = 0; column < sample.Length; column++)
         {
-            worksheet.Cells[2, column + 1].Value = sample[column];
+            SetCellValue(worksheet.Cell(2, column + 1), sample[column]);
         }
 
-        worksheet.View.FreezePanes(2, 1);
-        worksheet.Cells.AutoFitColumns();
-        return Task.FromResult(package.GetAsByteArray());
+        worksheet.SheetView.FreezeRows(1);
+        worksheet.ColumnsUsed().AdjustToContents();
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return Task.FromResult(stream.ToArray());
+    }
+
+    private static string CellText(IXLWorksheet worksheet, int row, int column)
+        => worksheet.Cell(row, column).GetFormattedString().Trim();
+
+    private static void SetCellValue(IXLCell cell, object? value)
+    {
+        if (value == null)
+        {
+            cell.Clear(XLClearOptions.Contents);
+            return;
+        }
+
+        cell.Value = value switch
+        {
+            string text => text,
+            bool boolean => boolean,
+            int number => number,
+            long number => number,
+            double number => number,
+            decimal number => number,
+            DateTime dateTime => dateTime,
+            _ => value.ToString() ?? string.Empty
+        };
     }
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

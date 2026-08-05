@@ -1,86 +1,84 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Calendar as CalendarIcon, CheckCircle, ClipboardCheck, Eye, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
     TableBody,
     TableCell,
     TableHead,
     TableHeader,
-    TableRow
+    TableRow,
 } from '@/components/ui/table';
-import { ClipboardCheck, Eye, CheckCircle, XCircle, Calendar as CalendarIcon } from 'lucide-react';
-import Link from 'next/link';
+import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 import type { UnitJournalEntry } from '@/types/unit-accounts';
 
-// MOCK DATA - Only pending approval entries
-const MOCK_PENDING_ENTRIES: UnitJournalEntry[] = [
-    {
-        id: 'uje-2',
-        entryNumber: 'UJE-2024-00002',
-        entryDate: '2024-12-15T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-12',
-        description: 'Machine Hours - Week 50',
-        status: 'PendingApproval',
-        lines: [
-            { id: 'l2', unitJournalEntryId: 'uje-2', lineNumber: 1, unitAccountId: 'ua-8', quantity: 168.5 },
-        ],
-        createdAt: '2024-12-15T14:00:00Z',
-        createdBy: 'Operator User',
-    },
-    {
-        id: 'uje-6',
-        entryNumber: 'UJE-2024-00006',
-        entryDate: '2024-12-18T00:00:00Z',
-        fiscalYearId: 'fy-1',
-        fiscalPeriodId: 'fp-12',
-        description: 'Year-End Employee Count Adjustment',
-        status: 'PendingApproval',
-        lines: [
-            { id: 'l7', unitJournalEntryId: 'uje-6', lineNumber: 1, unitAccountId: 'ua-2', quantity: 5 },
-            { id: 'l8', unitJournalEntryId: 'uje-6', lineNumber: 2, unitAccountId: 'ua-3', quantity: -2 },
-        ],
-        createdAt: '2024-12-18T10:00:00Z',
-        createdBy: 'HR Manager',
-    },
-];
+function formatDate(dateString: string) {
+    return new Date(dateString).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+}
 
 export default function UnitJournalEntriesApprovalPage() {
-    const [entries] = useState<UnitJournalEntry[]>(MOCK_PENDING_ENTRIES);
+    const [entries, setEntries] = useState<UnitJournalEntry[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [workingId, setWorkingId] = useState<string | null>(null);
 
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
-        });
+    const loadEntries = useCallback(async () => {
+        try {
+            setIsLoading(true);
+            const data = await unitAccountsDataService.getPendingUnitJournalApprovals();
+            setEntries(data);
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to load pending unit journal approvals.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadEntries();
+    }, [loadEntries]);
+
+    const handleApprove = async (id: string) => {
+        try {
+            setWorkingId(id);
+            await unitAccountsDataService.approveUnitJournalEntry(id);
+            toast.success('Unit journal entry approved.');
+            await loadEntries();
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to approve unit journal entry.');
+        } finally {
+            setWorkingId(null);
+        }
     };
 
-    const getTotalQuantity = (entry: UnitJournalEntry) => {
-        return entry.lines.reduce((sum, line) => sum + line.quantity, 0);
-    };
+    const handleReject = async (id: string) => {
+        const reason = window.prompt('Enter rejection reason:');
+        if (!reason?.trim()) return;
 
-    const handleApprove = (id: string) => {
-        console.log('Approving entry:', id);
-
-    };
-
-    const handleReject = (id: string) => {
-        const reason = prompt('Enter rejection reason:');
-        if (reason) {
-            console.log('Rejecting entry:', id, 'Reason:', reason);
-
+        try {
+            setWorkingId(id);
+            await unitAccountsDataService.rejectUnitJournalEntry(id, reason.trim());
+            toast.success('Unit journal entry rejected.');
+            await loadEntries();
+        } catch (error: any) {
+            toast.error(error?.message || 'Failed to reject unit journal entry.');
+        } finally {
+            setWorkingId(null);
         }
     };
 
     return (
         <div className="space-y-6">
-            {/* Page Header */}
             <div>
                 <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                     <ClipboardCheck className="h-8 w-8" />
@@ -89,10 +87,8 @@ export default function UnitJournalEntriesApprovalPage() {
                 <p className="text-muted-foreground">
                     Unit journal entries pending your approval
                 </p>
-
             </div>
 
-            {/* Breadcrumbs */}
             <Breadcrumb>
                 <BreadcrumbList>
                     <BreadcrumbItem>
@@ -113,16 +109,17 @@ export default function UnitJournalEntriesApprovalPage() {
                 </BreadcrumbList>
             </Breadcrumb>
 
-            {/* Pending Entries */}
             <Card>
                 <CardHeader>
                     <CardTitle>Pending Approval ({entries.length})</CardTitle>
-                    <CardDescription>
-                        Review and approve or reject entries
-                    </CardDescription>
+                    <CardDescription>Review and approve or reject entries</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {entries.length === 0 ? (
+                    {isLoading ? (
+                        <div className="text-center py-12 text-muted-foreground">
+                            Loading pending approvals...
+                        </div>
+                    ) : entries.length === 0 ? (
                         <div className="text-center py-12 text-muted-foreground">
                             <ClipboardCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
                             <p>No entries pending approval.</p>
@@ -136,7 +133,6 @@ export default function UnitJournalEntriesApprovalPage() {
                                     <TableHead>Description</TableHead>
                                     <TableHead>Submitted By</TableHead>
                                     <TableHead className="text-center">Lines</TableHead>
-                                    <TableHead className="text-right">Total Qty</TableHead>
                                     <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -157,20 +153,14 @@ export default function UnitJournalEntriesApprovalPage() {
                                         <TableCell className="max-w-xs truncate">
                                             {entry.description || '-'}
                                         </TableCell>
-                                        <TableCell>{entry.createdBy}</TableCell>
+                                        <TableCell>{entry.createdBy || '-'}</TableCell>
                                         <TableCell className="text-center">
-                                            <Badge variant="outline">{entry.lines.length}</Badge>
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono">
-                                            {getTotalQuantity(entry).toLocaleString(undefined, {
-                                                minimumFractionDigits: 0,
-                                                maximumFractionDigits: 2,
-                                            })}
+                                            <Badge variant="outline">{entry.lineCount ?? entry.lines?.length ?? 0}</Badge>
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-1">
                                                 <Link href={`/finance/unit-journal-entries/${entry.id}`}>
-                                                    <Button variant="ghost" size="sm" title="View Details">
+                                                    <Button variant="ghost" size="sm" title="View details">
                                                         <Eye className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
@@ -179,6 +169,7 @@ export default function UnitJournalEntriesApprovalPage() {
                                                     size="sm"
                                                     className="text-green-600 hover:text-green-700"
                                                     onClick={() => handleApprove(entry.id)}
+                                                    disabled={workingId === entry.id}
                                                     title="Approve"
                                                 >
                                                     <CheckCircle className="h-4 w-4" />
@@ -188,6 +179,7 @@ export default function UnitJournalEntriesApprovalPage() {
                                                     size="sm"
                                                     className="text-destructive hover:text-destructive"
                                                     onClick={() => handleReject(entry.id)}
+                                                    disabled={workingId === entry.id}
                                                     title="Reject"
                                                 >
                                                     <XCircle className="h-4 w-4" />

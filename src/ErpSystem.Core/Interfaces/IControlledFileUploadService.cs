@@ -15,11 +15,15 @@ public static class ControlledFileUploadCategories
     public const string DocumentManagement =
         "document-management";
 
+    public const string FinanceCloseEvidence =
+        "finance-close-evidence";
+
     public static IReadOnlySet<string> SystemCleanScanRequired { get; } =
         new HashSet<string>(
             [
                 SupplierRegistrationEvidence,
-                DocumentManagement
+                DocumentManagement,
+                FinanceCloseEvidence
             ],
             StringComparer.OrdinalIgnoreCase);
 }

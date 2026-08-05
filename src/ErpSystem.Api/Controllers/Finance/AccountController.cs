@@ -618,6 +618,32 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Updates the transaction and revaluation rate-selection policy for an
+        /// active foreign-currency GL account link.
+        /// </summary>
+        [HttpPut("{accountId}/currencies/{currencyCode}/rate-policy")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
+        public async Task<ActionResult<CurrencyLinkDto>> UpdateCurrencyLinkRatePolicy(
+            Guid accountId,
+            string currencyCode,
+            [FromBody] UpdateCurrencyLinkRatePolicyDto dto)
+        {
+            try
+            {
+                var result = await _accountService.UpdateCurrencyLinkRatePolicyAsync(accountId, currencyCode, dto);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Retrieves all currency links configured for a GL account, with optional inclusion of inactive links.
         /// </summary>
         /// <remarks>

@@ -19,6 +19,7 @@ public class TenantController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly ILdapAuthenticationService _ldapAuthenticationService;
     private readonly PaymentTermBaselineSeeder _paymentTermBaselineSeeder;
+    private readonly FinanceCloseTemplateBaselineSeeder _financeCloseTemplateBaselineSeeder;
     private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
@@ -31,6 +32,7 @@ public class TenantController : ControllerBase
         ICurrentUserService currentUserService,
         ILdapAuthenticationService ldapAuthenticationService,
         PaymentTermBaselineSeeder paymentTermBaselineSeeder,
+        FinanceCloseTemplateBaselineSeeder financeCloseTemplateBaselineSeeder,
         ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
         ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
@@ -42,6 +44,7 @@ public class TenantController : ControllerBase
         _currentUserService = currentUserService;
         _ldapAuthenticationService = ldapAuthenticationService;
         _paymentTermBaselineSeeder = paymentTermBaselineSeeder;
+        _financeCloseTemplateBaselineSeeder = financeCloseTemplateBaselineSeeder;
         _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
@@ -224,6 +227,7 @@ public class TenantController : ControllerBase
 
             // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.
             await _paymentTermBaselineSeeder.SeedTenantAsync(createdTenant.Id);
+            await _financeCloseTemplateBaselineSeeder.SeedTenantAsync(createdTenant.Id);
 
             // Log audit trail for tenant creation
             try

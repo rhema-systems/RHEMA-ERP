@@ -17,6 +17,7 @@ import type {
     CreateCashReceiptDto,
     CreateCashPaymentDto,
     CreateBankTransferDto,
+    BankTransferPreview,
     StartReconciliationDto,
     CreateManualMatchDto,
     CreateReconciliationAdjustmentDto,
@@ -24,6 +25,20 @@ import type {
     ReconciliationSummary,
     CashPositionSummary,
     CashFlowSummary,
+    LiquidityAccount,
+    LiquidityAccountEntry,
+    BankDeposit,
+    BankDepositStatus,
+    BankingSetupStatus,
+    DepositPolicy,
+    LiquidityAccountType,
+    ReturnedChequeCase,
+    ReturnedChequeCaseStatus,
+    PostedLiquidityPaymentCandidate,
+    CashTransactionTrace,
+    ReverseCashTransactionDto,
+    CashierTillSession,
+    CashierTillSessionStatus,
 } from '@/types/cash-management';
 import { apiService } from '@/services/api.service';
 
@@ -32,6 +47,267 @@ import { apiService } from '@/services/api.service';
 // =============================================================================
 
 class CashManagementDataService {
+    // ===== CASHIER / TILL CUSTODY =====
+
+    async getCashierTillSessions(filters?: {
+        status?: CashierTillSessionStatus;
+        liquidityAccountId?: string;
+        businessDate?: string;
+    }): Promise<CashierTillSession[]> {
+        const query = new URLSearchParams();
+        if (filters?.status) query.set('status', filters.status);
+        if (filters?.liquidityAccountId) query.set('liquidityAccountId', filters.liquidityAccountId);
+        if (filters?.businessDate) query.set('businessDate', filters.businessDate);
+        // Keep the optional suffix separate so the route-contract test can statically verify the
+        // endpoint while callers still avoid a trailing question mark when no filters are set.
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return apiService.get<CashierTillSession[]>(`/finance/cashier-tills/sessions${suffix}`);
+    }
+
+    async getCashierTillSession(id: string): Promise<CashierTillSession> {
+        return apiService.get<CashierTillSession>(`/finance/cashier-tills/sessions/${id}`);
+    }
+
+    async openCashierTillSession(dto: {
+        liquidityAccountId: string;
+        businessDate: string;
+        openingFloatAmount: number;
+        openingNotes?: string;
+        openingEvidenceFileId?: string;
+    }): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>('/finance/cashier-tills/sessions', dto);
+    }
+
+    async submitCashierTillCount(id: string, dto: {
+        countLines: Array<{ denomination: number; quantity: number }>;
+        varianceReason?: string;
+        closingEvidenceFileId?: string;
+        rowVersion: string;
+    }): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/submit-count`,
+            dto,
+        );
+    }
+
+    async approveCashierTillClosure(
+        id: string,
+        comments: string,
+        rowVersion: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/approve-closure`,
+            { comments, rowVersion },
+        );
+    }
+
+    async returnCashierTillForRecount(
+        id: string,
+        comments: string,
+        rowVersion: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/return-for-recount`,
+            { comments, rowVersion },
+        );
+    }
+
+    async reopenCashierTillAsCorrection(
+        id: string,
+        reason: string,
+        rowVersion: string,
+        openingEvidenceFileId?: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/reopen-as-correction`,
+            { reason, rowVersion, openingEvidenceFileId },
+        );
+    }
+
+    // ===== BANKING & SETTLEMENT =====
+
+    async getBankingSetup(): Promise<BankingSetupStatus> {
+        return apiService.get<BankingSetupStatus>('/finance/banking/setup');
+    }
+
+    async completeBankingSetup(dto: {
+        depositPolicy: DepositPolicy;
+        requirePrimaryEvidence: boolean;
+        accounts: Array<{
+            accountType: LiquidityAccountType;
+            code: string;
+            name: string;
+            currency: string;
+            glAccountId: string;
+        }>;
+    }): Promise<BankingSetupStatus> {
+        return apiService.post<BankingSetupStatus>('/finance/banking/setup', dto);
+    }
+
+    async getLiquidityAccounts(activeOnly = false): Promise<LiquidityAccount[]> {
+        return apiService.get<LiquidityAccount[]>(
+            `/finance/banking/liquidity-accounts?activeOnly=${activeOnly}`,
+        );
+    }
+
+    async createLiquidityAccount(dto: {
+        code: string;
+        name: string;
+        accountType: LiquidityAccountType;
+        currency: string;
+        glAccountId: string;
+        bankAccountId?: string;
+        providerName?: string;
+        providerAccountReference?: string;
+        allowsNegativeBalance: boolean;
+        allowsManualAllocations: boolean;
+        notes?: string;
+    }): Promise<LiquidityAccount> {
+        return apiService.post<LiquidityAccount>('/finance/banking/liquidity-accounts', dto);
+    }
+
+    async getEligibleLiquidityEntries(currency?: string): Promise<LiquidityAccountEntry[]> {
+        const query = currency ? `?currency=${encodeURIComponent(currency)}` : '';
+        return apiService.get<LiquidityAccountEntry[]>(`/finance/banking/eligible-entries${query}`);
+    }
+
+    async getPostedPaymentCandidates(): Promise<PostedLiquidityPaymentCandidate[]> {
+        return apiService.get<PostedLiquidityPaymentCandidate[]>('/finance/banking/posted-payment-candidates');
+    }
+
+    async registerPostedPayment(
+        accountTransactionId: string,
+        entryType: 'CashExpense' | 'PettyCashReplenishment' | 'CustomerRefund' | 'OtherPayment',
+    ): Promise<LiquidityAccountEntry> {
+        return apiService.post<LiquidityAccountEntry>('/finance/banking/posted-payment-entries', {
+            accountTransactionId,
+            entryType,
+        });
+    }
+
+    async getBankDeposits(status?: BankDepositStatus): Promise<BankDeposit[]> {
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
+        return apiService.get<BankDeposit[]>(`/finance/banking/deposits${query}`);
+    }
+
+    async getBankDeposit(id: string): Promise<BankDeposit> {
+        return apiService.get<BankDeposit>(`/finance/banking/deposits/${id}`);
+    }
+
+    async createBankDeposit(dto: {
+        bankAccountId: string;
+        depositDate: string;
+        depositReference: string;
+        notes?: string;
+        allocations: Array<{
+            liquidityAccountEntryId: string;
+            allocationType: 'Receipt' | 'Deduction';
+            amount: number;
+            notes?: string;
+        }>;
+    }): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>('/finance/banking/deposits', dto);
+    }
+
+    async submitBankDeposit(id: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/submit`, {});
+    }
+
+    async approveBankDeposit(id: string, comments?: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/approve`, { comments });
+    }
+
+    async rejectBankDeposit(id: string, reason: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/reject`, { reason });
+    }
+
+    async returnBankDeposit(id: string, comments: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/return`, { comments });
+    }
+
+    async postBankDeposit(id: string): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/post`, {});
+    }
+
+    async confirmBankDeposit(id: string, dto: {
+        bankConfirmationReference: string;
+        bankConfirmationDate: string;
+        confirmationEvidenceFileId?: string;
+        notes?: string;
+        rowVersion: string;
+    }): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${id}/confirm`, dto);
+    }
+
+    async uploadBankingEvidence(file: File): Promise<string> {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('category', 'finance-banking-evidence');
+        const response = await apiService.post<Record<string, string>>('/fileupload/single', formData);
+        const fileId = response.fileId || response.id || response.fileUploadRecordId;
+        if (!fileId) throw new Error('Upload succeeded but the server did not return a file ID.');
+        return fileId;
+    }
+
+    async linkBankDepositAttachment(
+        depositId: string,
+        fileUploadRecordId: string,
+        documentType = 'DepositSlip',
+        isPrimaryEvidence = true,
+    ): Promise<BankDeposit> {
+        return apiService.post<BankDeposit>(`/finance/banking/deposits/${depositId}/attachments`, {
+            fileUploadRecordId,
+            documentType,
+            isPrimaryEvidence,
+        });
+    }
+
+    async getReturnedCheques(status?: ReturnedChequeCaseStatus): Promise<ReturnedChequeCase[]> {
+        const query = status ? `?status=${encodeURIComponent(status)}` : '';
+        return apiService.get<ReturnedChequeCase[]>(`/finance/banking/returned-cheques${query}`);
+    }
+
+    async createReturnedCheque(dto: {
+        customerPaymentId: string;
+        bankDepositBatchId?: string;
+        bankAccountId: string;
+        returnDate: string;
+        bankReference: string;
+        returnReason: string;
+        bankChargeAmount: number;
+        chargeTreatment: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+        customerRecoverableChargeAmount?: number;
+        expenseChargeAmount?: number;
+        drawerBank?: string;
+        notes?: string;
+    }): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>('/finance/banking/returned-cheques', dto);
+    }
+
+    async submitReturnedCheque(id: string): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>(`/finance/banking/returned-cheques/${id}/submit`, {});
+    }
+
+    async approveReturnedCheque(id: string, comments?: string): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>(
+            `/finance/banking/returned-cheques/${id}/approve`,
+            { comments },
+        );
+    }
+
+    async linkReturnedChequeAttachment(
+        id: string,
+        fileUploadRecordId: string,
+        documentType = 'BankReturnAdvice',
+        isPrimaryEvidence = true,
+    ): Promise<ReturnedChequeCase> {
+        return apiService.post<ReturnedChequeCase>(`/finance/banking/returned-cheques/${id}/attachments`, {
+            fileUploadRecordId,
+            documentType,
+            isPrimaryEvidence,
+        });
+    }
+
     // ===== BANK ACCOUNTS =====
 
     async getBankAccounts(): Promise<BankAccount[]> {
@@ -73,6 +349,14 @@ class CashManagementDataService {
         return apiService.get<CashTransaction>(`/finance/cash-transactions/${id}`);
     }
 
+    async getCashTransactionTrace(id: string): Promise<CashTransactionTrace | null> {
+        return apiService.get<CashTransactionTrace>(`/finance/cash-transactions/${id}/trace`);
+    }
+
+    async reverseCashTransaction(id: string, dto: ReverseCashTransactionDto): Promise<CashTransaction> {
+        return apiService.post<CashTransaction>(`/finance/cash-transactions/${id}/reverse`, dto);
+    }
+
     async getTransactionsByBankAccount(bankAccountId: string, fromDate?: string, toDate?: string): Promise<CashTransaction[]> {
         const queryParams = new URLSearchParams();
         if (fromDate) queryParams.append('fromDate', fromDate);
@@ -96,6 +380,12 @@ class CashManagementDataService {
 
     async createBankTransfer(dto: CreateBankTransferDto): Promise<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }> {
         return apiService.post<{ fromTransaction: CashTransaction; toTransaction: CashTransaction }>('/finance/cash-transactions/transfer', dto);
+    }
+
+    async previewBankTransfer(dto: CreateBankTransferDto): Promise<BankTransferPreview> {
+        // Preview and capture intentionally share one server-side resolver; keeping rate
+        // selection out of the browser prevents an editable/manual rate from bypassing policy.
+        return apiService.post<BankTransferPreview>('/finance/cash-transactions/transfer/preview', dto);
     }
 
     async deleteCashTransaction(id: string): Promise<void> {

@@ -59,6 +59,17 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<JournalEntryDto> PostJournalEntryAsync(Guid id, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Posts a journal entry inside a caller-owned batch transaction.
+        /// The caller notifies the owner only after that outer transaction commits.
+        /// </summary>
+        Task<JournalEntryDto> PostJournalEntryForBatchAsync(Guid id, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Sends the owner notification for a successfully committed journal posting.
+        /// </summary>
+        Task NotifyJournalPostedAsync(Guid id, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Reverses a posted journal entry.
         /// Creates a reversing entry with opposite debits/credits.
         /// </summary>

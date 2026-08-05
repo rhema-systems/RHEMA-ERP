@@ -4,10 +4,12 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Services.Finance;
@@ -18,6 +20,10 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using FinancePaymentMethod = ErpSystem.Core.Entities.Finance.PaymentMethod;
@@ -41,6 +47,17 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IFxAccountingService? _fxAccountingService;
+        private readonly IFinanceAccessScopeService _financeAccessScopeService;
+        private readonly IFinanceReversalPolicyService _financeReversalPolicyService;
+        private readonly IWorkflowApprovalPolicyResolver? _approvalPolicyResolver;
+        private readonly IWithholdingTaxCertificateService? _withholdingTaxService;
+
+        private static readonly JsonSerializerOptions PaymentControlJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        };
         private readonly IVendorInvoiceService? _vendorInvoiceService;
         private readonly IProcurementControlEventService? _procurementControlEvents;
         private readonly IProcurementInvoicePaymentSodService? _invoicePaymentSod;
@@ -52,9 +69,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             ILogger<VendorPaymentService> logger,
             IDocumentNumberingService documentNumberingService,
             IWorkflowService workflowService,
+            IFinanceAccessScopeService financeAccessScopeService,
+            IFinanceReversalPolicyService financeReversalPolicyService,
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
             IFxAccountingService? fxAccountingService = null,
+            IWorkflowApprovalPolicyResolver? approvalPolicyResolver = null,
+            IWithholdingTaxCertificateService? withholdingTaxService = null,
             IVendorInvoiceService? vendorInvoiceService = null,
             IProcurementControlEventService? procurementControlEvents = null,
             IProcurementInvoicePaymentSodService? invoicePaymentSod = null)
@@ -65,9 +86,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             _logger = logger;
             _documentNumberingService = documentNumberingService;
             _workflowService = workflowService;
+            _financeAccessScopeService = financeAccessScopeService;
+            _financeReversalPolicyService = financeReversalPolicyService;
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
             _fxAccountingService = fxAccountingService;
+            _approvalPolicyResolver = approvalPolicyResolver;
+            _withholdingTaxService = withholdingTaxService;
             _vendorInvoiceService = vendorInvoiceService;
             _procurementControlEvents = procurementControlEvents;
             _invoicePaymentSod = invoicePaymentSod;
@@ -83,8 +108,20 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<VendorPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            var payment = await _unitOfWork.Repository<VendorPayment>()
-                .GetQueryable(p => p.TenantId == TenantId && p.Id == id)
+            var permittedBankAccountIds = await _financeAccessScopeService
+                .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
+            var query = _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == id);
+            if (permittedBankAccountIds != null)
+            {
+                // A restricted user must never learn that an out-of-scope payment exists. Applying
+                // the scope in SQL makes the result indistinguishable from an unknown identifier.
+                query = query.Where(payment =>
+                    payment.BankAccountId.HasValue &&
+                    permittedBankAccountIds.Contains(payment.BankAccountId.Value));
+            }
+
+            var payment = await query
                 .Include(p => p.Supplier)
                 .Include(p => p.Allocations)
                     .ThenInclude(a => a.VendorInvoice)
@@ -95,10 +132,92 @@ namespace ErpSystem.Api.Services.Finance.AP
             return payment == null ? null : MapToDto(payment);
         }
 
+        public async Task<VendorPaymentTraceDto?> GetTraceAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var payment = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                .Include(item => item.Supplier)
+                .Include(item => item.BankAccount)
+                .Include(item => item.ConfiguredPaymentMethod)
+                .Include(item => item.Allocations)
+                    .ThenInclude(item => item.VendorInvoice)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (payment == null)
+                return null;
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Read,
+                cancellationToken);
+
+            var allocationIds = payment.Allocations.Select(item => item.Id).ToList();
+            var postingEvents = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    !item.IsDeleted &&
+                    ((item.SourceDocumentType == "VendorPayment" && item.SourceDocumentId == payment.Id) ||
+                     (allocationIds.Contains(item.SourceDocumentId) &&
+                      (item.SourceDocumentType == "VendorPaymentAllocation" ||
+                       item.SourceDocumentType == "VendorPaymentAdvanceApplication"))))
+                .Include(item => item.JournalEntry)
+                    .ThenInclude(item => item!.Transactions)
+                        .ThenInclude(item => item.Account)
+                .OrderBy(item => item.PostingDate)
+                .ThenBy(item => item.RequestedAt)
+                .ToListAsync(cancellationToken);
+
+            var auditEvents = await _unitOfWork.Repository<AuditLog>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.Resource == "Finance.APPayment" &&
+                    item.ResourceId == payment.Id.ToString())
+                .AsNoTracking()
+                .OrderBy(item => item.Timestamp)
+                .ToListAsync(cancellationToken);
+
+            var trace = new VendorPaymentTraceDto
+            {
+                Payment = MapToDto(payment),
+                Postings = postingEvents.Select(MapPostingTrace).ToList(),
+                AuditEvents = auditEvents.Select(item => new FinanceAuditTraceDto
+                {
+                    AuditLogId = item.Id,
+                    EventType = item.Action,
+                    Timestamp = item.Timestamp,
+                    UserId = item.UserId,
+                    Username = item.Username,
+                    BeforeValuesJson = item.OldValues,
+                    DetailsJson = item.NewValues
+                }).ToList()
+            };
+
+            await RecordApPaymentAuditAsync(
+                FinanceAuditEvents.ApPaymentTraceViewed,
+                payment,
+                afterValues: new
+                {
+                    PostingCount = trace.Postings.Count,
+                    AuditEventCount = trace.AuditEvents.Count
+                },
+                comment: "AP payment source-to-ledger trace viewed.",
+                cancellationToken: cancellationToken);
+
+            return trace;
+        }
+
         public async Task<PagedResult<VendorPaymentDto>> GetAllAsync(VendorPaymentQueryDto query, CancellationToken cancellationToken = default)
         {
             var queryable = _unitOfWork.Repository<VendorPayment>()
                 .GetQueryable(p => p.TenantId == TenantId);
+
+            var permittedBankAccountIds = await _financeAccessScopeService
+                .GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Read, cancellationToken);
+            if (permittedBankAccountIds != null)
+            {
+                queryable = queryable.Where(payment =>
+                    payment.BankAccountId.HasValue &&
+                    permittedBankAccountIds.Contains(payment.BankAccountId.Value));
+            }
 
             if (!string.IsNullOrWhiteSpace(query.SearchTerm))
             {
@@ -195,6 +314,17 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var supplier = await ResolveSupplierForPaymentAsync(dto.SupplierId, cancellationToken);
 
+            // Resolve and persist the effective account, including the tenant default. Leaving the
+            // source field null would make later list, trace, and approval scope decisions depend on
+            // a setting that could change after the payment was created.
+            var effectiveBankAccountId = await ResolveBankAccountIdForScopeAsync(
+                dto.BankAccountId,
+                cancellationToken);
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                effectiveBankAccountId,
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
             var paymentNumber = await GeneratePaymentNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
@@ -203,7 +333,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 : dto.CurrencyCode.Trim().ToUpperInvariant();
             var configuredPaymentMethod = await ResolveConfiguredPaymentMethodAsync(
                 dto.PaymentMethodId,
-                dto.BankAccountId,
+                effectiveBankAccountId,
                 dto.TransactionReference ?? dto.ChequeNumber,
                 "vendor payment",
                 enforceReference: true,
@@ -212,23 +342,53 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? dto.PaymentMethod
                 : MapConfiguredPaymentMethodToVendorPaymentMethod(configuredPaymentMethod.Type);
 
-            // Calculate WHT. Prefer the explicit settlement amount from the payment UI,
-            // then allocation-level WHT, then the legacy rate-on-cash fallback.
+            // WHT is a configured-tax decision, not a free-form rate calculation. The server
+            // recomputes the annual supplier threshold and requires allocation totals to match
+            // the statutory result so a stale browser cannot bypass the Finance control.
             var allocationWhtAmount = dto.Allocations?
                 .Sum(a => Math.Max(a.WithholdingTaxAmount, 0m)) ?? 0m;
-            decimal whtAmount = 0;
-            if (dto.WithholdingTaxAmount.GetValueOrDefault() > 0)
+            var requestedWhtAmount = dto.WithholdingTaxAmount is decimal explicitWhtAmount && explicitWhtAmount > 0m
+                ? RoundMoney(explicitWhtAmount)
+                : RoundMoney(allocationWhtAmount);
+            WhtCalculationResultDto? whtCalculation = null;
+            if (dto.WithholdingTaxId.HasValue)
             {
-                whtAmount = RoundMoney(dto.WithholdingTaxAmount.Value);
+                if (dto.Allocations?.Any() != true)
+                {
+                    throw new InvalidOperationException("Configured WHT may only be applied to allocated supplier invoices; supplier advances must not carry WHT.");
+                }
+                if (_withholdingTaxService == null)
+                {
+                    throw new InvalidOperationException("WHT compliance service is not configured.");
+                }
+
+                var allocationSettlementBase = dto.Allocations.Sum(allocation =>
+                    Math.Max(allocation.AllocatedAmount, 0m)
+                    + Math.Max(allocation.DiscountAmount, 0m)
+                    + Math.Max(allocation.WithholdingTaxAmount, 0m));
+                var taxableBase = RoundMoney(dto.WithholdingTaxBaseAmount is > 0m
+                    ? dto.WithholdingTaxBaseAmount.Value
+                    : allocationSettlementBase);
+                whtCalculation = await _withholdingTaxService.CalculateApWithholdingAsync(new WhtCalculationRequestDto
+                {
+                    TaxId = dto.WithholdingTaxId.Value,
+                    SupplierId = supplier.Id,
+                    PaymentDate = dto.PaymentDate,
+                    TaxableBase = taxableBase
+                }, cancellationToken);
+
+                if (Math.Abs(RoundMoney(requestedWhtAmount - whtCalculation.WithholdingAmount)) > 0.01m)
+                {
+                    throw new InvalidOperationException(
+                        $"WHT allocations total {requestedWhtAmount:N2}, but configured tax {whtCalculation.TaxCode} requires {whtCalculation.WithholdingAmount:N2}. Recalculate the payment before saving.");
+                }
             }
-            else if (allocationWhtAmount > 0m)
+            else if (requestedWhtAmount > 0m || dto.WithholdingTaxRate > 0m)
             {
-                whtAmount = RoundMoney(allocationWhtAmount);
+                throw new InvalidOperationException("Select an active configured WHT tax before entering a withholding amount or rate.");
             }
-            else if (dto.WithholdingTaxRate > 0)
-            {
-                whtAmount = RoundMoney(dto.TotalAmount * (dto.WithholdingTaxRate / 100));
-            }
+
+            var whtAmount = whtCalculation?.WithholdingAmount ?? 0m;
 
             var payment = new VendorPayment
             {
@@ -243,13 +403,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentMethodId = configuredPaymentMethod?.Id,
                 CurrencyCode = paymentCurrencyCode,
                 ExchangeRate = dto.ExchangeRate,
-                BankAccountId = dto.BankAccountId,
+                BankAccountId = effectiveBankAccountId,
                 ChequeNumber = dto.ChequeNumber,
                 TransactionReference = dto.TransactionReference,
-                WithholdingTaxRate = dto.WithholdingTaxRate,
+                WithholdingTaxRate = whtCalculation?.TaxRate ?? 0m,
                 WithholdingTaxAmount = whtAmount,
+                WithholdingTaxBaseAmount = whtCalculation?.TaxableBase ?? 0m,
+                WithholdingTaxCumulativeBefore = whtCalculation?.CumulativeBefore ?? 0m,
+                WithholdingTaxThresholdAmount = whtCalculation?.ThresholdAmount,
+                WithholdingTaxThresholdApplied = whtCalculation?.ThresholdApplied ?? false,
+                WithholdingTaxCalculationNote = whtCalculation?.CalculationNote,
                 WithholdingTaxId = dto.WithholdingTaxId,
-                WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+                WithholdingTaxAccountId = whtCalculation?.TaxPayableAccountId,
                 WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
                 WithholdingCertificateDate = dto.WithholdingCertificateDate,
                 Status = VendorPaymentStatus.Draft,
@@ -317,6 +482,367 @@ namespace ErpSystem.Api.Services.Finance.AP
             return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
         }
 
+        /// <summary>
+        /// Submits a direct payment into the existing workflow engine. The selected effective-dated
+        /// policy is snapshotted before workflow creation so later configuration retirement cannot
+        /// obscure which evidence and monetary authority rules governed this payment.
+        /// </summary>
+        public async Task<VendorPaymentDto> SubmitAsync(
+            Guid id,
+            SubmitVendorPaymentDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            if (_approvalPolicyResolver == null)
+                throw new InvalidOperationException("The AP payment approval policy resolver is not configured.");
+            if (CurrentUserId == Guid.Empty)
+                throw new UnauthorizedAccessException("An authenticated Finance user is required to submit a payment.");
+
+            var payment = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                .Include(item => item.BankAccount)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Operate,
+                cancellationToken);
+
+            if (payment.PaymentBatchId.HasValue)
+                throw new InvalidOperationException("Payments created by a payment batch must use the batch approval workflow.");
+            if (payment.Status != VendorPaymentStatus.Draft)
+                throw new InvalidOperationException("Only a draft direct payment can be submitted for approval.");
+            if (payment.TotalAmount <= 0m)
+                throw new InvalidOperationException("A payment must have a positive amount before submission.");
+
+            var baseCurrency = (await _tenantSettingsService.GetBaseCurrencyAsync()).Trim().ToUpperInvariant();
+            var functionalAmount = decimal.Round(
+                payment.TotalAmount * (payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate),
+                2,
+                MidpointRounding.AwayFromZero);
+            var now = DateTime.UtcNow;
+            var resolution = await _approvalPolicyResolver.ResolveAsync(
+                new WorkflowApprovalPolicyContext(
+                    TenantId,
+                    "Vendor Payment",
+                    now,
+                    Module: "Finance",
+                    Category: payment.PaymentMethod.ToString(),
+                    Amount: functionalAmount,
+                    CurrencyCode: baseCurrency),
+                cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"No published AP payment approval policy covers {baseCurrency} {functionalAmount:N2} using {payment.PaymentMethod}.");
+
+            var control = resolution.ApprovalConfig;
+            var minimumReasonLength = Math.Max(control.MinimumExceptionReasonLength, 1);
+            var exceptionalReason = dto.ExceptionalPaymentReason?.Trim();
+            var evidenceExceptionReason = dto.EvidenceExceptionReason?.Trim();
+
+            if (dto.IsExceptionalPayment && (exceptionalReason?.Length ?? 0) < minimumReasonLength)
+                throw new InvalidOperationException(
+                    $"Exceptional payments require a reason of at least {minimumReasonLength} characters.");
+            if (dto.RequestEvidenceException && !control.AllowEvidenceException)
+                throw new InvalidOperationException("The applied payment policy does not permit an evidence exception.");
+            if (dto.RequestEvidenceException && (evidenceExceptionReason?.Length ?? 0) < minimumReasonLength)
+                throw new InvalidOperationException(
+                    $"Evidence exception requests require a reason of at least {minimumReasonLength} characters.");
+
+            var requiresManagingDirector =
+                control.RequiresManagingDirectorApproval ||
+                dto.IsExceptionalPayment ||
+                dto.RequestEvidenceException;
+            var managingDirectorRole = string.IsNullOrWhiteSpace(control.ManagingDirectorApproverRole)
+                ? "Managing Director"
+                : control.ManagingDirectorApproverRole.Trim();
+            if (requiresManagingDirector && !control.ApproverRules.Any(rule =>
+                    rule.AssignmentType == WorkflowAssignmentType.Role &&
+                    string.Equals(rule.Role, managingDirectorRole, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    $"The selected policy requires Managing Director authority but has no '{managingDirectorRole}' approver rule.");
+            }
+
+            var snapshotJson = JsonSerializer.Serialize(control, PaymentControlJsonOptions);
+            var snapshotHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshotJson)));
+
+            payment.Status = VendorPaymentStatus.PendingAuthorization;
+            payment.SubmittedById = CurrentUserId;
+            payment.SubmittedAt = now;
+            payment.AppliedApprovalPolicySetId = resolution.PolicySetId;
+            payment.AppliedApprovalPolicyCode = resolution.PolicyCode;
+            payment.ApprovalControlSnapshotJson = snapshotJson;
+            payment.ApprovalControlSnapshotHash = snapshotHash;
+            payment.IsExceptionalPayment = dto.IsExceptionalPayment;
+            payment.ExceptionalPaymentReason = dto.IsExceptionalPayment ? exceptionalReason : null;
+            payment.RequiresManagingDirectorApproval = requiresManagingDirector;
+            payment.ManagingDirectorApprovedById = null;
+            payment.ManagingDirectorApprovedAt = null;
+            payment.EvidenceExceptionRequested = dto.RequestEvidenceException;
+            payment.EvidenceExceptionReason = dto.RequestEvidenceException ? evidenceExceptionReason : null;
+            payment.EvidenceExceptionRequestedById = dto.RequestEvidenceException ? CurrentUserId : null;
+            payment.EvidenceExceptionRequestedAt = dto.RequestEvidenceException ? now : null;
+            payment.EvidenceExceptionApprovedById = null;
+            payment.EvidenceExceptionApprovedAt = null;
+            payment.UpdatedAt = now;
+            payment.UpdatedBy = UserName;
+            await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            try
+            {
+                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("VendorPayment", payment.Id);
+                if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
+                    throw new InvalidOperationException(
+                        workflowResult.Message ?? "Unable to start the direct-payment approval workflow.");
+
+                payment.WorkflowInstanceId = workflowResult.WorkflowInstanceId;
+                payment.UpdatedAt = DateTime.UtcNow;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await RecordApPaymentAuditAsync(
+                    FinanceAuditEvents.ApPaymentSubmitted,
+                    payment,
+                    afterValues: new
+                    {
+                        payment.Status,
+                        payment.SubmittedById,
+                        payment.SubmittedAt,
+                        payment.WorkflowInstanceId,
+                        payment.AppliedApprovalPolicySetId,
+                        payment.AppliedApprovalPolicyCode,
+                        payment.ApprovalControlSnapshotHash,
+                        FunctionalAmount = functionalAmount,
+                        FunctionalCurrencyCode = baseCurrency,
+                        payment.IsExceptionalPayment,
+                        payment.RequiresManagingDirectorApproval,
+                        payment.EvidenceExceptionRequested
+                    },
+                    comment: "Direct AP payment submitted under the snapshotted TDC evidence and authority policy.",
+                    cancellationToken: cancellationToken);
+            }
+            catch
+            {
+                // Workflow creation can fail because tenant configuration is incomplete. Return the
+                // payment to Draft so the maker can correct configuration and retry without a stuck
+                // PendingAuthorization record that has no active workflow.
+                payment.Status = VendorPaymentStatus.Draft;
+                payment.WorkflowInstanceId = null;
+                payment.SubmittedById = null;
+                payment.SubmittedAt = null;
+                // The policy snapshot belongs to a specific submission attempt. Clearing every
+                // derived control value prevents a failed workflow start from making a Draft
+                // payment appear submitted or from reusing a stale policy after configuration is
+                // corrected and the maker retries.
+                payment.AppliedApprovalPolicySetId = null;
+                payment.AppliedApprovalPolicyCode = null;
+                payment.ApprovalControlSnapshotJson = null;
+                payment.ApprovalControlSnapshotHash = null;
+                payment.IsExceptionalPayment = false;
+                payment.ExceptionalPaymentReason = null;
+                payment.RequiresManagingDirectorApproval = false;
+                payment.ManagingDirectorApprovedById = null;
+                payment.ManagingDirectorApprovedAt = null;
+                payment.EvidenceExceptionRequested = false;
+                payment.EvidenceExceptionReason = null;
+                payment.EvidenceExceptionRequestedById = null;
+                payment.EvidenceExceptionRequestedAt = null;
+                payment.EvidenceExceptionApprovedById = null;
+                payment.EvidenceExceptionApprovedAt = null;
+                payment.UpdatedAt = DateTime.UtcNow;
+                payment.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                throw;
+            }
+
+            return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+        }
+
+        public async Task<VendorPaymentControlDto?> GetControlAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+        {
+            var payment = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (payment == null)
+                return null;
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Read,
+                cancellationToken);
+
+            var control = DeserializePaymentControlSnapshot(payment.ApprovalControlSnapshotJson);
+            WorkflowApprovalPolicyResolution? previewResolution = null;
+            if (control == null && payment.Status == VendorPaymentStatus.Draft && _approvalPolicyResolver != null)
+            {
+                var baseCurrency = (await _tenantSettingsService.GetBaseCurrencyAsync()).Trim().ToUpperInvariant();
+                var functionalAmount = decimal.Round(
+                    payment.TotalAmount * (payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate),
+                    2,
+                    MidpointRounding.AwayFromZero);
+                previewResolution = await _approvalPolicyResolver.ResolveAsync(
+                    new WorkflowApprovalPolicyContext(
+                        TenantId,
+                        "Vendor Payment",
+                        DateTime.UtcNow,
+                        Module: "Finance",
+                        Category: payment.PaymentMethod.ToString(),
+                        Amount: functionalAmount,
+                        CurrencyCode: baseCurrency),
+                    cancellationToken);
+                control = previewResolution?.ApprovalConfig;
+            }
+
+            control ??= new ErpSystem.Core.DTOs.Workflow.WorkflowApprovalConfigDto();
+            var instance = payment.WorkflowInstanceId.HasValue
+                ? await _unitOfWork.Repository<WorkflowInstance>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == payment.WorkflowInstanceId.Value && !item.IsDeleted)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+            var stepInstances = instance == null
+                ? new List<WorkflowStepInstance>()
+                : await _unitOfWork.Repository<WorkflowStepInstance>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.WorkflowInstanceId == instance.Id && !item.IsDeleted)
+                    .Include(item => item.WorkflowStep)
+                    .OrderBy(item => item.WorkflowStep.Order)
+                    .ThenBy(item => item.CreatedDate)
+                    .ToListAsync(cancellationToken);
+            var stepIds = stepInstances.Select(item => item.Id).ToList();
+            var evidence = stepIds.Count == 0
+                ? new List<WorkflowEvidenceDocument>()
+                : await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        stepIds.Contains(item.StepInstanceId) &&
+                        item.IsCurrent &&
+                        !item.IsDeleted)
+                    .OrderBy(item => item.DocumentName)
+                    .ThenByDescending(item => item.Version)
+                    .ToListAsync(cancellationToken);
+
+            var currentStep = stepInstances
+                .Where(item => item.Status is WorkflowStepInstanceStatus.Pending or WorkflowStepInstanceStatus.InProgress)
+                .OrderByDescending(item => item.StartedDate ?? item.CreatedDate)
+                .FirstOrDefault();
+            var requirementStatuses = control.EvidenceRequirements
+                .Where(item => !string.IsNullOrWhiteSpace(item.RequirementKey))
+                .Select(requirement =>
+                {
+                    var matching = evidence.Where(item =>
+                        string.Equals(item.RequirementKey, requirement.RequirementKey, StringComparison.OrdinalIgnoreCase) &&
+                        item.MalwareScanStatus == WorkflowMalwareScanStatus.Clean &&
+                        (!item.ExpiryDate.HasValue || item.ExpiryDate.Value >= DateTime.UtcNow)).ToList();
+                    // Match the approval gate: an uploader cannot independently verify their own
+                    // supporting evidence for maker-checker purposes.
+                    var verified = matching.Count(item =>
+                        item.VerificationStatus == WorkflowEvidenceVerificationStatus.Verified &&
+                        item.VerifiedById.HasValue &&
+                        item.VerifiedById.Value != item.UploadedById);
+                    var minimum = Math.Max(requirement.MinimumDocuments, 1);
+                    return new VendorPaymentEvidenceRequirementStatusDto
+                    {
+                        RequirementKey = requirement.RequirementKey,
+                        DocumentName = string.IsNullOrWhiteSpace(requirement.DocumentName)
+                            ? requirement.RequirementKey
+                            : requirement.DocumentName,
+                        DocumentType = requirement.DocumentType,
+                        MinimumDocuments = minimum,
+                        RequireVerification = requirement.RequireVerification,
+                        CurrentDocumentCount = matching.Count,
+                        VerifiedDocumentCount = verified,
+                        IsSatisfied = requirement.RequireVerification
+                            ? verified >= minimum
+                            : matching.Count >= minimum
+                    };
+                })
+                .ToList();
+            var evidenceSatisfied = requirementStatuses.All(item => item.IsSatisfied);
+            var blockingReasons = requirementStatuses
+                .Where(item => !item.IsSatisfied)
+                .Select(item => item.RequireVerification
+                    ? $"{item.DocumentName}: {item.VerifiedDocumentCount} of {item.MinimumDocuments} verified document(s)."
+                    : $"{item.DocumentName}: {item.CurrentDocumentCount} of {item.MinimumDocuments} valid document(s).")
+                .ToList();
+            if (payment.EvidenceExceptionRequested && !payment.EvidenceExceptionApprovedById.HasValue)
+                blockingReasons.Add("The evidence exception is pending Managing Director approval.");
+            if (payment.RequiresManagingDirectorApproval && !payment.ManagingDirectorApprovedById.HasValue)
+                blockingReasons.Add("Managing Director approval is still required.");
+            if (!string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotJson) &&
+                !string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotHash))
+            {
+                var currentHash = Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(payment.ApprovalControlSnapshotJson)));
+                if (!string.Equals(currentHash, payment.ApprovalControlSnapshotHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    blockingReasons.Add("The approval policy snapshot integrity check failed; authorization is disabled pending administrator review.");
+                }
+            }
+
+            return new VendorPaymentControlDto
+            {
+                PaymentId = payment.Id,
+                PolicyCode = payment.AppliedApprovalPolicyCode ?? previewResolution?.PolicyCode,
+                PolicySetId = payment.AppliedApprovalPolicySetId ?? previewResolution?.PolicySetId,
+                PolicySnapshotHash = payment.ApprovalControlSnapshotHash,
+                WorkflowInstanceId = payment.WorkflowInstanceId,
+                WorkflowStatus = instance?.Status.ToString(),
+                CurrentStepInstanceId = currentStep?.Id,
+                CurrentStepName = currentStep?.WorkflowStep?.Name,
+                IsExceptionalPayment = payment.IsExceptionalPayment,
+                RequiresManagingDirectorApproval = payment.RequiresManagingDirectorApproval || control.RequiresManagingDirectorApproval,
+                ManagingDirectorApprovalCompleted = payment.ManagingDirectorApprovedById.HasValue,
+                EvidenceExceptionRequested = payment.EvidenceExceptionRequested,
+                EvidenceExceptionApproved = payment.EvidenceExceptionApprovedById.HasValue,
+                EvidenceRequirementsSatisfied = evidenceSatisfied,
+                CanSubmit = payment.Status == VendorPaymentStatus.Draft && previewResolution != null,
+                MinimumExceptionReasonLength = Math.Max(control.MinimumExceptionReasonLength, 1),
+                EvidenceRequirements = requirementStatuses,
+                EvidenceDocuments = evidence.Select(item => new VendorPaymentEvidenceDocumentDto
+                {
+                    Id = item.Id,
+                    AttachmentId = item.AttachmentId,
+                    RequirementKey = item.RequirementKey,
+                    DocumentName = item.DocumentName,
+                    DocumentType = item.DocumentType,
+                    FileName = item.FileName,
+                    VerificationStatus = item.VerificationStatus.ToString(),
+                    MalwareScanStatus = item.MalwareScanStatus.ToString(),
+                    UploadedAt = item.UploadedAt,
+                    UploadedById = item.UploadedById,
+                    VerifiedById = item.VerifiedById,
+                    VerifiedAt = item.VerifiedAt,
+                    VerificationNotes = item.VerificationNotes,
+                    Sha256 = item.Sha256
+                }).ToList(),
+                BlockingReasons = blockingReasons
+            };
+        }
+
+        private static ErpSystem.Core.DTOs.Workflow.WorkflowApprovalConfigDto? DeserializePaymentControlSnapshot(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return null;
+
+            try
+            {
+                return JsonSerializer.Deserialize<ErpSystem.Core.DTOs.Workflow.WorkflowApprovalConfigDto>(
+                    json,
+                    PaymentControlJsonOptions);
+            }
+            catch (JsonException)
+            {
+                throw new InvalidOperationException("The AP payment control snapshot is invalid and requires administrator review.");
+            }
+        }
+
+        // The incoming Procurement/Finance SoD slice exposes a compatibility submission method
+        // used by its controller/service tests. Retain it beside the richer evidence-aware command
+        // during this merge; both paths start the same canonical VendorPayment workflow and the
+        // post/approval gates below revalidate the authoritative SoD evidence.
         public Task<VendorPaymentDto> SubmitForAuthorizationAsync(
             Guid id,
             CancellationToken cancellationToken = default) =>
@@ -418,6 +944,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             await _invoicePaymentSod.RevalidatePaymentAuthorizationAsync(id, cancellationToken);
 
             var payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Operate,
+                cancellationToken);
             var wasAlreadyLinked = payment.JournalEntryId.HasValue;
 
             try
@@ -526,6 +1056,288 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
+        public async Task<VendorPaymentDto> ReversePaymentAsync(
+            Guid id,
+            ReverseVendorPaymentDto dto,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(dto);
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AP payment reversal.");
+
+            var initialPayment = await LoadPaymentForPostingAsync(id, cancellationToken);
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(initialPayment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Approve,
+                cancellationToken);
+
+            // AP and AR deliberately share this evaluator so policy changes cannot produce
+            // different reversal dates or narrative thresholds across the subledgers.
+            var policyDecision = await _financeReversalPolicyService.ResolveAsync(
+                initialPayment.PaymentDate,
+                dto.Reason,
+                dto.ReversalDate,
+                cancellationToken);
+            var reason = policyDecision.Reason;
+            var reversalDate = policyDecision.ReversalDate;
+
+            var transactionStarted = false;
+            try
+            {
+                // Serializable isolation protects the source payment and invoice settlement totals
+                // from a competing clear, allocation, or reversal operation while the compensating
+                // journals and subledger records are created as one business transaction.
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                transactionStarted = true;
+
+                var payment = await _unitOfWork.Repository<VendorPayment>()
+                    .GetQueryable(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted)
+                    .Include(item => item.Supplier)
+                    .Include(item => item.BankAccount)
+                    .Include(item => item.ConfiguredPaymentMethod)
+                    .Include(item => item.Allocations)
+                        .ThenInclude(item => item.VendorInvoice)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
+
+                // A successful retry returns the existing result. The Finance posting engine also
+                // uses deterministic idempotency keys, providing protection at both source and GL
+                // layers if two requests reach the service together.
+                if (payment.Status == VendorPaymentStatus.Reversed &&
+                    payment.ReversalJournalEntryId.HasValue &&
+                    payment.ReversalPostingEventId.HasValue)
+                {
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    transactionStarted = false;
+                    return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+                }
+
+                if (!payment.JournalEntryId.HasValue)
+                    throw new InvalidOperationException("Only a posted AP payment can be reversed.");
+                if (payment.Status == VendorPaymentStatus.Reconciled)
+                {
+                    throw new InvalidOperationException(
+                        "A reconciled AP payment must first be removed from its bank reconciliation before reversal.");
+                }
+                if (payment.Status is not (VendorPaymentStatus.Processed or VendorPaymentStatus.Cleared))
+                    throw new InvalidOperationException("Only a processed or cleared AP payment can be reversed.");
+
+                var activeAllocations = payment.Allocations
+                    .Where(item => !item.IsReversal && !item.IsDeleted)
+                    .OrderBy(item => item.AllocationDate)
+                    .ThenBy(item => item.Id)
+                    .ToList();
+
+                // Ordinary invoice-settlement allocations are linked to the payment's own posting
+                // event for traceability. Only a posted supplier advance creates a later, separate
+                // application journal that must be unwound before the original cash payment.
+                if (payment.IsSupplierAdvance &&
+                    activeAllocations.Any(item => item.ApplicationPostingEventId.HasValue))
+                {
+                    // A supplier advance application has its own reclassification journal. Reversing
+                    // the original cash payment without first unwinding that application would leave
+                    // AP control and the supplier-advance account inconsistent.
+                    throw new InvalidOperationException(
+                        "This supplier advance has posted applications. Reverse those applications before reversing the original payment.");
+                }
+
+                var originalPosting = await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.SourceDocumentType == "VendorPayment" &&
+                        item.SourceDocumentId == payment.Id &&
+                        item.PostingAction == "Post" &&
+                        item.PostingStatus == "Posted" &&
+                        !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException("The original AP payment posting event was not found.");
+
+                var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
+                    originalPosting.Id,
+                    reason,
+                    reversalDate,
+                    cancellationToken);
+                var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                {
+                    SourceModule = "AP",
+                    SourceDocumentType = "VendorPayment",
+                    SourceDocumentId = payment.Id,
+                    SourceDocumentTenantId = payment.TenantId,
+                    PostingAction = "Reverse",
+                    SourceDocumentReference = payment.PaymentNumber,
+                    Description = $"Reverse vendor payment {payment.PaymentNumber} - {payment.Supplier.Name}",
+                    PostingDate = reversalDate,
+                    JournalType = "AP Payment Reversal",
+                    BookClassification = "IFRS",
+                    FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
+                    ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
+                    ReversalReason = reason,
+                    ReversalType = "SourceDocument",
+                    IdempotencyKey = $"AP:VendorPayment:{payment.TenantId:N}:{payment.Id:N}:Reverse",
+                    ReturnExistingOnDuplicate = true,
+                    Lines = reversalPlan.ReversalLines.ToList()
+                }, cancellationToken);
+
+                // Realized FX postings are separate source events. Reverse each one inside the same
+                // transaction so the payment cannot be reversed while its exchange gain/loss remains
+                // in the ledger.
+                var realizedSettlements = await _unitOfWork.Repository<FxRealizedSettlement>()
+                    .GetQueryable(item =>
+                        item.TenantId == TenantId &&
+                        item.SettlementDocumentType == "VendorPayment" &&
+                        item.SettlementDocumentId == payment.Id &&
+                        item.Status == "Posted" &&
+                        !item.IsDeleted)
+                    .OrderBy(item => item.SettlementAllocationId)
+                    .ToListAsync(cancellationToken);
+                foreach (var settlement in realizedSettlements)
+                {
+                    if (!settlement.PostingEventId.HasValue || !settlement.JournalEntryId.HasValue)
+                        throw new InvalidOperationException("A realized FX settlement is missing its original posting links.");
+
+                    var fxPlan = await _financePostingEngine.GetReversalPlanAsync(
+                        settlement.PostingEventId.Value,
+                        reason,
+                        reversalDate,
+                        cancellationToken);
+                    var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    {
+                        SourceModule = "FX",
+                        SourceDocumentType = "VendorPaymentAllocation",
+                        SourceDocumentId = settlement.SettlementAllocationId,
+                        SourceDocumentTenantId = payment.TenantId,
+                        PostingAction = "ReverseRealizedFx",
+                        SourceDocumentReference = payment.PaymentNumber,
+                        Description = $"Reverse AP realized FX for {payment.PaymentNumber}",
+                        PostingDate = reversalDate,
+                        JournalType = "Realized FX Reversal",
+                        BookClassification = "IFRS",
+                        FunctionalCurrencyCode = settlement.FunctionalCurrencyCode,
+                        ReversalOfJournalEntryId = fxPlan.OriginalJournalEntryId,
+                        ReversalReason = reason,
+                        ReversalType = "SourceDocument",
+                        IdempotencyKey = $"FX:Realized:AP:{payment.TenantId:N}:{settlement.SettlementAllocationId:N}:Reverse",
+                        ReturnExistingOnDuplicate = true,
+                        Lines = fxPlan.ReversalLines.ToList()
+                    }, cancellationToken);
+
+                    settlement.ReversalJournalEntryId = fxResult.JournalEntryId;
+                    settlement.ReversalPostingEventId = fxResult.PostingEventId;
+                    settlement.ReversedAt = DateTime.UtcNow;
+                    settlement.ReversalReason = reason;
+                    settlement.Status = "Reversed";
+                    settlement.UpdatedAt = DateTime.UtcNow;
+                    settlement.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<FxRealizedSettlement>().UpdateAsync(settlement);
+                }
+
+                var now = DateTime.UtcNow;
+                foreach (var allocation in activeAllocations)
+                {
+                    var settledAmount = allocation.AllocatedAmount +
+                                        allocation.DiscountAmount +
+                                        allocation.WithholdingTaxAmount;
+                    allocation.VendorInvoice.PaidAmount = Math.Max(
+                        0m,
+                        RoundMoney(allocation.VendorInvoice.PaidAmount - settledAmount));
+                    allocation.VendorInvoice.Status = allocation.VendorInvoice.PaidAmount == 0m
+                        ? VendorInvoiceStatus.Approved
+                        : VendorInvoiceStatus.PartiallyPaid;
+                    allocation.VendorInvoice.UpdatedAt = now;
+                    allocation.VendorInvoice.UpdatedBy = UserName;
+                    await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(allocation.VendorInvoice);
+
+                    // Preserve the original settlement row and record a compensating allocation.
+                    // Reports can therefore reconstruct both the original action and correction.
+                    await _unitOfWork.Repository<VendorPaymentAllocation>().AddAsync(new VendorPaymentAllocation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = payment.TenantId,
+                        VendorPaymentId = payment.Id,
+                        VendorInvoiceId = allocation.VendorInvoiceId,
+                        AllocatedAmount = -allocation.AllocatedAmount,
+                        DiscountAmount = -allocation.DiscountAmount,
+                        WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
+                        AllocationDate = reversalDate,
+                        Notes = $"Payment reversal of allocation {allocation.Id}: {reason}",
+                        IsReversal = true,
+                        OriginalAllocationId = allocation.Id,
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
+                    });
+                }
+
+                payment.Status = VendorPaymentStatus.Reversed;
+                payment.AllocatedAmount = 0m;
+                payment.ReversalJournalEntryId = reversalResult.JournalEntryId;
+                payment.ReversalPostingEventId = reversalResult.PostingEventId;
+                payment.ReversalDate = reversalDate;
+                payment.ReversedAt = now;
+                payment.ReversedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                payment.ReversalReason = reason;
+                payment.UpdatedAt = now;
+                payment.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await RecordApPaymentAuditAsync(
+                    FinanceAuditEvents.ApPaymentReversed,
+                    payment,
+                    postingEventId: reversalResult.PostingEventId,
+                    journalEntryId: reversalResult.JournalEntryId,
+                    beforeValues: new
+                    {
+                        Status = initialPayment.Status,
+                        initialPayment.JournalEntryId,
+                        initialPayment.AllocatedAmount
+                    },
+                    afterValues: new
+                    {
+                        payment.Status,
+                        payment.ReversalJournalEntryId,
+                        payment.ReversalPostingEventId,
+                        payment.ReversalDate,
+                        ReversedAllocationCount = activeAllocations.Count,
+                        ReversedRealizedFxCount = realizedSettlements.Count
+                    },
+                    reason: reason,
+                    comment: "Posted AP payment reversed through linked compensating Finance postings.",
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+
+                _logger.LogWarning(
+                    "Reversed AP payment {PaymentNumber} with journal {ReversalJournalEntryId}. Reason: {Reason}",
+                    payment.PaymentNumber,
+                    payment.ReversalJournalEntryId,
+                    reason);
+                return await GetByIdAsync(payment.Id, cancellationToken) ?? MapToDto(payment);
+            }
+            catch (Exception ex)
+            {
+                if (transactionStarted)
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    // A rollback reverts the database, not EF's in-memory entity states. Clear the
+                    // failed graph before recording the audit event so its SaveChanges cannot
+                    // accidentally persist part of the rejected AP correction.
+                    _unitOfWork.ClearTrackedChanges();
+                }
+
+                await RecordApPaymentAuditAsync(
+                    FinanceAuditEvents.ApPaymentReversalFailed,
+                    initialPayment,
+                    afterValues: new { PaymentId = id, ReversalDate = reversalDate, error = ex.Message },
+                    reason: reason,
+                    comment: "AP payment reversal failed before the correction could be committed.",
+                    cancellationToken: cancellationToken);
+                _logger.LogError(ex, "Failed to reverse AP payment {PaymentNumber}", initialPayment.PaymentNumber);
+                throw;
+            }
+        }
+
         public Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync(
             Guid paymentId,
             List<VendorPaymentAllocationCreateDto> allocations,
@@ -574,6 +1386,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (payment == null)
                 throw new KeyNotFoundException($"Vendor payment with Id '{paymentId}' not found.");
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Operate,
+                cancellationToken);
 
             if (payment.JournalEntryId.HasValue)
             {
@@ -1237,6 +2054,15 @@ namespace ErpSystem.Api.Services.Finance.AP
 
         public async Task<List<VendorPaymentAllocationDto>> GetPaymentAllocationsAsync(Guid paymentId, CancellationToken cancellationToken = default)
         {
+            var paymentBankAccountId = await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == paymentId && !item.IsDeleted)
+                .Select(item => item.BankAccountId)
+                .SingleOrDefaultAsync(cancellationToken);
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(paymentBankAccountId, cancellationToken),
+                FinanceAccessLevel.Read,
+                cancellationToken);
+
             var allocations = await _unitOfWork.Repository<VendorPaymentAllocation>()
                 .GetQueryable(a => a.TenantId == TenantId && a.VendorPaymentId == paymentId)
                 .Include(a => a.VendorInvoice)
@@ -1399,6 +2225,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (payment == null)
                 throw new KeyNotFoundException($"Vendor payment with Id '{id}' not found.");
+
+            await _financeAccessScopeService.EnsureBankAccountAccessAsync(
+                await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken),
+                FinanceAccessLevel.Operate,
+                cancellationToken);
 
             payment.Status = VendorPaymentStatus.Cleared;
             payment.ClearedDate = clearedDate;
@@ -3246,6 +4077,23 @@ namespace ErpSystem.Api.Services.Finance.AP
             return settings ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
         }
 
+        private async Task<Guid?> ResolveBankAccountIdForScopeAsync(
+            Guid? paymentBankAccountId,
+            CancellationToken cancellationToken)
+        {
+            if (paymentBankAccountId.HasValue)
+                return paymentBankAccountId;
+
+            // AP payments may omit a bank account at draft time and rely on the tenant default
+            // during posting. Scope enforcement must resolve that same effective account; checking
+            // only the nullable source field would otherwise let a restricted user bypass scope by
+            // leaving the draft value blank.
+            return await _unitOfWork.Repository<FinanceSettings>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted)
+                .Select(item => item.DefaultBankAccountId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
         private async Task<Account> ResolvePaymentPostingAccountAsync(
             Guid accountId,
             string role,
@@ -3754,18 +4602,46 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TransactionReference = payment.TransactionReference,
                 WithholdingTaxRate = payment.WithholdingTaxRate,
                 WithholdingTaxAmount = payment.WithholdingTaxAmount,
+                WithholdingTaxBaseAmount = payment.WithholdingTaxBaseAmount,
+                WithholdingTaxCumulativeBefore = payment.WithholdingTaxCumulativeBefore,
+                WithholdingTaxThresholdAmount = payment.WithholdingTaxThresholdAmount,
+                WithholdingTaxThresholdApplied = payment.WithholdingTaxThresholdApplied,
+                WithholdingTaxCalculationNote = payment.WithholdingTaxCalculationNote,
                 WithholdingTaxId = payment.WithholdingTaxId,
                 WithholdingTaxAccountId = payment.WithholdingTaxAccountId,
                 WithholdingCertificateNumber = payment.WithholdingCertificateNumber,
                 WithholdingCertificateDate = payment.WithholdingCertificateDate,
                 DiscountTaken = payment.DiscountTaken,
                 Status = payment.Status,
+                SubmittedById = payment.SubmittedById,
+                SubmittedAt = payment.SubmittedAt,
+                WorkflowInstanceId = payment.WorkflowInstanceId,
+                AppliedApprovalPolicySetId = payment.AppliedApprovalPolicySetId,
+                AppliedApprovalPolicyCode = payment.AppliedApprovalPolicyCode,
+                ApprovalControlSnapshotHash = payment.ApprovalControlSnapshotHash,
+                IsExceptionalPayment = payment.IsExceptionalPayment,
+                ExceptionalPaymentReason = payment.ExceptionalPaymentReason,
+                RequiresManagingDirectorApproval = payment.RequiresManagingDirectorApproval,
+                ManagingDirectorApprovedById = payment.ManagingDirectorApprovedById,
+                ManagingDirectorApprovedAt = payment.ManagingDirectorApprovedAt,
+                EvidenceExceptionRequested = payment.EvidenceExceptionRequested,
+                EvidenceExceptionReason = payment.EvidenceExceptionReason,
+                EvidenceExceptionRequestedById = payment.EvidenceExceptionRequestedById,
+                EvidenceExceptionRequestedAt = payment.EvidenceExceptionRequestedAt,
+                EvidenceExceptionApprovedById = payment.EvidenceExceptionApprovedById,
+                EvidenceExceptionApprovedAt = payment.EvidenceExceptionApprovedAt,
                 AuthorizedById = payment.AuthorizedById,
                 AuthorizedDate = payment.AuthorizedDate,
                 InvoicePaymentSodControlEventId = payment.InvoicePaymentSodControlEventId,
                 PaymentBatchId = payment.PaymentBatchId,
                 PaymentBatchNumber = payment.PaymentBatch?.BatchNumber,
                 JournalEntryId = payment.JournalEntryId,
+                ReversalJournalEntryId = payment.ReversalJournalEntryId,
+                ReversalPostingEventId = payment.ReversalPostingEventId,
+                ReversalDate = payment.ReversalDate,
+                ReversedAt = payment.ReversedAt,
+                ReversedById = payment.ReversedById,
+                ReversalReason = payment.ReversalReason,
                 Notes = payment.Notes,
                 CreatedAt = payment.CreatedAt,
                 Allocations = payment.Allocations?.Select(a => new VendorPaymentAllocationDto
@@ -3784,6 +4660,47 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PaymentReadinessSnapshotHash = a.PaymentReadinessSnapshotHash,
                     PaymentReadinessEvaluatedAtUtc = a.PaymentReadinessEvaluatedAtUtc
                 }).ToList() ?? new List<VendorPaymentAllocationDto>()
+            };
+        }
+
+        private static FinancePostingTraceDto MapPostingTrace(FinancePostingEvent postingEvent)
+        {
+            var journal = postingEvent.JournalEntry;
+            return new FinancePostingTraceDto
+            {
+                PostingEventId = postingEvent.Id,
+                PostingAction = postingEvent.PostingAction,
+                PostingStatus = postingEvent.PostingStatus,
+                PostingDate = postingEvent.PostingDate,
+                PostedAt = postingEvent.PostedAt,
+                JournalEntryId = postingEvent.JournalEntryId,
+                JournalEntryNumber = journal?.JournalEntryNumber,
+                OriginalJournalEntryId = journal?.OriginalJournalEntryId,
+                ReversalJournalEntryId = journal?.ReversalJournalEntryId,
+                TotalDebitAmount = postingEvent.TotalDebitAmount,
+                TotalCreditAmount = postingEvent.TotalCreditAmount,
+                FunctionalCurrencyCode = postingEvent.FunctionalCurrencyCode,
+                Lines = journal?.Transactions
+                    .OrderBy(item => item.LineNumber)
+                    .Select(item => new FinanceJournalLineTraceDto
+                    {
+                        TransactionId = item.Id,
+                        LineNumber = item.LineNumber,
+                        AccountId = item.AccountId,
+                        AccountNumber = item.Account?.AccountNumber ?? string.Empty,
+                        AccountName = item.Account?.AccountName ?? string.Empty,
+                        Description = item.Description ?? string.Empty,
+                        DebitAmount = item.DebitAmount,
+                        CreditAmount = item.CreditAmount,
+                        // Older journal-line producers may omit the line currency. The posting event
+                        // is the authoritative functional-currency context for the trace fallback.
+                        TransactionCurrency = item.TransactionCurrency ?? postingEvent.FunctionalCurrencyCode,
+                        ForeignCurrencyAmount = item.ForeignCurrencyAmount,
+                        ExchangeRate = item.ExchangeRate,
+                        OriginalTransactionId = item.OriginalTransactionId,
+                        ReversalTransactionId = item.ReversalTransactionId
+                    })
+                    .ToList() ?? new List<FinanceJournalLineTraceDto>()
             };
         }
 

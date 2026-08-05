@@ -353,6 +353,69 @@ public sealed class GhanaStatutoryTaxEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-GhanaTax")]
     [Trait("Category", "Tax")]
+    public async Task InactiveModifiedTax_ShouldRemainVisibleLockedAndExposeCompleteConfigurationHistory()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var payableAccount = SeedAccount(db, tenantId, "2210", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var receivableAccount = SeedAccount(db, tenantId, "1410", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        await db.SaveChangesAsync();
+
+        var currentUser = CreateCurrentUser(tenantId);
+        var service = new TaxConfigurationService(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<TaxConfigurationService>>(),
+            CreateAuditService(db, currentUser));
+        var created = await service.CreateTaxAsync(new CreateTaxDto
+        {
+            Code = "LOCKED",
+            Name = "Locked Historical Tax",
+            Description = "Original configuration",
+            Rate = 10m,
+            EffectiveFrom = new DateTime(2026, 1, 1),
+            TaxPayableAccountId = payableAccount.Id,
+            TaxReceivableAccountId = receivableAccount.Id
+        });
+
+        await service.UpdateTaxAsync(created.Id, new UpdateTaxDto
+        {
+            Rate = 12.5m,
+            EffectiveFrom = new DateTime(2026, 8, 1),
+            ChangeReason = "Approved statutory rate change"
+        });
+        await service.UpdateTaxAsync(created.Id, new UpdateTaxDto
+        {
+            IsActive = false,
+            ChangeReason = "Tax retired by statutory authority"
+        });
+
+        var inactive = await service.GetTaxByIdAsync(created.Id);
+        inactive.Should().NotBeNull();
+        inactive!.IsActive.Should().BeFalse();
+        inactive.IsLocked.Should().BeTrue();
+
+        var versions = await service.GetTaxConfigurationVersionsAsync(created.Id);
+        versions.Should().HaveCount(3);
+        versions.Single(v => v.VersionNumber == 1).Should().Match<TaxConfigurationVersionDto>(v =>
+            v.Rate == 10m
+            && v.Description == "Original configuration"
+            && v.TaxPayableAccountId == payableAccount.Id
+            && v.TaxReceivableAccountId == receivableAccount.Id
+            && v.ChangeReason == "Approved statutory rate change"
+            && !v.IsCurrent);
+        versions.Single(v => v.IsCurrent).IsActive.Should().BeFalse();
+
+        await service.Invoking(s => s.UpdateTaxAsync(created.Id, new UpdateTaxDto { Name = "Forbidden edit" }))
+            .Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*locked*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-GhanaTax")]
+    [Trait("Category", "Tax")]
     public async Task TaxCalculation_ShouldRejectCrossTenantManualTaxSelection()
     {
         var tenantId = Guid.NewGuid();
@@ -570,7 +633,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             currentUser.Object,
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            CreateDocumentNumberingService(),
             Mock.Of<IWorkflowService>(),
             postingEngine,
             auditService,
@@ -590,7 +653,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             taxEngine,
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<InvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            CreateDocumentNumberingService(),
             postingEngine,
             auditService);
     }
@@ -608,8 +671,12 @@ public sealed class GhanaStatutoryTaxEngineTests
             currentUser.Object,
             tenantSettings.Object,
             Mock.Of<ILogger<VendorPaymentService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            CreateDocumentNumberingService(),
             Mock.Of<IWorkflowService>(),
+            // Tax tests are concerned with statutory calculation and posting, not data-scope
+            // enforcement. Dedicated Finance access-scope tests cover that control boundary.
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
     }
@@ -627,9 +694,27 @@ public sealed class GhanaStatutoryTaxEngineTests
             currentUser.Object,
             tenantSettings.Object,
             Mock.Of<ILogger<PaymentService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            CreateDocumentNumberingService(),
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
+    }
+
+    private static IDocumentNumberingService CreateDocumentNumberingService()
+    {
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering
+            .Setup(service => service.GenerateAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"TEST-{Guid.NewGuid():N}");
+        return numbering.Object;
     }
 
     private static FinanceAuditService CreateAuditService(ApplicationDbContext db, Mock<ICurrentUserService> currentUser)

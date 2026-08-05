@@ -54,6 +54,15 @@ export const moduleReportLandings = {
           { title: 'Accounts receivable reports', href: '/finance/ar/reports', icon: CreditCard },
         ],
       },
+      {
+        title: 'Tax and compliance',
+        items: [
+          { title: 'WHT certificates', href: '/finance/tax/reports/wht-certificates', icon: FileText },
+          // Remittance evidence is a Finance-owned statutory register, so expose it through the
+          // shared Reports landing while retaining its existing canonical workspace route.
+          { title: 'WHT remittances', href: '/finance/tax/reports/wht-remittances', icon: FileText },
+        ],
+      },
     ],
   },
   sales: {

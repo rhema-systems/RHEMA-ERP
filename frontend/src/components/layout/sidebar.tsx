@@ -73,6 +73,7 @@ import {
   PackageCheck,
   ScanLine,
   BellRing,
+  WalletCards,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -252,6 +253,9 @@ export const navigationItems: NavItem[] = [
         icon: CreditCard,
         children: [
           { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building, navigationSurface: 'settings' },
+          // Till sessions are a live custody workspace, not a report. Keep the operational link
+          // in Finance while all analytical/report entry points remain under the shared Reports menu.
+          { title: 'Cashier Till Sessions', href: '/finance/cash/till-sessions', icon: WalletCards },
           { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
           { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
           {
@@ -1057,10 +1061,12 @@ export const navigationItems: NavItem[] = [
             icon: Settings,
             children: [
               { title: 'Finance Settings', href: '/administration/finance/settings', icon: Settings },
+              { title: 'Finance Access Scopes', href: '/administration/finance/access-scopes', icon: ShieldCheck, permissions: ['Finance.AccessScopes.Manage'] },
               { title: 'Chart of Accounts Setup', href: '/administration/finance/accounts', icon: CreditCard },
               { title: 'Account Segments', href: '/administration/finance/account-segments', icon: FolderTree },
               { title: 'Account Generator', href: '/administration/finance/account-generator', icon: FileText },
               { title: 'Fiscal Calendar Setup', href: '/administration/finance/fiscal-calendar', icon: Calendar },
+              { title: 'Close Templates', href: '/administration/finance/close-templates', icon: ClipboardList },
             ],
           },
           {

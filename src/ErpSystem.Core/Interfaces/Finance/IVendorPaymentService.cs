@@ -21,6 +21,12 @@ public interface IVendorPaymentService
     Task<VendorPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retrieves the complete AP-payment source, allocation, posting, journal, reversal, and audit
+    /// chain used by Finance operations and assurance reviews.
+    /// </summary>
+    Task<VendorPaymentTraceDto?> GetTraceAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves vendor payments with filtering, sorting, and pagination.
     /// </summary>
     Task<PagedResult<VendorPaymentDto>> GetAllAsync(VendorPaymentQueryDto query, CancellationToken cancellationToken = default);
@@ -34,8 +40,27 @@ public interface IVendorPaymentService
     Task<VendorPaymentDto> CreateAsync(VendorPaymentCreateDto dto, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Submits a direct payment into its effective-dated approval/evidence route. Payment batches
+    /// retain their existing batch-level submission path and must not call this method.
+    /// </summary>
+    Task<VendorPaymentDto> SubmitAsync(
+        Guid id,
+        SubmitVendorPaymentDto dto,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the applied (or draft-preview) evidence and authority requirements together with
+    /// current workflow evidence so the payment page can explain every remaining control blocker.
+    /// </summary>
+    Task<VendorPaymentControlDto?> GetControlAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Freezes a manually prepared payment's invoice set and starts the shared
-    /// VendorPayment authorization workflow.
+    /// VendorPayment authorization workflow used by the Procurement/Finance SoD control.
+    /// This compatibility entry point is retained because the incoming AP controller and
+    /// integration tests consume it independently of the richer evidence-aware submission API.
     /// </summary>
     Task<VendorPaymentDto> SubmitForAuthorizationAsync(Guid id, CancellationToken cancellationToken = default);
 
@@ -43,6 +68,15 @@ public interface IVendorPaymentService
     /// Posts an approved or processed vendor payment to the General Ledger through the central finance posting engine.
     /// </summary>
     Task<VendorPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reverses a posted payment with a compensating journal and allocation records. The original
+    /// source document and posting remain immutable and linked to the correction.
+    /// </summary>
+    Task<VendorPaymentDto> ReversePaymentAsync(
+        Guid id,
+        ReverseVendorPaymentDto dto,
+        CancellationToken cancellationToken = default);
 
     // ── Allocations ─────────────────────────────────────────────────────
 

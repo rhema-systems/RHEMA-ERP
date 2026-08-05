@@ -19,7 +19,122 @@ public enum CashTransactionType
 {
     Receipt = 1,      // Money coming in
     Payment = 2,      // Money going out
-    Transfer = 3      // Movement between accounts
+    Transfer = 3,     // Movement between accounts
+    Deposit = 4,      // Posted liquidity settlement into a bank account
+    ReturnedCheque = 5 // Bank debit raised when a deposited cheque is returned
+}
+
+/// <summary>
+/// Identifies which bank-account side of one transfer a <see cref="CashTransaction"/> row
+/// represents. Transfer legs used to be inferred only from an OUT/IN document-number suffix;
+/// retaining an explicit value makes cross-currency amounts and reconciliation lineage safe to
+/// query even when a document-number format is changed later.
+/// </summary>
+public enum BankTransferLeg
+{
+    Outgoing = 1,
+    Incoming = 2
+}
+
+/// <summary>
+/// Operational stores and settlement channels that hold monetary value before it reaches
+/// (or after it leaves) a physical bank account.
+/// </summary>
+public enum LiquidityAccountType
+{
+    Bank = 1,
+    UndepositedCash = 2,
+    ChequesAwaitingDeposit = 3,
+    MobileMoneyClearing = 4,
+    CardSettlementClearing = 5,
+    CashTill = 6,
+    OtherSettlementClearing = 7
+}
+
+public enum LiquidityEntryDirection
+{
+    Increase = 1,
+    Decrease = 2
+}
+
+public enum LiquidityEntryType
+{
+    CustomerReceipt = 1,
+    DirectReceipt = 2,
+    CashExpense = 3,
+    PettyCashReplenishment = 4,
+    CustomerRefund = 5,
+    OtherPayment = 6,
+    DepositTransfer = 7,
+    Settlement = 8,
+    ReturnedCheque = 9,
+    Reversal = 10,
+    Adjustment = 11
+}
+
+/// <summary>
+/// Operational lifecycle for a physical cashier till. A submitted session is frozen for
+/// independent review; returning it re-opens the same session for a corrected denomination count.
+/// </summary>
+public enum CashierTillSessionStatus
+{
+    Open = 1,
+    PendingReview = 2,
+    Closed = 3
+}
+
+public enum BankDepositStatus
+{
+    Draft = 1,
+    Submitted = 2,
+    Approved = 3,
+    Posted = 4,
+    Returned = 5,
+    Rejected = 6,
+    Cancelled = 7,
+    Reversed = 8
+}
+
+/// <summary>
+/// Operational acknowledgement that the destination bank accepted a posted deposit. This is
+/// deliberately separate from GL posting and bank-statement reconciliation: each answers a
+/// different control question and therefore retains its own timestamp and actor.
+/// </summary>
+public enum BankDepositConfirmationStatus
+{
+    Pending = 1,
+    Confirmed = 2
+}
+
+public enum BankDepositAllocationType
+{
+    Receipt = 1,
+    Deduction = 2
+}
+
+public enum DepositPolicy
+{
+    DepositIntact = 1,
+    ControlledNetBanking = 2
+}
+
+public enum ReturnedChequeCaseStatus
+{
+    Draft = 1,
+    Submitted = 2,
+    Approved = 3,
+    Posted = 4,
+    Returned = 5,
+    Rejected = 6,
+    Cancelled = 7,
+    Reversed = 8
+}
+
+public enum ReturnedChequeChargeTreatment
+{
+    CustomerRecoverable = 1,
+    BankChargeExpense = 2,
+    Split = 3
 }
 
 /// <summary>

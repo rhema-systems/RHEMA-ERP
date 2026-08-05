@@ -393,6 +393,10 @@ public class DocumentNumberingService : IDocumentNumberingService
                 .Where(e => e.TenantId == tenantId)
                 .Select(e => e.JournalEntryNumber)
                 .ToListAsync(cancellationToken),
+            (DocumentNumberingModules.Finance, FinanceDocumentTypes.JournalBatch) => _context.Set<JournalBatch>()
+                .Where(e => e.TenantId == tenantId)
+                .Select(e => e.BatchNumber)
+                .ToListAsync(cancellationToken),
             (DocumentNumberingModules.Finance, FinanceDocumentTypes.UnitJournalEntry) => _context.Set<UnitJournalEntry>()
                 .Where(e => e.TenantId == tenantId)
                 .Select(e => e.EntryNumber)

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 
-export default function SupportTicketDetailPage({ params }: { params: { id: string } }) {
+export default async function SupportTicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   // Support portal is now part of the External Portal UI.
-  redirect(`/external-portal/support/tickets/${params.id}`);
+  redirect(`/external-portal/support/tickets/${id}`);
 }

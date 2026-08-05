@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="EPPlus" Version="7.0.5" />
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="iText7" Version="8.0.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
@@ -40,6 +40,24 @@
     <!-- Exclude duplicate migration artifacts (same class name) -->
     <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.cs" />
     <Compile Remove="Migrations\20260207050009_AddSystemExceptionLogs.Designer.cs" />
+    <!--
+      These recent Finance migrations intentionally keep discovery attributes on their executable
+      classes so fast Debug builds can apply them without generated designers. Excluding the same
+      designers in full builds prevents duplicate DbContext/Migration attributes while preserving
+      the authoritative current model in ApplicationDbContextModelSnapshot.
+    -->
+    <Compile Remove="Migrations\20260802142906_AddCashBankTransactionReversals.Designer.cs" />
+    <Compile Remove="Migrations\20260802153959_AddFinancePeriodCloseWorkspace.Designer.cs" />
+    <Compile Remove="Migrations\20260802172927_AddFinanceCloseTemplatesAndManualTasks.Designer.cs" />
+    <Compile Remove="Migrations\20260803075605_AddFinanceCloseEvidenceAndWaivers.Designer.cs" />
+    <Compile Remove="Migrations\20260803084838_AddFinanceCloseAgingEscalations.Designer.cs" />
+    <Compile Remove="Migrations\20260803110029_AddFinancePeriodReopenApprovals.Designer.cs" />
+    <Compile Remove="Migrations\20260803132236_AddApPaymentEvidenceAndAuthorityControls.Designer.cs" />
+    <Compile Remove="Migrations\20260803144941_AddWhtComplianceLifecycle.Designer.cs" />
+    <Compile Remove="Migrations\20260803163336_AddCashierTillControlWorkspace.Designer.cs" />
+    <Compile Remove="Migrations\20260803182450_AddBankDepositConfirmationControls.Designer.cs" />
+    <Compile Remove="Migrations\20260803193523_AddControlledCashBankDocumentIssuance.Designer.cs" />
+    <Compile Remove="Migrations\20260803213749_AddCrossCurrencyBankTransfers.Designer.cs" />
     <!-- This metadata is compiled only when historical designers are omitted. -->
     <Compile Remove="Migrations\FastBuildMigrationMetadata.cs" />
   </ItemGroup>

@@ -464,6 +464,24 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Retrieves the source-to-ledger evidence for a customer receipt, including operational
+        /// bank/liquidity entries, allocation postings, reversals, and Finance audit history.
+        /// </summary>
+        [HttpGet("{id}/trace")]
+        public async Task<ActionResult<CustomerPaymentTraceDto>> GetTrace(Guid id)
+        {
+            try
+            {
+                var trace = await _paymentService.GetTraceAsync(id);
+                return trace == null ? NotFound() : Ok(trace);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+        }
+
+        /// <summary>
         /// Records a new customer payment received via any supported payment method.
         /// </summary>
         /// <remarks>
@@ -500,6 +518,9 @@ namespace ErpSystem.Api.Controllers.Finance
                 var payment = await _paymentService.CreateAsync(dto);
                 return CreatedAtAction(nameof(GetById), new { id = payment.Id }, payment);
             }
+            // Scope enforcement belongs in the service so non-HTTP callers cannot bypass it.
+            // The controller only translates the deliberate denial into the correct HTTP status.
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -537,6 +558,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (id != dto.Id) return BadRequest("ID mismatch");
             try { return Ok(await _paymentService.UpdateAsync(dto)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -576,6 +598,7 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             if (id != dto.CustomerPaymentId) return BadRequest("ID mismatch");
             try { return Ok(await _paymentService.AllocatePaymentAsync(dto)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -586,7 +609,37 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<CustomerPaymentDto>> Post(Guid id)
         {
             try { return Ok(await _paymentService.PostAsync(id)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
+        }
+
+        /// <summary>
+        /// Reverses a posted customer receipt through linked compensating GL, allocation, FX, and
+        /// bank/liquidity records. The dedicated permission and Approve-level data scope are both
+        /// required because ordinary receipt processing authority is insufficient for correction.
+        /// </summary>
+        [HttpPost("{id}/reverse")]
+        [Authorize(Policy = FinancePermissions.ReverseArPayments)]
+        public async Task<ActionResult<CustomerPaymentDto>> ReversePayment(
+            Guid id,
+            [FromBody] ReverseCustomerPaymentDto dto)
+        {
+            try
+            {
+                return Ok(await _paymentService.ReversePaymentAsync(id, dto));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         /// <summary>
@@ -623,6 +676,7 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<CustomerPaymentDto>> ClearPayment(Guid id, [FromBody] DateTime clearedDate)
         {
             try { return Ok(await _paymentService.ClearPaymentAsync(id, clearedDate)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 
@@ -662,6 +716,7 @@ namespace ErpSystem.Api.Controllers.Finance
         public async Task<ActionResult<CustomerPaymentDto>> BouncedPayment(Guid id, [FromBody] string reason)
         {
             try { return Ok(await _paymentService.BouncedPaymentAsync(id, reason)); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

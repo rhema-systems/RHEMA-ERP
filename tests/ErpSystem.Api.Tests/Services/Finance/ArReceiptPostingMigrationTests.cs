@@ -1,7 +1,9 @@
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
+using ErpSystem.Api.Services.Finance.Cash;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -367,7 +369,7 @@ public sealed class ArReceiptPostingMigrationTests
         var act = () => service.PostAsync(fixture.Payment.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("AR receipt posting bank/cash account account '1100' is not active.");
+            .WithMessage("AR receipt posting bank account account '1100' is not active.");
     }
 
     [Fact]
@@ -445,7 +447,279 @@ public sealed class ArReceiptPostingMigrationTests
         await clear.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posted customer payments cannot be cleared by mutation until bank reconciliation integration is migrated to the posting engine.");
         await bounce.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posted customer payments cannot be bounced by mutation until AR receipt reversal posting is implemented.");
+            .WithMessage("Posted receipts cannot be bounced by mutation. Use the posted receipt reversal workflow, or the returned-cheque workflow after deposit.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptReversal")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task PostedArReceipt_ShouldReverseLedgerAllocationAndBankFootprintsWithoutMutation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var posted = await service.PostAsync(fixture.Payment.Id);
+
+        var reversed = await service.ReversePaymentAsync(fixture.Payment.Id, new ReverseCustomerPaymentDto
+        {
+            Reason = "Customer transfer was recorded against the wrong receipt.",
+            ReversalDate = new DateTime(2026, 7, 6)
+        });
+
+        reversed.Status.Should().Be("Reversed");
+        reversed.JournalEntryId.Should().Be(posted.JournalEntryId);
+        reversed.ReversalJournalEntryId.Should().NotBeNull();
+        reversed.ReversalPostingEventId.Should().NotBeNull();
+        reversed.ReversalCashTransactionId.Should().NotBeNull();
+        reversed.ReversalDate.Should().Be(new DateTime(2026, 7, 6));
+
+        // The source payment/allocation stay in place and are offset by explicit linked evidence.
+        var allocations = await db.Set<PaymentAllocation>()
+            .Where(item => item.CustomerPaymentId == fixture.Payment.Id)
+            .OrderBy(item => item.IsReversal)
+            .ToListAsync();
+        allocations.Should().HaveCount(2);
+        allocations.Single(item => !item.IsReversal).AllocatedAmount.Should().Be(100m);
+        var correction = allocations.Single(item => item.IsReversal);
+        correction.OriginalAllocationId.Should().Be(fixture.Allocation.Id);
+        correction.AllocatedAmount.Should().Be(-100m);
+
+        var journal = await db.JournalEntries
+            .Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == reversed.ReversalJournalEntryId);
+        journal.OriginalJournalEntryId.Should().Be(posted.JournalEntryId);
+        journal.Transactions.Single(item => item.AccountId == fixture.BankGlAccount.Id).CreditAmount.Should().Be(100m);
+        journal.Transactions.Single(item => item.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(100m);
+
+        var cashEntries = await db.Set<CashTransaction>()
+            .Where(item => item.ReferenceNumber == fixture.Payment.PaymentNumber ||
+                           item.Id == reversed.ReversalCashTransactionId)
+            .ToListAsync();
+        cashEntries.Should().ContainSingle(item => item.TransactionType == CashTransactionType.Receipt);
+        cashEntries.Should().ContainSingle(item => item.TransactionType == CashTransactionType.Payment);
+        (await db.BankAccounts.SingleAsync(item => item.Id == fixture.BankAccount.Id)).CurrentBalance.Should().Be(0m);
+        (await db.Invoices.SingleAsync(item => item.Id == fixture.Invoice.Id)).PaidAmount.Should().Be(0m);
+        (await db.Set<BusinessPartner>().SingleAsync(item => item.Id == fixture.Customer.Id))
+            .OutstandingBalance.Should().Be(100m);
+        (await db.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ArReceiptReversed))
+            .Should().Be(1);
+
+        var trace = await service.GetTraceAsync(fixture.Payment.Id);
+        trace.Should().NotBeNull();
+        trace!.Postings.Should().Contain(item => item.PostingAction == "Post");
+        trace.Postings.Should().Contain(item => item.PostingAction == "Reverse");
+        trace.OperationalEntries.Should().HaveCount(2);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptReversal")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task RepeatingArReceiptReversal_ShouldReturnExistingCorrection()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        await service.PostAsync(fixture.Payment.Id);
+        var command = new ReverseCustomerPaymentDto
+        {
+            Reason = "Customer transfer was recorded against the wrong receipt.",
+            ReversalDate = new DateTime(2026, 7, 6)
+        };
+
+        var first = await service.ReversePaymentAsync(fixture.Payment.Id, command);
+        var second = await service.ReversePaymentAsync(fixture.Payment.Id, command);
+
+        second.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "CustomerPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id &&
+            item.PostingAction == "Reverse")).Should().Be(1);
+        (await db.Set<PaymentAllocation>().CountAsync(item =>
+            item.CustomerPaymentId == fixture.Payment.Id && item.IsReversal)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptReversal")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ReconciledArReceipt_ShouldRequireReconciliationRemovalBeforeReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        await service.PostAsync(fixture.Payment.Id);
+        var cashReceipt = await db.Set<CashTransaction>().SingleAsync(item =>
+            item.TransactionType == CashTransactionType.Receipt &&
+            item.ReferenceNumber == fixture.Payment.PaymentNumber);
+        cashReceipt.IsReconciled = true;
+        await db.SaveChangesAsync();
+
+        var act = () => service.ReversePaymentAsync(fixture.Payment.Id, new ReverseCustomerPaymentDto
+        {
+            Reason = "Customer transfer was recorded against the wrong receipt.",
+            ReversalDate = new DateTime(2026, 7, 6)
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("This receipt is bank-reconciled. Remove it from the reconciliation before reversal.");
+        (await db.FinancePostingEvents.CountAsync(item => item.PostingAction == "Reverse")).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptReversal")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task LiquidityHeldArReceipt_ShouldCreateLinkedDecreaseEntryOnReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var holdingGl = SeedAccount(db, tenantId, "1110", AccountType.Asset);
+        var holding = SeedLiquidityAccount(db, tenantId, holdingGl.Id);
+        fixture.Payment.PaymentMethod = "Cash";
+        fixture.Payment.BankAccountId = null;
+        fixture.Payment.LiquidityAccountId = holding.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        await service.PostAsync(fixture.Payment.Id);
+
+        var reversed = await service.ReversePaymentAsync(fixture.Payment.Id, new ReverseCustomerPaymentDto
+        {
+            Reason = "Cash receipt was recorded for the incorrect customer account.",
+            ReversalDate = new DateTime(2026, 7, 6)
+        });
+
+        reversed.ReversalLiquidityAccountEntryId.Should().NotBeNull();
+        reversed.ReversalCashTransactionId.Should().BeNull();
+        var entries = await db.LiquidityAccountEntries
+            .Where(item => item.SourceDocumentId == fixture.Payment.Id)
+            .ToListAsync();
+        var original = entries.Single(item => item.EntryType == LiquidityEntryType.CustomerReceipt);
+        var correction = entries.Single(item => item.EntryType == LiquidityEntryType.Reversal);
+        original.IsReversed.Should().BeTrue();
+        correction.Direction.Should().Be(LiquidityEntryDirection.Decrease);
+        correction.ReversalOfEntryId.Should().Be(original.Id);
+        correction.Amount.Should().Be(original.Amount);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptReversal")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task DepositedLiquidityReceipt_ShouldRequireBankingReversalFirst()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var holdingGl = SeedAccount(db, tenantId, "1110", AccountType.Asset);
+        var holding = SeedLiquidityAccount(db, tenantId, holdingGl.Id);
+        fixture.Payment.PaymentMethod = "Cash";
+        fixture.Payment.BankAccountId = null;
+        fixture.Payment.LiquidityAccountId = holding.Id;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        await service.PostAsync(fixture.Payment.Id);
+        var entry = await db.LiquidityAccountEntries.SingleAsync(item =>
+            item.SourceDocumentId == fixture.Payment.Id &&
+            item.EntryType == LiquidityEntryType.CustomerReceipt);
+        // AllocatedAmount is the operational proof that Banking & Settlement has consumed part
+        // of this holding entry. The receipt workflow must not bypass that downstream owner.
+        entry.AllocatedAmount = 25m;
+        await db.SaveChangesAsync();
+
+        var act = () => service.ReversePaymentAsync(fixture.Payment.Id, new ReverseCustomerPaymentDto
+        {
+            Reason = "Cash receipt was recorded for the incorrect customer account.",
+            ReversalDate = new DateTime(2026, 7, 6)
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("This receipt has already been included in a bank deposit or settlement. Reverse that banking transaction first.");
+        (await db.FinancePostingEvents.CountAsync(item => item.PostingAction == "Reverse")).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank")]
+    public async Task PostedCashReceipt_ShouldEnterHoldingAccountAndSupportPartialDeposit()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var holdingGl = SeedAccount(db, tenantId, "1110", AccountType.Asset);
+        var holding = new LiquidityAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "UNDEPOSITED-CASH",
+            Name = "Undeposited Cash",
+            AccountType = LiquidityAccountType.UndepositedCash,
+            Currency = "GHS",
+            GLAccountId = holdingGl.Id,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.LiquidityAccounts.Add(holding);
+        fixture.Payment.PaymentMethod = "Cash";
+        fixture.Payment.BankAccountId = null;
+        fixture.Payment.LiquidityAccountId = holding.Id;
+        await db.SaveChangesAsync();
+        var (receiptService, _) = CreateService(db, tenantId);
+
+        await receiptService.PostAsync(fixture.Payment.Id);
+
+        var holdingEntry = await db.LiquidityAccountEntries.SingleAsync(entry =>
+            entry.TenantId == tenantId &&
+            entry.SourceDocumentType == nameof(CustomerPayment) &&
+            entry.SourceDocumentId == fixture.Payment.Id);
+        holdingEntry.Direction.Should().Be(LiquidityEntryDirection.Increase);
+        holdingEntry.EntryType.Should().Be(LiquidityEntryType.CustomerReceipt);
+        holdingEntry.Amount.Should().Be(100m);
+        var receiptJournal = await db.JournalEntries
+            .Include(entry => entry.Transactions)
+            .SingleAsync(entry => entry.Id == fixture.Payment.JournalEntryId);
+        receiptJournal.Transactions.Single(line => line.AccountId == holdingGl.Id).DebitAmount.Should().Be(100m);
+
+        var currentUser = CreateCurrentUser(tenantId);
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("BD-2026-0001");
+        var bankingService = new BankingSettlementService(
+            db,
+            currentUser.Object,
+            numbering.Object,
+            Mock.Of<IWorkflowIntegrationService>(),
+            Mock.Of<IFinancePostingEngine>());
+
+        var deposit = await bankingService.CreateDepositAsync(new CreateBankDepositDto
+        {
+            BankAccountId = fixture.BankAccount.Id,
+            DepositDate = new DateTime(2026, 7, 6),
+            DepositReference = "SLIP-PARTIAL-001",
+            Allocations =
+            {
+                new BankDepositAllocationRequestDto
+                {
+                    LiquidityAccountEntryId = holdingEntry.Id,
+                    AllocationType = BankDepositAllocationType.Receipt,
+                    Amount = 40m
+                }
+            }
+        });
+
+        deposit.TotalReceipts.Should().Be(40m);
+        deposit.NetAmount.Should().Be(40m);
+        deposit.Allocations.Should().ContainSingle();
+        (await db.LiquidityAccountEntries.SingleAsync(entry => entry.Id == holdingEntry.Id))
+            .AllocatedAmount.Should().Be(40m);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -478,13 +752,28 @@ public sealed class ArReceiptPostingMigrationTests
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        var documentNumbering = new Mock<IDocumentNumberingService>();
+        documentNumbering
+            .Setup(x => x.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"LQE-{Guid.NewGuid():N}"[..24]);
 
         var service = new PaymentService(
             new UnitOfWork(db),
             currentUser.Object,
             tenantSettings.Object,
             Mock.Of<ILogger<PaymentService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            documentNumbering.Object,
+            // Posting fixtures run tenant-wide. Reversal tests use the real shared policy so
+            // date/reason assertions exercise the same control used in production.
+            Mock.Of<IFinanceAccessScopeService>(),
+            new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService);
 
@@ -752,6 +1041,28 @@ public sealed class ArReceiptPostingMigrationTests
 
         db.BankAccounts.Add(bankAccount);
         return bankAccount;
+    }
+
+    private static LiquidityAccount SeedLiquidityAccount(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid glAccountId)
+    {
+        var account = new LiquidityAccount
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = $"UNDEPOSITED-{tenantId.ToString("N")[..6]}",
+            Name = "Undeposited Cash",
+            AccountType = LiquidityAccountType.UndepositedCash,
+            Currency = "GHS",
+            GLAccountId = glAccountId,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.LiquidityAccounts.Add(account);
+        return account;
     }
 
     private static Invoice SeedPostedInvoice(

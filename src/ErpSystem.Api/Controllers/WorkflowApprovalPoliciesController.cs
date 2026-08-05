@@ -123,7 +123,17 @@ public sealed class WorkflowApprovalPoliciesController : ControllerBase
             return Conflict("Only draft policies can be published.");
         }
 
-        _ = DeserializeConfiguration(policy.ApprovalConfiguration);
+        var publishingUserId = CurrentUserId();
+        if (publishingUserId.HasValue &&
+            (policy.CreatedById == publishingUserId || policy.LastModifiedById == publishingUserId))
+        {
+            // Publishing changes the authority route for future financial transactions. Require a
+            // second administrator to review that change instead of letting its maker activate it.
+            return Conflict("Maker-checker control: the user who created or last edited a policy cannot publish it.");
+        }
+
+        var configuration = DeserializeConfiguration(policy.ApprovalConfiguration);
+        ValidateApprovalConfiguration(configuration);
         var overlaps = await _db.WorkflowApprovalPolicySets.AnyAsync(candidate =>
             candidate.Id != policy.Id && candidate.TenantId == policy.TenantId && !candidate.IsDeleted &&
             candidate.IsActive && candidate.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
@@ -185,6 +195,51 @@ public sealed class WorkflowApprovalPoliciesController : ControllerBase
             throw new ArgumentException("Maximum amount cannot be lower than minimum amount.");
         if (request.ApprovalConfig.ApproverRules.Count == 0)
             throw new ArgumentException("At least one approver rule is required.");
+        ValidateApprovalConfiguration(request.ApprovalConfig);
+    }
+
+    private static void ValidateApprovalConfiguration(WorkflowApprovalConfigDto configuration)
+    {
+        var evidenceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var requirement in configuration.EvidenceRequirements)
+        {
+            if (string.IsNullOrWhiteSpace(requirement.RequirementKey) || string.IsNullOrWhiteSpace(requirement.DocumentName))
+                throw new ArgumentException("Every evidence requirement needs a stable key and document name.");
+            if (!evidenceKeys.Add(requirement.RequirementKey.Trim()))
+                throw new ArgumentException($"Evidence requirement key '{requirement.RequirementKey}' is duplicated.");
+            if (requirement.MinimumDocuments < 1)
+                throw new ArgumentException($"Evidence requirement '{requirement.RequirementKey}' must require at least one document.");
+        }
+
+        var executiveRole = configuration.ManagingDirectorApproverRole?.Trim();
+        if ((configuration.RequiresManagingDirectorApproval || configuration.AllowEvidenceException) &&
+            string.IsNullOrWhiteSpace(executiveRole))
+        {
+            throw new ArgumentException("A Managing Director approver role is required for executive or evidence-exception controls.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(executiveRole) &&
+            !configuration.ApproverRules.Any(rule =>
+                string.Equals(rule.Role?.Trim(), executiveRole, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ArgumentException($"The configured executive role '{executiveRole}' must also appear in the approver rules.");
+        }
+
+        if (configuration.AllowEvidenceException)
+        {
+            if (string.IsNullOrWhiteSpace(configuration.EvidenceExceptionApproverRole))
+                throw new ArgumentException("An evidence-exception approver role is required when exceptions are enabled.");
+            if (!configuration.ApproverRules.Any(rule => string.Equals(
+                    rule.Role?.Trim(),
+                    configuration.EvidenceExceptionApproverRole.Trim(),
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException(
+                    $"The evidence-exception role '{configuration.EvidenceExceptionApproverRole}' must also appear in the approver rules.");
+            }
+            if (configuration.MinimumExceptionReasonLength < 20)
+                throw new ArgumentException("Evidence exceptions must require a reason of at least 20 characters.");
+        }
     }
 
     private static void ApplyRequest(WorkflowApprovalPolicySet policy, SaveWorkflowApprovalPolicyRequest request)

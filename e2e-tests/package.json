@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test",
+    "test:journal-batches": "playwright test tests/journal-batches.spec.ts"
   },
   "keywords": [],
   "author": "",
@@ -11,5 +12,8 @@
   "description": "",
   "dependencies": {
     "@playwright/test": "^1.60.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2"
   }
 }

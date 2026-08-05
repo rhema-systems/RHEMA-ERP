@@ -15,17 +15,20 @@ import { Download, Loader2, Printer } from 'lucide-react';
 import { DEFAULT_ACCOUNTING_BOOKS } from '@/lib/finance/accounting-books';
 import { ReportSegmentFilters } from '@/components/finance/reports/ReportSegmentFilters';
 import { AppliedReportSegmentFilters } from '@/components/finance/reports/AppliedReportSegmentFilters';
+import { FinancialStatementLayoutRows } from '@/components/finance/reports/FinancialStatementLayoutRows';
 import {
     buildFinanceSegmentFilters,
     toFinanceSegmentFilterQueryParameters,
     type ReportSegmentSelections,
 } from '@/lib/finance/report-segment-filters';
-import type { FinanceSegmentFilterDto, SegmentStructure } from '@/types/finance';
+import type { FinanceSegmentFilterDto, FinancialStatementLayoutSummaryDto, SegmentStructure } from '@/types/finance';
 
 export default function BalanceSheetPage() {
     const [asAtDate, setAsAtDate] = useState(new Date().toISOString().split('T')[0]);
     const [bookClassification, setBookClassification] = useState('IFRS');
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
+    const [layouts, setLayouts] = useState<FinancialStatementLayoutSummaryDto[]>([]);
+    const [layoutSelection, setLayoutSelection] = useState('default');
     const [loading, setLoading] = useState(true);
     const [running, setRunning] = useState(false);
     const [actionLoading, setActionLoading] = useState<'print' | 'export' | null>(null);
@@ -44,7 +47,7 @@ export default function BalanceSheetPage() {
     const loadInitialReport = async () => {
         try {
             setLoading(true);
-            const [settingsData, books, dimensions] = await Promise.all([
+            const [settingsData, books, dimensions, layoutOptions] = await Promise.all([
                 financeDataService.getFinanceSettings(),
                 financeDataService.getAccountingBooks().catch(() => DEFAULT_ACCOUNTING_BOOKS),
                 financeDataService.getReportingDimensions().catch((err) => {
@@ -52,15 +55,18 @@ export default function BalanceSheetPage() {
                     setSegmentLoadError('GL segment filters could not be loaded.');
                     return [] as SegmentStructure[];
                 }),
+                financeDataService.getFinancialStatementLayouts('BalanceSheet').catch(() => []),
             ]);
             setSettings(settingsData);
             if (books.length > 0) setAccountingBooks(books);
             setReportingDimensions(dimensions);
+            setLayouts(layoutOptions.filter((layout) => layout.isActive && layout.publishedVersionNumber));
             const data = await financeDataService.getBalanceSheet({
                 asAtDate,
                 bookClassification,
                 includeAccountDetails: true,
                 segmentFilters: [],
+                useDefaultLayout: true,
             });
             setReport(data);
         } catch (err) {
@@ -81,6 +87,10 @@ export default function BalanceSheetPage() {
                 bookClassification,
                 includeAccountDetails: true,
                 segmentFilters,
+                layoutId: layoutSelection !== 'default' && layoutSelection !== 'legacy'
+                    ? layoutSelection
+                    : undefined,
+                useDefaultLayout: layoutSelection === 'default',
             });
             setReport(data);
             setAppliedSegmentFilters(segmentFilters);
@@ -103,6 +113,10 @@ export default function BalanceSheetPage() {
             asAtDate,
             bookClassification,
             includeAccountDetails: true,
+            layoutId: layoutSelection !== 'default' && layoutSelection !== 'legacy'
+                ? layoutSelection
+                : undefined,
+            useDefaultLayout: layoutSelection === 'default',
             ...toFinanceSegmentFilterQueryParameters(appliedSegmentFilters),
         };
     };
@@ -185,19 +199,42 @@ export default function BalanceSheetPage() {
 
             <Card>
                 <CardContent className="p-6">
-                    <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-4">
+                    <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-5">
                         <div className="space-y-2">
                             <Label>As At Date</Label>
                             <Input type="date" value={asAtDate} onChange={(event) => setAsAtDate(event.target.value)} />
                         </div>
                         <div className="space-y-2">
                             <Label>Book</Label>
-                            <Select value={bookClassification} onValueChange={setBookClassification}>
+                            <Select
+                                value={bookClassification}
+                                onValueChange={(value) => {
+                                    setBookClassification(value);
+                                    setLayoutSelection('default');
+                                }}
+                            >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     {accountingBooks.map((book) => (
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Statement Layout</Label>
+                            <Select value={layoutSelection} onValueChange={setLayoutSelection}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="default">Default layout</SelectItem>
+                                    {layouts
+                                        .filter((layout) => layout.accountingBookCode === bookClassification)
+                                        .map((layout) => (
+                                            <SelectItem key={layout.id} value={layout.id}>
+                                                {layout.name} ({layout.code}){layout.isDefault ? ' — default' : ''}
+                                            </SelectItem>
+                                        ))}
+                                    <SelectItem value="legacy">Legacy classification</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -231,28 +268,47 @@ export default function BalanceSheetPage() {
                     <p className="mt-1 font-mono text-xs text-muted-foreground">
                         Currency: {report?.currencyCode || settings?.baseCurrency || 'GHS'}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        {report?.layoutExecution
+                            ? `Layout: ${report.layoutExecution.layoutName} (${report.layoutExecution.layoutCode}) v${report.layoutExecution.versionNumber}`
+                            : 'Legacy account-classification presentation'}
+                    </p>
                 </CardHeader>
                 <CardContent className="pt-6">
                     <div className="mx-auto max-w-4xl rounded-md border bg-white p-6 shadow-sm">
                         <Table>
                             <TableBody>
-                                {(report?.sections ?? []).map(section => (
-                                    <BalanceSheetSection key={section.sectionName} section={section} formatMoney={formatMoney} />
-                                ))}
-                                <TableRow className="border-t-4 bg-blue-50/50 text-lg font-bold">
-                                    <TableCell colSpan={2} className="py-4 text-right">Total Assets</TableCell>
-                                    <TableCell className="w-[160px] py-4 text-right">{formatMoney(report?.totalAssets ?? 0)}</TableCell>
-                                </TableRow>
-                                <TableRow className="bg-blue-50/50 text-lg font-bold">
-                                    <TableCell colSpan={2} className="py-4 text-right">Total Liabilities and Equity</TableCell>
-                                    <TableCell className="w-[160px] py-4 text-right">{formatMoney((report?.totalLiabilities ?? 0) + (report?.totalEquity ?? 0))}</TableCell>
-                                </TableRow>
+                                {report?.layoutExecution ? (
+                                    <FinancialStatementLayoutRows
+                                        rows={report.layoutExecution.rows}
+                                        formatMoney={formatMoney}
+                                    />
+                                ) : (
+                                    <>
+                                        {(report?.sections ?? []).map(section => (
+                                            <BalanceSheetSection key={section.sectionName} section={section} formatMoney={formatMoney} />
+                                        ))}
+                                        <TableRow className="border-t-4 bg-blue-50/50 text-lg font-bold">
+                                            <TableCell colSpan={2} className="py-4 text-right">Total Assets</TableCell>
+                                            <TableCell className="w-[160px] py-4 text-right">{formatMoney(report?.totalAssets ?? 0)}</TableCell>
+                                        </TableRow>
+                                        <TableRow className="bg-blue-50/50 text-lg font-bold">
+                                            <TableCell colSpan={2} className="py-4 text-right">Total Liabilities and Equity</TableCell>
+                                            <TableCell className="w-[160px] py-4 text-right">{formatMoney((report?.totalLiabilities ?? 0) + (report?.totalEquity ?? 0))}</TableCell>
+                                        </TableRow>
+                                    </>
+                                )}
                             </TableBody>
                         </Table>
                     </div>
                     {report && !report.isBalanced && (
                         <div className="mt-3 text-sm text-red-600">
                             Balance sheet is out of balance.
+                        </div>
+                    )}
+                    {report?.layoutExecution && report.layoutExecution.reconciliation.unmappedNonZeroAccountCount > 0 && (
+                        <div className="mt-3 text-sm text-amber-700">
+                            {report.layoutExecution.reconciliation.unmappedNonZeroAccountCount} non-zero eligible GL account(s) are not mapped to this layout.
                         </div>
                     )}
                 </CardContent>
