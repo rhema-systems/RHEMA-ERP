@@ -393,6 +393,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     code = "SUPPLIER_APPLICANT_PAYMENT_REQUIRED",
                     message = "Payment or an approved exemption is required before uploading documents."
                 });
+            var registration = await _registrations.GetByIdAsync(session.RegistrationId);
+            if (registration is null)
+                return NotFound(new { code = "SUPPLIER_APPLICANT_REGISTRATION_NOT_FOUND" });
+            var normalizedDocumentType = documentType?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedDocumentType) || normalizedDocumentType.Length > 100)
+                return BadRequest(new { code = "SUPPLIER_APPLICANT_DOCUMENT_TYPE_INVALID" });
             var safeName = Path.GetFileName(file.FileName);
             var upload = await _controlledFiles.UploadAsync(
                 new ControlledFileUploadRequest
@@ -421,12 +427,23 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         SourceLabel = "Supplier registration evidence",
                         SourceEntityType = "BusinessPartnerRegistration",
                         SourceRecordId = session.RegistrationId,
-                        SourceRecordReference = session.RegistrationId.ToString(),
+                        SourceRecordReference = registration.ApplicationNumber,
                         Title = safeName,
-                        DocumentType = documentType.Trim(),
+                        DocumentType = "SupplierEvidence",
                         MetadataTemplateCode = "PROC-SUP-EVD",
-                        AccessProfile = "Procurement restricted",
-                        ChangeSummary = "Supplier registration evidence uploaded through applicant access."
+                        AccessProfile = "Procurement supplier restricted",
+                        ChangeSummary = "Supplier registration evidence uploaded through applicant access.",
+                        RequirePublishedGovernance = true,
+                        MetadataValues =
+                        [
+                            new("sourceReference", "Source reference", registration.ApplicationNumber),
+                            new("documentFamily", "Document family", "Supplier"),
+                            new("classification", "Classification", classificationCode ?? normalizedDocumentType),
+                            new("sourceStatus", "Source status", registration.Status),
+                            new("uploadedBy", "Uploaded by", "Supplier Applicant"),
+                            new("checksumSha256", "Checksum SHA-256", upload.ChecksumSha256),
+                            new("evidenceRequirement", "Evidence requirement", evidenceRequirementCode)
+                        ]
                     },
                     cancellationToken);
             }
@@ -450,7 +467,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         FileUploadRecordId = upload.Record.Id,
                         CentralDocumentRecordId = centralDocument.DocumentRecordId,
                         CentralDocumentVersionId = centralDocument.DocumentVersionId,
-                        DocumentType = documentType.Trim(),
+                        DocumentType = normalizedDocumentType,
                         DocumentName = safeName,
                         DocumentPath = null,
                         FilePath = string.Empty,

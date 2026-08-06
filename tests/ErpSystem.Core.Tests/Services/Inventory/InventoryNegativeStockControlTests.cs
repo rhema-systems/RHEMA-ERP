@@ -90,13 +90,14 @@ public sealed class InventoryNegativeStockControlTests : IDisposable
     [Fact]
     public void Current_relational_model_matches_the_compiled_migration_snapshot()
     {
-        using var sqlServerContext = new ApplicationDbContext(
-            new DbContextOptionsBuilder<ApplicationDbContext>()
-                .UseSqlServer("Server=(local);Database=Tdc0610ModelOnly;Trusted_Connection=True;TrustServerCertificate=True")
-                .Options);
+        using var sqlServerContext = new DesignTimeDbContextFactory().CreateDbContext([]);
         var snapshot = sqlServerContext.GetService<IMigrationsAssembly>().ModelSnapshot;
         if (snapshot is null)
-            return; // Normal fast Debug builds intentionally omit the snapshot; focused tooling and Release compile it.
+        {
+            Environment.GetEnvironmentVariable("TdcFocusedEfToolingBuild")
+                .Should().NotBe("true", "focused EF tooling builds must compile the migration snapshot");
+            return; // Normal fast Debug builds intentionally omit the snapshot.
+        }
 
         var differ = sqlServerContext.GetService<IMigrationsModelDiffer>();
         var runtimeInitializer = sqlServerContext.GetService<IModelRuntimeInitializer>();

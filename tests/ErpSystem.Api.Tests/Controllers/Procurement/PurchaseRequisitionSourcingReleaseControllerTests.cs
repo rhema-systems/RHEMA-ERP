@@ -4,6 +4,7 @@ using System.Reflection;
 using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
@@ -139,6 +140,8 @@ public sealed class PurchaseRequisitionSourcingReleaseControllerTests
             tenderService.Object,
             Mock.Of<IWorkflowService>(),
             Mock.Of<ICurrentUserProvider>(),
+            Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
             NullLogger<TendersController>.Instance);
         var tenderResult = (ObjectResult)(await tenderController.CreateTender(new CreateTenderDto
         {

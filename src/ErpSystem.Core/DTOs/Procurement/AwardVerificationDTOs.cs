@@ -164,6 +164,9 @@ public class TenderAwardVerificationItemDocumentDto
     public Guid UploadedById { get; set; }
     public string? UploadedByName { get; set; }
     public DateTime UploadedDate { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
 }
 
 public class UploadVerificationItemDocumentDto
@@ -181,20 +184,8 @@ public class UploadVerificationItemDocumentDto
 public class UploadVerificationDocumentDto
 {
     [Required]
-    [MaxLength(255)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    public long FileSize { get; set; }
-
-    [MaxLength(100)]
-    public string? ContentType { get; set; }
-
     [MaxLength(50)]
-    public string? DocumentType { get; set; }
+    public string DocumentType { get; set; } = "Other";
 
     [MaxLength(500)]
     public string? Description { get; set; }
@@ -243,4 +234,3 @@ public class CompleteVerificationDto
 }
 
 #endregion
-

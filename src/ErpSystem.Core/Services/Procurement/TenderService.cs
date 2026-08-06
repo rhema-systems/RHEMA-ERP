@@ -791,7 +791,9 @@ public class TenderService : ITenderService
     }
 
     // Tender Documents
-    public async Task<TenderDocumentDto> UploadTenderDocumentAsync(Guid tenderId, UploadTenderDocumentDto dto, string filePath, string? fileType, long? fileSize)
+    public async Task<TenderDocumentDto> UploadTenderDocumentAsync(Guid tenderId, UploadTenderDocumentDto dto,
+        string logicalFileReference, string? fileType, long? fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId)
     {
         try
         {
@@ -806,12 +808,15 @@ public class TenderService : ITenderService
                 TenderId = tenderId,
                 DocumentName = dto.DocumentName,
                 DocumentType = dto.DocumentType,
-                FilePath = filePath,
+                FilePath = logicalFileReference,
                 FileType = fileType,
                 FileSize = fileSize,
                 IsPublic = dto.IsPublic,
                 UploadedDate = DateTime.UtcNow,
                 UploadedById = _currentUserProvider.UserId,
+                FileUploadRecordId = fileUploadRecordId,
+                CentralDocumentRecordId = centralDocumentRecordId,
+                CentralDocumentVersionId = centralDocumentVersionId,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -820,7 +825,7 @@ public class TenderService : ITenderService
             // If this is an acceptance declaration, update the tender entity
             if (dto.DocumentType == "AcceptanceDeclaration")
             {
-                tender.AcceptanceDeclarationDocumentPath = filePath;
+                tender.AcceptanceDeclarationDocumentPath = logicalFileReference;
                 tender.AcceptanceDeclarationDocumentName = dto.DocumentName;
                 tender.UpdatedAt = DateTime.UtcNow;
                 await _tenderRepository.UpdateAsync(tender);
@@ -1548,7 +1553,10 @@ public class TenderService : ITenderService
             FileSize = document.FileSize,
             IsPublic = document.IsPublic,
             UploadedDate = document.UploadedDate,
-            UploadedByName = string.Empty // Would need to fetch from User entity
+            UploadedByName = string.Empty, // Would need to fetch from User entity
+            FileUploadRecordId = document.FileUploadRecordId,
+            CentralDocumentRecordId = document.CentralDocumentRecordId,
+            CentralDocumentVersionId = document.CentralDocumentVersionId
         };
     }
 
