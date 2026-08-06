@@ -215,6 +215,10 @@ public class TenderAwardVerificationItemDocument : TenantEntity
     public Guid UploadedById { get; set; }
     public DateTime UploadedDate { get; set; } = DateTime.UtcNow;
 
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
+
     // Navigation Properties
     [ForeignKey(nameof(ItemResultId))]
     public virtual TenderAwardVerificationItemResult ItemResult { get; set; } = null!;
@@ -222,4 +226,3 @@ public class TenderAwardVerificationItemDocument : TenantEntity
     [ForeignKey(nameof(UploadedById))]
     public virtual ApplicationUser UploadedBy { get; set; } = null!;
 }
-

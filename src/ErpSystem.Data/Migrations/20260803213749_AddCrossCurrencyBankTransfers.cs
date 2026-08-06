@@ -28,80 +28,74 @@ namespace ErpSystem.Data.Migrations
                 oldType: "decimal(18,4)",
                 oldNullable: true);
 
-            migrationBuilder.AddColumn<DateTime>(
-                name: "ExchangeRateDate",
-                table: "CashTransaction",
-                type: "datetime2",
-                nullable: true);
+            // Earlier Finance snapshot reconciliation builds may already contain
+            // part of this column set without the migration-history row. Add only
+            // the missing members so the migration is safe on both clean and
+            // partially reconciled databases.
+            migrationBuilder.Sql(
+                """
+                IF COL_LENGTH(N'dbo.CashTransaction', N'ExchangeRateDate') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [ExchangeRateDate] datetime2 NULL;
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "ExchangeRateId",
-                table: "CashTransaction",
-                type: "uniqueidentifier",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'ExchangeRateId') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [ExchangeRateId] uniqueidentifier NULL;
 
-            migrationBuilder.AddColumn<int>(
-                name: "ExchangeRateQuoteSide",
-                table: "CashTransaction",
-                type: "int",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'ExchangeRateQuoteSide') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [ExchangeRateQuoteSide] int NULL;
 
-            migrationBuilder.AddColumn<string>(
-                name: "ExchangeRateSource",
-                table: "CashTransaction",
-                type: "nvarchar(100)",
-                maxLength: 100,
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'ExchangeRateSource') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [ExchangeRateSource] nvarchar(100) NULL;
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "TransferCrossRate",
-                table: "CashTransaction",
-                type: "decimal(18,8)",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'TransferCrossRate') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [TransferCrossRate] decimal(18,8) NULL;
 
-            migrationBuilder.AddColumn<decimal>(
-                name: "TransferFxGainLossBaseAmount",
-                table: "CashTransaction",
-                type: "decimal(18,2)",
-                nullable: false,
-                defaultValue: 0m);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'TransferFxGainLossBaseAmount') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [TransferFxGainLossBaseAmount] decimal(18,2) NOT NULL
+                        CONSTRAINT [DF_CashTransaction_TransferFxGainLossBaseAmount] DEFAULT (0);
 
-            migrationBuilder.AddColumn<int>(
-                name: "TransferLeg",
-                table: "CashTransaction",
-                type: "int",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'TransferLeg') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [TransferLeg] int NULL;
 
-            migrationBuilder.AddColumn<Guid>(
-                name: "TransferPairId",
-                table: "CashTransaction",
-                type: "uniqueidentifier",
-                nullable: true);
+                IF COL_LENGTH(N'dbo.CashTransaction', N'TransferPairId') IS NULL
+                    ALTER TABLE [dbo].[CashTransaction] ADD [TransferPairId] uniqueidentifier NULL;
+                """);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_CashTransaction_ExchangeRateId",
-                table: "CashTransaction",
-                column: "ExchangeRateId");
+            migrationBuilder.Sql(
+                """
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE [object_id] = OBJECT_ID(N'dbo.CashTransaction')
+                      AND [name] = N'IX_CashTransaction_ExchangeRateId')
+                    CREATE INDEX [IX_CashTransaction_ExchangeRateId]
+                        ON [dbo].[CashTransaction] ([ExchangeRateId]);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_CashTransaction_TenantId_ExchangeRateId",
-                table: "CashTransaction",
-                columns: new[] { "TenantId", "ExchangeRateId" });
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE [object_id] = OBJECT_ID(N'dbo.CashTransaction')
+                      AND [name] = N'IX_CashTransaction_TenantId_ExchangeRateId')
+                    CREATE INDEX [IX_CashTransaction_TenantId_ExchangeRateId]
+                        ON [dbo].[CashTransaction] ([TenantId], [ExchangeRateId]);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_CashTransaction_TenantId_TransferPairId_TransferLeg",
-                table: "CashTransaction",
-                columns: new[] { "TenantId", "TransferPairId", "TransferLeg" },
-                unique: true,
-                filter: "[TransferPairId] IS NOT NULL AND [TransferLeg] IS NOT NULL");
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE [object_id] = OBJECT_ID(N'dbo.CashTransaction')
+                      AND [name] = N'IX_CashTransaction_TenantId_TransferPairId_TransferLeg')
+                    CREATE UNIQUE INDEX [IX_CashTransaction_TenantId_TransferPairId_TransferLeg]
+                        ON [dbo].[CashTransaction] ([TenantId], [TransferPairId], [TransferLeg])
+                        WHERE [TransferPairId] IS NOT NULL AND [TransferLeg] IS NOT NULL;
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_CashTransaction_ExchangeRates_ExchangeRateId",
-                table: "CashTransaction",
-                column: "ExchangeRateId",
-                principalTable: "ExchangeRates",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.foreign_keys
+                    WHERE [parent_object_id] = OBJECT_ID(N'dbo.CashTransaction')
+                      AND [name] = N'FK_CashTransaction_ExchangeRates_ExchangeRateId')
+                BEGIN
+                    ALTER TABLE [dbo].[CashTransaction] WITH CHECK
+                        ADD CONSTRAINT [FK_CashTransaction_ExchangeRates_ExchangeRateId]
+                        FOREIGN KEY ([ExchangeRateId]) REFERENCES [dbo].[ExchangeRates] ([Id]);
+                    ALTER TABLE [dbo].[CashTransaction]
+                        CHECK CONSTRAINT [FK_CashTransaction_ExchangeRates_ExchangeRateId];
+                END;
+                """);
         }
 
         /// <inheritdoc />
