@@ -164,6 +164,7 @@
     <Compile Include="Services\Finance\LegacyPostingPathLockdownTests.cs" />
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
+    <Compile Include="Services\Finance\CrossCurrencyBankTransferMigrationTests.cs" />
     <Compile Include="Services\Finance\FiscalYearCloseTests.cs" />
     <Compile Include="Services\Finance\FiscalYearDeletionGuardTests.cs" />
     <Compile Include="Services\Finance\FiscalPeriodModuleLockTests.cs" />
@@ -182,6 +183,8 @@
     <Compile Include="Services\FileStorageDeploymentConfigurationTests.cs" />
     <Compile Include="Services\Workflow\WorkflowLegacyDocumentRequirementTests.cs" />
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
+    <Compile Include="Services\Identity\HrIdentityReconciliationServiceTests.cs" />
+    <Compile Include="Services\Procurement\ProcurementCentralDmsAdoptionTests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">

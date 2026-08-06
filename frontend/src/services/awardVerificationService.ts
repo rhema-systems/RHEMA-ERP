@@ -84,6 +84,9 @@ export interface TenderAwardVerificationItemDocument {
   description?: string;
   uploadedDate: string;
   uploadedByName?: string;
+  fileUploadRecordId?: string;
+  centralDocumentRecordId?: string;
+  centralDocumentVersionId?: string;
 }
 
 export interface TenderAwardVerificationItemResult {
@@ -154,25 +157,24 @@ export interface CompleteVerificationDto {
 }
 
 export interface UploadVerificationDocumentDto {
-  fileName: string;
-  filePath: string;
-  fileSize?: number;
-  contentType?: string;
-  documentType?: string;
+  documentType: string;
   description?: string;
 }
 
 const getAuthHeaders = () => {
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  const token =
+    localStorage.getItem('token') || localStorage.getItem('authToken');
   return {
     'Content-Type': 'application/json',
-    ...(token && { 'Authorization': `Bearer ${token}` })
+    ...(token && { Authorization: `Bearer ${token}` }),
   };
 };
 
 export const awardVerificationService = {
   // Checklist Template Methods
-  async getTemplates(includeInactive = false): Promise<AwardVerificationChecklistTemplate[]> {
+  async getTemplates(
+    includeInactive = false
+  ): Promise<AwardVerificationChecklistTemplate[]> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/templates?includeInactive=${includeInactive}`,
       { headers: getAuthHeaders() }
@@ -181,7 +183,9 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async getTemplateById(id: string): Promise<AwardVerificationChecklistTemplate> {
+  async getTemplateById(
+    id: string
+  ): Promise<AwardVerificationChecklistTemplate> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/templates/${id}`,
       { headers: getAuthHeaders() }
@@ -200,7 +204,9 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async createTemplate(data: CreateChecklistTemplateDto): Promise<AwardVerificationChecklistTemplate> {
+  async createTemplate(
+    data: CreateChecklistTemplateDto
+  ): Promise<AwardVerificationChecklistTemplate> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/templates`,
       { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data) }
@@ -212,7 +218,10 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async updateTemplate(id: string, data: UpdateChecklistTemplateDto): Promise<AwardVerificationChecklistTemplate> {
+  async updateTemplate(
+    id: string,
+    data: UpdateChecklistTemplateDto
+  ): Promise<AwardVerificationChecklistTemplate> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/templates/${id}`,
       { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(data) }
@@ -236,7 +245,9 @@ export const awardVerificationService = {
   },
 
   // Verification Methods
-  async getVerificationByTender(tenderId: string): Promise<TenderAwardVerification | null> {
+  async getVerificationByTender(
+    tenderId: string
+  ): Promise<TenderAwardVerification | null> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/by-tender/${tenderId}`,
       { headers: getAuthHeaders() }
@@ -246,7 +257,9 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async startVerification(data: StartVerificationDto): Promise<TenderAwardVerification> {
+  async startVerification(
+    data: StartVerificationDto
+  ): Promise<TenderAwardVerification> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications`,
       { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data) }
@@ -258,7 +271,9 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async verifyChecklistItem(data: VerifyChecklistItemDto): Promise<TenderAwardVerificationItemResult> {
+  async verifyChecklistItem(
+    data: VerifyChecklistItemDto
+  ): Promise<TenderAwardVerificationItemResult> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/verify-item`,
       { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data) }
@@ -270,7 +285,9 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async completeBidderVerification(data: CompleteBidderVerificationDto): Promise<TenderAwardVerificationBidder> {
+  async completeBidderVerification(
+    data: CompleteBidderVerificationDto
+  ): Promise<TenderAwardVerificationBidder> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/complete-bidder`,
       { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data) }
@@ -286,7 +303,10 @@ export const awardVerificationService = {
    * Verify all items for a bidder and complete the bidder verification
    * This is a convenience method that verifies all items and then completes the bidder
    */
-  async verifyBidder(verificationId: string, data: VerifyBidderDto): Promise<TenderAwardVerificationBidder> {
+  async verifyBidder(
+    verificationId: string,
+    data: VerifyBidderDto
+  ): Promise<TenderAwardVerificationBidder> {
     // First, verify each item
     for (const item of data.itemResults) {
       await this.verifyChecklistItem({
@@ -304,10 +324,17 @@ export const awardVerificationService = {
     });
   },
 
-  async completeVerification(verificationId: string, notes?: string): Promise<TenderAwardVerification> {
+  async completeVerification(
+    verificationId: string,
+    notes?: string
+  ): Promise<TenderAwardVerification> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/${verificationId}/complete`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ notes }) }
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ notes }),
+      }
     );
     if (!response.ok) {
       const error = await response.text();
@@ -317,10 +344,25 @@ export const awardVerificationService = {
   },
 
   // Document Methods
-  async uploadDocument(itemResultId: string, data: UploadVerificationDocumentDto): Promise<TenderAwardVerificationItemDocument> {
+  async uploadDocument(
+    itemResultId: string,
+    file: File,
+    data: UploadVerificationDocumentDto
+  ): Promise<TenderAwardVerificationItemDocument> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('documentType', data.documentType);
+    if (data.description?.trim())
+      form.append('description', data.description.trim());
+    const token =
+      localStorage.getItem('token') || localStorage.getItem('authToken');
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/item-results/${itemResultId}/documents`,
-      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data) }
+      {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      }
     );
     if (!response.ok) {
       const error = await response.text();
@@ -329,7 +371,9 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async getDocumentsByItemResult(itemResultId: string): Promise<TenderAwardVerificationItemDocument[]> {
+  async getDocumentsByItemResult(
+    itemResultId: string
+  ): Promise<TenderAwardVerificationItemDocument[]> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/item-results/${itemResultId}/documents`,
       { headers: getAuthHeaders() }
@@ -338,13 +382,27 @@ export const awardVerificationService = {
     return response.json();
   },
 
-  async getDocumentById(documentId: string): Promise<TenderAwardVerificationItemDocument> {
+  async getDocumentById(
+    documentId: string
+  ): Promise<TenderAwardVerificationItemDocument> {
     const response = await fetch(
       `${API_BASE_URL}/procurement/AwardVerifications/documents/${documentId}`,
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error('Failed to fetch document');
     return response.json();
+  },
+
+  async downloadDocument(documentId: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/AwardVerifications/documents/${documentId}/download`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to download document');
+    }
+    return response.blob();
   },
 
   async deleteDocument(documentId: string): Promise<void> {

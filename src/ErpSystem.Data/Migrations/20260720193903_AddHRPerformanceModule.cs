@@ -2941,6 +2941,7 @@ IF OBJECT_ID(N'AppraisalAttachments', N'U') IS NOT NULL AND EXISTS (SELECT 1 FRO
             migrationBuilder.InsertData(
                 table: "GoalRiskSetting",
                 columns: new[] { "Id", "CreatedAt", "CreatedBy", "CreatedById", "DaysRemainingThreshold", "DeletedAt", "DeletedBy", "ExpectedProgressTolerancePercent", "IsActive", "IsDeleted", "LastModifiedById", "MinimumProgressPercent", "TenantId", "UpdatedAt", "UpdatedBy" },
+                columnTypes: new[] { "uniqueidentifier", "datetime2", "nvarchar(max)", "uniqueidentifier", "int", "datetime2", "nvarchar(max)", "int", "bit", "bit", "uniqueidentifier", "int", "uniqueidentifier", "datetime2", "nvarchar(max)" },
                 values: new object[] { new Guid("a1b2c3d4-0000-0000-0000-000000000001"), new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "System", null, 14, null, null, 20, true, false, null, 60, new Guid("00000000-0000-0000-0000-000000000001"), null, null });
 
             migrationBuilder.CreateIndex(

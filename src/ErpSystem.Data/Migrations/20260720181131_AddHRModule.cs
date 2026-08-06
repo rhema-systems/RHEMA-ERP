@@ -459,6 +459,10 @@ IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
                 nullable: false,
                 defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
 
+            migrationBuilder.DropIndex(
+                name: "IX_Units_Code",
+                table: "Units");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Units",
@@ -468,6 +472,11 @@ IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
                 oldClrType: typeof(string),
                 oldType: "nvarchar(20)",
                 oldMaxLength: 20);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Units_Code",
+                table: "Units",
+                column: "Code");
 
             migrationBuilder.AddColumn<string>(
                 name: "AccountCode",
@@ -505,6 +514,10 @@ IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
                 type: "int",
                 nullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Sections_Code",
+                table: "Sections");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Sections",
@@ -514,6 +527,11 @@ IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
                 oldClrType: typeof(string),
                 oldType: "nvarchar(20)",
                 oldMaxLength: 20);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Sections_Code",
+                table: "Sections",
+                column: "Code");
 
             migrationBuilder.AddColumn<string>(
                 name: "AccountCode",
@@ -666,6 +684,13 @@ IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
             // Keep every pre-existing row active. No-op on an empty/fresh table.
             migrationBuilder.Sql("UPDATE LeaveSubTypes SET IsActive = 1;");
 
+            // The legacy schema has a composite index over the two date columns.
+            // SQL Server will not alter either indexed column, so retain the index
+            // definition explicitly across the DateTime -> DateOnly conversion.
+            migrationBuilder.DropIndex(
+                name: "IX_LeaveRequests_StartDate_EndDate",
+                table: "LeaveRequests");
+
             migrationBuilder.AlterColumn<DateOnly>(
                 name: "StartDate",
                 table: "LeaveRequests",
@@ -691,6 +716,11 @@ IF EXISTS (SELECT 1 FROM Employees WHERE HireRecordId IS NOT NULL)
                 nullable: false,
                 oldClrType: typeof(DateTime),
                 oldType: "datetime2");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LeaveRequests_StartDate_EndDate",
+                table: "LeaveRequests",
+                columns: new[] { "StartDate", "EndDate" });
 
             migrationBuilder.AddColumn<Guid>(
                 name: "ApprovedById",
@@ -737,6 +767,10 @@ UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS N
                 type: "uniqueidentifier",
                 nullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_LeavePlans_RelieverId",
+                table: "LeavePlans");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "RelieverId",
                 table: "LeavePlans",
@@ -744,6 +778,11 @@ UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS N
                 nullable: true,
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LeavePlans_RelieverId",
+                table: "LeavePlans",
+                column: "RelieverId");
 
             migrationBuilder.AddColumn<Guid>(
                 name: "ApprovedById",
@@ -892,6 +931,10 @@ UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS N
                 oldMaxLength: 1000,
                 oldNullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Employees_DepartmentId",
+                table: "Employees");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "DepartmentId",
                 table: "Employees",
@@ -899,6 +942,11 @@ UPDATE LeaveRequests SET WorkflowInstanceId = NULL WHERE WorkflowInstanceId IS N
                 nullable: true,
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Employees_DepartmentId",
+                table: "Employees",
+                column: "DepartmentId");
 
             migrationBuilder.AddColumn<bool>(
                 name: "CanBeAssignedToMaintenance",
@@ -976,6 +1024,24 @@ BEGIN
        OR p.OrganizationLevelId IS NULL OR p.OrganizationLevelId = '00000000-0000-0000-0000-000000000000';
 END;");
 
+            // Preserve the legacy indexes while changing nullability. SQL Server
+            // requires every dependent index to be removed for the ALTER COLUMN.
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePosition_Tenant_OrgUnit",
+                table: "EmployeePositions");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositions_OrganizationUnitId",
+                table: "EmployeePositions");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositions_OrganizationLevelId",
+                table: "EmployeePositions");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositions_DepartmentId",
+                table: "EmployeePositions");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "OrganizationUnitId",
                 table: "EmployeePositions",
@@ -1004,6 +1070,26 @@ END;");
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier");
 
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePosition_Tenant_OrgUnit",
+                table: "EmployeePositions",
+                columns: new[] { "TenantId", "OrganizationUnitId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositions_OrganizationUnitId",
+                table: "EmployeePositions",
+                column: "OrganizationUnitId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositions_OrganizationLevelId",
+                table: "EmployeePositions",
+                column: "OrganizationLevelId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositions_DepartmentId",
+                table: "EmployeePositions",
+                column: "DepartmentId");
+
             migrationBuilder.AddColumn<int>(
                 name: "NoticePeriodMonths",
                 table: "EmployeePositions",
@@ -1016,6 +1102,10 @@ END;");
                 type: "int",
                 nullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositionHistories_LocationLevelId",
+                table: "EmployeePositionHistories");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "LocationLevelId",
                 table: "EmployeePositionHistories",
@@ -1023,6 +1113,11 @@ END;");
                 nullable: true,
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositionHistories_LocationLevelId",
+                table: "EmployeePositionHistories",
+                column: "LocationLevelId");
 
             migrationBuilder.AlterColumn<string>(
                 name: "LastName",
@@ -1133,6 +1228,10 @@ END;");
                 nullable: false,
                 defaultValue: false);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Divisions_Code",
+                table: "Divisions");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Divisions",
@@ -1142,6 +1241,11 @@ END;");
                 oldClrType: typeof(string),
                 oldType: "nvarchar(20)",
                 oldMaxLength: 20);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Divisions_Code",
+                table: "Divisions",
+                column: "Code");
 
             migrationBuilder.AddColumn<string>(
                 name: "AccountCode",
@@ -1162,6 +1266,10 @@ END;");
                 oldMaxLength: 7,
                 oldNullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Departments_Code",
+                table: "Departments");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Departments",
@@ -1171,6 +1279,12 @@ END;");
                 oldClrType: typeof(string),
                 oldType: "nvarchar(20)",
                 oldMaxLength: 20);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Departments_Code",
+                table: "Departments",
+                column: "Code",
+                unique: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "AccountCode",
@@ -23717,11 +23831,13 @@ END;
             migrationBuilder.InsertData(
                 table: "CompanyHrPolicySettings",
                 columns: new[] { "Id", "BudgetEnforcementMode", "CompulsoryRetirementAge", "ContractExpiryLeadDays", "CreatedAt", "CreatedBy", "CreatedById", "DefaultCurrencyCode", "DefaultProbationMonths", "DefaultResignationNoticeDays", "DefaultTerminationNoticeDays", "DeletedAt", "DeletedBy", "FemaleRetirementAge", "FiscalYearStartMonth", "FitWeightCompetency", "FitWeightPerformance", "FitWeightPotential", "FitWeightTenure", "IsDeleted", "LastModifiedById", "LongServiceMilestoneYears", "MaleRetirementAge", "MinimumWorkingAge", "ProbationEndLeadDays", "RetirementCountdownLeadDays", "ReviewDueLeadDays", "SuccessionPlanNumberPrefix", "TenantId", "UpdatedAt", "UpdatedBy", "UseGenderSpecificRetirementAge", "VacancyAlertLeadDays", "VoluntaryRetirementAge" },
+                columnTypes: new[] { "uniqueidentifier", "int", "int", "int", "datetime2", "nvarchar(max)", "uniqueidentifier", "nvarchar(3)", "int", "int", "int", "datetime2", "nvarchar(max)", "int", "int", "int", "int", "int", "int", "bit", "uniqueidentifier", "nvarchar(200)", "int", "int", "int", "int", "int", "nvarchar(10)", "uniqueidentifier", "datetime2", "nvarchar(max)", "bit", "int", "int" },
                 values: new object[] { new Guid("b2c3d4e5-0000-0000-0000-000000000001"), 2, 60, 60, new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "System", null, "GHS", 6, 30, 30, null, null, null, 1, 30, 35, 20, 15, false, null, "5,10,15,20,25", null, 18, 30, 365, 30, "SP", new Guid("00000000-0000-0000-0000-000000000001"), null, null, false, 90, 55 });
 
             migrationBuilder.InsertData(
                 table: "TalentPoolTypeDefinitions",
                 columns: new[] { "Id", "Code", "ColorHex", "CreatedAt", "CreatedBy", "CreatedById", "DeletedAt", "DeletedBy", "Description", "IsActive", "IsDeleted", "IsSystemDefault", "LastModifiedById", "Name", "SortOrder", "TenantId", "UpdatedAt", "UpdatedBy" },
+                columnTypes: new[] { "uniqueidentifier", "nvarchar(50)", "nvarchar(9)", "datetime2", "nvarchar(max)", "uniqueidentifier", "datetime2", "nvarchar(max)", "nvarchar(500)", "bit", "bit", "bit", "uniqueidentifier", "nvarchar(100)", "int", "uniqueidentifier", "datetime2", "nvarchar(max)" },
                 values: new object[,]
                 {
                     { new Guid("c3d4e5f6-0000-0000-0000-000000000001"), "HighPotential", "#2563EB", new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "System", null, null, null, null, true, false, true, null, "High Potential", 1, new Guid("00000000-0000-0000-0000-000000000001"), null, null },
@@ -35815,6 +35931,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 nullable: false,
                 defaultValue: 0);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Units_Code",
+                table: "Units");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Units",
@@ -35824,6 +35944,11 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(string),
                 oldType: "nvarchar(100)",
                 oldMaxLength: 100);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Units_Code",
+                table: "Units",
+                column: "Code");
 
             migrationBuilder.AlterColumn<DateOnly>(
                 name: "EndDate",
@@ -35841,6 +35966,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 nullable: false,
                 defaultValue: new DateOnly(1, 1, 1));
 
+            migrationBuilder.DropIndex(
+                name: "IX_Sections_Code",
+                table: "Sections");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Sections",
@@ -35850,6 +35979,11 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(string),
                 oldType: "nvarchar(100)",
                 oldMaxLength: 100);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Sections_Code",
+                table: "Sections",
+                column: "Code");
 
             migrationBuilder.AlterColumn<string>(
                 name: "Path",
@@ -35898,6 +36032,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldType: "int",
                 oldNullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_LeaveRequests_StartDate_EndDate",
+                table: "LeaveRequests");
+
             migrationBuilder.AlterColumn<DateTime>(
                 name: "StartDate",
                 table: "LeaveRequests",
@@ -35924,6 +36062,11 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(DateOnly),
                 oldType: "date");
 
+            migrationBuilder.CreateIndex(
+                name: "IX_LeaveRequests_StartDate_EndDate",
+                table: "LeaveRequests",
+                columns: new[] { "StartDate", "EndDate" });
+
             migrationBuilder.AddColumn<DateTime>(
                 name: "ApprovalDate",
                 table: "LeaveRequests",
@@ -35937,6 +36080,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 maxLength: 1000,
                 nullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_LeavePlans_RelieverId",
+                table: "LeavePlans");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "RelieverId",
                 table: "LeavePlans",
@@ -35946,6 +36093,11 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier",
                 oldNullable: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LeavePlans_RelieverId",
+                table: "LeavePlans",
+                column: "RelieverId");
 
             migrationBuilder.AddColumn<Guid>(
                 name: "DepartmentId",
@@ -35982,6 +36134,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldMaxLength: 2000,
                 oldNullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Employees_DepartmentId",
+                table: "Employees");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "DepartmentId",
                 table: "Employees",
@@ -35991,6 +36147,27 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier",
                 oldNullable: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Employees_DepartmentId",
+                table: "Employees",
+                column: "DepartmentId");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePosition_Tenant_OrgUnit",
+                table: "EmployeePositions");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositions_OrganizationUnitId",
+                table: "EmployeePositions");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositions_OrganizationLevelId",
+                table: "EmployeePositions");
+
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositions_DepartmentId",
+                table: "EmployeePositions");
 
             migrationBuilder.AlterColumn<Guid>(
                 name: "OrganizationUnitId",
@@ -36017,6 +36194,26 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier",
                 oldNullable: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePosition_Tenant_OrgUnit",
+                table: "EmployeePositions",
+                columns: new[] { "TenantId", "OrganizationUnitId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositions_OrganizationUnitId",
+                table: "EmployeePositions",
+                column: "OrganizationUnitId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositions_OrganizationLevelId",
+                table: "EmployeePositions",
+                column: "OrganizationLevelId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositions_DepartmentId",
+                table: "EmployeePositions",
+                column: "DepartmentId");
 
             migrationBuilder.AddColumn<decimal>(
                 name: "MaxSalary",
@@ -36056,6 +36253,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 type: "uniqueidentifier",
                 nullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_EmployeePositionHistories_LocationLevelId",
+                table: "EmployeePositionHistories");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "LocationLevelId",
                 table: "EmployeePositionHistories",
@@ -36065,6 +36266,11 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(Guid),
                 oldType: "uniqueidentifier",
                 oldNullable: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_EmployeePositionHistories_LocationLevelId",
+                table: "EmployeePositionHistories",
+                column: "LocationLevelId");
 
             migrationBuilder.AddColumn<string>(
                 name: "DocumentType",
@@ -36124,6 +36330,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldType: "nvarchar(2000)",
                 oldMaxLength: 2000);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Divisions_Code",
+                table: "Divisions");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Divisions",
@@ -36133,6 +36343,11 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(string),
                 oldType: "nvarchar(100)",
                 oldMaxLength: 100);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Divisions_Code",
+                table: "Divisions",
+                column: "Code");
 
             migrationBuilder.AlterColumn<string>(
                 name: "Color",
@@ -36145,6 +36360,10 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldMaxLength: 50,
                 oldNullable: true);
 
+            migrationBuilder.DropIndex(
+                name: "IX_Departments_Code",
+                table: "Departments");
+
             migrationBuilder.AlterColumn<string>(
                 name: "Code",
                 table: "Departments",
@@ -36154,6 +36373,12 @@ WHERE  lr.ApprovedById IS NOT NULL AND lr.WorkflowInstanceId IS NULL;");
                 oldClrType: typeof(string),
                 oldType: "nvarchar(100)",
                 oldMaxLength: 100);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Departments_Code",
+                table: "Departments",
+                column: "Code",
+                unique: true);
 
             migrationBuilder.CreateTable(
                 name: "AttendanceRecords",

@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Identity;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.HR.Payroll;
@@ -1008,6 +1009,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<WorkflowOfflineAction> WorkflowOfflineActions { get; set; }
     public DbSet<WorkflowEntityType> WorkflowEntityTypes { get; set; }
 
+    // Shared HR / Identity reconciliation
+    public DbSet<HrIdentityReconciliationState> HrIdentityReconciliationStates { get; set; }
+    public DbSet<HrIdentityReconciliationRun> HrIdentityReconciliationRuns { get; set; }
+    public DbSet<HrIdentityReconciliationItem> HrIdentityReconciliationItems { get; set; }
+    public DbSet<HrIdentityWorkflowIssue> HrIdentityWorkflowIssues { get; set; }
+
     // Finance - Common entities
     public DbSet<PaymentTerm> PaymentTerms { get; set; }
     public DbSet<Currency> Currencies { get; set; }
@@ -1153,6 +1160,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<WorkflowSignatureEvidence>().HasIndex(item => item.ApprovalId).IsUnique();
         builder.Entity<WorkflowIntegrationExecution>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.Entity<WorkflowOfflineAction>().HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+        ConfigureHrIdentityReconciliation(builder);
         ConfigureCentralDocumentManagementEntities(builder);
         ConfigureLandAcquisitionEntities(builder);
         ConfigureProcedureCaseEntities(builder);
@@ -1207,6 +1215,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderNegotiationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationItemConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
+        ConfigureProcurementCentralDocumentLinks<TenderDocument>(builder);
+        ConfigureProcurementCentralDocumentLinks<TenderBidDocument>(builder);
         builder.ApplyConfiguration(new EvaluationTemplateConfiguration());
         builder.ApplyConfiguration(new EvaluationTemplateCriterionConfiguration());
         builder.ApplyConfiguration(new ProcurementTenderControlConfiguration());
@@ -3917,6 +3927,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderAwardVerificationBidderConfiguration());
         builder.ApplyConfiguration(new TenderAwardVerificationItemResultConfiguration());
         builder.ApplyConfiguration(new TenderAwardVerificationItemDocumentConfiguration());
+        ConfigureProcurementCentralDocumentLinks<TenderAwardVerificationItemDocument>(builder);
         builder.ApplyConfiguration(new ProcurementAwardReadinessDecisionConfiguration());
         builder.ApplyConfiguration(new ProcurementBidderCommunicationRegisterConfiguration());
         builder.ApplyConfiguration(new ProcurementBidderCommunicationRecipientConfiguration());
@@ -7636,6 +7647,77 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         });
     }
 
+    private static void ConfigureHrIdentityReconciliation(ModelBuilder builder)
+    {
+        builder.Entity<HrIdentityReconciliationState>(entity =>
+        {
+            entity.Property(item => item.SourceFingerprint).IsUnicode(false).IsFixedLength();
+            entity.HasIndex(item => new { item.TenantId, item.UserId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.EmployeeId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.ReactivationReviewRequired });
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(item => item.DepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Employee>().WithMany().HasForeignKey(item => item.ManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.ManagerUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<HrIdentityReconciliationRun>().WithMany().HasForeignKey(item => item.LastRunId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table => table.HasTrigger("TR_HrIdentityReconciliationStates_TenantGuard"));
+        });
+
+        builder.Entity<HrIdentityReconciliationRun>(entity =>
+        {
+            entity.Property(item => item.IdempotencyKey).IsUnicode(false);
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.StartedAtUtc });
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.RequestedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_HrIdentityReconciliationRuns_TenantGuard");
+                table.HasTrigger("TR_HrIdentityReconciliationRuns_CompletedImmutable");
+            });
+        });
+
+        builder.Entity<HrIdentityReconciliationItem>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.RunId, item.UserId, item.AttemptNumber }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.Status, item.ProcessedAtUtc });
+            entity.HasOne<HrIdentityReconciliationRun>().WithMany().HasForeignKey(item => item.RunId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(item => item.PreviousDepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Department>().WithMany().HasForeignKey(item => item.CurrentDepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Employee>().WithMany().HasForeignKey(item => item.PreviousManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Employee>().WithMany().HasForeignKey(item => item.CurrentManagerEmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_HrIdentityReconciliationItems_TenantGuard");
+                table.HasTrigger("TR_HrIdentityReconciliationItems_NoMutation");
+            });
+        });
+
+        builder.Entity<HrIdentityWorkflowIssue>(entity =>
+        {
+            entity.HasIndex(item => new { item.TenantId, item.Status, item.DetectedAtUtc });
+            entity.HasIndex(item => new { item.TenantId, item.WorkflowApprovalId, item.IssueType })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Status] = 0 AND [WorkflowApprovalId] IS NOT NULL");
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Employee>().WithMany().HasForeignKey(item => item.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<WorkflowInstance>().WithMany().HasForeignKey(item => item.WorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<WorkflowStepInstance>().WithMany().HasForeignKey(item => item.WorkflowStepInstanceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<WorkflowApproval>().WithMany().HasForeignKey(item => item.WorkflowApprovalId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.StaleAssigneeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.SuggestedReplacementUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.ReplacementUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.ResolvedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table => table.HasTrigger("TR_HrIdentityWorkflowIssues_TenantGuard"));
+        });
+    }
+
     private static void SetSoftDeleteFilter<TEntity>(ModelBuilder builder, Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entityType)
         where TEntity : BaseEntity
     {
@@ -11351,6 +11433,32 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+    }
+
+    private static void ConfigureProcurementCentralDocumentLinks<TEntity>(ModelBuilder builder)
+        where TEntity : TenantEntity
+    {
+        var entity = builder.Entity<TEntity>();
+        entity.HasIndex("TenantId", "FileUploadRecordId")
+            .HasFilter("[FileUploadRecordId] IS NOT NULL");
+        entity.HasIndex("TenantId", "CentralDocumentRecordId")
+            .IsUnique()
+            .HasFilter("[CentralDocumentRecordId] IS NOT NULL");
+        entity.HasIndex("TenantId", "CentralDocumentVersionId")
+            .IsUnique()
+            .HasFilter("[CentralDocumentVersionId] IS NOT NULL");
+        entity.HasOne<FileUploadRecord>()
+            .WithMany()
+            .HasForeignKey("FileUploadRecordId")
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne<CentralDocumentRecord>()
+            .WithMany()
+            .HasForeignKey("CentralDocumentRecordId")
+            .OnDelete(DeleteBehavior.Restrict);
+        entity.HasOne<CentralDocumentVersion>()
+            .WithMany()
+            .HasForeignKey("CentralDocumentVersionId")
+            .OnDelete(DeleteBehavior.Restrict);
     }
 
     private static void ConfigureProcurementMasterDataChanges(ModelBuilder builder)

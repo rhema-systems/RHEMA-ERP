@@ -518,6 +518,10 @@ public class TenderBidDocument : TenantEntity
 
     public Guid? UploadedById { get; set; }
 
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
+
     // Navigation Properties
     public virtual TenderBid TenderBid { get; set; } = null!;
     public virtual ApplicationUser? UploadedBy { get; set; }
@@ -553,6 +557,10 @@ public class TenderDocument : TenantEntity
     public Guid? UploadedById { get; set; }
 
     public bool IsPublic { get; set; } = true; // Visible to all bidders
+
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
 
     // Navigation Properties
     public virtual Tender Tender { get; set; } = null!;

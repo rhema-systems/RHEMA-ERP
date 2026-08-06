@@ -1,7 +1,9 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,17 +17,23 @@ public class TendersController : ControllerBase
     private readonly ITenderService _tenderService;
     private readonly IWorkflowService _workflowService;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IControlledFileUploadService _controlledFiles;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly ILogger<TendersController> _logger;
 
     public TendersController(
         ITenderService tenderService,
         IWorkflowService workflowService,
         ICurrentUserProvider currentUserProvider,
+        IControlledFileUploadService controlledFiles,
+        ICentralDocumentRepositoryFileService centralDocuments,
         ILogger<TendersController> logger)
     {
         _tenderService = tenderService;
         _workflowService = workflowService;
         _currentUserProvider = currentUserProvider;
+        _controlledFiles = controlledFiles;
+        _centralDocuments = centralDocuments;
         _logger = logger;
     }
 
@@ -488,30 +496,105 @@ public class TendersController : ControllerBase
                 return BadRequest("No file provided");
             }
 
-            // Create uploads folder for tender documents
-            var uploadsFolder = Path.Combine("uploads", "tenders", id.ToString());
-            Directory.CreateDirectory(uploadsFolder);
-
-            // Generate unique filename
-            var fileName = $"{Guid.NewGuid()}_{file.FileName}";
-            var filePath = Path.Combine(uploadsFolder, fileName);
-
-            // Save file to disk
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            var tender = await _tenderService.GetTenderByIdAsync(id);
+            if (tender is null)
             {
-                await file.CopyToAsync(stream);
+                return NotFound("Tender not found");
+            }
+
+            var normalizedType = documentType?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedType) || normalizedType.Length > 50)
+            {
+                return BadRequest("A valid document type is required.");
+            }
+
+            var safeName = Path.GetFileName(file.FileName);
+            var normalizedName = string.IsNullOrWhiteSpace(documentName) ? safeName : documentName.Trim();
+            if (normalizedName.Length > 200)
+            {
+                return BadRequest("Document name cannot exceed 200 characters.");
+            }
+
+            var actorName = string.IsNullOrWhiteSpace(_currentUserProvider.FullName)
+                ? _currentUserProvider.Username
+                : _currentUserProvider.FullName;
+            var upload = await _controlledFiles.UploadAsync(new ControlledFileUploadRequest
+            {
+                TenantId = _currentUserProvider.TenantId,
+                ActorUserId = _currentUserProvider.UserId,
+                ActorName = actorName,
+                Category = ControlledFileUploadCategories.DocumentManagement,
+                FileName = safeName,
+                ContentType = string.IsNullOrWhiteSpace(file.ContentType)
+                    ? "application/octet-stream"
+                    : file.ContentType,
+                FileSize = file.Length,
+                OpenReadStream = file.OpenReadStream
+            }, HttpContext.RequestAborted);
+
+            CentralDocumentRepositoryLink centralDocument;
+            try
+            {
+                centralDocument = await _centralDocuments.RegisterAsync(
+                    new CentralDocumentRepositoryRegistration
+                    {
+                        TenantId = _currentUserProvider.TenantId,
+                        ActorUserId = _currentUserProvider.UserId,
+                        ActorName = actorName,
+                        FileUploadRecordId = upload.Record.Id,
+                        SourceModule = "Procurement",
+                        SourceLabel = "Procurement / Tender documents",
+                        SourceEntityType = "Tender",
+                        SourceRecordId = id,
+                        SourceRecordReference = tender.TenderNumber,
+                        Title = normalizedName,
+                        DocumentType = "TenderDocument",
+                        MetadataTemplateCode = "TDC-PROC-TENDER",
+                        AccessProfile = "Procurement tender restricted",
+                        VersionStatus = "Submitted",
+                        ChangeSummary = $"{normalizedType} uploaded from the tender record.",
+                        RequirePublishedGovernance = true,
+                        MetadataValues =
+                        [
+                            new("sourceReference", "Source reference", tender.TenderNumber),
+                            new("documentFamily", "Document family", "Tender"),
+                            new("classification", "Classification", normalizedType),
+                            new("sourceStatus", "Source status", tender.Status),
+                            new("uploadedBy", "Uploaded by", actorName),
+                            new("checksumSha256", "Checksum SHA-256", upload.ChecksumSha256)
+                        ]
+                    }, HttpContext.RequestAborted);
+            }
+            catch
+            {
+                await _controlledFiles.DeleteAsync(_currentUserProvider.TenantId,
+                    upload.Record.Id, _currentUserProvider.UserId, HttpContext.RequestAborted);
+                throw;
             }
 
             // Create DTO
             var dto = new UploadTenderDocumentDto
             {
-                DocumentName = documentName ?? file.FileName,
-                DocumentType = documentType,
+                DocumentName = normalizedName,
+                DocumentType = normalizedType,
                 IsPublic = isPublic
             };
 
-            // Upload document (service will update with file info)
-            var document = await _tenderService.UploadTenderDocumentAsync(id, dto, filePath, file.ContentType, file.Length);
+            TenderDocumentDto document;
+            try
+            {
+                document = await _tenderService.UploadTenderDocumentAsync(id, dto,
+                    $"dms:{centralDocument.DocumentRecordId:N}:version:{centralDocument.DocumentVersionId:N}",
+                    upload.Record.ContentType, upload.Record.FileSize, upload.Record.Id,
+                    centralDocument.DocumentRecordId, centralDocument.DocumentVersionId);
+            }
+            catch
+            {
+                await _centralDocuments.DeleteAsync(_currentUserProvider.TenantId,
+                    centralDocument.DocumentRecordId, _currentUserProvider.UserId,
+                    HttpContext.RequestAborted);
+                throw;
+            }
             return Created($"/api/procurement/Tenders/{id}/documents/{document.Id}", document);
         }
         catch (InvalidOperationException ex)
@@ -533,7 +616,8 @@ public class TendersController : ControllerBase
     {
         try
         {
-            var documents = await _tenderService.GetTenderDocumentsAsync(id, includeInternal: true);
+            var documents = await _tenderService.GetTenderDocumentsAsync(
+                id, includeInternal: !_currentUserProvider.IsExternalUser);
             var document = documents.FirstOrDefault(d => d.Id == documentId);
 
             if (document == null)
@@ -541,12 +625,28 @@ public class TendersController : ControllerBase
                 return NotFound("Document not found");
             }
 
-            if (string.IsNullOrEmpty(document.FilePath) || !System.IO.File.Exists(document.FilePath))
+            if (document.CentralDocumentRecordId.HasValue && document.CentralDocumentVersionId.HasValue)
             {
-                _logger.LogError("Document file not found at path: {FilePath}", document.FilePath);
-                return NotFound("Document file not found on server");
+                var content = await _centralDocuments.OpenAsync(
+                    _currentUserProvider.TenantId,
+                    document.CentralDocumentRecordId.Value,
+                    document.CentralDocumentVersionId.Value,
+                    HttpContext.RequestAborted);
+                if (content is null || content.UploadRecord.VirusScanStatus != FileVirusScanStatus.Clean)
+                {
+                    if (content is not null) await content.DisposeAsync();
+                    return NotFound("Document is unavailable in the central repository.");
+                }
+
+                return File(content.Content, content.ContentType, content.FileName,
+                    enableRangeProcessing: true);
             }
 
+            // Legacy records remain readable until the separately deferred archive migration is selected.
+            if (string.IsNullOrEmpty(document.FilePath) || !System.IO.File.Exists(document.FilePath))
+            {
+                return NotFound("Legacy document file not found on server");
+            }
             var fileBytes = await System.IO.File.ReadAllBytesAsync(document.FilePath);
             var contentType = document.FileType ?? "application/octet-stream";
 
