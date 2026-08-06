@@ -2313,25 +2313,32 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (_unitOfWork.HasActiveTransaction)
                 return await operation();
 
-            await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
-            try
+            // SQL Server retry strategies cannot execute inside a transaction created by the
+            // caller before the strategy begins. Put transaction creation, application locking,
+            // all reads/writes and commit inside one retriable delegate so a transient failure
+            // restarts the complete template decision rather than only its last database query.
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                // Template version allocation and active-version replacement are tenant-wide
-                // decisions. One logical lock prevents two administrators from producing the same
-                // version number or activating competing close types concurrently.
-                await _unitOfWork.AcquireTransactionLockAsync(
-                    $"FIN:CLOSE-TEMPLATE:{TenantId:N}",
-                    cancellationToken);
-                var result = await operation();
-                await _unitOfWork.CommitAsync(cancellationToken);
-                return result;
-            }
-            catch
-            {
-                if (_unitOfWork.HasActiveTransaction)
-                    await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
+                await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    // Template version allocation and active-version replacement are tenant-wide
+                    // decisions. One logical lock prevents two administrators from producing the same
+                    // version number or activating competing close types concurrently.
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"FIN:CLOSE-TEMPLATE:{TenantId:N}",
+                        cancellationToken);
+                    var result = await operation();
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         private async Task EnsureDefaultCloseTemplatesAsync(CancellationToken cancellationToken)
@@ -2618,25 +2625,33 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (_unitOfWork.HasActiveTransaction)
                 return await operation();
 
-            await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
-            try
+            // Keep the user transaction inside EF's retry strategy. Creating it outside produces
+            // SqlServerRetryingExecutionStrategy's "does not support user-initiated transactions"
+            // failure on the first close-workspace query (Issue #32). Retrying the entire unit also
+            // preserves the invariant that lock acquisition and the resulting close decision are
+            // committed together; neither operation is safe to retry independently.
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                // The SQL Server application lock serializes evaluation, certification, close and
-                // reopen decisions for this tenant/period. Serializable isolation alone cannot
-                // lock a cycle row before cycle one exists, so both controls are intentional.
-                await _unitOfWork.AcquireTransactionLockAsync(
-                    $"FIN:CLOSE:{TenantId:N}:{periodId:N}",
-                    cancellationToken);
-                var result = await operation();
-                await _unitOfWork.CommitAsync(cancellationToken);
-                return result;
-            }
-            catch
-            {
-                if (_unitOfWork.HasActiveTransaction)
-                    await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
+                await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    // The SQL Server application lock serializes evaluation, certification, close and
+                    // reopen decisions for this tenant/period. Serializable isolation alone cannot
+                    // lock a cycle row before cycle one exists, so both controls are intentional.
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        $"FIN:CLOSE:{TenantId:N}:{periodId:N}",
+                        cancellationToken);
+                    var result = await operation();
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         private async Task<FinanceCloseCycle> GetOrCreateActiveCloseCycleAsync(
