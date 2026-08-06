@@ -421,6 +421,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<SmsSettings> SmsSettings { get; set; }
     public DbSet<DataRetentionPolicy> DataRetentionPolicies { get; set; }
     public DbSet<DataRetentionJobRun> DataRetentionJobRuns { get; set; }
+    public DbSet<AuditRecordLifecycleEvent> AuditRecordLifecycleEvents { get; set; }
 
     #region HR Entities
 
@@ -1168,6 +1169,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProcurementSourcingCaseSourceRequestConfiguration());
         ConfigureProcurementAccessControl(builder);
         ConfigureProcurementControlEvents(builder);
+        ConfigureAuditGovernance(builder);
         ConfigureProcurementMasterDataChanges(builder);
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
@@ -4248,6 +4250,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure AuditLog entity
         builder.Entity<AuditLog>(entity =>
         {
+            entity.ToTable("AuditLogs", table => table.HasTrigger("TR_AuditLogs_AppendOnly"));
             entity.HasOne(a => a.User).WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(a => a.Tenant).WithMany().HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(a => a.Timestamp);
@@ -11264,6 +11267,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 table.HasTrigger("TR_ProcurementControlEvents_AppendOnly");
                 table.HasCheckConstraint("CK_ProcurementControlEvents_Result", "[Result] BETWEEN 0 AND 6");
+                table.HasCheckConstraint("CK_ProcurementControlEvents_Operation", "[Operation] BETWEEN 0 AND 9");
                 table.HasCheckConstraint("CK_ProcurementControlEvents_SchemaVersion", "[SchemaVersion] >= 1");
             });
             entity.Property(item => item.EventKey).IsUnicode(false);
@@ -11279,6 +11283,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.OccurredAtUtc });
             entity.HasIndex(item => new { item.TenantId, item.CorrelationId, item.OccurredAtUtc });
             entity.HasIndex(item => new { item.TenantId, item.EventType, item.Result, item.OccurredAtUtc });
+            entity.HasIndex(item => new { item.TenantId, item.Operation, item.OccurredAtUtc });
             entity.HasIndex(item => new { item.TenantId, item.SourceType, item.SourceReference });
             entity.HasIndex(item => new { item.TenantId, item.RuleCode, item.OccurredAtUtc });
             entity.HasOne(item => item.ActorUser).WithMany().HasForeignKey(item => item.ActorUserId).OnDelete(DeleteBehavior.Restrict);
@@ -11307,6 +11312,44 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.FileUploadRecord).WithMany()
                 .HasForeignKey(item => item.FileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureAuditGovernance(ModelBuilder builder)
+    {
+        builder.Entity<DataRetentionPolicy>(entity =>
+        {
+            entity.ToTable("DataRetentionPolicies", table =>
+            {
+                table.HasCheckConstraint("CK_DataRetentionPolicies_AuditMinimum",
+                    "[AuditLogRetentionDays] >= 2555");
+                table.HasCheckConstraint("CK_DataRetentionPolicies_WorkflowAuditMinimum",
+                    "[WorkflowAuditRetentionDays] >= 2555");
+            });
+        });
+
+        builder.Entity<AuditRecordLifecycleEvent>(entity =>
+        {
+            entity.ToTable("AuditRecordLifecycleEvents", table =>
+            {
+                table.HasTrigger("TR_AuditRecordLifecycleEvents_AppendOnly");
+                table.HasCheckConstraint("CK_AuditRecordLifecycleEvents_Action", "[Action] BETWEEN 0 AND 3");
+                table.HasCheckConstraint("CK_AuditRecordLifecycleEvents_Sequence", "[SequenceNumber] >= 1");
+                table.HasCheckConstraint("CK_AuditRecordLifecycleEvents_Retention",
+                    "[RetainUntilUtc] >= DATEADD(day, 2555, [SourceOccurredAtUtc])");
+            });
+            entity.Property(value => value.StoreKey).IsUnicode(false);
+            entity.Property(value => value.RequestKey).IsUnicode(false);
+            entity.Property(value => value.CorrelationId).IsUnicode(false);
+            entity.Property(value => value.PreviousIntegrityHash).IsUnicode(false).IsFixedLength();
+            entity.Property(value => value.IntegrityHash).IsUnicode(false).IsFixedLength();
+            entity.HasIndex(value => new { value.TenantId, value.RequestKey }).IsUnique();
+            entity.HasIndex(value => new { value.TenantId, value.StoreKey, value.RecordId, value.SequenceNumber }).IsUnique();
+            entity.HasIndex(value => new { value.TenantId, value.StoreKey, value.RecordId, value.CreatedAt });
+            entity.HasOne(value => value.ActorUser).WithMany().HasForeignKey(value => value.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

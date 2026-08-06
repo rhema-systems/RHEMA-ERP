@@ -47,10 +47,11 @@ public sealed class DataRetentionController : ControllerBase
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 Enabled = true,
-                AuditLogRetentionDays = 365,
+                AuditLogRetentionDays = 2555,
                 SecurityLogRetentionDays = 365,
                 NotificationRetentionDays = 180,
                 EhcAuditEventRetentionDays = 365,
+                WorkflowAuditRetentionDays = 2555,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUserService.UserName ?? "System"
             };
@@ -67,10 +68,11 @@ public sealed class DataRetentionController : ControllerBase
                 Id = policy.Id,
                 TenantId = policy.TenantId,
                 Enabled = policy.Enabled,
-                AuditLogRetentionDays = policy.AuditLogRetentionDays,
+                AuditLogRetentionDays = Math.Max(policy.AuditLogRetentionDays, 2555),
                 SecurityLogRetentionDays = policy.SecurityLogRetentionDays,
                 NotificationRetentionDays = policy.NotificationRetentionDays,
-                EhcAuditEventRetentionDays = policy.EhcAuditEventRetentionDays
+                EhcAuditEventRetentionDays = policy.EhcAuditEventRetentionDays,
+                WorkflowAuditRetentionDays = Math.Max(policy.WorkflowAuditRetentionDays, 2555)
             }
         });
     }
@@ -106,10 +108,11 @@ public sealed class DataRetentionController : ControllerBase
             }
 
             policy.Enabled = request.Enabled;
-            policy.AuditLogRetentionDays = Math.Clamp(request.AuditLogRetentionDays, 1, 3650);
+            policy.AuditLogRetentionDays = Math.Clamp(request.AuditLogRetentionDays, 2555, 36500);
             policy.SecurityLogRetentionDays = Math.Clamp(request.SecurityLogRetentionDays, 1, 3650);
             policy.NotificationRetentionDays = Math.Clamp(request.NotificationRetentionDays, 1, 3650);
             policy.EhcAuditEventRetentionDays = Math.Clamp(request.EhcAuditEventRetentionDays, 1, 3650);
+            policy.WorkflowAuditRetentionDays = Math.Clamp(request.WorkflowAuditRetentionDays, 2555, 36500);
             policy.UpdatedAt = now;
             policy.UpdatedBy = _currentUserService.UserName ?? "System";
 
@@ -155,4 +158,3 @@ public sealed class DataRetentionController : ControllerBase
         return Ok(new { success = true, data = runs });
     }
 }
-

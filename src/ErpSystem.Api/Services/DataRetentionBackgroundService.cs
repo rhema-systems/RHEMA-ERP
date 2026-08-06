@@ -103,10 +103,11 @@ public sealed class DataRetentionBackgroundService : BackgroundService
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 Enabled = true,
-                AuditLogRetentionDays = 365,
+                AuditLogRetentionDays = 2555,
                 SecurityLogRetentionDays = 365,
                 NotificationRetentionDays = 180,
                 EhcAuditEventRetentionDays = 365,
+                WorkflowAuditRetentionDays = 2555,
                 CreatedAt = now,
                 CreatedBy = "System"
             };
@@ -143,12 +144,11 @@ public sealed class DataRetentionBackgroundService : BackgroundService
                 return;
             }
 
-            // Audit logs
-            var auditCutoff = now.AddDays(-Math.Clamp(policy.AuditLogRetentionDays, 1, 3650));
-            counts["AuditLogs"] = await db.AuditLogs
-                .IgnoreQueryFilters()
-                .Where(a => a.TenantId == tenantId && a.Timestamp < auditCutoff)
-                .ExecuteDeleteAsync(cancellationToken);
+            // Platform audit logs and registered procurement/inventory control events are immutable.
+            // Archival and legal-hold state live in the shared append-only governance overlay; the
+            // source audit rows are never purged by this maintenance worker.
+            counts["AuditLogsProtected"] = 0;
+            counts["ProcurementControlEventsProtected"] = 0;
 
             // Security logs
             var securityCutoff = now.AddDays(-Math.Clamp(policy.SecurityLogRetentionDays, 1, 3650));

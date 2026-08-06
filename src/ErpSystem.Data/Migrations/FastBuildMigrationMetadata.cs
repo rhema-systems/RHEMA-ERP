@@ -167,3 +167,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260801224538_HrControlledDocumentLinks")] partial class HrControlledDocumentLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260805104205_HrRemoveDuplicateShadowForeignKeys")] partial class HrRemoveDuplicateShadowForeignKeys { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260805114001_MergeFinanceControlHardeningAndSharedReporting")] partial class MergeFinanceControlHardeningAndSharedReporting { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260806010613_TDC0706SharedAuditGovernance")] partial class TDC0706SharedAuditGovernance { }

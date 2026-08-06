@@ -139,6 +139,41 @@ public sealed class ProcurementControlEventServiceTests
         await query.Should().ThrowAsync<ProcurementControlEventAuthorizationException>();
     }
 
+    [Fact]
+    public async Task RealWriterPersistsEveryRequiredSemanticOperation()
+    {
+        await using var fixture = new Fixture();
+        var actions = new (string Action, AuditOperationKind Operation)[]
+        {
+            ("Created", AuditOperationKind.Create),
+            ("Updated", AuditOperationKind.Update),
+            ("InvoiceMatchExceptionApproved", AuditOperationKind.Approve),
+            ("InvoiceMatchExceptionRejected", AuditOperationKind.Reject),
+            ("OverrideSourcingMethod", AuditOperationKind.Override),
+            ("PostStockAdjustment", AuditOperationKind.Post),
+            ("ReverseStockAdjustment", AuditOperationKind.Reverse),
+            ("Dispatch", AuditOperationKind.Dispatch),
+            ("Receive", AuditOperationKind.Receive)
+        };
+
+        foreach (var (action, expected) in actions)
+        {
+            var key = $"semantic-{(int)expected}";
+            var request = Request(key);
+            request.Action = action;
+
+            var recorded = await fixture.Service.RecordAsync(request);
+
+            recorded.Operation.Should().Be(expected);
+        }
+
+        var persisted = await fixture.Context.ProcurementControlEvents
+            .OrderBy(item => item.Operation)
+            .Select(item => item.Operation)
+            .ToListAsync();
+        persisted.Should().Equal(actions.Select(item => item.Operation).OrderBy(item => item));
+    }
+
     private static ProcurementControlEventWriteRequest Request(string key) => new()
     {
         EventKey = key,

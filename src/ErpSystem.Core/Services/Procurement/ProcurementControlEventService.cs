@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Audit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,7 +16,7 @@ namespace ErpSystem.Core.Services.Procurement;
 
 public sealed class ProcurementControlEventService : IProcurementControlEventService
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<ProcurementControlEventService> _logger;
@@ -54,6 +55,7 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             SchemaVersion = SchemaVersion,
             EventType = request.EventType.Trim(),
             Action = request.Action.Trim(),
+            Operation = AuditOperationClassifier.Classify(request.Action),
             Result = request.Result,
             RuleCode = TrimOrNull(request.RuleCode),
             RuleId = request.RuleId,
@@ -151,6 +153,7 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             SchemaVersion = SchemaVersion,
             EventType = request.EventType.Trim(),
             Action = request.Action.Trim(),
+            Operation = AuditOperationClassifier.Classify(request.Action),
             Result = request.Result,
             RuleCode = TrimOrNull(request.RuleCode),
             RuleId = request.RuleId,
@@ -394,6 +397,7 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             SchemaVersion = item.SchemaVersion,
             EventType = item.EventType,
             Action = item.Action,
+            Operation = item.Operation,
             Result = item.Result,
             RuleCode = item.RuleCode,
             RuleId = item.RuleId,
@@ -422,7 +426,45 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
 
     private static string ComputeHash(ProcurementControlEvent item)
     {
-        var payload = new
+        var evidence = item.EvidenceLinks.OrderBy(link => link.ReferenceKind).ThenBy(link => link.Reference).Select(link => new
+        {
+            Kind = (int)link.ReferenceKind,
+            link.WorkflowEvidenceDocumentId,
+            link.FileUploadRecordId,
+            link.Reference,
+            link.Label,
+            link.RequirementKey
+        }).ToList();
+        var payload = item.SchemaVersion >= 2
+            ? JsonSerializer.Serialize(new
+            {
+                item.SchemaVersion,
+                item.EventKey,
+                item.EventType,
+                item.Action,
+                Operation = (int)item.Operation,
+                Result = (int)item.Result,
+                item.RuleCode,
+                item.RuleId,
+                item.RuleVersion,
+                item.DecisionKeysJson,
+                item.SourceType,
+                item.SourceId,
+                item.SourceReference,
+                item.ActorUserId,
+                item.ActorName,
+                item.ActorRolesJson,
+                item.Reason,
+                item.InputValuesJson,
+                item.ResultValuesJson,
+                item.BeforeJson,
+                item.AfterJson,
+                item.CorrelationId,
+                item.CausationId,
+                OccurredAtUtc = item.OccurredAtUtc.ToUniversalTime().ToString("O"),
+                Evidence = evidence
+            }, JsonOptions)
+            : JsonSerializer.Serialize(new
         {
             item.SchemaVersion,
             item.EventKey,
@@ -447,17 +489,9 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             item.CorrelationId,
             item.CausationId,
             OccurredAtUtc = item.OccurredAtUtc.ToUniversalTime().ToString("O"),
-            Evidence = item.EvidenceLinks.OrderBy(link => link.ReferenceKind).ThenBy(link => link.Reference).Select(link => new
-            {
-                Kind = (int)link.ReferenceKind,
-                link.WorkflowEvidenceDocumentId,
-                link.FileUploadRecordId,
-                link.Reference,
-                link.Label,
-                link.RequirementKey
-            }).ToList()
-        };
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload, JsonOptions))));
+            Evidence = evidence
+        }, JsonOptions);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     }
 
     private static void ValidateWrite(ProcurementControlEventWriteRequest request)
