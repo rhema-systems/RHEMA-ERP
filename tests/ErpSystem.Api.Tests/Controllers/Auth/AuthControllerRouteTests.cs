@@ -25,7 +25,7 @@ public class AuthControllerRouteTests
         var settingsService = new Mock<ISettingsService>();
         settingsService
             .Setup(service => service.GetSecuritySettingsAsync())
-            .ReturnsAsync(new Security
+            .ReturnsAsync(new ErpSystem.Core.Entities.Security
             {
                 SessionTimeoutMinutes = 45,
                 JwtTokenLifetimeMinutes = 120

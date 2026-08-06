@@ -31,14 +31,6 @@ public partial class RepairMissingFinanceSettingsColumns : Migration
             IF COL_LENGTH(N'dbo.FinanceSettings', N'SubledgerPostingMode') IS NULL
                 ALTER TABLE [dbo].[FinanceSettings] ADD [SubledgerPostingMode] nvarchar(30) NULL;
 
-            UPDATE [dbo].[FinanceSettings]
-            SET [SubledgerPostingMode] = N'IFRS'
-            WHERE [SubledgerPostingMode] IS NULL
-               OR NULLIF(LTRIM(RTRIM([SubledgerPostingMode])), N'') IS NULL;
-
-            ALTER TABLE [dbo].[FinanceSettings]
-                ALTER COLUMN [SubledgerPostingMode] nvarchar(30) NOT NULL;
-
             IF COL_LENGTH(N'dbo.FinanceSettings', N'WriteOffExpenseAccountId') IS NULL
                 ALTER TABLE [dbo].[FinanceSettings] ADD [WriteOffExpenseAccountId] uniqueidentifier NULL;
 
@@ -47,6 +39,20 @@ public partial class RepairMissingFinanceSettingsColumns : Migration
 
             IF COL_LENGTH(N'dbo.FinanceSettings', N'RequireSubledgerJournalApproval') IS NULL
                 ALTER TABLE [dbo].[FinanceSettings] ADD [RequireSubledgerJournalApproval] bit NULL;
+            """);
+
+        // SQL Server resolves column references when a batch is compiled. Keep
+        // the backfill in a later command so genuinely missing columns added
+        // above are visible before they are referenced.
+        migrationBuilder.Sql(
+            """
+            UPDATE [dbo].[FinanceSettings]
+            SET [SubledgerPostingMode] = N'IFRS'
+            WHERE [SubledgerPostingMode] IS NULL
+               OR NULLIF(LTRIM(RTRIM([SubledgerPostingMode])), N'') IS NULL;
+
+            ALTER TABLE [dbo].[FinanceSettings]
+                ALTER COLUMN [SubledgerPostingMode] nvarchar(30) NOT NULL;
 
             UPDATE [dbo].[FinanceSettings]
             SET [RequireSubledgerJournalApproval] = 0
@@ -54,6 +60,10 @@ public partial class RepairMissingFinanceSettingsColumns : Migration
 
             ALTER TABLE [dbo].[FinanceSettings]
                 ALTER COLUMN [RequireSubledgerJournalApproval] bit NOT NULL;
+            """);
+
+        migrationBuilder.Sql(
+            """
 
             IF NOT EXISTS (
                 SELECT 1

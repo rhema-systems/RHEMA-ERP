@@ -703,7 +703,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
         current.SetupGet(item => item.UserName).Returns(user.UserName);
         var settings = new Mock<ISettingsService>();
         settings.Setup(item => item.GetSecuritySettingsAsync(tenantId))
-            .ReturnsAsync((Security?)null);
+            .ReturnsAsync((ErpSystem.Core.Entities.Security?)null);
         var audit = new Mock<IAuditLogService>();
         audit.Setup(item => item.LogUserActionAsync(
                 It.IsAny<Guid>(),
@@ -804,7 +804,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
         current.SetupGet(item => item.UserName).Returns(user.UserName);
         var settings = new Mock<ISettingsService>();
         settings.Setup(item => item.GetSecuritySettingsAsync(tenantId))
-            .ReturnsAsync((Security?)null);
+            .ReturnsAsync((ErpSystem.Core.Entities.Security?)null);
         var applicantAccess =
             new Mock<IProcurementSupplierApplicantAccessService>();
         applicantAccess.Setup(item => item.CompleteCredentialActivationAsync(
@@ -895,7 +895,7 @@ public sealed class SupplierApplicantLifecycleControllerTests
         current.SetupGet(item => item.UserName).Returns(outerUser.UserName);
         var settings = new Mock<ISettingsService>();
         settings.Setup(item => item.GetSecuritySettingsAsync(tenantId))
-            .ReturnsAsync((Security?)null);
+            .ReturnsAsync((ErpSystem.Core.Entities.Security?)null);
         var applicantAccess =
             new Mock<IProcurementSupplierApplicantAccessService>();
         var unitOfWork = TransactionalUnitOfWork();

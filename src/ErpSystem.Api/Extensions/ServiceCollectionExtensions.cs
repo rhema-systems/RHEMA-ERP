@@ -35,6 +35,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data.Repositories.HR;
 using ErpSystem.Core.Services.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.Procurement;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -481,6 +482,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ITenantService, TenantService>();
             services.AddScoped<IUserTenantService, UserTenantService>();
             services.AddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Identity.IHrIdentityAccessService,
+                ErpSystem.Api.Services.Identity.HrIdentityAccessService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Identity.IHrIdentityReconciliationService,
+                ErpSystem.Api.Services.Identity.HrIdentityReconciliationService>();
+            services.AddHostedService<ErpSystem.Api.Services.Identity.HrIdentityReconciliationBackgroundService>();
             services.AddScoped<ISearchService, SearchService>();
 
             // Identity services
@@ -1218,6 +1224,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
                 .AddPolicy("AuditGovernanceManage", policy =>
                     policy.Requirements.Add(new PermissionRequirement("settings.update")))
+                .AddPolicy("HrIdentityReconciliationRead", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("settings.read", "settings.update")))
+                .AddPolicy("HrIdentityReconciliationManage", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("settings.update")))
                 .AddPolicy("Finance", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true
@@ -1290,6 +1300,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            foreach (var permission in ProcurementAccessControlRegistry.Permissions)
+            {
+                authorizationBuilder.AddPolicy(permission.Code, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Code)));
             }
 
             // HR occupational-health policies. The medical controllers previously carried a bare

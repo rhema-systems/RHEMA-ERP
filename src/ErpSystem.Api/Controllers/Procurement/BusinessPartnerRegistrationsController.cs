@@ -579,6 +579,16 @@ public class BusinessPartnerRegistrationsController : ControllerBase
             var userId = AuthenticatedUserId();
             var tenantId = _currentUser.TenantId ??
                 throw new UnauthorizedAccessException("Tenant context is required.");
+            var registration = await _registrationService.GetByIdAsync(id);
+            if (registration is null)
+            {
+                return NotFound("Supplier registration not found.");
+            }
+            var normalizedDocumentType = documentType?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedDocumentType) || normalizedDocumentType.Length > 100)
+            {
+                return BadRequest("Select a valid supplier evidence type.");
+            }
             var upload = await _controlledFiles.UploadAsync(
                 new ControlledFileUploadRequest
                 {
@@ -607,12 +617,23 @@ public class BusinessPartnerRegistrationsController : ControllerBase
                         SourceLabel = "Supplier registration evidence",
                         SourceEntityType = "BusinessPartnerRegistration",
                         SourceRecordId = id,
-                        SourceRecordReference = id.ToString(),
+                        SourceRecordReference = registration.ApplicationNumber,
                         Title = upload.Record.OriginalFileName,
-                        DocumentType = documentType,
+                        DocumentType = "SupplierEvidence",
                         MetadataTemplateCode = "PROC-SUP-EVD",
-                        AccessProfile = "Procurement restricted",
-                        ChangeSummary = "Supplier registration evidence uploaded by an internal reviewer."
+                        AccessProfile = "Procurement supplier restricted",
+                        ChangeSummary = "Supplier registration evidence uploaded by an internal reviewer.",
+                        RequirePublishedGovernance = true,
+                        MetadataValues =
+                        [
+                            new("sourceReference", "Source reference", registration.ApplicationNumber),
+                            new("documentFamily", "Document family", "Supplier"),
+                            new("classification", "Classification", classificationCode ?? normalizedDocumentType),
+                            new("sourceStatus", "Source status", registration.Status),
+                            new("uploadedBy", "Uploaded by", _currentUser.UserName),
+                            new("checksumSha256", "Checksum SHA-256", upload.ChecksumSha256),
+                            new("evidenceRequirement", "Evidence requirement", evidenceRequirementCode)
+                        ]
                     },
                     HttpContext.RequestAborted);
             }
@@ -633,7 +654,7 @@ public class BusinessPartnerRegistrationsController : ControllerBase
                         FileUploadRecordId = upload.Record.Id,
                         CentralDocumentRecordId = centralDocument.DocumentRecordId,
                         CentralDocumentVersionId = centralDocument.DocumentVersionId,
-                        DocumentType = documentType,
+                        DocumentType = normalizedDocumentType,
                         DocumentName = upload.Record.OriginalFileName,
                         DocumentPath = null,
                         FilePath = string.Empty,

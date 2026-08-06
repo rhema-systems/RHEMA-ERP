@@ -587,6 +587,21 @@ public class ContractsController : ControllerBase
                 return BadRequest("No file provided");
             }
 
+            var contract = await _contractService.GetByIdAsync(contractId);
+            if (contract is null)
+            {
+                return NotFound("Contract not found.");
+            }
+            var normalizedDocumentType = documentType?.Trim();
+            var contractFamily = ProcurementDocumentManagementCatalog.Find(
+                ProcurementDocumentFamily.Contract)!;
+            if (string.IsNullOrWhiteSpace(normalizedDocumentType) ||
+                !contractFamily.Classifications.Contains(
+                    normalizedDocumentType, StringComparer.OrdinalIgnoreCase))
+            {
+                return BadRequest("Select a supported contract document type from the controlled list.");
+            }
+
             var upload = await _controlledFiles.UploadAsync(
                 new ControlledFileUploadRequest
                 {
@@ -616,12 +631,22 @@ public class ContractsController : ControllerBase
                         SourceLabel = "Procurement contract evidence",
                         SourceEntityType = "Contract",
                         SourceRecordId = contractId,
-                        SourceRecordReference = contractId.ToString(),
+                        SourceRecordReference = contract.ContractNumber,
                         Title = upload.Record.OriginalFileName,
-                        DocumentType = documentType,
+                        DocumentType = "ContractEvidence",
                         MetadataTemplateCode = "PROC-CON-EVD",
-                        AccessProfile = "Procurement restricted",
-                        ChangeSummary = description
+                        AccessProfile = "Procurement contract restricted",
+                        ChangeSummary = description,
+                        RequirePublishedGovernance = true,
+                        MetadataValues =
+                        [
+                            new("sourceReference", "Source reference", contract.ContractNumber),
+                            new("documentFamily", "Document family", "Contract"),
+                            new("classification", "Classification", normalizedDocumentType),
+                            new("sourceStatus", "Source status", contract.Status),
+                            new("uploadedBy", "Uploaded by", ActorName),
+                            new("checksumSha256", "Checksum SHA-256", upload.ChecksumSha256)
+                        ]
                     },
                     HttpContext.RequestAborted);
             }
@@ -638,7 +663,7 @@ public class ContractsController : ControllerBase
             {
                 document = await _contractService.UploadDocumentAsync(
                     contractId,
-                    documentType,
+                    normalizedDocumentType,
                     upload.Record.OriginalFileName,
                     centralDocument.DocumentReference,
                     upload.Record.ContentType,

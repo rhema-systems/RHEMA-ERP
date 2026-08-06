@@ -171,6 +171,8 @@ public sealed class VendorPaymentBatchCreationTests
             Mock.Of<ILogger<VendorPaymentService>>(),
             numbering.Object,
             workflow.Object,
+            Mock.Of<IFinanceAccessScopeService>(),
+            Mock.Of<IFinanceReversalPolicyService>(),
             vendorInvoiceService: invoiceService.Object,
             procurementControlEvents: controlEvents);
 
@@ -362,6 +364,8 @@ public sealed class VendorPaymentBatchCreationTests
             Mock.Of<ILogger<VendorPaymentService>>(),
             Mock.Of<IDocumentNumberingService>(),
             Mock.Of<IWorkflowService>(),
+            Mock.Of<IFinanceAccessScopeService>(),
+            Mock.Of<IFinanceReversalPolicyService>(),
             vendorInvoiceService: invoiceService.Object);
 
         var result = await service.GetOutstandingInvoicesAsync(supplier.Id);

@@ -287,6 +287,9 @@ public class TenderBidDocumentDto
     public long? FileSize { get; set; }
     public DateTime UploadedDate { get; set; }
     public string? UploadedByName { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
 }
 
 /// <summary>

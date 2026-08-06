@@ -44,7 +44,16 @@ public sealed class CentralDocumentRepositoryRegistration
     public string VersionStatus { get; init; } = "Submitted";
     public string? ChangeSummary { get; init; }
     public string? Notes { get; init; }
+    public bool RequirePublishedGovernance { get; init; }
+    public IReadOnlyList<CentralDocumentMetadataRegistrationValue> MetadataValues { get; init; } =
+        Array.Empty<CentralDocumentMetadataRegistrationValue>();
 }
+
+public sealed record CentralDocumentMetadataRegistrationValue(
+    string FieldKey,
+    string FieldLabel,
+    string? FieldValue,
+    string ValueType = "text");
 
 public sealed class CentralDocumentRepositoryLink
 {
