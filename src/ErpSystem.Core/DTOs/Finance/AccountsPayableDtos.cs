@@ -523,6 +523,7 @@ public class VendorPaymentDto
     public string? PaymentMethodName { get; set; }
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
     public Guid? BankAccountId { get; set; }
     public string? BankAccountName { get; set; }
     public string? ChequeNumber { get; set; }
@@ -591,6 +592,7 @@ public class VendorPaymentCreateDto
 
     public string CurrencyCode { get; set; } = "USD";
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
 
     public Guid? BankAccountId { get; set; }
     public string? ChequeNumber { get; set; }
@@ -736,6 +738,16 @@ public class VendorPaymentAllocationDto
     public Guid VendorInvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public decimal AllocatedAmount { get; set; }
+    public decimal PaymentCurrencyAmount { get; set; }
+    public string InvoiceCurrencyCode { get; set; } = string.Empty;
+    public string PaymentCurrencyCode { get; set; } = string.Empty;
+    public bool IsCrossCurrency { get; set; }
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
+    public decimal InvoiceSettlementExchangeRate { get; set; }
+    public Guid? PaymentExchangeRateId { get; set; }
+    public decimal PaymentExchangeRate { get; set; }
+    public decimal PaymentFunctionalAmount { get; set; }
+    public decimal SettlementFunctionalAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
     public DateTime AllocationDate { get; set; }
@@ -754,6 +766,19 @@ public class VendorPaymentAllocationCreateDto
     [Required]
     [Range(0.01, double.MaxValue)]
     public decimal AllocatedAmount { get; set; }
+
+    /// <summary>
+    /// Cash to consume in payment currency. Same-currency callers may omit it and the server will
+    /// use AllocatedAmount; cross-currency callers must state it so Finance never invents the
+    /// commercial conversion agreed with the supplier or bank.
+    /// </summary>
+    public decimal? PaymentCurrencyAmount { get; set; }
+
+    /// <summary>
+    /// Optional approved invoice-currency rate for the settlement date. If omitted, Finance
+    /// resolves the active approved daily mid-rate from the tenant rate master.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
 
     public decimal DiscountAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
@@ -779,6 +804,11 @@ public class OutstandingVendorInvoiceDto
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal BalanceAmount { get; set; }
+    /// <summary>
+    /// Currency in which the payable balance is denominated. Payment-entry clients must use
+    /// this value instead of assuming that every outstanding invoice shares the bank currency.
+    /// </summary>
+    public string CurrencyCode { get; set; } = "GHS";
     public int DaysOverdue { get; set; }
     public decimal? EarlyPaymentDiscountPercentage { get; set; }
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }

@@ -342,6 +342,8 @@ export interface VendorPayment {
     paymentMethodName?: string;
     currencyCode: string;
     exchangeRate: number;
+    /** Approved rate-master row frozen when this payment was recorded. */
+    exchangeRateId?: string;
     bankAccountId?: string;
     bankAccountName?: string;
     chequeNumber?: string;
@@ -397,6 +399,8 @@ export interface VendorPaymentCreateRequest {
     paymentMethodId?: string;
     currencyCode?: string;
     exchangeRate?: number;
+    /** Optional approved rate selected by the UI; the API resolves the daily rate when omitted. */
+    exchangeRateId?: string;
     bankAccountId?: string;
     chequeNumber?: string;
     transactionReference?: string;
@@ -417,6 +421,17 @@ export interface VendorPaymentAllocation {
     vendorInvoiceId: string;
     invoiceNumber: string;
     allocatedAmount: number;
+    /** Amount consumed from the payment/bank currency; differs from allocatedAmount for FX settlement. */
+    paymentCurrencyAmount: number;
+    invoiceCurrencyCode: string;
+    paymentCurrencyCode: string;
+    isCrossCurrency: boolean;
+    invoiceSettlementExchangeRateId?: string;
+    invoiceSettlementExchangeRate: number;
+    paymentExchangeRateId?: string;
+    paymentExchangeRate: number;
+    paymentFunctionalAmount: number;
+    settlementFunctionalAmount: number;
     discountAmount: number;
     withholdingTaxAmount: number;
     allocationDate: string;
@@ -430,6 +445,9 @@ export interface VendorPaymentAllocation {
 export interface VendorPaymentAllocationCreateRequest {
     vendorInvoiceId: string;
     allocatedAmount: number;
+    /** Required when the payment currency and invoice currency differ. */
+    paymentCurrencyAmount?: number;
+    invoiceSettlementExchangeRateId?: string;
     discountAmount?: number;
     withholdingTaxAmount?: number;
     notes?: string;
@@ -853,6 +871,8 @@ export interface OutstandingVendorInvoice {
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
+    /** Currency of the invoice balance, used to expose cross-currency settlement explicitly. */
+    currencyCode: string;
     daysOverdue: number;
     earlyPaymentDiscountPercentage?: number;
     earlyPaymentDiscountDueDate?: string;

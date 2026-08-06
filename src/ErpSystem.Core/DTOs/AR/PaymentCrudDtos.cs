@@ -15,6 +15,7 @@ public class PaymentCreateDto
     public Guid? PaymentMethodId { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public Guid? BankAccountId { get; set; }
     public Guid? LiquidityAccountId { get; set; }
     public string? CheckNumber { get; set; }
@@ -163,6 +164,14 @@ public class InvoiceAllocationDto
 {
     public Guid InvoiceId { get; set; }
     public decimal AllocatedAmount { get; set; }
+
+    /// <summary>
+    /// Receipt-currency amount consumed by the invoice allocation. It defaults to
+    /// AllocatedAmount only for same-currency settlement.
+    /// </summary>
+    public decimal? PaymentCurrencyAmount { get; set; }
+
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
     public decimal DiscountAmount { get; set; }
     public string? Notes { get; set; }
 }

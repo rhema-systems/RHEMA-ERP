@@ -23,6 +23,43 @@ public class PaymentAllocation : BaseEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    /// <summary>
+    /// Portion of the receipt consumed by this allocation in receipt currency. AllocatedAmount
+    /// remains the invoice reduction in invoice currency; they only match for same-currency AR.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentCurrencyAmount { get; set; }
+
+    [Required]
+    [MaxLength(3)]
+    public string InvoiceCurrencyCode { get; set; } = "GHS";
+
+    [Required]
+    [MaxLength(3)]
+    public string PaymentCurrencyCode { get; set; } = "GHS";
+
+    public bool IsCrossCurrency { get; set; }
+
+    /// <summary>
+    /// Immutable approved-rate evidence and calculated functional values used by posting,
+    /// reversal, settlement read-model rebuilds, and audit traces.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal InvoiceSettlementExchangeRate { get; set; } = 1m;
+
+    public Guid? PaymentExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal PaymentExchangeRate { get; set; } = 1m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentFunctionalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal SettlementFunctionalAmount { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; } = 0;
 

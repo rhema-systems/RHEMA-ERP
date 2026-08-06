@@ -80,6 +80,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? PaymentMethodName { get; set; }
         public string CurrencyCode { get; set; } = string.Empty;
         public decimal ExchangeRate { get; set; }
+        public Guid? ExchangeRateId { get; set; }
         public Guid? BankAccountId { get; set; }
         public string? BankAccountName { get; set; }
         public Guid? LiquidityAccountId { get; set; }
@@ -143,6 +144,16 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid InvoiceId { get; set; }
         public string InvoiceNumber { get; set; } = string.Empty;
         public decimal AllocatedAmount { get; set; }
+        public decimal PaymentCurrencyAmount { get; set; }
+        public string InvoiceCurrencyCode { get; set; } = string.Empty;
+        public string PaymentCurrencyCode { get; set; } = string.Empty;
+        public bool IsCrossCurrency { get; set; }
+        public Guid? InvoiceSettlementExchangeRateId { get; set; }
+        public decimal InvoiceSettlementExchangeRate { get; set; }
+        public Guid? PaymentExchangeRateId { get; set; }
+        public decimal PaymentExchangeRate { get; set; }
+        public decimal PaymentFunctionalAmount { get; set; }
+        public decimal SettlementFunctionalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
         public DateTime AllocationDate { get; set; }
         public string? Notes { get; set; }

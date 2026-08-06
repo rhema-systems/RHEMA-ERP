@@ -436,7 +436,12 @@ export default function VendorPaymentDetailsPage() {
                                         {alloc.withholdingTaxAmount > 0 ? formatCurrency(alloc.withholdingTaxAmount, payment.currencyCode) : '-'}
                                     </div>
                                     <div className="col-span-2 text-right font-medium">
-                                        {formatCurrency(alloc.allocatedAmount, payment.currencyCode)}
+                                        <div>{formatCurrency(alloc.allocatedAmount, alloc.invoiceCurrencyCode || payment.currencyCode)}</div>
+                                        {alloc.isCrossCurrency && (
+                                            <div className="text-xs font-normal text-muted-foreground">
+                                                from {formatCurrency(alloc.paymentCurrencyAmount, alloc.paymentCurrencyCode || payment.currencyCode)}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ))}

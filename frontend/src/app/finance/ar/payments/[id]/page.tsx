@@ -166,8 +166,15 @@ export default function CustomerReceiptDetailsPage() {
                                         <tr key={allocation.id} className={`border-t ${allocation.isReversal ? 'bg-amber-50/60' : ''}`}>
                                             <td className="p-3 font-medium">{allocation.invoiceNumber} {allocation.isReversal && <Badge variant="outline" className="ml-2">Reversal</Badge>}</td>
                                             <td className="p-3">{format(new Date(allocation.allocationDate), 'MMM dd, yyyy')}</td>
-                                            <td className="p-3 text-right">{allocation.discountAmount ? formatCurrency(allocation.discountAmount, payment.currencyCode) : '-'}</td>
-                                            <td className="p-3 text-right">{formatCurrency(allocation.allocatedAmount, payment.currencyCode)}</td>
+                                            <td className="p-3 text-right">{allocation.discountAmount ? formatCurrency(allocation.discountAmount, allocation.invoiceCurrencyCode || payment.currencyCode) : '-'}</td>
+                                            <td className="p-3 text-right">
+                                                <div>{formatCurrency(allocation.allocatedAmount, allocation.invoiceCurrencyCode || payment.currencyCode)}</div>
+                                                {allocation.isCrossCurrency && (
+                                                    <div className="text-xs text-muted-foreground">
+                                                        from {formatCurrency(allocation.paymentCurrencyAmount, allocation.paymentCurrencyCode || payment.currencyCode)}
+                                                    </div>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))}
                                     {!payment.allocations?.length && <tr><td colSpan={4} className="p-4 text-center text-muted-foreground">No invoice allocations.</td></tr>}

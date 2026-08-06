@@ -165,6 +165,11 @@
     <Compile Include="Services\Finance\FinanceConcurrencyHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceSettingsMigrationGapTests.cs" />
     <Compile Include="Services\Finance\CrossCurrencyBankTransferMigrationTests.cs" />
+    <!-- Cross-currency settlement is a Finance release gate. Keep both pure arithmetic and
+         migration/backfill tests in the default suite so later project-file curation cannot
+         silently remove coverage that protects PR #30's accounting evidence. -->
+    <Compile Include="Services\Finance\CrossCurrencySettlementCalculatorTests.cs" />
+    <Compile Include="Services\Finance\CrossCurrencySettlementMigrationTests.cs" />
     <Compile Include="Services\Finance\FiscalYearCloseTests.cs" />
     <Compile Include="Services\Finance\FiscalYearDeletionGuardTests.cs" />
     <Compile Include="Services\Finance\FiscalPeriodModuleLockTests.cs" />

@@ -145,6 +145,8 @@ export interface CustomerPayment {
     status: 'Draft' | 'Approved' | 'Pending' | 'Posted' | 'Cleared' | 'Reversed' | 'Void' | 'Bounced';
     currencyCode: string;
     exchangeRate: number;
+    /** Approved rate-master row frozen when this receipt was recorded. */
+    exchangeRateId?: string;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string;
     withholdingTaxAmount: number;
@@ -186,6 +188,8 @@ export interface PaymentCreateRequest {
     transactionReference?: string;
     currencyCode: string;
     exchangeRate?: number;
+    /** Optional approved rate selected by the UI; the API resolves the daily rate when omitted. */
+    exchangeRateId?: string;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string;
     withholdingTaxAmount?: number;
@@ -205,6 +209,17 @@ export interface PaymentAllocation {
     invoiceId: string;
     invoiceNumber: string;
     allocatedAmount: number;
+    /** Amount consumed from the receipt currency; differs from allocatedAmount for FX settlement. */
+    paymentCurrencyAmount: number;
+    invoiceCurrencyCode: string;
+    paymentCurrencyCode: string;
+    isCrossCurrency: boolean;
+    invoiceSettlementExchangeRateId?: string;
+    invoiceSettlementExchangeRate: number;
+    paymentExchangeRateId?: string;
+    paymentExchangeRate: number;
+    paymentFunctionalAmount: number;
+    settlementFunctionalAmount: number;
     discountAmount?: number;
     allocationDate: string;
     notes?: string;
@@ -287,6 +302,9 @@ export interface PaymentAllocationRequest {
 export interface InvoiceAllocationRequest {
     invoiceId: string;
     allocatedAmount: number;
+    /** Required when the receipt currency and invoice currency differ. */
+    paymentCurrencyAmount?: number;
+    invoiceSettlementExchangeRateId?: string;
     discountAmount?: number;
     notes?: string;
 }
