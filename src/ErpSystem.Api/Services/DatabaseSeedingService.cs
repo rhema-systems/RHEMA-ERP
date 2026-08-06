@@ -45,6 +45,8 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
+        private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
@@ -101,7 +103,9 @@ namespace ErpSystem.Web.Services
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
             ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
-            IConfiguration? configuration = null)
+            IConfiguration? configuration = null,
+            AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
+            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null)
         {
             _context = context;
             _userManager = userManager;
@@ -112,6 +116,8 @@ namespace ErpSystem.Web.Services
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
+            _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
@@ -200,6 +206,12 @@ namespace ErpSystem.Web.Services
                     await _inventoryStatutoryReportSeeder.SeedAsync();
                 }
 
+                if (_auditComplianceReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC audit and compliance report catalogue is seeded...");
+                    await _auditComplianceReportSeeder.SeedAsync();
+                }
+
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
                 _logger.LogInformation("Ensuring EHC notification topics are seeded...");
                 try
@@ -245,6 +257,12 @@ namespace ErpSystem.Web.Services
                     // Seed finance data (currencies, accounts, fiscal years, settings)
                     _logger.LogInformation("Ensuring finance data is seeded...");
                     await SeedFinanceDataAsync();
+
+                    if (_procurementSupplierOnboardingTestSeeder is not null)
+                    {
+                        _logger.LogInformation("Ensuring supplier-onboarding end-to-end test prerequisites are seeded...");
+                        await _procurementSupplierOnboardingTestSeeder.SeedAsync();
+                    }
 
                     // Seed EHC helpdesk demo data (tickets, feedback, problems, service requests, channels, compliance)
                     _logger.LogInformation("Ensuring EHC helpdesk demo data is seeded...");

@@ -69,7 +69,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         if (workflows.Any(item => !item.IsPublished))
             issues.Add("TDC workflow templates remain missing or Draft until DEC-003/DEC-004 routes are approved and published.");
         if (activeAssignments == 0)
-            issues.Add("No active tenant-scoped TDC responsibility assignments exist.");
+            issues.Add("No active tenant-scoped warehouse or committee context assignments exist.");
 
         return new ProcurementAccessReadinessDto
         {
@@ -105,10 +105,10 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
     public async Task<IReadOnlyList<ProcurementAccessUserOptionDto>> GetUsersAsync(CancellationToken cancellationToken = default)
     {
         EnsureAdministrator();
+        var now = DateTime.UtcNow;
         return await UserTenants.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.Status == UserTenantStatus.Active &&
-                item.User.IsActive)
-            .Include(item => item.User)
+                (!item.ExpiresAt.HasValue || item.ExpiresAt > now) && item.User.IsActive)
             .AsNoTracking()
             .OrderBy(item => item.User.FirstName).ThenBy(item => item.User.LastName)
             .Select(item => new ProcurementAccessUserOptionDto
@@ -116,7 +116,12 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 UserId = item.UserId,
                 Username = item.User.UserName ?? string.Empty,
                 DisplayName = (item.User.FirstName + " " + item.User.LastName).Trim(),
-                IsActive = item.User.IsActive
+                IsActive = item.User.IsActive,
+                RoleNames = item.User.UserRoles
+                    .Where(link => link.Role.Name != null)
+                    .Select(link => link.Role.Name!)
+                    .OrderBy(name => name)
+                    .ToList()
             }).ToListAsync(cancellationToken);
     }
 
@@ -171,9 +176,22 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             ?? throw new ProcurementAccessConflictException($"Identity role '{roleDefinition.Code}' has not been provisioned.");
         var userBelongs = await UserTenants.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && item.UserId == request.UserId && !item.IsDeleted &&
-                item.Status == UserTenantStatus.Active && item.User.IsActive)
+                item.Status == UserTenantStatus.Active &&
+                (!item.ExpiresAt.HasValue || item.ExpiresAt > DateTime.UtcNow) && item.User.IsActive)
             .AnyAsync(cancellationToken);
         if (!userBelongs) throw new ProcurementAccessNotFoundException("The selected user is not active in the current tenant.");
+        if (request.IsActive)
+        {
+            var hasSecurityRole = await UserTenants.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && item.UserId == request.UserId && !item.IsDeleted &&
+                    item.Status == UserTenantStatus.Active &&
+                    (!item.ExpiresAt.HasValue || item.ExpiresAt > DateTime.UtcNow) && item.User.IsActive)
+                .SelectMany(item => item.User.UserRoles)
+                .AnyAsync(link => link.RoleId == configuredRole.RoleId, cancellationToken);
+            if (!hasSecurityRole)
+                throw new ProcurementAccessValidationException("SECURITY_ROLE_REQUIRED",
+                    $"Assign role '{roleDefinition.Code}' to the user in Security before adding its procurement scope or committee duty.");
+        }
 
         var warehouseRole = roleDefinition.PermissionCodes
             .Select(ProcurementAccessControlRegistry.FindPermission)
@@ -505,27 +523,35 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
         if (permission.IsWarehouseScoped && !request.WarehouseId.HasValue)
             throw new ProcurementAccessValidationException("WAREHOUSE_REQUIRED", "A warehouse ID is required for this permission.");
         var now = DateTime.UtcNow;
+        var securityRoleNames = await UserTenants.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && item.UserId == _currentUser.UserId && !item.IsDeleted &&
+                item.Status == UserTenantStatus.Active && (!item.ExpiresAt.HasValue || item.ExpiresAt > now) &&
+                item.User.IsActive)
+            .SelectMany(item => item.User.UserRoles)
+            .Where(link => link.Role.Name != null)
+            .Select(link => link.Role.Name!)
+            .Distinct()
+            .ToListAsync(cancellationToken);
         var assignments = await Assignments.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && item.UserId == _currentUser.UserId && !item.IsDeleted && item.IsActive &&
                 item.EffectiveFrom <= now && (!item.EffectiveTo.HasValue || item.EffectiveTo >= now))
             .Include(item => item.Warehouses.Where(scope => !scope.IsDeleted))
             .Include(item => item.Locations.Where(scope => !scope.IsDeleted))
             .AsNoTracking().ToListAsync(cancellationToken);
-        var roleNames = assignments.Select(item => item.RoleName).Distinct().ToList();
         var permittedRoles = await Permissions.GetQueryable(item =>
                 item.Name == permission.Code && !item.IsDeleted)
             .SelectMany(item => item.RolePermissions)
-            .Where(item => item.Role.Name != null && roleNames.Contains(item.Role.Name))
+            .Where(item => item.Role.Name != null && securityRoleNames.Contains(item.Role.Name))
             .Select(item => item.Role.Name!)
             .Distinct().ToListAsync(cancellationToken);
         var matches = assignments.Where(item => permittedRoles.Contains(item.RoleName)).ToList();
 
         var code = "ACCESS_ALLOWED";
-        var message = "The current actor has an active tenant-scoped responsibility assignment for this duty.";
-        if (matches.Count == 0)
+        var message = "The current actor's Security role grants this procurement privilege.";
+        if (permittedRoles.Count == 0)
         {
             code = "ACCESS_PERMISSION_DENIED";
-            message = "The current actor has no active tenant-scoped TDC responsibility assignment granting this permission.";
+            message = "The current actor has no Security role granting this procurement privilege.";
         }
         else if (permission.IsWarehouseScoped)
         {
@@ -540,11 +566,11 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             if (matches.Count == 0)
             {
                 code = "ACCESS_WAREHOUSE_DENIED";
-                message = "The current actor is not assigned to the requested warehouse.";
+                message = "The Security role grants this privilege, but the current actor has no effective procurement scope for the requested warehouse.";
             }
         }
 
-        if (matches.Count > 0 && request.RequireLocationScope && !request.LocationId.HasValue)
+        if (code == "ACCESS_ALLOWED" && permission.IsWarehouseScoped && request.RequireLocationScope && !request.LocationId.HasValue)
         {
             matches = matches.Where(item => item.LocationScopeMode == ProcurementLocationScopeMode.All).ToList();
             if (matches.Count == 0)
@@ -553,7 +579,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                 message = "An explicit assigned warehouse location is required for this operation.";
             }
         }
-        else if (matches.Count > 0 && request.LocationId.HasValue)
+        else if (code == "ACCESS_ALLOWED" && permission.IsWarehouseScoped && request.LocationId.HasValue)
         {
             var location = await WarehouseLocations.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId && item.Id == request.LocationId.Value &&
@@ -576,7 +602,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             }
         }
 
-        if (matches.Count > 0 && !string.IsNullOrWhiteSpace(request.CommitteeCode))
+        if (code == "ACCESS_ALLOWED" && !string.IsNullOrWhiteSpace(request.CommitteeCode))
         {
             var committee = await Committees.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId && item.Code == request.CommitteeCode.Trim() && !item.IsDeleted &&
@@ -607,7 +633,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             LocationId = request.LocationId,
             CommitteeCode = request.CommitteeCode?.Trim(),
             MatchedAssignmentIds = matches.Select(item => item.Id).ToList(),
-            MatchedRoles = matches.Select(item => item.RoleName).Distinct().ToList(),
+            MatchedRoles = permittedRoles,
             CorrelationId = correlationId,
             EvaluatedAtUtc = now
         };

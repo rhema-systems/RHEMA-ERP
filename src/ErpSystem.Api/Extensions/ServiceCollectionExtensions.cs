@@ -597,7 +597,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
             services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
                 provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAuditComplianceReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
             services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
+            services.AddScoped<IReportTemplateLifecycleService, ErpSystem.Data.Services.ReportTemplateLifecycleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentOutputService, ErpSystem.Api.Services.Documents.DocumentOutputService>();
             // Controlled cash/bank documents reuse the shared renderer but persist their own
             // one-original/many-replacement issue sequence and emitted-byte audit evidence.
@@ -1005,6 +1011,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodGuardService, ErpSystem.Core.Services.Procurement.ProcurementSodGuardService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAccessControlService, ErpSystem.Core.Services.Procurement.ProcurementAccessControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementControlEventService, ErpSystem.Core.Services.Procurement.ProcurementControlEventService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditRecordProvider, ErpSystem.Core.Services.Audit.PlatformAuditLogRecordProvider>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditRecordProvider, ErpSystem.Core.Services.Audit.ProcurementControlEventAuditRecordProvider>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditGovernanceService, ErpSystem.Core.Services.Audit.AuditGovernanceService>();
+            services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageContributor, ErpSystem.Core.Services.Audit.ProcurementInventoryAuditEventCoverageContributor>();
+            services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageService, ErpSystem.Core.Services.Audit.AuditEventCoverageService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAppSubmissionService, ErpSystem.Core.Services.Procurement.ProcurementAppSubmissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSpecificationTemplateService, ErpSystem.Core.Services.Procurement.ProcurementSpecificationTemplateService>();
             services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementCalendarService>();
@@ -1057,9 +1068,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPrequalificationService, ErpSystem.Core.Services.Procurement.ProcurementPrequalificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementSupplierOnboardingTestSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
@@ -1201,6 +1214,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
                         !ctx.User.IsInRole(Constants.Roles.ExternalUser)))
+                .AddPolicy("AuditGovernanceRead", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
+                .AddPolicy("AuditGovernanceManage", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("settings.update")))
                 .AddPolicy("Finance", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true

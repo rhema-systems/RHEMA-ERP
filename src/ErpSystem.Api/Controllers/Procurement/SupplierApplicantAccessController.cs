@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -133,7 +134,8 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         try
         {
             var tenant = await ResolveTenantAsync(request.TenantCode);
-            await EnsureCaptchaAsync(tenant.Id, request.RecaptchaToken, cancellationToken);
+            // CAPTCHA was completed when this single-use, attempt-limited OTP was
+            // requested. The OTP is the verification control for this second step.
             var channel = ParseChannel(request.Channel);
             var contact = NormalizeContact(channel, request.Contact);
             var verification = await _otp.VerifyOtpAsync(
@@ -165,52 +167,80 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 },
                 Correlation("verify-issue"),
                 cancellationToken);
-            var deliveryStatus = "Sent";
-            try
+            var paidPending = issued.FeeMode ==
+                    ProcurementSupplierOnboardingFeeMode.Paid &&
+                issued.TokenStatus ==
+                    ProcurementSupplierOnboardingTokenStatus.AwaitingPayment;
+            var resumed = issued.ResumedExistingApplication;
+            var restrictedSession = issued.RestrictedSession;
+            string? applicantSessionToken = null;
+            DateTime? applicantSessionExpiresAtUtc = null;
+            string? paymentSessionToken = null;
+            DateTime? paymentSessionExpiresAtUtc = null;
+            string deliveryStatus;
+            if (paidPending || resumed)
             {
-                var message =
-                    $"Supplier application {issued.RegistrationNumber}. " +
-                    $"Application token: {issued.PlaintextToken}. " +
-                    "Keep this token secure; it remains valid until the application is approved or rejected.";
-                if (channel == ProcurementSupplierApplicantVerificationChannel.Email)
+                if (!string.IsNullOrWhiteSpace(issued.PlaintextToken) ||
+                    restrictedSession is null ||
+                    restrictedSession.PaymentOnly != paidPending)
+                    throw new InvalidOperationException(
+                        "Supplier onboarding did not create the required restricted recovery session.");
+                applicantSessionToken = _jwt.Issue(restrictedSession);
+                applicantSessionExpiresAtUtc = restrictedSession.ExpiresAtUtc;
+                if (restrictedSession.PaymentOnly)
                 {
-                    await _notifications.SendEmailAsync(
-                        contact,
-                        "Your supplier application token",
-                        $"<p>{System.Net.WebUtility.HtmlEncode(message)}</p>",
-                        isHtml: true);
+                    paymentSessionToken = applicantSessionToken;
+                    paymentSessionExpiresAtUtc = applicantSessionExpiresAtUtc;
                 }
-                else
-                {
-                    await _sms.SendAsync(tenant.Id, contact, message, cancellationToken);
-                }
+                deliveryStatus = resumed
+                    ? "ExistingApplicationResumed"
+                    : "WithheldPendingPayment";
             }
-            catch
+            else
             {
-                deliveryStatus = "Failed";
-                _logger.LogWarning(
-                    "Supplier application-token delivery failed for registration {RegistrationId}",
-                    issued.RegistrationId);
+                if (string.IsNullOrWhiteSpace(issued.PlaintextToken))
+                    throw new InvalidOperationException(
+                        "An active free supplier application did not produce an application token.");
+                var delivery = await _applicantAccess.DeliverApplicationTokenAsync(
+                    issued.TokenId,
+                    issued.PlaintextToken,
+                    Correlation("token-delivery"),
+                    cancellationToken);
+                deliveryStatus = delivery.Status;
             }
 
-            return Created(
-                $"/api/procurement/supplier-applicant-access/verified-applications/{issued.RegistrationId}",
-                new
-                {
-                    issued.RegistrationId,
-                    issued.RegistrationNumber,
-                    issued.TokenId,
-                    issued.TokenReference,
-                    applicationToken = issued.PlaintextToken,
-                    issued.FeeMode,
-                    issued.TokenStatus,
-                    issued.PaymentStatus,
-                    issued.TotalAmount,
-                    issued.CurrencyCode,
-                    deliveryStatus,
-                    message =
-                        "The token is shown once and can be used repeatedly until the application is approved or rejected."
-                });
+            var payload = new
+            {
+                issued.RegistrationId,
+                issued.RegistrationNumber,
+                issued.TokenId,
+                issued.TokenReference,
+                applicationToken = paidPending || resumed ? null : issued.PlaintextToken,
+                applicantSessionToken,
+                applicantSessionExpiresAtUtc,
+                paymentSessionToken,
+                paymentSessionExpiresAtUtc,
+                paymentOnly = restrictedSession?.PaymentOnly ?? paidPending,
+                resumedExistingApplication = resumed,
+                issued.FeeMode,
+                issued.TokenStatus,
+                issued.PaymentStatus,
+                issued.TotalAmount,
+                issued.CurrencyCode,
+                deliveryStatus,
+                message = resumed
+                    ? paidPending
+                        ? "Your existing application was recovered after contact verification. Continue its pending payment; no duplicate application or token was created."
+                        : "Your existing application was recovered after contact verification. Continue the same application in the restricted portal."
+                    : paidPending
+                        ? "Contact verification is complete. Submit payment through the restricted payment session. The application token will be generated and delivered through the verified channel only after trusted payment verification."
+                        : "The token is shown once and can be used repeatedly until the application is approved or rejected."
+            };
+            return resumed
+                ? Ok(payload)
+                : Created(
+                    $"/api/procurement/supplier-applicant-access/verified-applications/{issued.RegistrationId}",
+                    payload);
         }
         catch (Exception exception)
         {
@@ -325,8 +355,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         {
             var session = await _applicantAccess.ValidateSessionAsync(
                 SessionReference(), Correlation("payment-session"), cancellationToken);
-            var result = await _tokens.RecordPaymentAsync(
-                session.TokenId, request, Correlation("payment"), cancellationToken);
+            var result = await _tokens.RecordApplicantPaymentAsync(
+                session.TokenId,
+                session.SessionId,
+                request,
+                Correlation("payment"),
+                cancellationToken);
             return Ok(result.Token);
         }
         catch (Exception exception)
@@ -364,7 +398,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 new ControlledFileUploadRequest
                 {
                     TenantId = session.TenantId,
-                    ActorUserId = session.SystemActorUserId,
+                    ActorUserId = session.ApplicantActorId,
                     ActorName = "Supplier Applicant",
                     Category = ControlledFileUploadCategories.DocumentManagement,
                     FileName = safeName,
@@ -380,7 +414,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     new CentralDocumentRepositoryRegistration
                     {
                         TenantId = session.TenantId,
-                        ActorUserId = session.SystemActorUserId,
+                        ActorUserId = session.ApplicantActorId,
                         ActorName = "Supplier Applicant",
                         FileUploadRecordId = upload.Record.Id,
                         SourceModule = "Procurement",
@@ -401,7 +435,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 await _controlledFiles.DeleteAsync(
                     session.TenantId,
                     upload.Record.Id,
-                    session.SystemActorUserId,
+                    session.ApplicantActorId,
                     cancellationToken);
                 throw;
             }
@@ -428,14 +462,14 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         ExpiryDate = expiryDate,
                         ChecksumSha256 = upload.ChecksumSha256
                     },
-                    session.SystemActorUserId);
+                    session.ApplicantActorId);
             }
             catch
             {
                 await _centralDocuments.DeleteAsync(
                     session.TenantId,
                     centralDocument.DocumentRecordId,
-                    session.SystemActorUserId,
+                    session.ApplicantActorId,
                     cancellationToken);
                 throw;
             }
@@ -560,13 +594,13 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     await _registrations.DeleteDocumentAsync(
                         session.RegistrationId,
                         documentId,
-                        session.SystemActorUserId);
+                        session.ApplicantActorId);
                     if (document.CentralDocumentRecordId.HasValue)
                     {
                         await _centralDocuments.DeleteAsync(
                             session.TenantId,
                             document.CentralDocumentRecordId.Value,
-                            session.SystemActorUserId,
+                            session.ApplicantActorId,
                             cancellationToken);
                     }
                     else if (document.FileUploadRecordId.HasValue)
@@ -574,7 +608,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                         await _controlledFiles.DeleteAsync(
                             session.TenantId,
                             document.FileUploadRecordId.Value,
-                            session.SystemActorUserId,
+                            session.ApplicantActorId,
                             cancellationToken);
                     }
                     await _unitOfWork.CommitAsync(cancellationToken);
@@ -806,11 +840,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         ProcurementSupplierApplicantVerificationChannel channel,
         string contact)
     {
-        var value = contact.Trim();
-        if (channel == ProcurementSupplierApplicantVerificationChannel.Email)
-            return value.ToLowerInvariant();
-        var prefix = value.StartsWith('+') ? "+" : string.Empty;
-        return prefix + string.Concat(value.Where(char.IsDigit));
+        return SupplierApplicantContactNormalizer.Normalize(channel, contact);
     }
 
     private static void ValidateContact(
@@ -823,11 +853,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 "SUPPLIER_APPLICANT_EMAIL_INVALID",
                 "Enter a valid email address.",
                 400);
+        var phoneDigits = contact.Count(char.IsDigit);
         if (channel == ProcurementSupplierApplicantVerificationChannel.Sms &&
-            contact.Count(char.IsDigit) < 8)
+            (!contact.StartsWith('+') || phoneDigits is < 8 or > 15))
             throw new ProcurementSupplierApplicantAccessException(
                 "SUPPLIER_APPLICANT_PHONE_INVALID",
-                "Enter a valid phone number.",
+                "Enter a valid phone number in Ghana national or E.164 format.",
                 400);
     }
 

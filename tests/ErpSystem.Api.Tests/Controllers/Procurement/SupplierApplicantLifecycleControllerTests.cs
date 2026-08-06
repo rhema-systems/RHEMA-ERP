@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Api.Services;
@@ -50,6 +51,17 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 PaymentStatus =
                     ProcurementSupplierOnboardingPaymentStatus.NotRequired,
                 CurrencyCode = "GHS"
+            });
+        access.Setup(item => item.DeliverApplicationTokenAsync(
+                It.IsAny<Guid>(),
+                "one-time-application-token",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantTokenDeliveryDto
+            {
+                ApplicantAccessFound = true,
+                Delivered = true,
+                Status = "Sent"
             });
         var tenants = new Mock<ITenantService>();
         tenants.Setup(item => item.GetTenantByCodeAsync("TDC"))
@@ -125,6 +137,136 @@ public sealed class SupplierApplicantLifecycleControllerTests
         captured.Contact.Should().Be("retained@example.test");
         captured.CompanyName.Should().BeEmpty();
         captured.RetainedRegistrationId.Should().Be(retainedRegistrationId);
+        captcha.Verify(item => item.EnsureCaptchaValidAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PaidVerifiedApplicationReturnsRestrictedSessionWithoutDisclosingToken(
+        bool resumed)
+    {
+        var tenantId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var tokenId = Guid.NewGuid();
+        var paymentSession = new SupplierApplicantSessionDto
+        {
+            SessionId = Guid.NewGuid(),
+            SessionReference = Guid.NewGuid(),
+            ApplicantActorId = Guid.NewGuid(),
+            TenantId = tenantId,
+            RegistrationId = registrationId,
+            TokenId = tokenId,
+            ExpiresAtUtc = DateTime.UtcNow.AddHours(1),
+            PaymentOnly = true
+        };
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.CreateVerifiedApplicationAsync(
+                It.IsAny<VerifyAndIssueSupplierApplicantTokenRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantTokenIssueDto
+            {
+                RegistrationId = registrationId,
+                RegistrationNumber = "PAID-APP-001",
+                TokenId = tokenId,
+                TokenReference = "TOK-PAID-001",
+                PlaintextToken = null,
+                FeeMode = ProcurementSupplierOnboardingFeeMode.Paid,
+                TokenStatus = ProcurementSupplierOnboardingTokenStatus.AwaitingPayment,
+                PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.Pending,
+                TotalAmount = 100m,
+                CurrencyCode = "GHS",
+                ResumedExistingApplication = resumed,
+                RestrictedSession = paymentSession
+            });
+        var tenants = new Mock<ITenantService>();
+        tenants.Setup(item => item.GetTenantByCodeAsync("TDC"))
+            .ReturnsAsync(new Tenant
+            {
+                Id = tenantId,
+                Code = "TDC",
+                Name = "TDC",
+                Status = TenantStatus.Active,
+                AllowSelfRegistration = true
+            });
+        var otp = new Mock<IOtpService>();
+        otp.Setup(item => item.VerifyOtpAsync(
+                tenantId,
+                OtpPurpose.SupplierApplicantVerification,
+                OtpChannel.Email,
+                "paid@example.test",
+                "123456",
+                true,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OtpVerifyResult(true, null));
+        var captcha = new Mock<ICaptchaVerificationService>();
+        captcha.Setup(item => item.EnsureCaptchaValidAsync(
+                tenantId,
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var jwt = new Mock<IProcurementSupplierApplicantJwtService>();
+        jwt.Setup(item => item.Issue(paymentSession))
+            .Returns("signed-payment-only-session");
+        var controller = new SupplierApplicantAccessController(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            tenants.Object,
+            otp.Object,
+            Mock.Of<ITenantSmsSender>(),
+            Mock.Of<INotificationService>(),
+            captcha.Object,
+            jwt.Object,
+            Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
+            Mock.Of<IFileStorageService>(),
+            TransactionalUnitOfWork().Object,
+            NullLogger<SupplierApplicantAccessController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var result = await controller.VerifyAndIssue(
+            new SupplierApplicantVerifyAndIssueRequest
+            {
+                TenantCode = "TDC",
+                Channel = "Email",
+                Contact = "paid@example.test",
+                OtpCode = "123456",
+                CompanyName = "Paid Applicant Ltd"
+            },
+            CancellationToken.None);
+
+        object? responseValue;
+        if (resumed)
+            responseValue = result.Should().BeOfType<OkObjectResult>().Subject.Value;
+        else
+            responseValue = result.Should().BeOfType<CreatedResult>().Subject.Value;
+        using var payload = JsonDocument.Parse(JsonSerializer.Serialize(responseValue));
+        payload.RootElement.GetProperty("applicationToken").ValueKind.Should()
+            .Be(JsonValueKind.Null);
+        payload.RootElement.GetProperty("paymentSessionToken").GetString().Should()
+            .Be("signed-payment-only-session");
+        payload.RootElement.GetProperty("applicantSessionToken").GetString().Should()
+            .Be("signed-payment-only-session");
+        payload.RootElement.GetProperty("paymentOnly").GetBoolean().Should().BeTrue();
+        payload.RootElement.GetProperty("resumedExistingApplication").GetBoolean()
+            .Should().Be(resumed);
+        access.Verify(item => item.DeliverApplicationTokenAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -140,10 +282,12 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var centralDocumentRecordId = Guid.NewGuid();
         var centralDocumentVersionId = Guid.NewGuid();
         var paymentMethodId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
         var session = new SupplierApplicantSessionDto
         {
+            SessionId = sessionId,
             SessionReference = sessionReference,
-            SystemActorUserId = actorId,
+            ApplicantActorId = actorId,
             TenantId = tenantId,
             RegistrationId = registrationId,
             TokenId = tokenId,
@@ -181,8 +325,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
         tokens.Setup(item => item.GetPaymentMethodsAsync(
                 tokenId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(paymentMethods);
-        tokens.Setup(item => item.RecordPaymentAsync(
+        tokens.Setup(item => item.RecordApplicantPaymentAsync(
                 tokenId,
+                sessionId,
                 It.IsAny<RecordProcurementSupplierOnboardingPaymentRequest>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -286,8 +431,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
             payment, CancellationToken.None);
         paymentResult.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().BeSameAs(pendingToken);
-        tokens.Verify(item => item.RecordPaymentAsync(
+        tokens.Verify(item => item.RecordApplicantPaymentAsync(
             tokenId,
+            sessionId,
             It.Is<RecordProcurementSupplierOnboardingPaymentRequest>(request =>
                 request.PaymentMethodId == paymentMethodId &&
                 request.PaymentReference == "MOMO-12345"),
@@ -362,8 +508,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierApplicantSessionDto
             {
+                SessionId = Guid.NewGuid(),
                 SessionReference = sessionReference,
-                SystemActorUserId = actorId,
+                ApplicantActorId = actorId,
                 TenantId = tenantId,
                 RegistrationId = registrationId,
                 TokenId = Guid.NewGuid(),
@@ -440,8 +587,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierApplicantSessionDto
             {
+                SessionId = Guid.NewGuid(),
                 SessionReference = sessionReference,
-                SystemActorUserId = Guid.NewGuid(),
+                ApplicantActorId = Guid.NewGuid(),
                 TenantId = Guid.NewGuid(),
                 RegistrationId = Guid.NewGuid(),
                 TokenId = Guid.NewGuid(),
@@ -484,8 +632,9 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SupplierApplicantSessionDto
             {
+                SessionId = Guid.NewGuid(),
                 SessionReference = sessionReference,
-                SystemActorUserId = Guid.NewGuid(),
+                ApplicantActorId = Guid.NewGuid(),
                 TenantId = Guid.NewGuid(),
                 RegistrationId = Guid.NewGuid(),
                 TokenId = Guid.NewGuid(),

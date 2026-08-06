@@ -262,19 +262,19 @@ export interface CreateBusinessPartnerDto {
   bankAccountNumber?: string;
   bankBranchCode?: string;
   paymentTerms?: string;
-  paymentTermId?: string;
+  paymentTermId?: string | null;
   currency?: string;
   creditLimit?: number;
   notes?: string;
   categoryIds?: string[];
   specializationIds?: string[];
   // Parent/Hierarchy
-  parentId?: string;
+  parentId?: string | null;
   // Customer-Specific Fields
   customerType?: string; // Retail, Wholesale, Corporate, Government
   defaultDiscount?: number;
   priceList?: string;
-  salesRepresentativeId?: string;
+  salesRepresentativeId?: string | null;
   salesTerritory?: string;
   isTaxExempt?: boolean;
   taxExemptionNumber?: string;
@@ -304,9 +304,9 @@ export interface UpdateBusinessPartnerDto {
   specializationIds?: string[];
   currency?: string;
   paymentTerms?: string;
-  paymentTermId?: string;
+  paymentTermId?: string | null;
   priceList?: string;
-  parentId?: string;
+  parentId?: string | null;
 }
 
 export interface PagedResult<T> {
@@ -318,6 +318,23 @@ export interface PagedResult<T> {
 }
 
 const BUSINESS_PARTNER_DROPDOWN_PAGE_SIZE = 100;
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const normalizeOptionalGuid = (
+  value: string | null | undefined,
+  fieldLabel: string
+): string | undefined => {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (!GUID_PATTERN.test(normalized)) {
+    throw new Error(`${fieldLabel} must be selected from the available options.`);
+  }
+
+  return normalized;
+};
 
 const getBusinessPartnerDropdownItems = (result: unknown): BusinessPartnerDto[] => {
   if (Array.isArray(result)) {
@@ -472,10 +489,12 @@ export const businessPartnerService = {
 
   // Create new partner
   async createPartner(data: CreateBusinessPartnerDto): Promise<BusinessPartnerDetailDto> {
-    // Clean up the data - convert empty strings to undefined for nullable Guid fields
+    // ASP.NET nullable Guid properties accept a Guid or null, but not an empty string.
     const cleanedData = {
       ...data,
-      parentId: data.parentId && data.parentId !== '' ? data.parentId : undefined,
+      parentId: normalizeOptionalGuid(data.parentId, 'Parent business partner'),
+      paymentTermId: normalizeOptionalGuid(data.paymentTermId, 'Payment term'),
+      salesRepresentativeId: normalizeOptionalGuid(data.salesRepresentativeId, 'Sales representative'),
     };
     
     const response = await fetch(`${API_BASE_URL}/procurement/business-partners`, {
@@ -490,10 +509,11 @@ export const businessPartnerService = {
 
   // Update partner
   async updatePartner(id: string, data: UpdateBusinessPartnerDto): Promise<BusinessPartnerDetailDto> {
-    // Clean up the data - convert empty strings to undefined for nullable Guid fields
+    // Keep nullable Guid fields out of JSON when the corresponding optional select is blank.
     const cleanedData = {
       ...data,
-      parentId: data.parentId && data.parentId !== '' ? data.parentId : undefined,
+      parentId: normalizeOptionalGuid(data.parentId, 'Parent business partner'),
+      paymentTermId: normalizeOptionalGuid(data.paymentTermId, 'Payment term'),
     };
     
     const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {

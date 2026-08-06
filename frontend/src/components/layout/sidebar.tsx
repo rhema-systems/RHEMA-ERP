@@ -522,6 +522,11 @@ export const navigationItems: NavItem[] = [
         icon: Users,
         children: [
           {
+            title: 'Supplier Application Portal',
+            href: '/supplier-application',
+            icon: Globe2,
+          },
+          {
             title: 'Business Partners',
             href: '/procurement/business-partners',
             icon: Users,
@@ -546,7 +551,7 @@ export const navigationItems: NavItem[] = [
             title: 'Supplier Onboarding Tokens',
             href: '/administration/procurement/supplier-onboarding-tokens',
             icon: KeyRound,
-            permissions: ['procurement.supplier.manage', 'procurement.supplier.review'],
+            permissions: ['procurement.supplier.manage', 'procurement.supplier.review', 'procurement.supplier.payment.verify'],
             accessMode: 'any',
           },
           {
@@ -1084,6 +1089,7 @@ export const navigationItems: NavItem[] = [
       { title: 'Financial Reports', href: '/reports/financial', icon: CreditCard },
       { title: 'Procurement Reports', href: '/reports/purchasing', icon: ShoppingCart },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
+      { title: 'Audit & Compliance Reports', href: '/reports/audit-compliance', icon: ShieldCheck },
       { title: 'Sales Reports', href: '/reports/sales', icon: ShoppingCart },
       { title: 'HR Reports', href: '/reports/human-resources', icon: UserCheck },
       { title: 'Estate Reports', href: '/reports/estate', icon: Home },
@@ -1245,7 +1251,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Executable Policies', href: '/administration/procurement/policy-sets', icon: ShieldCheck },
           { title: 'Policy Simulator', href: '/administration/procurement/compliance-simulator', icon: ClipboardCheck },
           { title: 'SOD Controls', href: '/administration/procurement/sod-controls', icon: Swords },
-          { title: 'Access & Committees', href: '/administration/procurement/access-controls', icon: Users },
+          { title: 'Scopes & Committees', href: '/administration/procurement/access-controls', icon: Users },
           { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },
           { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
           { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },

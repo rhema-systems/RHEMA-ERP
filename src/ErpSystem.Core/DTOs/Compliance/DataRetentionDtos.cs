@@ -9,15 +9,17 @@ public sealed class DataRetentionPolicyDto
     public int SecurityLogRetentionDays { get; set; }
     public int NotificationRetentionDays { get; set; }
     public int EhcAuditEventRetentionDays { get; set; }
+    public int WorkflowAuditRetentionDays { get; set; }
 }
 
 public sealed class UpdateDataRetentionPolicyRequestDto
 {
     public bool Enabled { get; set; } = true;
-    public int AuditLogRetentionDays { get; set; } = 365;
+    public int AuditLogRetentionDays { get; set; } = 2555;
     public int SecurityLogRetentionDays { get; set; } = 365;
     public int NotificationRetentionDays { get; set; } = 180;
     public int EhcAuditEventRetentionDays { get; set; } = 365;
+    public int WorkflowAuditRetentionDays { get; set; } = 2555;
 }
 
 public sealed class DataRetentionJobRunDto
@@ -31,4 +33,3 @@ public sealed class DataRetentionJobRunDto
     public string? CountsJson { get; set; }
     public string? Error { get; set; }
 }
-

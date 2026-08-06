@@ -40,7 +40,7 @@ const define = (
 ): ProcurementDecisionFormDefinition => ({
   decisionKey,
   fields: [...fields, ...effectiveFields],
-  defaults: { ...defaults, effectiveFrom: '', effectiveTo: '' },
+  defaults: { ...defaults, effectiveFrom: '' },
 });
 
 export const procurementDecisionFormRegistry: Record<string, ProcurementDecisionFormDefinition> = {
@@ -106,15 +106,22 @@ export const procurementDecisionFormRegistry: Record<string, ProcurementDecision
     { key: 'amount', label: 'Amount', type: 'number', min: 0, step: 0.01, required: true },
     { key: 'currencyCode', label: 'Currency', type: 'select', options: currencies, required: true },
     { key: 'taxPercent', label: 'Tax percent', type: 'number', min: 0, max: 100, step: 0.01, required: true },
-    { key: 'paymentChannels', label: 'Allowed payment-method codes', type: 'textList' },
-    { key: 'revenueAccountId', label: 'Fee revenue account ID', type: 'text' },
-    { key: 'taxAccountId', label: 'Tax liability account ID', type: 'text' },
-    { key: 'exemptionWorkflowDefinitionId', label: 'Exemption workflow definition ID', type: 'text' },
-    { key: 'receiptNumberFormat', label: 'Receipt number format', type: 'text', required: true },
+    { key: 'paymentChannels', label: 'Allowed payment methods', type: 'textList' },
+    { key: 'revenueAccountId', label: 'Fee revenue account', type: 'text' },
+    { key: 'taxAccountId', label: 'Tax liability account', type: 'text' },
+    { key: 'exemptionWorkflowDefinitionId', label: 'Exemption workflow definition', type: 'text' },
+    { key: 'receiptNumberFormat', label: 'Receipt number format', type: 'text', required: true, placeholder: 'SUP-REC-{YYYY}-{######}' },
     { key: 'exemptionRule', label: 'Exemption rule', type: 'textarea', required: true },
     { key: 'refundRule', label: 'Refund rule', type: 'textarea', required: true },
     { key: 'renewalRule', label: 'Renewal rule', type: 'textarea', required: true },
-  ], { mode: 'paid', amount: 0, currencyCode: 'GHS', taxPercent: 0, paymentChannels: [] }),
+  ], {
+    mode: 'paid',
+    amount: 0,
+    currencyCode: 'GHS',
+    taxPercent: 0,
+    paymentChannels: [],
+    receiptNumberFormat: 'SUP-REC-{YYYY}-{######}',
+  }),
   'DEC-008': define('DEC-008', [
     { key: 'documentType', label: 'Document type', type: 'text', required: true },
     { key: 'signatureMode', label: 'Signature mode', type: 'select', options: [{ value: 'electronic', label: 'Electronic' }, { value: 'uploadedManualEvidence', label: 'Uploaded manual evidence' }, { value: 'electronicOrManualEvidence', label: 'Electronic or manual evidence' }], required: true },
@@ -253,4 +260,21 @@ export function displayDecisionFormField(value: unknown, type: ProcurementDecisi
   if (type === 'textList') return Array.isArray(value) ? value.join(', ') : '';
   if (value === undefined || value === null) return '';
   return String(value);
+}
+
+export function normalizeDecisionFormValue(
+  decisionKey: string,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const definition = procurementDecisionFormRegistry[decisionKey];
+  if (!definition) throw new Error(`Unknown procurement decision key ${decisionKey}`);
+
+  const normalized = { ...value };
+  for (const field of definition.fields) {
+    if (field.type === 'date' && !field.required && (normalized[field.key] === '' || normalized[field.key] === null)) {
+      delete normalized[field.key];
+    }
+  }
+
+  return normalized;
 }

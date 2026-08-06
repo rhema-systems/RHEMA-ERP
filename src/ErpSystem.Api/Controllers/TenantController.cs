@@ -24,6 +24,7 @@ public class TenantController : ControllerBase
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
     private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
+    private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
 
     public TenantController(
         ITenantService tenantService,
@@ -36,7 +37,8 @@ public class TenantController : ControllerBase
         ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
         ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
-        InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null)
+        InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
+        AuditComplianceReportSeeder? auditComplianceReportSeeder = null)
     {
         _tenantService = tenantService;
         _logger = logger;
@@ -49,6 +51,7 @@ public class TenantController : ControllerBase
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
         _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
+        _auditComplianceReportSeeder = auditComplianceReportSeeder;
     }
 
     /// <summary>
@@ -223,6 +226,10 @@ public class TenantController : ControllerBase
             if (_inventoryStatutoryReportSeeder is not null)
             {
                 await _inventoryStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
+            }
+            if (_auditComplianceReportSeeder is not null)
+            {
+                await _auditComplianceReportSeeder.SeedTenantAsync(createdTenant.Id);
             }
 
             // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.

@@ -104,6 +104,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                 RegistrationId = fixture.Registration.Id
             },
             "issue-paid");
+        var paymentSession = await fixture.SeedApplicantSessionAsync(issued.Token.Id);
         var submitted = await fixture.Service.RecordPaymentAsync(
             issued.Token.Id,
             new RecordProcurementSupplierOnboardingPaymentRequest
@@ -142,7 +143,6 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             new ReconcileProcurementSupplierOnboardingPaymentRequest
             {
                 ReconciliationReference = "PROVIDER-CONFIRM-0001",
-                Notes = "Trusted provider settlement confirmed.",
                 RowVersion = pending.RowVersion
             },
             "verify-payment");
@@ -152,19 +152,21 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             new ReconcileProcurementSupplierOnboardingPaymentRequest
             {
                 ReconciliationReference = "PROVIDER-CONFIRM-0001",
-                Notes = "Trusted provider settlement confirmed.",
                 RowVersion = pending.RowVersion
             },
             "verify-payment");
 
-        verified.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
-        verified.PaymentStatus.Should()
+        verified.Token.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
+        verified.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
-        verified.Payments.Should().ContainSingle(item =>
+        verified.PlaintextToken.Should().NotBeNullOrWhiteSpace();
+        verified.Token.Generation.Should().Be(2);
+        verified.Token.Payments.Should().ContainSingle(item =>
             item.ReceiptNumber == "SUP-ONB-2026-00001" &&
             item.PostingEventId == fixture.PostingEventId &&
             item.JournalEntryId == fixture.JournalEntryId &&
-            item.ReconciliationReference == "PROVIDER-CONFIRM-0001");
+            item.ReconciliationReference == "PROVIDER-CONFIRM-0001" &&
+            item.ReconciliationNotes == null);
         fixture.PostedRequest.Should().NotBeNull();
         fixture.PostedRequest!.OriginModuleCode.Should().Be("PROC");
         fixture.PostedRequest.SourceDocumentType.Should()
@@ -174,7 +176,11 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         fixture.PostedRequest.Lines.Should().Contain(item =>
             item.TransactionTag == "SupplierOnboardingFee" &&
             item.AccountId == fixture.RevenueAccount!.Id);
-        verificationReplay.Payments.Should().ContainSingle();
+        verificationReplay.Token.Payments.Should().ContainSingle();
+        verificationReplay.PlaintextToken.Should().BeNull();
+        (await fixture.Context.ProcurementSupplierApplicantSessions
+                .SingleAsync(item => item.Id == paymentSession.Id))
+            .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Revoked);
         fixture.FinancePostCount.Should().Be(1,
             "verification replays must not create duplicate Finance postings");
     }
@@ -403,10 +409,10 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             },
             "approve-exemption");
 
-        approved.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
-        approved.PaymentStatus.Should()
+        approved.Token.Status.Should().Be(ProcurementSupplierOnboardingTokenStatus.Active);
+        approved.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Exempt);
-        approved.Exemptions.Should().ContainSingle(item =>
+        approved.Token.Exemptions.Should().ContainSingle(item =>
             item.Status == ProcurementSupplierOnboardingExemptionStatus.Approved);
     }
 
@@ -466,11 +472,101 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             },
             "reconcile-payment");
 
-        reconciled.PaymentStatus.Should()
+        reconciled.Token.PaymentStatus.Should()
             .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
-        replay.Payments.Should().ContainSingle(item =>
+        replay.Token.Payments.Should().ContainSingle(item =>
             item.ReconciliationReference == "BANK-RECON-001" &&
             item.Status == ProcurementSupplierOnboardingPaymentStatus.Reconciled);
+    }
+
+    [Fact]
+    public async Task ApplicantPaymentUsesSessionLineageAndDoesNotImpersonateAdministrator()
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SeedSystemActor();
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-for-applicant-lineage");
+        var session = await fixture.SeedApplicantSessionAsync(issued.Token.Id);
+        fixture.SetUser(session.ApplicantAccessId);
+        fixture.UseApplicantSession(
+            fixture.Registration.Id,
+            issued.Token.Id,
+            session.SessionReference);
+
+        var submitted = await fixture.Service.RecordApplicantPaymentAsync(
+            issued.Token.Id,
+            session.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod!.Id,
+                PaymentReference = "MOMO-APPLICANT-001",
+                RowVersion = issued.Token.RowVersion
+            },
+            "applicant-payment-lineage");
+
+        var submittedDto = submitted.Token.Payments.Should().ContainSingle().Subject;
+        submittedDto.SubmittedByApplicant.Should().BeTrue();
+        submittedDto.SubmittedByApplicantSessionId.Should().Be(session.Id);
+        var stored = await fixture.Context.ProcurementSupplierOnboardingPayments
+            .SingleAsync(item => item.Id == submittedDto.Id);
+        stored.CreatedBy.Should().Be("Verified Supplier Applicant");
+        stored.CreatedById.Should().BeNull(
+            "a pre-approval applicant is not an ERP user and must not borrow an administrator ID");
+        stored.SubmittedByApplicantSessionId.Should().Be(session.Id);
+
+        fixture.SetExternal(false);
+        fixture.SetUser(fixture.UserId);
+        var reconciled = await fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            stored.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "CASHIER-VERIFIED-001",
+                Notes = "Applicant payment independently verified by the cashier.",
+                RowVersion = submittedDto.RowVersion
+            },
+            "verify-applicant-payment");
+
+        reconciled.Token.PaymentStatus.Should()
+            .Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
+        fixture.FinancePostCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ApplicantPaymentRejectsASessionFromAnotherToken()
+    {
+        await using var fixture = new Fixture(paid: true);
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-for-session-boundary");
+        var session = await fixture.SeedApplicantSessionAsync(issued.Token.Id);
+        fixture.SetUser(session.ApplicantAccessId);
+        fixture.UseApplicantSession(
+            fixture.Registration.Id,
+            issued.Token.Id,
+            session.SessionReference);
+
+        var action = () => fixture.Service.RecordApplicantPaymentAsync(
+            Guid.NewGuid(),
+            session.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod!.Id,
+                PaymentReference = "MOMO-CROSS-TOKEN",
+                RowVersion = issued.Token.RowVersion
+            },
+            "reject-cross-token-session");
+
+        await action.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenAuthorizationException>();
+        fixture.FinancePostCount.Should().Be(0);
     }
 
     private static ProcurementControlEventEvidenceReference Evidence(string reference) =>

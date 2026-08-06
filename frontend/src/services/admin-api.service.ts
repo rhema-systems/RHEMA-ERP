@@ -90,6 +90,17 @@ export interface Role {
   updatedAt: Date;
 }
 
+export interface AdminPermission {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  category: string;
+  isSystemPermission: boolean;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
 export interface TenantModule {
   id: string;
   moduleName: string;
@@ -879,6 +890,10 @@ class AdminApiService {
 
   async getRoles(): Promise<Role[]> {
     return apiService.request<Role[]>('/role');
+  }
+
+  async getPermissions(): Promise<AdminPermission[]> {
+    return apiService.request<AdminPermission[]>('/permission');
   }
 
   async createRole(roleData: Partial<Role>): Promise<Role> {

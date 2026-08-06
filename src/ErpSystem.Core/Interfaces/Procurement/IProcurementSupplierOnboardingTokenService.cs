@@ -14,9 +14,10 @@ public interface IProcurementSupplierOnboardingTokenService
     Task<ProcurementSupplierOnboardingTokenDto> ValidateApplicantTokenAsync(Guid tenantId, string plaintextToken, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierOnboardingTokenIssueResultDto> ReissueAsync(Guid id, ReissueProcurementSupplierOnboardingTokenRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierOnboardingTokenIssueResultDto> RecordPaymentAsync(Guid id, RecordProcurementSupplierOnboardingPaymentRequest request, string correlationId, CancellationToken cancellationToken = default);
-    Task<ProcurementSupplierOnboardingTokenDto> ReconcilePaymentAsync(Guid tokenId, Guid paymentId, ReconcileProcurementSupplierOnboardingPaymentRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementSupplierOnboardingTokenIssueResultDto> RecordApplicantPaymentAsync(Guid id, Guid applicantSessionId, RecordProcurementSupplierOnboardingPaymentRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementSupplierOnboardingTokenIssueResultDto> ReconcilePaymentAsync(Guid tokenId, Guid paymentId, ReconcileProcurementSupplierOnboardingPaymentRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierOnboardingTokenDto> RequestExemptionAsync(Guid id, RequestProcurementSupplierOnboardingExemptionRequest request, string correlationId, CancellationToken cancellationToken = default);
-    Task<ProcurementSupplierOnboardingTokenDto> DecideExemptionAsync(Guid tokenId, Guid exemptionId, DecideProcurementSupplierOnboardingExemptionRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementSupplierOnboardingTokenIssueResultDto> DecideExemptionAsync(Guid tokenId, Guid exemptionId, DecideProcurementSupplierOnboardingExemptionRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task ExpireForTerminalRegistrationAsync(Guid registrationId, string terminalStatus, Guid actorUserId, string correlationId, CancellationToken cancellationToken = default);
 }
 

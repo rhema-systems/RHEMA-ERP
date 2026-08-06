@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
@@ -38,6 +38,8 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { QUERY_KEYS } from '@/config/api';
+import { resolveSupplierOnboardingAccess } from '@/lib/procurement-supplier-onboarding-access';
 import { procurementSupplierOnboardingTokenService as service } from '@/services/procurement-supplier-onboarding-token.service';
 import type {
   SupplierOnboardingExemption,
@@ -73,8 +75,8 @@ const dateTime = (value?: string) =>
 export default function SupplierOnboardingTokensPage() {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
-  const canManage = hasPermission('procurement.supplier.manage');
-  const canReview = hasPermission('procurement.supplier.review');
+  const { canManage, canReview, canVerifyPayment } =
+    resolveSupplierOnboardingAccess(hasPermission);
   const [filters, setFilters] = useState<SupplierOnboardingTokenSearch>({
     page: 1,
     pageSize: 25,
@@ -92,6 +94,12 @@ export default function SupplierOnboardingTokensPage() {
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [plaintextToken, setPlaintextToken] = useState<string>();
+
+  useEffect(() => {
+    // Sensitive actions must reflect current Security grants instead of a stale
+    // user snapshot retained from before an administrator changed the role.
+    void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.CURRENT_USER });
+  }, [queryClient]);
 
   const summary = useQuery({
     queryKey: ['supplier-onboarding-token-summary'],
@@ -175,7 +183,7 @@ export default function SupplierOnboardingTokensPage() {
           detail.data.id,
           targetPayment.id,
           reference.trim(),
-          notes.trim(),
+          notes.trim() || undefined,
           targetPayment.rowVersion
         );
         message = 'Payment verified, posted, receipted, and reconciled';
@@ -463,7 +471,7 @@ export default function SupplierOnboardingTokensPage() {
                     Request exemption
                   </Button>
                 )}
-                {canReview && verifiablePayment && (
+                {canVerifyPayment && verifiablePayment && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -566,13 +574,56 @@ export default function SupplierOnboardingTokensPage() {
               <div><Label>{action === 'reissue' ? 'Rotation reason' : 'Exemption reason'}</Label><Textarea value={reason} onChange={(event) => setReason(event.target.value)} /></div>
             )}
             {action === 'reconcile' && (
-              <div><Label>Trusted provider or cashier reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} /></div>
+              <Alert className="border-blue-200 bg-blue-50 text-blue-950 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
+                <ShieldCheck className="h-4 w-4" />
+                <AlertTitle>Independent payment verification required</AlertTitle>
+                <AlertDescription>
+                  Confirm becomes available after both audit fields below are completed.
+                  Use evidence obtained independently from the provider, bank, POS or
+                  official cashier record—not an unverified reference supplied only by
+                  the applicant.
+                </AlertDescription>
+              </Alert>
+            )}
+            {action === 'reconcile' && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-verification-reference">
+                  Provider transaction / cashier receipt reference <span aria-hidden="true">*</span>
+                </Label>
+                <Input
+                  id="payment-verification-reference"
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value)}
+                  placeholder="MoMo transaction ID, bank reference, POS or cashier receipt no."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter the independently verifiable transaction or official receipt
+                  reference used to match this payment.
+                </p>
+              </div>
             )}
             {(action === 'exemption' || action === 'approve-exemption' || action === 'reject-exemption') && (
               <div><Label>Shared evidence reference</Label><Input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Document or external evidence reference" /></div>
             )}
-            {(action === 'reconcile' || action === 'approve-exemption' || action === 'reject-exemption') && (
-              <div><Label>{action === 'reconcile' ? 'Verification notes' : 'Independent decision comment'}</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
+            {action === 'reconcile' && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-verification-note">
+                  Payment verification note <span className="text-muted-foreground">(optional)</span>
+                </Label>
+                <Textarea
+                  id="payment-verification-note"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="How the amount, payer, date and settlement or receipt were independently confirmed"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Add context when the trusted reference alone does not fully explain
+                  the verification, such as a mismatch, manual or offline check.
+                </p>
+              </div>
+            )}
+            {(action === 'approve-exemption' || action === 'reject-exemption') && (
+              <div><Label>Independent decision comment</Label><Textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></div>
             )}
           </div>
           <DialogFooter>
@@ -585,7 +636,7 @@ export default function SupplierOnboardingTokensPage() {
                 (action === 'payment' && !paymentMethodId) ||
                 ((action === 'reissue' || action === 'exemption') && !reason.trim()) ||
                 ((action === 'reconcile' || action === 'exemption' || action === 'approve-exemption' || action === 'reject-exemption') && !reference.trim()) ||
-                ((action === 'reconcile' || action === 'approve-exemption' || action === 'reject-exemption') && !notes.trim())
+                ((action === 'approve-exemption' || action === 'reject-exemption') && !notes.trim())
               }
             >
               {busy ? 'Working…' : 'Confirm'}

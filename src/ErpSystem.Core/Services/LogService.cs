@@ -212,24 +212,10 @@ public class AuditLogService : IAuditLogService
 
     public async Task DeleteOldAuditLogsAsync(DateTime beforeDate)
     {
-        try
-        {
-            var tenantId = GetRequiredAuditTenantId();
-            var oldLogs = await _unitOfWork.Repository<AuditLog>()
-                .FindAsync(a => a.TenantId == tenantId && a.CreatedAt < beforeDate);
-            foreach (var log in oldLogs)
-            {
-                await _unitOfWork.Repository<AuditLog>().DeleteAsync(log.Id);
-            }
-            await _unitOfWork.SaveChangesAsync();
-
-            _logger.LogInformation("Deleted {Count} audit logs older than {Date}", oldLogs.Count(), beforeDate);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting old audit logs");
-            throw;
-        }
+        _ = GetRequiredAuditTenantId();
+        await Task.CompletedTask;
+        throw new NotSupportedException(
+            "Audit logs are immutable and cannot be deleted. Use the shared audit archive lifecycle instead.");
     }
 
     private Guid GetRequiredAuditTenantId()

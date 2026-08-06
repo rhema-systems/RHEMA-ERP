@@ -41,6 +41,7 @@ interface PublicCaptchaChallengeProps {
   id: string;
   enabled: boolean;
   provider: CaptchaProvider;
+  theme?: 'light' | 'dark';
   recaptchaSiteKey?: string | null;
   hCaptchaSiteKey?: string | null;
   onChange(token: string | null): void;
@@ -56,6 +57,7 @@ export const PublicCaptchaChallenge = forwardRef<
     id,
     enabled,
     provider,
+    theme = 'dark',
     recaptchaSiteKey,
     hCaptchaSiteKey,
     onChange,
@@ -108,7 +110,7 @@ export const PublicCaptchaChallenge = forwardRef<
       }
       hcaptchaWidgetIdRef.current = window.hcaptcha.render(container, {
         sitekey: hCaptchaSiteKey,
-        theme: 'dark',
+        theme,
         callback: (token) => onChangeRef.current(token),
         'expired-callback': () => onChangeRef.current(null),
         'error-callback': () => onChangeRef.current(null),
@@ -147,7 +149,7 @@ export const PublicCaptchaChallenge = forwardRef<
       }
       hcaptchaWidgetIdRef.current = null;
     };
-  }, [enabled, hCaptchaSiteKey, provider]);
+  }, [enabled, hCaptchaSiteKey, provider, theme]);
 
   if (!enabled) return null;
 
@@ -181,7 +183,7 @@ export const PublicCaptchaChallenge = forwardRef<
       <ReCAPTCHA
         ref={recaptchaRef}
         sitekey={siteKey}
-        theme="dark"
+        theme={theme}
         onChange={onChange}
         onExpired={() => onChange(null)}
         onErrored={() => onChange(null)}
