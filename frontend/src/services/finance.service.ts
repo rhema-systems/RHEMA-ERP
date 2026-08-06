@@ -609,6 +609,13 @@ class FinanceService {
   }
 
   /**
+   * Open a previously unopened Future period.
+   */
+  async openPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+    return apiService.post<FiscalPeriod>(`${this.baseUrl}/periods/${id}/open`, { reason });
+  }
+
+  /**
    * Validate period can be closed
    */
   async validatePeriodClose(id: string): Promise<PeriodCloseValidationDto> {
@@ -640,7 +647,7 @@ class FinanceService {
    * Unlock period
    */
   async unlockPeriod(id: string, reason: string): Promise<void> {
-    return apiService.post(`${this.baseUrl}/periods/${id}/unlock`, reason);
+    return apiService.post(`${this.baseUrl}/periods/${id}/unlock`, { reason });
   }
 
   // ==========================================

@@ -490,6 +490,103 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             return period == null ? null : MapFiscalPeriodToDto(period);
         }
 
+        public Task<FiscalPeriodDto> OpenPeriodAsync(
+            PeriodOpenRequestDto request,
+            CancellationToken cancellationToken = default)
+            => ExecutePeriodCloseControlAsync(
+                request.FiscalPeriodId,
+                () => OpenPeriodCoreAsync(request, cancellationToken),
+                cancellationToken);
+
+        private async Task<FiscalPeriodDto> OpenPeriodCoreAsync(
+            PeriodOpenRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            var reason = request.Reason?.Trim() ?? string.Empty;
+            if (reason.Length < 10)
+                throw new InvalidOperationException("The period opening reason must contain at least 10 characters.");
+
+            var period = await _unitOfWork.Repository<FiscalPeriod>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == request.FiscalPeriodId)
+                .Include(item => item.FiscalYear)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new ArgumentException($"Fiscal period with Id '{request.FiscalPeriodId}' not found.");
+
+            if (period.IsOpen || string.Equals(period.PeriodStatus, "Open", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Period is already open.");
+            if (period.IsClosed || string.Equals(period.PeriodStatus, "Closed", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A closed period must use the controlled reopen request and approval workflow.");
+            if (period.IsLocked || string.Equals(period.PeriodStatus, "Locked", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A locked period cannot be opened.");
+            if (!string.Equals(period.PeriodStatus, "Future", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Only Future periods can be opened; this period is '{period.PeriodStatus}'.");
+
+            var fiscalYear = period.FiscalYear;
+            if (fiscalYear.IsClosed || fiscalYear.IsLocked ||
+                string.Equals(fiscalYear.Status, "Closed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(fiscalYear.Status, "Locked", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(fiscalYear.Status, "Archived", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("A period cannot be opened inside a closed, locked, or archived fiscal year.");
+            }
+
+            // Multiple adjacent periods may remain open while Finance completes the prior close.
+            // We still prohibit chronological gaps: every earlier period must first leave Future
+            // status, either by being opened or by completing its own controlled lifecycle.
+            var firstUnopenedEarlierPeriod = await _unitOfWork.Repository<FiscalPeriod>()
+                .GetQueryable(item => item.TenantId == TenantId &&
+                    item.FiscalYearId == period.FiscalYearId &&
+                    item.StartDate < period.StartDate &&
+                    item.PeriodStatus == "Future")
+                .OrderBy(item => item.StartDate)
+                .Select(item => new { item.PeriodCode, item.PeriodName })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (firstUnopenedEarlierPeriod != null)
+            {
+                throw new InvalidOperationException(
+                    $"Open earlier period '{firstUnopenedEarlierPeriod.PeriodCode} - {firstUnopenedEarlierPeriod.PeriodName}' before opening {period.PeriodCode}.");
+            }
+
+            var beforeOpen = BuildPeriodAuditSnapshot(period);
+            var now = DateTime.UtcNow;
+            period.PeriodStatus = "Open";
+            period.Status = "Open";
+            period.IsOpen = true;
+            period.IsClosed = false;
+            period.UpdatedAt = now;
+            period.UpdatedBy = UserName;
+            period.LastModifiedById = CurrentUserId;
+
+            // A fiscal year may be provisioned in Future state with every period unopened. Opening
+            // its first period activates the year; subsequent adjacent opens leave it active.
+            if (string.Equals(fiscalYear.Status, "Future", StringComparison.OrdinalIgnoreCase))
+                fiscalYear.Status = "Open";
+            fiscalYear.IsActive = true;
+            fiscalYear.UpdatedAt = now;
+            fiscalYear.UpdatedBy = UserName;
+            fiscalYear.LastModifiedById = CurrentUserId;
+
+            await _unitOfWork.Repository<FiscalPeriod>().UpdateAsync(period);
+            await _unitOfWork.Repository<FiscalYear>().UpdateAsync(fiscalYear);
+            await RecordPeriodAuditAsync(
+                FinanceAuditEvents.AccountingPeriodOpened,
+                period,
+                beforeValues: beforeOpen,
+                afterValues: BuildPeriodAuditSnapshot(period),
+                reason: reason,
+                comment: "Future accounting period opened for posting.",
+                context: new { fiscalYear.FiscalYearCode, AllowsConcurrentAdjacentPeriods = true },
+                cancellationToken: cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Fiscal period {Code} opened by {User}. Reason: {Reason}",
+                period.PeriodCode,
+                UserName,
+                reason);
+            return MapFiscalPeriodToDto(period);
+        }
+
         public Task<FinanceCloseWorkspaceDto> EvaluatePeriodCloseWorkspaceAsync(
             Guid periodId,
             CancellationToken cancellationToken = default)

@@ -328,7 +328,8 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - Open: Transactions can be posted
         /// - Closed: No new transactions, can be reopened
         /// - Locked: Permanently closed, cannot be reopened
-        /// - Only one period should be open at a time (best practice)
+        /// - Multiple adjacent periods may be open while Finance completes the prior close
+        /// - Future periods must be opened chronologically; gaps are not permitted
         ///
         /// **Authorization:** Requires Finance.Read permission
         /// </remarks>
@@ -652,6 +653,40 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Opens a Future fiscal period for transaction posting.
+        /// </summary>
+        /// <remarks>
+        /// Opening is not reopening: a Future period has no signed close certificate to protect,
+        /// while a Closed period must use the independent reopen request/review workflow.
+        /// Earlier periods do not have to be closed, but they must already have left Future status
+        /// so Finance cannot create a chronological gap in the accounting calendar.
+        /// </remarks>
+        [HttpPost("periods/{id}/open")]
+        [Authorize(Policy = FinancePermissions.OpenAccountingPeriods)]
+        public async Task<ActionResult<FiscalPeriodDto>> OpenPeriod(Guid id, [FromBody] PeriodOpenRequestDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Period open request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                dto.FiscalPeriodId = id;
+                return Ok(await _fiscalPeriodService.OpenPeriodAsync(dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        /// <summary>
         /// Closes a fiscal period, preventing new transactions from being posted.
         /// </summary>
         /// <remarks>
@@ -804,6 +839,38 @@ namespace ErpSystem.Api.Controllers.Finance
             catch (Exception ex)
             {
                 return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Applies the global lock to an already closed fiscal period.
+        /// </summary>
+        /// <remarks>
+        /// The service has always treated this as the highest protection level. Exposing the
+        /// matching endpoint keeps the HTTP contract aligned with the service and frontend client.
+        /// </remarks>
+        [HttpPost("periods/{id}/lock")]
+        [Authorize(Policy = FinancePermissions.AdministerFinance)]
+        public async Task<ActionResult<FiscalPeriodDto>> LockPeriod(Guid id, [FromBody] PeriodLockRequestDto dto)
+        {
+            if (dto == null)
+                return BadRequest("Period lock request is required.");
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            try
+            {
+                dto.FiscalPeriodId = id;
+                return Ok(await _fiscalPeriodService.LockPeriodAsync(dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
             }
         }
 
