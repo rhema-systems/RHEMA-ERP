@@ -5,6 +5,25 @@ using System.ComponentModel.DataAnnotations;
 namespace ErpSystem.Core.DTOs.Finance
 {
     /// <summary>
+    /// Request DTO for opening a period that has never been closed.
+    /// Closed periods use the separate maker-checker reopen workflow because they may already
+    /// support signed financial statements or other certified downstream reporting.
+    /// </summary>
+    public class PeriodOpenRequestDto
+    {
+        [Required]
+        public Guid FiscalPeriodId { get; set; }
+
+        /// <summary>
+        /// Business reason retained in the Finance audit trail.
+        /// </summary>
+        [Required]
+        [MinLength(10)]
+        [MaxLength(500)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Request DTO for closing a fiscal period
     /// </summary>
     public class PeriodCloseRequestDto

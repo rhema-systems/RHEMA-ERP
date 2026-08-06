@@ -109,6 +109,7 @@ public static class FinancePermissions
     public const string ManageFinancialStatementLayouts = "Finance.Reports.Layouts.Manage";
     public const string PublishFinancialStatementLayouts = "Finance.Reports.Layouts.Publish";
 
+    public const string OpenAccountingPeriods = "Finance.PeriodOpen";
     public const string CloseAccountingPeriods = "Finance.PeriodClose";
     public const string ReopenAccountingPeriods = "Finance.PeriodReopen";
     public const string ApproveAccountingPeriodReopens = "Finance.PeriodReopen.Approve";
@@ -219,6 +220,7 @@ public static class FinancePermissions
         new(ManageFinancialStatementLayouts, "Manage Financial Statement Layouts", "Create and maintain draft financial statement layouts and mappings.", CategoryReporting),
         new(PublishFinancialStatementLayouts, "Publish Financial Statement Layouts", "Validate and publish versioned financial statement layouts for production reporting.", CategoryReporting),
 
+        new(OpenAccountingPeriods, "Open Accounting Periods", "Open future fiscal periods for controlled transaction posting.", CategoryPeriodClose),
         new(CloseAccountingPeriods, "Close Accounting Periods", "Close fiscal periods after month-end checks.", CategoryPeriodClose),
         new(ReopenAccountingPeriods, "Reopen Accounting Periods", "Reopen previously closed fiscal periods.", CategoryPeriodClose),
         new(ApproveAccountingPeriodReopens, "Approve Accounting Period Reopens", "Independently approve or reject controlled accounting-period reopen requests.", CategoryPeriodClose),

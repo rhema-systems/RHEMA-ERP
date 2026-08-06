@@ -151,6 +151,7 @@ public static class FinanceAuditEvents
     public const string BankReconciliationCancelled = "Finance.BankReconciliation.Cancelled";
     public const string BankDepositConfirmed = "Finance.BankDeposit.Confirmed";
 
+    public const string AccountingPeriodOpened = "Finance.AccountingPeriod.Opened";
     public const string AccountingPeriodCloseRequested = "Finance.AccountingPeriod.CloseRequested";
     public const string AccountingPeriodCloseCycleEvaluated = "Finance.AccountingPeriod.CloseCycleEvaluated";
     public const string AccountingPeriodClosePrepared = "Finance.AccountingPeriod.ClosePrepared";

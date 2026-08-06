@@ -351,6 +351,9 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> FiscalPeriodPolicy(string action)
         => action switch
         {
+            // Opening a never-used Future period is deliberately separate from both month-end
+            // close preparation and maker-checker reopening of a certified Closed period.
+            "OpenPeriod" => One(FinancePermissions.OpenAccountingPeriods),
             "EvaluatePeriodCloseWorkspace" or "PreparePeriodClose" or "UpdateFinanceCloseTask" or
             "ClosePeriod" or "CloseFiscalYear" or "LockPeriodForModule" => One(FinancePermissions.CloseAccountingPeriods),
             "RequestPeriodReopen" or "ReopenFiscalYear" or "UnlockPeriod" or "UnlockPeriodForModule" => One(FinancePermissions.ReopenAccountingPeriods),
