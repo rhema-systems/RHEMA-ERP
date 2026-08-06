@@ -664,6 +664,11 @@ export interface CreateFiscalYearDto {
 }
 
 // Fiscal Period
+export interface PeriodOpenRequestDto {
+    fiscalPeriodId: string;
+    reason: string;
+}
+
 export interface PeriodCloseRequestDto {
     fiscalPeriodId: string;
     closingNotes?: string;

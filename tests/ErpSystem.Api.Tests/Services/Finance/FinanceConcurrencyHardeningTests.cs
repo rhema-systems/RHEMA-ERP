@@ -11,6 +11,44 @@ public sealed class FinanceConcurrencyHardeningTests
 {
     [Fact]
     [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinancePeriodCloseIssue32")]
+    public void PeriodCloseTransactions_ShouldStartInsideSqlServerExecutionStrategy()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Fiscal",
+            "FiscalPeriodService.cs"));
+        var templateControl = ExtractMember(
+            source,
+            "private async Task<T> ExecuteCloseTemplateControlAsync<T>",
+            "private async Task EnsureDefaultCloseTemplatesAsync");
+        var periodControl = ExtractMember(
+            source,
+            "private async Task<T> ExecutePeriodCloseControlAsync<T>",
+            "private async Task<FinanceCloseCycle> GetOrCreateActiveCloseCycleAsync");
+
+        foreach (var control in new[] { templateControl, periodControl })
+        {
+            var strategyIndex = control.IndexOf("ExecuteInStrategyAsync", StringComparison.Ordinal);
+            var transactionIndex = control.IndexOf("BeginTransactionAsync", StringComparison.Ordinal);
+            strategyIndex.Should().BeGreaterThan(-1, "SQL Server retry handling must own the complete close-control unit");
+            transactionIndex.Should().BeGreaterThan(strategyIndex, "the user transaction must be created inside the execution strategy");
+            control.Should().Contain("IsolationLevel.Serializable", "period-close decisions still require serializable isolation");
+            control.Should().Contain("AcquireTransactionLockAsync", "the transaction-scoped application lock remains the concurrency boundary");
+            control.Should().Contain("RollbackAsync", "a failed retry attempt must release transaction state before it can be repeated");
+        }
+
+        periodControl.Should().Contain("FIN:CLOSE:", "evaluation, certification, close and reopen actions must share a period lock");
+        templateControl.Should().Contain("FIN:CLOSE-TEMPLATE:", "template version allocation must retain its tenant-wide lock");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
     public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseAtomicBalanceDeltas()
     {

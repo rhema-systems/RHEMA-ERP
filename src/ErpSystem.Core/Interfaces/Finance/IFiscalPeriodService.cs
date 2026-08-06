@@ -60,7 +60,13 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task<FiscalPeriodDto?> GetPeriodForDateAsync(DateTime transactionDate, CancellationToken cancellationToken = default);
 
-        // Period Close/Reopen Operations
+        // Period Open/Close/Reopen Operations
+
+        /// <summary>
+        /// Opens a previously unopened Future period. This is intentionally distinct from
+        /// reopening a certified Closed period, which requires maker-checker approval.
+        /// </summary>
+        Task<FiscalPeriodDto> OpenPeriodAsync(PeriodOpenRequestDto request, CancellationToken cancellationToken = default);
         
         /// <summary>
         /// Closes a fiscal period.

@@ -23,6 +23,7 @@ export default function FiscalPeriodsPage() {
     const { toast } = useToast();
     const { hasPermission } = useAuth();
     const canAdminister = hasPermission('Finance.Admin');
+    const canOpen = hasPermission('Finance.PeriodOpen');
     const canClose = hasPermission('Finance.PeriodClose');
     const canReopen = hasPermission('Finance.PeriodReopen');
     const canApproveReopen = hasPermission('Finance.PeriodReopen.Approve');
@@ -32,6 +33,7 @@ export default function FiscalPeriodsPage() {
     const [loading, setLoading] = useState(true);
     const [filterYear, setFilterYear] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
+    const [openReason, setOpenReason] = useState('');
     const [reopenReason, setReopenReason] = useState('');
     const [reopenImpactAssessment, setReopenImpactAssessment] = useState('');
     const [reopenReviewComment, setReopenReviewComment] = useState('');
@@ -77,6 +79,37 @@ export default function FiscalPeriodsPage() {
         if (filterYear !== 'all' && !period.periodName.includes(filterYear) && !period.startDate.startsWith(filterYear)) return false;
         return true;
     });
+
+    const handleOpenPeriod = async (periodId: string) => {
+        const reason = openReason.trim();
+        if (reason.length < 10) {
+            toast({
+                title: 'Opening reason required',
+                description: 'Provide at least 10 characters explaining why the period is being opened.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        try {
+            setProcessing(true);
+            await financeDataService.openFiscalPeriod(periodId, reason);
+            toast({
+                title: 'Period opened',
+                description: 'The period is now available for posting, subject to its module locks.'
+            });
+            setOpenReason('');
+            await loadData();
+        } catch (error: any) {
+            toast({
+                title: 'Period could not be opened',
+                description: error.message || 'The accounting period opening failed.',
+                variant: 'destructive',
+            });
+        } finally {
+            setProcessing(false);
+        }
+    };
 
     const handleRequestReopen = async (periodId: string) => {
         const reason = reopenReason.trim();
@@ -168,12 +201,6 @@ export default function FiscalPeriodsPage() {
         } finally {
             setProcessing(false);
         }
-    };
-
-    // Note: Global locking usually not exposed in UI directly to standard users, 
-    // but implemented here for completeness matching previous mock
-    const handleLockPeriod = async (periodId: string) => {
-        toast({ title: "Info", description: "Global locking requires admin verification. Use Module Locks for granular control." });
     };
 
     const formatDate = (dateString: string) => {
@@ -363,6 +390,43 @@ export default function FiscalPeriodsPage() {
                                                         )}
 
                                                         {/* Period Actions */}
+                                                        {(canOpen || canAdminister) && status === 'Future' && (
+                                                            <Dialog>
+                                                                <DialogTrigger asChild>
+                                                                    <Button variant="outline" size="sm" onClick={() => setOpenReason('')}>
+                                                                        <Unlock className="mr-1 h-4 w-4" />
+                                                                        Open
+                                                                    </Button>
+                                                                </DialogTrigger>
+                                                                <DialogContent>
+                                                                    <DialogHeader>
+                                                                        <DialogTitle>Open {period.periodName}?</DialogTitle>
+                                                                        <DialogDescription>
+                                                                            Earlier periods may remain open for closing adjustments, but no earlier period may still be Future.
+                                                                        </DialogDescription>
+                                                                    </DialogHeader>
+                                                                    <div className="space-y-2 py-4">
+                                                                        <Label htmlFor={`open-reason-${period.id}`}>Opening reason</Label>
+                                                                        <Textarea
+                                                                            id={`open-reason-${period.id}`}
+                                                                            value={openReason}
+                                                                            onChange={(event) => setOpenReason(event.target.value)}
+                                                                            placeholder="e.g. Open for August 2026 operational postings"
+                                                                            maxLength={500}
+                                                                            rows={3}
+                                                                        />
+                                                                    </div>
+                                                                    <DialogFooter>
+                                                                        <DialogClose asChild>
+                                                                            <Button variant="outline" disabled={processing}>Cancel</Button>
+                                                                        </DialogClose>
+                                                                        <Button onClick={() => handleOpenPeriod(period.id)} disabled={processing}>
+                                                                            {processing ? 'Opening...' : 'Open Period'}
+                                                                        </Button>
+                                                                    </DialogFooter>
+                                                                </DialogContent>
+                                                            </Dialog>
+                                                        )}
                                                         {canClose && status === 'Open' && (
                                                             <CloseWorkspaceDialog period={period} onClosed={loadData} />
                                                         )}

@@ -254,9 +254,10 @@ class FinanceDataService {
         return apiService.get<FiscalPeriod>(`/finance/fiscal-periods/${id}`);
     }
 
-    async openFiscalPeriod(id: string, reason: string, affectedPeriodAssessment: string): Promise<FinancePeriodReopenRequest> {
-        // Opening a certified period is a maker-checker request, never a direct state change.
-        return this.requestFiscalPeriodReopen(id, reason, affectedPeriodAssessment);
+    async openFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
+        // Future-to-Open is a first-use lifecycle transition. Certified Closed periods continue
+        // through requestFiscalPeriodReopen so their signed close evidence remains protected.
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/open`, { reason });
     }
 
     async evaluateFiscalPeriodClose(id: string): Promise<FinanceCloseWorkspace> {

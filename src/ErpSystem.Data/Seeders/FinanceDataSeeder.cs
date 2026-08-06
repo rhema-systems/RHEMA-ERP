@@ -395,20 +395,9 @@ public class FinanceDataSeeder
 
         if (existing != null)
         {
-            existing.FiscalYearName = $"Fiscal Year {year}";
-            existing.Year = year;
-            existing.StartDate = startDate;
-            existing.EndDate = endDate;
-            existing.TotalDays = DateTime.IsLeapYear(year) ? 366 : 365;
-            existing.FiscalYearType = "Calendar";
-            existing.Status = status;
-            existing.IsActive = !isClosed;
-            existing.NumberOfPeriods = 12;
-            existing.BaseCurrency = "GHS";
-            existing.IsClosed = isClosed;
-            existing.IsLocked = isLocked;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedBy = "System";
+            // Fiscal-year status is operational accounting data, not reference data. Development
+            // seeding runs repeatedly, so updating an existing row here could silently reopen a
+            // year that Finance deliberately closed or locked. Seed only missing demo years.
             return;
         }
 
@@ -448,14 +437,18 @@ public class FinanceDataSeeder
         {
             await EnsureCalendarMonthPeriodAsync(tenantId, fy2025Id, 2025, month, "Closed", true, true, baseDate);
 
-            var status = month < 6 ? "Closed" : month == 6 ? "Open" : "Future";
+            // The fresh FY2026 demo baseline keeps the July-August operational window open.
+            // Earlier periods are closed and later periods remain Future so developers exercise
+            // the real open transition instead of bypassing period controls with an all-year-open
+            // fixture.
+            var status = month <= 6 ? "Closed" : month <= 8 ? "Open" : "Future";
             await EnsureCalendarMonthPeriodAsync(
                 tenantId,
                 fy2026Id,
                 2026,
                 month,
                 status,
-                isClosed: month < 6,
+                isClosed: month <= 6,
                 isLocked: false,
                 createdAt: baseDate);
         }
@@ -512,18 +505,9 @@ public class FinanceDataSeeder
 
         if (existing != null)
         {
-            existing.PeriodName = periodName;
-            existing.PeriodCode = $"{startDate:yyyy-MM}";
-            existing.StartDate = startDate;
-            existing.EndDate = endDate;
-            existing.Status = status;
-            existing.PeriodStatus = status;
-            existing.IsOpen = string.Equals(status, "Open", StringComparison.OrdinalIgnoreCase);
-            existing.IsClosed = isClosed;
-            existing.IsLocked = isLocked;
-            existing.PeriodDays = (endDate.Date - startDate.Date).Days + 1;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedBy = "System";
+            // Never rewrite an existing accounting period. Its status, dates and lock state may
+            // represent posted transactions, a signed close, or an audit decision. Re-running
+            // demo seeding must therefore be missing-only and operationally idempotent.
             return;
         }
 
