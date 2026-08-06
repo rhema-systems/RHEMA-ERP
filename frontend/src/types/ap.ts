@@ -433,7 +433,9 @@ export interface VendorPaymentAllocation {
     paymentFunctionalAmount: number;
     settlementFunctionalAmount: number;
     discountAmount: number;
+    discountFunctionalAmount: number;
     withholdingTaxAmount: number;
+    withholdingTaxFunctionalAmount: number;
     allocationDate: string;
     notes?: string;
     isReversal: boolean;

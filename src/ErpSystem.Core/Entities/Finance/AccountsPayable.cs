@@ -476,6 +476,10 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(5,2)")]
     public decimal WithholdingTaxRate { get; set; }
 
+    /// <summary>
+    /// Functional/statutory WHT roll-up derived from the active invoice allocations. It must not
+    /// be interpreted as payment-currency cash when a payment settles foreign-currency invoices.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
@@ -514,6 +518,10 @@ public class VendorPayment : TenantEntity
 
     // ── Early-Payment Discount Applied ──────────────────────────────────
 
+    /// <summary>
+    /// Functional-currency roll-up of allocation discounts. Native discount evidence remains on
+    /// each allocation because one payment may settle invoices in different currencies.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountTaken { get; set; }
 
@@ -681,8 +689,22 @@ public class VendorPaymentAllocation : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; }
 
+    /// <summary>
+    /// Functional-currency value of the invoice-currency discount. Keeping this beside the
+    /// native amount prevents later rate-master edits from changing the posted deduction.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DiscountFunctionalAmount { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
+
+    /// <summary>
+    /// Functional/statutory value of this invoice's WHT component. The header remains a roll-up;
+    /// allocation evidence is authoritative when invoices or payment currency differ.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxFunctionalAmount { get; set; }
 
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 

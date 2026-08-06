@@ -63,6 +63,26 @@ public class PaymentAllocation : BaseEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; } = 0;
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DiscountFunctionalAmount { get; set; }
+
+    /// <summary>
+    /// WHT and VAT-WHT are stored per invoice in invoice currency. Their functional snapshots
+    /// are the statutory/reporting values and allow a single receipt to settle invoices in
+    /// different currencies without inventing a header currency for the deductions.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal WithholdingTaxFunctionalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VatWithholdingAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal VatWithholdingFunctionalAmount { get; set; }
+
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(500)]

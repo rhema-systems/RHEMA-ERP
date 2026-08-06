@@ -173,6 +173,8 @@ public class InvoiceAllocationDto
 
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
     public decimal DiscountAmount { get; set; }
+    public decimal WithholdingTaxAmount { get; set; }
+    public decimal VatWithholdingAmount { get; set; }
     public string? Notes { get; set; }
 }
 

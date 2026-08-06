@@ -32,6 +32,34 @@ public static class CrossCurrencySettlementCalculator
         decimal invoiceDeductionAmount,
         decimal paymentExchangeRate,
         decimal invoiceSettlementExchangeRate)
+        => CalculateWithDeductions(
+            paymentCurrency,
+            invoiceCurrency,
+            paymentCurrencyAmount,
+            invoiceCurrencyAmount,
+            invoiceDeductionAmount,
+            invoiceWithholdingAmount: 0m,
+            invoiceVatWithholdingAmount: 0m,
+            paymentExchangeRate,
+            invoiceSettlementExchangeRate);
+
+    /// <summary>
+    /// Builds settlement evidence when the invoice is reduced by separately accountable
+    /// deductions. Each component is rounded independently because discount, WHT and VAT-WHT
+    /// post to different accounts and must reconcile individually to their statutory evidence.
+    /// All deduction inputs are expressed in invoice currency; their approved conversion is the
+    /// same invoice-settlement rate frozen on the allocation.
+    /// </summary>
+    public static CrossCurrencySettlementAmounts CalculateWithDeductions(
+        string paymentCurrency,
+        string invoiceCurrency,
+        decimal paymentCurrencyAmount,
+        decimal invoiceCurrencyAmount,
+        decimal invoiceDiscountAmount,
+        decimal invoiceWithholdingAmount,
+        decimal invoiceVatWithholdingAmount,
+        decimal paymentExchangeRate,
+        decimal invoiceSettlementExchangeRate)
     {
         var normalizedPaymentCurrency = NormalizeCurrency(paymentCurrency);
         var normalizedInvoiceCurrency = NormalizeCurrency(invoiceCurrency);
@@ -42,10 +70,11 @@ public static class CrossCurrencySettlementCalculator
 
         if (paymentCurrencyAmount < 0m || invoiceCurrencyAmount < 0m)
             throw new InvalidOperationException("Settlement cash amounts cannot be negative.");
-        if (invoiceDeductionAmount < 0m)
+        if (invoiceDiscountAmount < 0m || invoiceWithholdingAmount < 0m || invoiceVatWithholdingAmount < 0m)
             throw new InvalidOperationException("Settlement deductions cannot be negative.");
         if (paymentExchangeRate <= 0m || invoiceSettlementExchangeRate <= 0m)
             throw new InvalidOperationException("Settlement exchange rates must be greater than zero.");
+        var invoiceDeductionAmount = invoiceDiscountAmount + invoiceWithholdingAmount + invoiceVatWithholdingAmount;
         if (invoiceCurrencyAmount + invoiceDeductionAmount <= 0m)
             throw new InvalidOperationException("Settlement must reduce the invoice by a positive amount.");
         if (isCrossCurrency && (paymentCurrencyAmount <= 0m || invoiceCurrencyAmount <= 0m))
@@ -67,7 +96,14 @@ public static class CrossCurrencySettlementCalculator
         }
 
         var paymentFunctionalAmount = RoundMoney(paymentCurrencyAmount * paymentExchangeRate);
-        var deductionFunctionalAmount = RoundMoney(invoiceDeductionAmount * invoiceSettlementExchangeRate);
+        // These values are intentionally rounded independently. Combining the deductions before
+        // rounding can leave a one-cent difference between the control line and the three GL
+        // deduction lines, which would make a valid settlement fail the posting-engine balance.
+        var discountFunctionalAmount = RoundMoney(invoiceDiscountAmount * invoiceSettlementExchangeRate);
+        var withholdingFunctionalAmount = RoundMoney(invoiceWithholdingAmount * invoiceSettlementExchangeRate);
+        var vatWithholdingFunctionalAmount = RoundMoney(invoiceVatWithholdingAmount * invoiceSettlementExchangeRate);
+        var deductionFunctionalAmount = RoundMoney(
+            discountFunctionalAmount + withholdingFunctionalAmount + vatWithholdingFunctionalAmount);
 
         // The settlement value is the actual functional value surrendered or received: cash at
         // the payment rate plus non-cash deductions at the invoice settlement rate. This is the
@@ -87,6 +123,9 @@ public static class CrossCurrencySettlementCalculator
             RoundRate(invoiceSettlementExchangeRate),
             paymentFunctionalAmount,
             deductionFunctionalAmount,
+            discountFunctionalAmount,
+            withholdingFunctionalAmount,
+            vatWithholdingFunctionalAmount,
             settlementFunctionalAmount,
             invoiceSettlementFunctionalAmount);
     }
@@ -120,5 +159,8 @@ public sealed record CrossCurrencySettlementAmounts(
     decimal InvoiceSettlementExchangeRate,
     decimal PaymentFunctionalAmount,
     decimal DeductionFunctionalAmount,
+    decimal DiscountFunctionalAmount,
+    decimal WithholdingFunctionalAmount,
+    decimal VatWithholdingFunctionalAmount,
     decimal SettlementFunctionalAmount,
     decimal InvoiceSettlementFunctionalAmount);

@@ -749,7 +749,9 @@ public class VendorPaymentAllocationDto
     public decimal PaymentFunctionalAmount { get; set; }
     public decimal SettlementFunctionalAmount { get; set; }
     public decimal DiscountAmount { get; set; }
+    public decimal DiscountFunctionalAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
+    public decimal WithholdingTaxFunctionalAmount { get; set; }
     public DateTime AllocationDate { get; set; }
     public string? Notes { get; set; }
     public bool IsReversal { get; set; }

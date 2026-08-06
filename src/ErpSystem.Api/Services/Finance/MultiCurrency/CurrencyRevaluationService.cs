@@ -816,7 +816,9 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         }
 
         var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
-        var settledForeignAmount = RoundMoney(allocation.AllocatedAmount + allocation.DiscountAmount);
+        var settledForeignAmount = RoundMoney(
+            allocation.AllocatedAmount + allocation.DiscountAmount +
+            allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount);
         if (settledForeignAmount <= 0m)
         {
             return null;

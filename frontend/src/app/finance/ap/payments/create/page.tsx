@@ -344,9 +344,13 @@ export default function NewVendorPaymentPage() {
             }
 
             let verifiedWithholding: WhtCalculationResult | null = null;
+            const requiresServerFunctionalWithholding = paymentAllocations.some(allocation => {
+                const invoice = outstandingInvoices?.find(item => item.invoiceId === allocation.vendorInvoiceId);
+                return invoice?.currencyCode !== 'GHS';
+            });
             const withholdingTaxableBase = paymentAllocations.reduce((sum, allocation) =>
                 sum + allocation.allocatedAmount + (allocation.discountAmount || 0) + (allocation.withholdingTaxAmount || 0), 0);
-            if (data.withholdingTaxId) {
+            if (data.withholdingTaxId && !requiresServerFunctionalWithholding) {
                 verifiedWithholding = await taxDataService.calculateApWithholding({
                     taxId: data.withholdingTaxId,
                     supplierId: data.supplierId,
@@ -384,8 +388,11 @@ export default function NewVendorPaymentPage() {
             const payment = await accountsPayableService.createPayment({
                 ...data,
                 paymentDate: data.paymentDate.toISOString(),
-                withholdingTaxAmount: totalWithholdingTax,
-                withholdingTaxBaseAmount: verifiedWithholding?.taxableBase ?? 0,
+                // Cross/foreign invoice WHT is converted and validated per allocation by the
+                // API. A native header sum would mix currencies and must never become statutory
+                // evidence; zero asks Finance to derive its functional roll-up.
+                withholdingTaxAmount: requiresServerFunctionalWithholding ? 0 : totalWithholdingTax,
+                withholdingTaxBaseAmount: requiresServerFunctionalWithholding ? 0 : verifiedWithholding?.taxableBase ?? 0,
                 allocations: paymentAllocations.length > 0 ? paymentAllocations : undefined,
             });
 
@@ -413,7 +420,6 @@ export default function NewVendorPaymentPage() {
     }, 0) ?? 0;
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
     const totalWithholdingTax = Object.values(withholdingAllocations).reduce((acc, curr) => acc + curr, 0);
-    const totalBillSettlement = totalAllocated + totalDiscounts + totalWithholdingTax;
     const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = async () => {
@@ -765,17 +771,12 @@ export default function NewVendorPaymentPage() {
                                         <div>Remaining Cash to Allocate:</div>
                                         {totalDiscounts > 0 && (
                                             <div className="text-xs text-muted-foreground">
-                                                Discounts taken: {formatCurrency(totalDiscounts, currentCurrencyCode)}
+                                                Discounts are recorded in each invoice currency below.
                                             </div>
                                         )}
                                         {totalWithholdingTax > 0 && (
                                             <div className="text-xs text-muted-foreground">
-                                                WHT withheld: {formatCurrency(totalWithholdingTax, currentCurrencyCode)}
-                                            </div>
-                                        )}
-                                        {(totalDiscounts > 0 || totalWithholdingTax > 0) && (
-                                            <div className="text-xs text-muted-foreground">
-                                                Total bill settlement: {formatCurrency(totalBillSettlement, currentCurrencyCode)}
+                                                WHT is recorded per invoice; Finance derives the functional statutory total.
                                             </div>
                                         )}
                                     </div>
@@ -874,8 +875,6 @@ export default function NewVendorPaymentPage() {
                                                             )}
                                                         </td>
                                                         <td className="p-3">
-                                                            {/* Discount/WHT header totals are single-currency today. Deductions
-                                                                stay disabled on FX rows until statutory metadata is line-scoped. */}
                                                             <Input
                                                                 type="number"
                                                                 className="text-right h-8"
@@ -889,7 +888,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || !isPaymentReady || availableDiscount <= 0 || isCrossCurrency}
+                                                                disabled={isSubmitting || !isPaymentReady || availableDiscount <= 0}
                                                             />
                                                         </td>
                                                         <td className="p-3">
@@ -906,7 +905,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax || isCrossCurrency}
+                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax}
                                                             />
                                                         </td>
                                                     </tr>

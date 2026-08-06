@@ -76,6 +76,29 @@ public sealed class CrossCurrencySettlementCalculatorTests
         result.InvoiceSettlementFunctionalAmount.Should().Be(25m);
     }
 
+    [Fact]
+    public void LineScopedDeductions_ShouldRetainIndependentlyRoundedFunctionalEvidence()
+    {
+        // Each deduction posts to a different account. Independent rounding ensures the AP/AR
+        // control line equals the exact sum of cash, discount, WHT and VAT-WHT posting lines.
+        var result = CrossCurrencySettlementCalculator.CalculateWithDeductions(
+            paymentCurrency: "GHS",
+            invoiceCurrency: "USD",
+            paymentCurrencyAmount: 1_000m,
+            invoiceCurrencyAmount: 75m,
+            invoiceDiscountAmount: 1.11m,
+            invoiceWithholdingAmount: 2.22m,
+            invoiceVatWithholdingAmount: 3.33m,
+            paymentExchangeRate: 1m,
+            invoiceSettlementExchangeRate: 12.345678m);
+
+        result.DiscountFunctionalAmount.Should().Be(13.70m);
+        result.WithholdingFunctionalAmount.Should().Be(27.41m);
+        result.VatWithholdingFunctionalAmount.Should().Be(41.11m);
+        result.DeductionFunctionalAmount.Should().Be(82.22m);
+        result.SettlementFunctionalAmount.Should().Be(1_082.22m);
+    }
+
     [Theory]
     [InlineData(0, 100)]
     [InlineData(100, 0)]
