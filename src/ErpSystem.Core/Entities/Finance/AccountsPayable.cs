@@ -454,6 +454,12 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved payment-currency rate selected for this payment. Cross-currency settlement uses
+    /// this stable reference instead of trusting a later lookup or an untraceable typed value.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+
     // ── Bank Details ────────────────────────────────────────────────────
 
     public Guid? BankAccountId { get; set; }
@@ -634,6 +640,43 @@ public class VendorPaymentAllocation : TenantEntity
     [Required]
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
+
+    /// <summary>
+    /// Cash consumed from the vendor payment, expressed in payment currency. AllocatedAmount is
+    /// deliberately retained as the invoice-currency reduction for aging and invoice balance.
+    /// </summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentCurrencyAmount { get; set; }
+
+    [Required]
+    [MaxLength(3)]
+    public string InvoiceCurrencyCode { get; set; } = "GHS";
+
+    [Required]
+    [MaxLength(3)]
+    public string PaymentCurrencyCode { get; set; } = "GHS";
+
+    public bool IsCrossCurrency { get; set; }
+
+    /// <summary>
+    /// Approved rate ids and frozen values retain both audit lineage and deterministic arithmetic
+    /// if the exchange-rate master is corrected after posting.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal InvoiceSettlementExchangeRate { get; set; } = 1m;
+
+    public Guid? PaymentExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal PaymentExchangeRate { get; set; } = 1m;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentFunctionalAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal SettlementFunctionalAmount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal DiscountAmount { get; set; }

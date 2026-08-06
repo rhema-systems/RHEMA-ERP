@@ -337,23 +337,39 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
     [Trait("Category", "FX")]
-    public async Task FunctionalOrThirdCurrencySettlementOfForeignInvoiceIsRejected()
+    public async Task FunctionalOrThirdCurrencySettlementUsesFrozenPaymentSideEvidence()
     {
         await using var fixture = await FxFixture.CreateAsync();
         var apScenario = await fixture.PostApSettlementAsync(invoiceRate: 10m, paymentRate: 12m, settledForeignAmount: 100m);
         apScenario.ApPayment!.CurrencyCode = "GHS";
+        var apAllocation = apScenario.ApPayment.Allocations.Single();
+        apAllocation.PaymentCurrencyCode = "GHS";
+        apAllocation.PaymentCurrencyAmount = 1_200m;
+        apAllocation.PaymentExchangeRate = 1m;
+        apAllocation.SettlementFunctionalAmount = 1_200m;
+        apAllocation.IsCrossCurrency = true;
+
         var arScenario = await fixture.PostArSettlementAsync(invoiceRate: 10m, receiptRate: 12m, settledForeignAmount: 100m);
         arScenario.ArReceipt!.CurrencyCode = "EUR";
+        var arAllocation = arScenario.ArReceipt.Allocations.Single();
+        arAllocation.PaymentCurrencyCode = "EUR";
+        arAllocation.PaymentCurrencyAmount = 80m;
+        arAllocation.PaymentExchangeRate = 15m;
+        arAllocation.SettlementFunctionalAmount = 1_200m;
+        arAllocation.IsCrossCurrency = true;
         await fixture.Db.SaveChangesAsync();
 
-        await fixture.Service.Invoking(s => s.PostRealizedFxForApPaymentAsync(apScenario.ApPayment.Id))
-            .Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Cross-currency AP settlements are not supported*");
-        await fixture.Service.Invoking(s => s.PostRealizedFxForArReceiptAsync(arScenario.ArReceipt.Id))
-            .Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Cross-currency AR settlements are not supported*");
+        var apSettlements = await fixture.Service.PostRealizedFxForApPaymentAsync(apScenario.ApPayment.Id);
+        var arSettlements = await fixture.Service.PostRealizedFxForArReceiptAsync(arScenario.ArReceipt.Id);
+
+        apSettlements.Should().ContainSingle();
+        apSettlements[0].PaymentCurrencyCode.Should().Be("GHS");
+        apSettlements[0].PaymentCurrencyAmount.Should().Be(1_200m);
+        apSettlements[0].GainLossAmount.Should().Be(200m);
+        arSettlements.Should().ContainSingle();
+        arSettlements[0].PaymentCurrencyCode.Should().Be("EUR");
+        arSettlements[0].PaymentCurrencyAmount.Should().Be(80m);
+        arSettlements[0].GainLossAmount.Should().Be(200m);
     }
 
     [Fact]

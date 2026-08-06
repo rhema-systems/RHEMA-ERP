@@ -12,6 +12,7 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Finance;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +52,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IFinanceReversalPolicyService _financeReversalPolicyService;
         private readonly IWorkflowApprovalPolicyResolver? _approvalPolicyResolver;
         private readonly IWithholdingTaxCertificateService? _withholdingTaxService;
+        private readonly IExchangeRateService? _exchangeRateService;
 
         private static readonly JsonSerializerOptions PaymentControlJsonOptions = new()
         {
@@ -78,7 +80,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IWithholdingTaxCertificateService? withholdingTaxService = null,
             IVendorInvoiceService? vendorInvoiceService = null,
             IProcurementControlEventService? procurementControlEvents = null,
-            IProcurementInvoicePaymentSodService? invoicePaymentSod = null)
+            IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
+            IExchangeRateService? exchangeRateService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -96,6 +99,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _vendorInvoiceService = vendorInvoiceService;
             _procurementControlEvents = procurementControlEvents;
             _invoicePaymentSod = invoicePaymentSod;
+            _exchangeRateService = exchangeRateService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -331,6 +335,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             var paymentCurrencyCode = string.IsNullOrWhiteSpace(dto.CurrencyCode)
                 ? baseCurrencyCode
                 : dto.CurrencyCode.Trim().ToUpperInvariant();
+            // Production DI supplies the tenant-scoped exchange-rate service. Resolving the rate
+            // here freezes the approved source before allocations are calculated; tests that do
+            // not exercise FX may continue to use the explicit functional/same-currency value.
+            var paymentRate = await ResolveApprovedSettlementRateAsync(
+                paymentCurrencyCode,
+                baseCurrencyCode,
+                dto.PaymentDate,
+                dto.ExchangeRateId,
+                dto.ExchangeRate,
+                requireApprovedSource: dto.Allocations?.Any() == true,
+                cancellationToken);
             var configuredPaymentMethod = await ResolveConfiguredPaymentMethodAsync(
                 dto.PaymentMethodId,
                 effectiveBankAccountId,
@@ -402,7 +417,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentMethod = paymentMethod,
                 PaymentMethodId = configuredPaymentMethod?.Id,
                 CurrencyCode = paymentCurrencyCode,
-                ExchangeRate = dto.ExchangeRate,
+                ExchangeRate = paymentRate.Rate,
+                ExchangeRateId = paymentRate.Id,
                 BankAccountId = effectiveBankAccountId,
                 ChequeNumber = dto.ChequeNumber,
                 TransactionReference = dto.TransactionReference,
@@ -1256,6 +1272,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                         VendorPaymentId = payment.Id,
                         VendorInvoiceId = allocation.VendorInvoiceId,
                         AllocatedAmount = -allocation.AllocatedAmount,
+                        PaymentCurrencyAmount = -allocation.PaymentCurrencyAmount,
+                        InvoiceCurrencyCode = allocation.InvoiceCurrencyCode,
+                        PaymentCurrencyCode = allocation.PaymentCurrencyCode,
+                        IsCrossCurrency = allocation.IsCrossCurrency,
+                        InvoiceSettlementExchangeRateId = allocation.InvoiceSettlementExchangeRateId,
+                        InvoiceSettlementExchangeRate = allocation.InvoiceSettlementExchangeRate,
+                        PaymentExchangeRateId = allocation.PaymentExchangeRateId,
+                        PaymentExchangeRate = allocation.PaymentExchangeRate,
+                        PaymentFunctionalAmount = -allocation.PaymentFunctionalAmount,
+                        SettlementFunctionalAmount = -allocation.SettlementFunctionalAmount,
                         DiscountAmount = -allocation.DiscountAmount,
                         WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
                         AllocationDate = reversalDate,
@@ -1441,6 +1467,16 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var now = DateTime.UtcNow;
             var createdAllocations = new List<VendorPaymentAllocation>();
+            var functionalCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            var paymentRate = await ResolveApprovedSettlementRateAsync(
+                paymentCurrency,
+                functionalCurrency,
+                payment.PaymentDate,
+                payment.ExchangeRateId,
+                payment.ExchangeRate,
+                requireApprovedSource: !string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase),
+                cancellationToken);
 
             foreach (var alloc in allocations)
             {
@@ -1470,9 +1506,32 @@ namespace ErpSystem.Api.Services.Finance.AP
                     throw new InvalidOperationException($"Invoice '{invoice.InvoiceNumber}' does not belong to this payment's supplier.");
                 }
 
-                var requestedCashAmount = Math.Max(alloc.AllocatedAmount, 0m);
+                var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, functionalCurrency);
+                var isCrossCurrency = !string.Equals(paymentCurrency, invoiceCurrency, StringComparison.OrdinalIgnoreCase);
+                if (isCrossCurrency && !alloc.PaymentCurrencyAmount.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"Payment-currency amount is required to settle invoice '{invoice.InvoiceNumber}' in {invoiceCurrency} from a {paymentCurrency} payment.");
+                }
+
+                // AllocatedAmount is the invoice-currency cash equivalent. The separately supplied
+                // payment amount is what consumes the payment balance; conflating them caused the
+                // original FIN-LIM-0022 restriction.
+                var requestedInvoiceCashAmount = Math.Max(alloc.AllocatedAmount, 0m);
+                var requestedPaymentCashAmount = Math.Max(
+                    alloc.PaymentCurrencyAmount ?? alloc.AllocatedAmount,
+                    0m);
                 var requestedDiscountAmount = Math.Max(alloc.DiscountAmount, 0m);
                 var requestedWithholdingAmount = Math.Max(alloc.WithholdingTaxAmount, 0m);
+                // Payment-level WHT/discount evidence is currently expressed in one header
+                // currency. Allowing those deductions on a cross-currency row would make that
+                // evidence ambiguous even though the journal could be forced to balance. Keep
+                // this first release cash-only until statutory deductions become line-scoped.
+                if (isCrossCurrency && (requestedDiscountAmount > 0m || requestedWithholdingAmount > 0m))
+                {
+                    throw new InvalidOperationException(
+                        "Cross-currency AP allocation currently supports cash settlement only; record discounts and withholding on a same-currency settlement.");
+                }
                 if (requestedDiscountAmount > 0m)
                 {
                     if (invoice.EarlyPaymentDiscountPercentage <= 0m ||
@@ -1490,30 +1549,74 @@ namespace ErpSystem.Api.Services.Finance.AP
                             $"Discount {requestedDiscountAmount:C} exceeds the eligible amount {maximumDiscount:C} for invoice '{invoice.InvoiceNumber}'.");
                     }
 
-                    if (Math.Abs(RoundMoney(requestedCashAmount + requestedDiscountAmount + requestedWithholdingAmount - balance)) > 0.01m)
+                    if (Math.Abs(RoundMoney(requestedInvoiceCashAmount + requestedDiscountAmount + requestedWithholdingAmount - balance)) > 0.01m)
                     {
                         throw new InvalidOperationException(
                             $"An early-payment discount may only be taken when invoice '{invoice.InvoiceNumber}' is fully settled by this allocation.");
                     }
 
                     var availableCash = Math.Max(payment.TotalAmount - payment.AllocatedAmount, 0m);
-                    if (requestedCashAmount > availableCash)
+                    if (requestedPaymentCashAmount > availableCash)
                     {
                         throw new InvalidOperationException("The payment does not have enough unallocated cash to complete the discounted settlement.");
                     }
                 }
 
-                // Cannot allocate more cash than remaining balance or unallocated payment amount.
-                var maxAllocatable = Math.Min(balance, Math.Max(payment.TotalAmount - payment.AllocatedAmount, 0m));
-                var allocAmount = Math.Min(Math.Max(alloc.AllocatedAmount, 0m), maxAllocatable);
-                var discountAmount = Math.Min(Math.Max(alloc.DiscountAmount, 0m), Math.Max(balance - allocAmount, 0m));
-                var withholdingTaxAmount = Math.Min(requestedWithholdingAmount, Math.Max(balance - allocAmount - discountAmount, 0m));
+                var availablePaymentCash = Math.Max(payment.TotalAmount - payment.AllocatedAmount, 0m);
+                decimal allocAmount;
+                decimal paymentCashAmount;
+                decimal discountAmount;
+                decimal withholdingTaxAmount;
+                if (isCrossCurrency)
+                {
+                    // A cross-currency conversion is an explicit commercial decision. Silently
+                    // clipping either side would change the agreed rate, so reject over-allocation
+                    // and require the maker to correct the amounts.
+                    if (requestedPaymentCashAmount > availablePaymentCash)
+                        throw new InvalidOperationException("Cross-currency allocation exceeds the unallocated vendor-payment amount.");
+                    if (RoundMoney(requestedInvoiceCashAmount + requestedDiscountAmount + requestedWithholdingAmount) > RoundMoney(balance))
+                        throw new InvalidOperationException($"Cross-currency allocation would over-settle invoice '{invoice.InvoiceNumber}'.");
+
+                    allocAmount = requestedInvoiceCashAmount;
+                    paymentCashAmount = requestedPaymentCashAmount;
+                    discountAmount = requestedDiscountAmount;
+                    withholdingTaxAmount = requestedWithholdingAmount;
+                }
+                else
+                {
+                    // Preserve the established same-currency convenience behavior: the server may
+                    // clip a draft allocation to the smaller invoice/payment balance.
+                    var maxAllocatable = Math.Min(balance, availablePaymentCash);
+                    allocAmount = Math.Min(requestedInvoiceCashAmount, maxAllocatable);
+                    paymentCashAmount = allocAmount;
+                    discountAmount = Math.Min(requestedDiscountAmount, Math.Max(balance - allocAmount, 0m));
+                    withholdingTaxAmount = Math.Min(requestedWithholdingAmount, Math.Max(balance - allocAmount - discountAmount, 0m));
+                }
 
                 if (allocAmount <= 0 && discountAmount <= 0 && withholdingTaxAmount <= 0)
                 {
                     result.Warnings.Add($"No funds available to allocate to invoice '{invoice.InvoiceNumber}'.");
                     continue;
                 }
+
+                var invoiceRate = await ResolveApprovedSettlementRateAsync(
+                    invoiceCurrency,
+                    functionalCurrency,
+                    payment.PaymentDate,
+                    alloc.InvoiceSettlementExchangeRateId,
+                    string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase)
+                        ? paymentRate.Rate
+                        : invoice.ExchangeRate,
+                    requireApprovedSource: !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase),
+                    cancellationToken);
+                var settlement = CrossCurrencySettlementCalculator.Calculate(
+                    paymentCurrency,
+                    invoiceCurrency,
+                    paymentCashAmount,
+                    allocAmount,
+                    discountAmount + withholdingTaxAmount,
+                    paymentRate.Rate,
+                    invoiceRate.Rate);
 
                 var allocation = new VendorPaymentAllocation
                 {
@@ -1522,6 +1625,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorPaymentId = paymentId,
                     VendorInvoiceId = alloc.VendorInvoiceId,
                     AllocatedAmount = allocAmount,
+                    PaymentCurrencyAmount = settlement.PaymentCurrencyAmount,
+                    InvoiceCurrencyCode = settlement.InvoiceCurrency,
+                    PaymentCurrencyCode = settlement.PaymentCurrency,
+                    IsCrossCurrency = settlement.IsCrossCurrency,
+                    InvoiceSettlementExchangeRateId = invoiceRate.Id,
+                    InvoiceSettlementExchangeRate = settlement.InvoiceSettlementExchangeRate,
+                    PaymentExchangeRateId = paymentRate.Id,
+                    PaymentExchangeRate = settlement.PaymentExchangeRate,
+                    PaymentFunctionalAmount = settlement.PaymentFunctionalAmount,
+                    SettlementFunctionalAmount = settlement.SettlementFunctionalAmount,
                     DiscountAmount = discountAmount,
                     WithholdingTaxAmount = withholdingTaxAmount,
                     AllocationDate = now,
@@ -1539,7 +1652,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 // Allocation reserves the intended settlement only. The payable balance is
                 // changed atomically with the successful Finance posting in PostAsync; a Draft
                 // or merely Authorized payment must never make an invoice appear paid.
-                payment.AllocatedAmount += allocAmount;
+                payment.AllocatedAmount += settlement.PaymentCurrencyAmount;
 
                 result.Allocations.Add(new VendorPaymentAllocationDto
                 {
@@ -1548,6 +1661,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorInvoiceId = alloc.VendorInvoiceId,
                     InvoiceNumber = invoice.InvoiceNumber,
                     AllocatedAmount = allocAmount,
+                    PaymentCurrencyAmount = settlement.PaymentCurrencyAmount,
+                    InvoiceCurrencyCode = settlement.InvoiceCurrency,
+                    PaymentCurrencyCode = settlement.PaymentCurrency,
+                    IsCrossCurrency = settlement.IsCrossCurrency,
+                    InvoiceSettlementExchangeRateId = invoiceRate.Id,
+                    InvoiceSettlementExchangeRate = settlement.InvoiceSettlementExchangeRate,
+                    PaymentExchangeRateId = paymentRate.Id,
+                    PaymentExchangeRate = settlement.PaymentExchangeRate,
+                    PaymentFunctionalAmount = settlement.PaymentFunctionalAmount,
+                    SettlementFunctionalAmount = settlement.SettlementFunctionalAmount,
                     DiscountAmount = discountAmount,
                     WithholdingTaxAmount = withholdingTaxAmount,
                     AllocationDate = now,
@@ -1682,7 +1805,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                         throw new InvalidOperationException("Supplier advance can only be applied to invoices for the same supplier.");
                     if (!invoice.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier advance cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
-                    if (!string.Equals(NormalizeCurrency(invoice.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
+                    // Advance application posts against a pre-existing advance control balance,
+                    // not a bank line. Until that balance carries its own currency lot, both the
+                    // advance and invoice must be functional currency; ordinary invoice payments
+                    // use the fully snapshotted cross-currency path above.
+                    if (!string.Equals(NormalizeCurrency(invoice.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(NormalizeCurrency(payment.CurrencyCode, functionalCurrency), functionalCurrency, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException("Foreign-currency supplier advance application is not supported until advance FX settlement is implemented.");
 
                     var invoiceOutstanding = await GetInvoiceUnreservedBalanceAsync(
@@ -1701,6 +1829,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                         VendorPaymentId = payment.Id,
                         VendorInvoiceId = invoice.Id,
                         AllocatedAmount = RoundMoney(requested.AllocatedAmount),
+                        PaymentCurrencyAmount = RoundMoney(requested.AllocatedAmount),
+                        InvoiceCurrencyCode = functionalCurrency,
+                        PaymentCurrencyCode = functionalCurrency,
+                        IsCrossCurrency = false,
+                        InvoiceSettlementExchangeRate = 1m,
+                        PaymentExchangeRate = 1m,
+                        PaymentFunctionalAmount = RoundMoney(requested.AllocatedAmount),
+                        SettlementFunctionalAmount = RoundMoney(requested.AllocatedAmount),
                         AllocationDate = now,
                         Notes = requested.Notes,
                         PaymentReadinessControlEventId = paymentDecision.Event.Id,
@@ -1766,6 +1902,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                         VendorInvoiceId = invoice.Id,
                         InvoiceNumber = invoice.InvoiceNumber,
                         AllocatedAmount = allocation.AllocatedAmount,
+                        PaymentCurrencyAmount = allocation.PaymentCurrencyAmount,
+                        InvoiceCurrencyCode = allocation.InvoiceCurrencyCode,
+                        PaymentCurrencyCode = allocation.PaymentCurrencyCode,
+                        IsCrossCurrency = allocation.IsCrossCurrency,
+                        InvoiceSettlementExchangeRate = allocation.InvoiceSettlementExchangeRate,
+                        PaymentExchangeRate = allocation.PaymentExchangeRate,
+                        PaymentFunctionalAmount = allocation.PaymentFunctionalAmount,
+                        SettlementFunctionalAmount = allocation.SettlementFunctionalAmount,
                         AllocationDate = allocation.AllocationDate,
                         Notes = allocation.Notes,
                         PaymentReadinessControlEventId = paymentDecision.Event.Id,
@@ -2009,6 +2153,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorPaymentId = allocation.VendorPaymentId,
                     VendorInvoiceId = allocation.VendorInvoiceId,
                     AllocatedAmount = -allocation.AllocatedAmount,
+                    PaymentCurrencyAmount = -allocation.PaymentCurrencyAmount,
+                    InvoiceCurrencyCode = allocation.InvoiceCurrencyCode,
+                    PaymentCurrencyCode = allocation.PaymentCurrencyCode,
+                    IsCrossCurrency = allocation.IsCrossCurrency,
+                    InvoiceSettlementExchangeRateId = allocation.InvoiceSettlementExchangeRateId,
+                    InvoiceSettlementExchangeRate = allocation.InvoiceSettlementExchangeRate,
+                    PaymentExchangeRateId = allocation.PaymentExchangeRateId,
+                    PaymentExchangeRate = allocation.PaymentExchangeRate,
+                    PaymentFunctionalAmount = -allocation.PaymentFunctionalAmount,
+                    SettlementFunctionalAmount = -allocation.SettlementFunctionalAmount,
                     DiscountAmount = -allocation.DiscountAmount,
                     WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
                     AllocationDate = now,
@@ -2023,7 +2177,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 allocation.VendorPayment.AllocatedAmount = Math.Max(
                     0m,
-                    allocation.VendorPayment.AllocatedAmount - allocation.AllocatedAmount);
+                    allocation.VendorPayment.AllocatedAmount -
+                    (allocation.PaymentCurrencyAmount > 0m ? allocation.PaymentCurrencyAmount : allocation.AllocatedAmount));
                 allocation.VendorPayment.DiscountTaken = RoundMoney(
                     GetEffectiveAllocations(allocation.VendorPayment.Allocations)
                         .Where(item => item.Id != allocationId)
@@ -2076,6 +2231,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 VendorInvoiceId = a.VendorInvoiceId,
                 InvoiceNumber = a.VendorInvoice.InvoiceNumber,
                 AllocatedAmount = a.AllocatedAmount,
+                PaymentCurrencyAmount = a.PaymentCurrencyAmount,
+                InvoiceCurrencyCode = a.InvoiceCurrencyCode,
+                PaymentCurrencyCode = a.PaymentCurrencyCode,
+                IsCrossCurrency = a.IsCrossCurrency,
+                InvoiceSettlementExchangeRateId = a.InvoiceSettlementExchangeRateId,
+                InvoiceSettlementExchangeRate = a.InvoiceSettlementExchangeRate,
+                PaymentExchangeRateId = a.PaymentExchangeRateId,
+                PaymentExchangeRate = a.PaymentExchangeRate,
+                PaymentFunctionalAmount = a.PaymentFunctionalAmount,
+                SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                 DiscountAmount = a.DiscountAmount,
                 WithholdingTaxAmount = a.WithholdingTaxAmount,
                 AllocationDate = a.AllocationDate,
@@ -2187,6 +2352,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     TotalAmount = i.TotalAmount,
                     PaidAmount = i.PaidAmount,
                     BalanceAmount = unreservedBalance,
+                    CurrencyCode = NormalizeCurrency(i.CurrencyCode, "GHS"),
                     DaysOverdue = i.DueDate.HasValue && i.DueDate.Value < now
                         ? (int)(now - i.DueDate.Value).TotalDays
                         : 0,
@@ -2415,6 +2581,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                         VendorPaymentId = payment.Id,
                         VendorInvoiceId = invoice.Id,
                         AllocatedAmount = -original.AllocatedAmount,
+                        PaymentCurrencyAmount = -original.PaymentCurrencyAmount,
+                        InvoiceCurrencyCode = original.InvoiceCurrencyCode,
+                        PaymentCurrencyCode = original.PaymentCurrencyCode,
+                        IsCrossCurrency = original.IsCrossCurrency,
+                        InvoiceSettlementExchangeRateId = original.InvoiceSettlementExchangeRateId,
+                        InvoiceSettlementExchangeRate = original.InvoiceSettlementExchangeRate,
+                        PaymentExchangeRateId = original.PaymentExchangeRateId,
+                        PaymentExchangeRate = original.PaymentExchangeRate,
+                        PaymentFunctionalAmount = -original.PaymentFunctionalAmount,
+                        SettlementFunctionalAmount = -original.SettlementFunctionalAmount,
                         DiscountAmount = -original.DiscountAmount,
                         WithholdingTaxAmount = -original.WithholdingTaxAmount,
                         AllocationDate = now,
@@ -3857,15 +4033,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 throw new InvalidOperationException("Foreign-currency supplier advances are not supported until advance application FX settlement is implemented.");
             }
-            foreach (var allocation in activeAllocations)
-            {
-                var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
-                if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException("Cross-currency AP settlements are not supported in FX Batch 18. Vendor payment currency must match each allocated invoice currency.");
-                }
-            }
-
             var exchangeRate = NormalizeExchangeRate(payment.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
@@ -3908,29 +4075,56 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await ResolvePaymentPostingAccountAsync(bankAccount.GLAccountId.Value, "bank/cash account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
-            var discountTaken = RoundMoney(activeAllocations.Sum(a => a.DiscountAmount));
-            var allocationWithholdingTax = RoundMoney(activeAllocations.Sum(a => a.WithholdingTaxAmount));
-            var withholdingTaxAmount = allocationWithholdingTax > 0m
-                ? allocationWithholdingTax
-                : RoundMoney(payment.WithholdingTaxAmount);
-            var apSettlementAmount = RoundMoney(payment.TotalAmount + discountTaken + withholdingTaxAmount);
-
             var postingLines = new List<FinancePostingLineDto>();
             var lineNumber = 1;
-            postingLines.Add(BuildPostingLine(
-                debitAccountId,
-                isSupplierAdvance
-                    ? $"Supplier advance {payment.PaymentNumber}"
-                    : $"AP payment {payment.PaymentNumber}",
-                debitTransactionAmount: isSupplierAdvance ? payment.TotalAmount : apSettlementAmount,
-                creditTransactionAmount: 0m,
-                paymentCurrency,
-                functionalCurrency,
-                exchangeRate,
-                payment.PaymentDate,
-                payment.PaymentNumber,
-                lineNumber++,
-                isSupplierAdvance ? "AP-SupplierAdvance" : "AP-Control"));
+            if (isSupplierAdvance)
+            {
+                postingLines.Add(BuildPostingLine(
+                    debitAccountId,
+                    $"Supplier advance {payment.PaymentNumber}",
+                    debitTransactionAmount: payment.TotalAmount,
+                    creditTransactionAmount: 0m,
+                    paymentCurrency,
+                    functionalCurrency,
+                    exchangeRate,
+                    payment.PaymentDate,
+                    payment.PaymentNumber,
+                    lineNumber++,
+                    "AP-SupplierAdvance",
+                    payment.ExchangeRateId));
+            }
+            else
+            {
+                foreach (var allocation in activeAllocations)
+                {
+                    var invoiceGrossAmount = RoundMoney(
+                        allocation.AllocatedAmount + allocation.DiscountAmount + allocation.WithholdingTaxAmount);
+                    var settlementFunctionalAmount = allocation.SettlementFunctionalAmount > 0m
+                        ? RoundMoney(allocation.SettlementFunctionalAmount)
+                        : RoundMoney(invoiceGrossAmount * NormalizeExchangeRate(allocation.InvoiceSettlementExchangeRate));
+                    var effectiveControlRate = invoiceGrossAmount <= 0m
+                        ? 1m
+                        : decimal.Round(settlementFunctionalAmount / invoiceGrossAmount, 6, MidpointRounding.AwayFromZero);
+
+                    // One AP-control line per invoice preserves that invoice's native-currency
+                    // clearing quantity. Its functional amount is the actual settlement value;
+                    // the separate FX event then restores the control account to historical cost.
+                    postingLines.Add(BuildPostingLine(
+                        debitAccountId,
+                        $"AP settlement {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
+                        debitTransactionAmount: invoiceGrossAmount,
+                        creditTransactionAmount: 0m,
+                        allocation.InvoiceCurrencyCode,
+                        functionalCurrency,
+                        effectiveControlRate,
+                        payment.PaymentDate,
+                        payment.PaymentNumber,
+                        lineNumber++,
+                        "AP-Control",
+                        exchangeRateId: null,
+                        functionalDebitOverride: settlementFunctionalAmount));
+                }
+            }
 
             postingLines.Add(BuildPostingLine(
                 bankAccount.GLAccountId.Value,
@@ -3943,47 +4137,52 @@ namespace ErpSystem.Api.Services.Finance.AP
                 payment.PaymentDate,
                 payment.PaymentNumber,
                 lineNumber++,
-                "AP-Bank"));
+                "AP-Bank",
+                payment.ExchangeRateId));
 
-            if (discountTaken > 0m)
+            if (activeAllocations.Any(a => a.DiscountAmount > 0m))
             {
                 var discountAccountId = settings.DiscountReceivedAccountId
                     ?? throw new InvalidOperationException("Purchase discount received account is not configured for this tenant.");
                 await ResolvePaymentPostingAccountAsync(discountAccountId, "purchase discount received account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    discountAccountId,
-                    $"Purchase discount taken - {payment.PaymentNumber}",
-                    debitTransactionAmount: 0m,
-                    creditTransactionAmount: discountTaken,
-                    paymentCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    payment.PaymentDate,
-                    payment.PaymentNumber,
-                    lineNumber++,
-                    "AP-Discount"));
+                foreach (var allocation in activeAllocations.Where(a => a.DiscountAmount > 0m))
+                    postingLines.Add(BuildPostingLine(
+                        discountAccountId,
+                        $"Purchase discount - {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
+                        debitTransactionAmount: 0m,
+                        creditTransactionAmount: allocation.DiscountAmount,
+                        allocation.InvoiceCurrencyCode,
+                        functionalCurrency,
+                        allocation.InvoiceSettlementExchangeRate,
+                        payment.PaymentDate,
+                        payment.PaymentNumber,
+                        lineNumber++,
+                        "AP-Discount",
+                        allocation.InvoiceSettlementExchangeRateId));
             }
 
-            if (withholdingTaxAmount > 0m)
+            if (activeAllocations.Any(a => a.WithholdingTaxAmount > 0m))
             {
                 var taxAccountId = payment.WithholdingTaxAccountId
                     ?? await ResolveConfiguredWithholdingTaxPayableAccountAsync(payment.PaymentDate, payment.WithholdingTaxId, cancellationToken)
                     ?? throw new InvalidOperationException("AP withholding tax payable account is not configured for this tenant.");
                 await ResolvePaymentPostingAccountAsync(taxAccountId, "withholding tax payable account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    taxAccountId,
-                    $"Withholding tax - {payment.PaymentNumber}",
-                    debitTransactionAmount: 0m,
-                    creditTransactionAmount: withholdingTaxAmount,
-                    paymentCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    payment.PaymentDate,
-                    payment.PaymentNumber,
-                    lineNumber++,
-                    "AP-WHT"));
+                foreach (var allocation in activeAllocations.Where(a => a.WithholdingTaxAmount > 0m))
+                    postingLines.Add(BuildPostingLine(
+                        taxAccountId,
+                        $"Withholding tax - {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
+                        debitTransactionAmount: 0m,
+                        creditTransactionAmount: allocation.WithholdingTaxAmount,
+                        allocation.InvoiceCurrencyCode,
+                        functionalCurrency,
+                        allocation.InvoiceSettlementExchangeRate,
+                        payment.PaymentDate,
+                        payment.PaymentNumber,
+                        lineNumber++,
+                        "AP-WHT",
+                        allocation.InvoiceSettlementExchangeRateId));
             }
 
             if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
@@ -4019,7 +4218,10 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             var functionalCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync(), "GHS");
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
-            if (string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            var requiresFx = !string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                || payment.Allocations.Any(a => !a.IsReversal &&
+                    (a.IsCrossCurrency || !string.Equals(a.InvoiceCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase)));
+            if (!requiresFx)
             {
                 return;
             }
@@ -4138,11 +4340,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             DateTime exchangeRateDate,
             string reference,
             int lineNumber,
-            string transactionTag)
+            string transactionTag,
+            Guid? exchangeRateId = null,
+            decimal? functionalDebitOverride = null,
+            decimal? functionalCreditOverride = null)
         {
             var isForeign = !string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
-            var debitAmount = ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
-            var creditAmount = ToFunctionalAmount(creditTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+            var debitAmount = functionalDebitOverride ?? ToFunctionalAmount(debitTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
+            var creditAmount = functionalCreditOverride ?? ToFunctionalAmount(creditTransactionAmount, transactionCurrency, functionalCurrency, exchangeRate);
 
             return new FinancePostingLineDto
             {
@@ -4151,9 +4356,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DebitAmount = debitAmount,
                 CreditAmount = creditAmount,
                 TransactionCurrency = transactionCurrency,
+                TransactionDebitAmount = debitTransactionAmount,
+                TransactionCreditAmount = creditTransactionAmount,
                 ForeignCurrencyAmount = isForeign
                     ? debitTransactionAmount > 0m ? debitTransactionAmount : creditTransactionAmount
                     : null,
+                ExchangeRateId = isForeign ? exchangeRateId : null,
                 ExchangeRate = isForeign ? exchangeRate : null,
                 ExchangeRateSource = isForeign ? "AP payment exchange-rate snapshot" : null,
                 ExchangeRateDate = isForeign ? exchangeRateDate.Date : null,
@@ -4217,10 +4425,68 @@ namespace ErpSystem.Api.Services.Finance.AP
         private static decimal NormalizeExchangeRate(decimal exchangeRate)
             => exchangeRate <= 0m ? 1m : exchangeRate;
 
+        /// <summary>
+        /// Resolves the immutable tenant-approved daily mid-rate used by settlement. The fallback
+        /// exists only for functional-currency and non-FX unit-test paths; a foreign allocation is
+        /// never allowed to proceed without an approved rate-master record.
+        /// </summary>
+        private async Task<SettlementRateSnapshot> ResolveApprovedSettlementRateAsync(
+            string transactionCurrency,
+            string functionalCurrency,
+            DateTime settlementDate,
+            Guid? requestedRateId,
+            decimal fallbackRate,
+            bool requireApprovedSource,
+            CancellationToken cancellationToken)
+        {
+            transactionCurrency = NormalizeCurrency(transactionCurrency, functionalCurrency);
+            functionalCurrency = NormalizeCurrency(functionalCurrency, "GHS");
+            if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                if (requestedRateId.HasValue)
+                    throw new InvalidOperationException("A functional-currency AP settlement must not specify an exchange-rate id.");
+                return new SettlementRateSnapshot(null, 1m);
+            }
+
+            if (_exchangeRateService == null)
+            {
+                if (requireApprovedSource)
+                    throw new InvalidOperationException("Approved exchange-rate resolution is not configured for foreign-currency AP settlement.");
+                return new SettlementRateSnapshot(null, NormalizeExchangeRate(fallbackRate));
+            }
+
+            var rate = requestedRateId.HasValue
+                ? await _exchangeRateService.GetExchangeRateByIdAsync(requestedRateId.Value, cancellationToken)
+                : await _exchangeRateService.GetCurrentRateAsync(
+                    transactionCurrency,
+                    functionalCurrency,
+                    settlementDate,
+                    "Daily",
+                    "Mid",
+                    cancellationToken);
+
+            if (rate == null || !rate.IsActive || rate.Rate <= 0m ||
+                !(rate.ApprovalStatus.Equals("Approved", StringComparison.OrdinalIgnoreCase) ||
+                  rate.ApprovalStatus.Equals("AutoApproved", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"No active approved daily mid-rate exists for {transactionCurrency} to {functionalCurrency} on {settlementDate:yyyy-MM-dd}.");
+
+            if (!rate.BaseCurrencyCode.Equals(functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !rate.TargetCurrencyCode.Equals(transactionCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !rate.RateType.Equals("Daily", StringComparison.OrdinalIgnoreCase) ||
+                !rate.QuoteSide.Equals("Mid", StringComparison.OrdinalIgnoreCase) ||
+                rate.EffectiveDate.Date > settlementDate.Date ||
+                (rate.ExpiryDate.HasValue && rate.ExpiryDate.Value.Date < settlementDate.Date))
+                throw new InvalidOperationException("The selected AP settlement rate does not match the required currency pair, date, daily rate type, or mid quote policy.");
+
+            return new SettlementRateSnapshot(rate.Id, NormalizeExchangeRate(rate.Rate));
+        }
+
         private static string NormalizeCurrency(string? currencyCode, string defaultValue)
             => string.IsNullOrWhiteSpace(currencyCode)
                 ? defaultValue.Trim().ToUpperInvariant()
                 : currencyCode.Trim().ToUpperInvariant();
+
+        private sealed record SettlementRateSnapshot(Guid? Id, decimal Rate);
 
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
@@ -4290,7 +4556,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (!hasInitialAllocationHistory)
                 return;
 
-            var allocatedCashAmount = RoundMoney(effectiveAllocations.Sum(item => item.AllocatedAmount));
+            // Payment completeness is measured in payment currency. AllocatedAmount is an
+            // invoice-currency value for cross-currency rows and cannot be compared to TotalAmount.
+            var allocatedCashAmount = RoundMoney(effectiveAllocations.Sum(item =>
+                item.PaymentCurrencyAmount > 0m ? item.PaymentCurrencyAmount : item.AllocatedAmount));
             if (allocatedCashAmount != RoundMoney(payment.TotalAmount))
             {
                 throw new VendorPaymentControlException(
@@ -4596,6 +4865,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,
                 CurrencyCode = payment.CurrencyCode,
                 ExchangeRate = payment.ExchangeRate,
+                ExchangeRateId = payment.ExchangeRateId,
                 BankAccountId = payment.BankAccountId,
                 BankAccountName = payment.BankAccount?.AccountName,
                 ChequeNumber = payment.ChequeNumber,
@@ -4651,6 +4921,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorInvoiceId = a.VendorInvoiceId,
                     InvoiceNumber = a.VendorInvoice?.InvoiceNumber ?? string.Empty,
                     AllocatedAmount = a.AllocatedAmount,
+                    PaymentCurrencyAmount = a.PaymentCurrencyAmount,
+                    InvoiceCurrencyCode = a.InvoiceCurrencyCode,
+                    PaymentCurrencyCode = a.PaymentCurrencyCode,
+                    IsCrossCurrency = a.IsCrossCurrency,
+                    InvoiceSettlementExchangeRateId = a.InvoiceSettlementExchangeRateId,
+                    InvoiceSettlementExchangeRate = a.InvoiceSettlementExchangeRate,
+                    PaymentExchangeRateId = a.PaymentExchangeRateId,
+                    PaymentExchangeRate = a.PaymentExchangeRate,
+                    PaymentFunctionalAmount = a.PaymentFunctionalAmount,
+                    SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                     DiscountAmount = a.DiscountAmount,
                     WithholdingTaxAmount = a.WithholdingTaxAmount,
                     AllocationDate = a.AllocationDate,

@@ -575,7 +575,7 @@ The table below is the control index for all documented limitations. **Regressio
 | `FIN-LIM-0019` | Resolved | Regression — preserve tax hardening. | WP4, WP8 |
 | `FIN-LIM-0020` | Resolved | Regression — preserve FX workflow foundation and effective configuration. | WP0, WP2 |
 | `FIN-LIM-0021` | Resolved | Preserve approved per-leg rate evidence, destination amount confirmation, realised FX posting, idempotent pair capture, native-currency reconciliation, reversal snapshots, access scope, and failure audit through regression/UAT. | WP2, WP5 regression |
-| `FIN-LIM-0022` | Open | Implement cross-currency AP/AR settlement. | WP2, WP4 |
+| `FIN-LIM-0022` | Partially Resolved | Ordinary cash-only AP/AR invoice settlement now records both native amounts, approved rate snapshots, functional values, central posting, realized FX and reversals. Complete line-scoped cross-currency deductions and currency-lotted supplier/customer advances. | WP2, WP4 |
 | `FIN-LIM-0023` | Resolved | Regression — preserve depreciation foundation. | WP6 |
 | `FIN-LIM-0024` | Resolved | Regression — preserve revaluation/impairment foundation. | WP6 |
 | `FIN-LIM-0025` | Resolved | Regression — preserve asset transfers. | WP6 |

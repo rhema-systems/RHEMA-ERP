@@ -10355,7 +10355,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<decimal>("ExchangeRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ExpirationDate")
                         .HasColumnType("datetime2");
@@ -15522,6 +15525,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("InvoiceDocumentId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("IsCrossCurrency")
+                        .HasColumnType("bit");
+
                     b.Property<string>("InvoiceDocumentType")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -15538,6 +15544,20 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime>("PostedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("PaymentCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal>("PaymentCurrencyAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("PaymentExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("PaymentExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("PostingEventId")
                         .HasColumnType("uniqueidentifier");
@@ -17751,10 +17771,24 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("InvoiceCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal>("InvoiceSettlementExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("InvoiceSettlementExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsCrossCurrency")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsReversal")
@@ -17769,6 +17803,26 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("OriginalAllocationId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PaymentCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal>("PaymentCurrencyAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("PaymentExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("PaymentExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("PaymentFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("SettlementFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -22237,7 +22291,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(1000)");
 
                     b.Property<decimal>("ExchangeRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("InvoicePaymentSodControlEventId")
                         .HasColumnType("uniqueidentifier");
@@ -22444,7 +22501,21 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("InvoiceCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal>("InvoiceSettlementExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("InvoiceSettlementExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsCrossCurrency")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsReversal")
@@ -22460,6 +22531,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("OriginalAllocationId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("PaymentCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal>("PaymentCurrencyAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("PaymentExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("PaymentExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("PaymentFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<Guid?>("PaymentReadinessControlEventId")
                         .HasColumnType("uniqueidentifier");
 
@@ -22469,6 +22557,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("PaymentReadinessSnapshotHash")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<decimal>("SettlementFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");

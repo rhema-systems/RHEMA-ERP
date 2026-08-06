@@ -110,7 +110,10 @@ export default function NewVendorPaymentPage() {
     const preselectedDescription = searchParams.get('description') || '';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Invoice allocations and payment consumption are deliberately separate. A USD bank
+    // payment can settle a GHS invoice, so reusing one number here would recreate FIN-LIM-0022.
     const [allocations, setAllocations] = useState<Record<string, number>>({});
+    const [paymentCurrencyAllocations, setPaymentCurrencyAllocations] = useState<Record<string, number>>({});
     const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
     const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
     const [withholdingCalculation, setWithholdingCalculation] = useState<WhtCalculationResult | null>(null);
@@ -270,12 +273,21 @@ export default function NewVendorPaymentPage() {
                     outstandingInvoices?.find((invoice) => invoice.invoiceId === invoiceId)
                         ?.paymentReadiness?.isPaymentReady === true
                 )
-                .map(([invoiceId, amount]) => ({
-                    vendorInvoiceId: invoiceId,
-                    allocatedAmount: amount,
-                    discountAmount: Number(discountAllocations[invoiceId]) || 0,
-                    withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
-                }));
+                .map(([invoiceId, amount]) => {
+                    const invoice = outstandingInvoices?.find(item => item.invoiceId === invoiceId);
+                    const isCrossCurrency = invoice?.currencyCode !== data.currencyCode;
+                    return {
+                        vendorInvoiceId: invoiceId,
+                        // allocatedAmount always reduces the invoice's native-currency balance.
+                        allocatedAmount: amount,
+                        // The API requires the bank-currency amount explicitly for an FX allocation.
+                        paymentCurrencyAmount: isCrossCurrency
+                            ? Number(paymentCurrencyAllocations[invoiceId]) || 0
+                            : amount,
+                        discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                        withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
+                    };
+                });
 
             const blockedSelection = Object.entries(allocations).find(([invoiceId, amount]) =>
                 (amount > 0 || Number(discountAllocations[invoiceId]) > 0 || Number(withholdingAllocations[invoiceId]) > 0) &&
@@ -291,12 +303,23 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
-            const totalAllocated = paymentAllocations.reduce((sum, allocation) => sum + allocation.allocatedAmount, 0);
+            const incompleteCrossCurrencyAllocation = paymentAllocations.find(allocation =>
+                allocation.allocatedAmount > 0 && (allocation.paymentCurrencyAmount ?? 0) <= 0);
+            if (incompleteCrossCurrencyAllocation) {
+                toast({
+                    title: 'Payment-currency amount required',
+                    description: 'Enter both the invoice amount settled and the amount consumed from the selected bank currency.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            const totalAllocated = paymentAllocations.reduce((sum, allocation) => sum + (allocation.paymentCurrencyAmount ?? allocation.allocatedAmount), 0);
             const totalWithholdingTax = paymentAllocations.reduce((sum, allocation) => sum + (allocation.withholdingTaxAmount || 0), 0);
             if (totalAllocated > data.totalAmount) {
                 toast({
                     title: 'Allocation exceeds payment',
-                    description: 'Allocated bill amounts cannot exceed the payment amount.',
+                    description: 'Amounts allocated from the selected bank currency cannot exceed the payment amount.',
                     variant: 'destructive',
                 });
                 return;
@@ -380,7 +403,14 @@ export default function NewVendorPaymentPage() {
     };
 
     const currentAmount = form.watch('totalAmount');
-    const totalAllocated = Object.values(allocations).reduce((acc, curr) => acc + curr, 0);
+    // The payment header is denominated in the bank currency, so remaining cash must use
+    // paymentCurrencyAllocations for FX rows and the invoice amount only for same-currency rows.
+    const totalAllocated = outstandingInvoices?.reduce((sum, invoice) => {
+        const invoiceAmount = Number(allocations[invoice.invoiceId]) || 0;
+        return sum + (invoice.currencyCode === currentCurrencyCode
+            ? invoiceAmount
+            : Number(paymentCurrencyAllocations[invoice.invoiceId]) || 0);
+    }, 0) ?? 0;
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
     const totalWithholdingTax = Object.values(withholdingAllocations).reduce((acc, curr) => acc + curr, 0);
     const totalBillSettlement = totalAllocated + totalDiscounts + totalWithholdingTax;
@@ -396,7 +426,9 @@ export default function NewVendorPaymentPage() {
             // Never auto-allocate cash to a Procurement-blocked invoice. The user can see the
             // readiness reason in the table, and the API independently enforces the same rule.
             const sortedInvoices = outstandingInvoices
-                .filter((invoice) => invoice.paymentReadiness?.isPaymentReady === true)
+                // Cross-currency rows need an explicit user-confirmed pair of amounts. Auto
+                // allocation remains deterministic by operating only on same-currency invoices.
+                .filter((invoice) => invoice.paymentReadiness?.isPaymentReady === true && invoice.currencyCode === currentCurrencyCode)
                 .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
             for (const inv of sortedInvoices) {
                 if (remaining <= 0) break;
@@ -450,6 +482,7 @@ export default function NewVendorPaymentPage() {
                 setWithholdingCalculation(null);
             }
             setAllocations(next.cash);
+            setPaymentCurrencyAllocations({});
             setDiscountAllocations(next.discounts);
             setWithholdingAllocations(next.withholding);
         } catch (error: any) {
@@ -758,7 +791,8 @@ export default function NewVendorPaymentPage() {
                                                 <th className="p-3 text-left">Bill #</th>
                                                 <th className="p-3 text-left">Due Date</th>
                                                 <th className="p-3 text-right">Balance Due</th>
-                                                <th className="p-3 text-right w-[150px]">Allocate</th>
+                                                <th className="p-3 text-right w-[150px]">Invoice Cash</th>
+                                                <th className="p-3 text-right w-[150px]">Payment Cash</th>
                                                 <th className="p-3 text-right w-[150px]">Discount</th>
                                                 <th className="p-3 text-right w-[150px]">WHT</th>
                                             </tr>
@@ -771,6 +805,7 @@ export default function NewVendorPaymentPage() {
                                                 const currentDiscountAllocation = Number(discountAllocations[inv.invoiceId]) || 0;
                                                 const maxWithholdingAllocation = Math.max(inv.balanceAmount - currentCashAllocation - currentDiscountAllocation, 0);
                                                 const isPaymentReady = inv.paymentReadiness?.isPaymentReady === true;
+                                                const isCrossCurrency = inv.currencyCode !== currentCurrencyCode;
 
                                                 return (
                                                     <tr key={inv.invoiceId} className="border-t">
@@ -782,7 +817,7 @@ export default function NewVendorPaymentPage() {
                                                             <VendorPaymentReadinessBadge readiness={inv.paymentReadiness} />
                                                             {availableDiscount > 0 && (
                                                                 <span className="text-xs text-emerald-700">
-                                                                    Discount available: {formatCurrency(availableDiscount, currentCurrencyCode)}
+                                                                    Discount available: {formatCurrency(availableDiscount, inv.currencyCode)}
                                                                 </span>
                                                             )}
                                                         </td>
@@ -792,7 +827,7 @@ export default function NewVendorPaymentPage() {
                                                                 <span className="ml-2 text-xs text-red-500 font-bold">Overdue</span>
                                                             )}
                                                         </td>
-                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, currentCurrencyCode)}</td>
+                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, inv.currencyCode)}</td>
                                                         <td className="p-3">
                                                             <Input
                                                                 type="number"
@@ -811,6 +846,36 @@ export default function NewVendorPaymentPage() {
                                                             />
                                                         </td>
                                                         <td className="p-3">
+                                                            {isCrossCurrency ? (
+                                                                <Input
+                                                                    type="number"
+                                                                    className="text-right h-8"
+                                                                    min={0}
+                                                                    value={paymentCurrencyAllocations[inv.invoiceId] || ''}
+                                                                    onChange={(e) => {
+                                                                        const val = Number(e.target.value);
+                                                                        setPaymentCurrencyAllocations(prev => ({
+                                                                            ...prev,
+                                                                            [inv.invoiceId]: val,
+                                                                        }));
+                                                                    }}
+                                                                    disabled={isSubmitting || !isPaymentReady}
+                                                                    aria-label={`Payment amount in ${currentCurrencyCode}`}
+                                                                />
+                                                            ) : (
+                                                                <div className="text-right text-muted-foreground">
+                                                                    {formatCurrency(currentCashAllocation, currentCurrencyCode)}
+                                                                </div>
+                                                            )}
+                                                            {isCrossCurrency && (
+                                                                <div className="mt-1 text-right text-xs text-muted-foreground">
+                                                                    {currentCurrencyCode} paid for {inv.currencyCode} balance
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3">
+                                                            {/* Discount/WHT header totals are single-currency today. Deductions
+                                                                stay disabled on FX rows until statutory metadata is line-scoped. */}
                                                             <Input
                                                                 type="number"
                                                                 className="text-right h-8"
@@ -824,7 +889,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || !isPaymentReady || availableDiscount <= 0}
+                                                                disabled={isSubmitting || !isPaymentReady || availableDiscount <= 0 || isCrossCurrency}
                                                             />
                                                         </td>
                                                         <td className="p-3">
@@ -841,7 +906,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax}
+                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax || isCrossCurrency}
                                                             />
                                                         </td>
                                                     </tr>

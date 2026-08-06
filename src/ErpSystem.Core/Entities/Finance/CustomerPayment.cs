@@ -52,6 +52,13 @@ public class CustomerPayment : BusinessEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved receipt-currency rate snapshot source. The value remains duplicated in
+    /// ExchangeRate intentionally: the id supplies audit lineage while the value guarantees
+    /// deterministic posting if rate-master data is later corrected.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+
     // Bank/Payment Details
     public Guid? BankAccountId { get; set; }
     public virtual BankAccount? BankAccount { get; set; }

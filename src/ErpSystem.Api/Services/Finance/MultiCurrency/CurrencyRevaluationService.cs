@@ -123,8 +123,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         var settings = await GetFinanceSettingsAsync(tenantId, cancellationToken);
         var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, await _tenantSettingsService.GetBaseCurrencyAsync());
         var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
-        EnsureApSettlementCurrencySupported(payment, paymentCurrency);
-        if (IsFunctionalCurrency(paymentCurrency, functionalCurrency))
+        var requiresFx = !IsFunctionalCurrency(paymentCurrency, functionalCurrency)
+            || payment.Allocations.Any(a => !a.IsReversal &&
+                (a.IsCrossCurrency || !IsFunctionalCurrency(
+                    NormalizeCurrency(a.VendorInvoice?.CurrencyCode, functionalCurrency),
+                    functionalCurrency)));
+        if (!requiresFx)
         {
             return Array.Empty<FxRealizedSettlement>();
         }
@@ -208,8 +212,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         var settings = await GetFinanceSettingsAsync(tenantId, cancellationToken);
         var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, await _tenantSettingsService.GetBaseCurrencyAsync());
         var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
-        EnsureArSettlementCurrencySupported(payment, paymentCurrency);
-        if (IsFunctionalCurrency(paymentCurrency, functionalCurrency))
+        var requiresFx = !IsFunctionalCurrency(paymentCurrency, functionalCurrency)
+            || payment.Allocations.Any(a => !a.IsReversal &&
+                (a.IsCrossCurrency || !IsFunctionalCurrency(
+                    NormalizeCurrency(a.Invoice?.CurrencyCode, functionalCurrency),
+                    functionalCurrency)));
+        if (!requiresFx)
         {
             return Array.Empty<FxRealizedSettlement>();
         }
@@ -620,12 +628,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         }
 
         var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
-        if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "Cross-currency AP settlements are not supported in FX Batch 18. Vendor payment currency must match each allocated invoice currency.");
-        }
-
         var settledForeignAmount = RoundMoney(allocation.AllocatedAmount + allocation.DiscountAmount + allocation.WithholdingTaxAmount);
         if (settledForeignAmount <= 0m)
         {
@@ -634,7 +636,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
 
         var basis = await ResolveSettlementBasisAsync(
             tenantId,
-            paymentCurrency,
+            invoiceCurrency,
             invoiceJournalEntryId: allocation.VendorInvoice.JournalEntryId.Value,
             invoiceDocumentType: "VendorInvoice",
             invoiceDocumentId: allocation.VendorInvoiceId,
@@ -646,7 +648,12 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             cancellationToken);
 
         var historicalFunctionalAmount = RoundMoney(settledForeignAmount * basis.HistoricalRate);
-        var settlementFunctionalAmount = RoundMoney(settledForeignAmount * basis.SettlementRate);
+        // Cross-currency settlement cannot be reconstructed by multiplying the invoice amount by
+        // the payment rate. The allocation freezes the actual functional value of cash plus
+        // deductions, which is the correct comparison against the historical AP carrying value.
+        var settlementFunctionalAmount = allocation.SettlementFunctionalAmount > 0m
+            ? RoundMoney(allocation.SettlementFunctionalAmount)
+            : RoundMoney(settledForeignAmount * basis.SettlementRate);
         var delta = RoundMoney(settlementFunctionalAmount - historicalFunctionalAmount);
         if (delta == 0m)
         {
@@ -717,13 +724,26 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             InvoiceDocumentType = "VendorInvoice",
             InvoiceDocumentId = allocation.VendorInvoiceId,
             ControlAccountId = basis.ControlAccountId,
-            TransactionCurrency = paymentCurrency,
+            TransactionCurrency = invoiceCurrency,
             FunctionalCurrencyCode = functionalCurrency,
             SettledForeignAmount = settledForeignAmount,
+            PaymentCurrencyCode = NormalizeCurrency(allocation.PaymentCurrencyCode, paymentCurrency),
+            PaymentCurrencyAmount = allocation.PaymentCurrencyAmount > 0m
+                ? allocation.PaymentCurrencyAmount
+                : allocation.AllocatedAmount,
+            PaymentExchangeRateId = allocation.PaymentExchangeRateId,
+            PaymentExchangeRate = allocation.PaymentExchangeRate > 0m
+                ? allocation.PaymentExchangeRate
+                : NormalizeExchangeRate(payment.ExchangeRate),
+            IsCrossCurrency = allocation.IsCrossCurrency,
             HistoricalExchangeRate = basis.HistoricalRate,
             HistoricalExchangeRateId = basis.HistoricalRateId,
-            SettlementExchangeRate = basis.SettlementRate,
-            SettlementExchangeRateId = basis.SettlementRateId,
+            SettlementExchangeRate = settledForeignAmount > 0m
+                ? decimal.Round(settlementFunctionalAmount / settledForeignAmount, 6, MidpointRounding.AwayFromZero)
+                : basis.SettlementRate,
+            // A blended third-currency value has no single rate-master row. Payment and invoice
+            // rate ids are retained separately on the allocation/FX event instead.
+            SettlementExchangeRateId = allocation.IsCrossCurrency ? null : basis.SettlementRateId,
             HistoricalFunctionalAmount = historicalFunctionalAmount,
             SettlementFunctionalAmount = settlementFunctionalAmount,
             GainLossAmount = amount,
@@ -776,12 +796,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
         }
 
         var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
-        if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "Cross-currency AR settlements are not supported in FX Batch 18. Customer receipt currency must match each allocated invoice currency.");
-        }
-
         var settledForeignAmount = RoundMoney(allocation.AllocatedAmount + allocation.DiscountAmount);
         if (settledForeignAmount <= 0m)
         {
@@ -790,7 +804,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
 
         var basis = await ResolveSettlementBasisAsync(
             tenantId,
-            paymentCurrency,
+            invoiceCurrency,
             invoiceJournalEntryId: allocation.Invoice.JournalEntryId.Value,
             invoiceDocumentType: "CustomerInvoice",
             invoiceDocumentId: allocation.InvoiceId,
@@ -802,7 +816,9 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             cancellationToken);
 
         var historicalFunctionalAmount = RoundMoney(settledForeignAmount * basis.HistoricalRate);
-        var settlementFunctionalAmount = RoundMoney(settledForeignAmount * basis.SettlementRate);
+        var settlementFunctionalAmount = allocation.SettlementFunctionalAmount > 0m
+            ? RoundMoney(allocation.SettlementFunctionalAmount)
+            : RoundMoney(settledForeignAmount * basis.SettlementRate);
         var delta = RoundMoney(settlementFunctionalAmount - historicalFunctionalAmount);
         if (delta == 0m)
         {
@@ -873,13 +889,24 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             InvoiceDocumentType = "CustomerInvoice",
             InvoiceDocumentId = allocation.InvoiceId,
             ControlAccountId = basis.ControlAccountId,
-            TransactionCurrency = paymentCurrency,
+            TransactionCurrency = invoiceCurrency,
             FunctionalCurrencyCode = functionalCurrency,
             SettledForeignAmount = settledForeignAmount,
+            PaymentCurrencyCode = NormalizeCurrency(allocation.PaymentCurrencyCode, paymentCurrency),
+            PaymentCurrencyAmount = allocation.PaymentCurrencyAmount > 0m
+                ? allocation.PaymentCurrencyAmount
+                : allocation.AllocatedAmount,
+            PaymentExchangeRateId = allocation.PaymentExchangeRateId,
+            PaymentExchangeRate = allocation.PaymentExchangeRate > 0m
+                ? allocation.PaymentExchangeRate
+                : NormalizeExchangeRate(payment.ExchangeRate),
+            IsCrossCurrency = allocation.IsCrossCurrency,
             HistoricalExchangeRate = basis.HistoricalRate,
             HistoricalExchangeRateId = basis.HistoricalRateId,
-            SettlementExchangeRate = basis.SettlementRate,
-            SettlementExchangeRateId = basis.SettlementRateId,
+            SettlementExchangeRate = settledForeignAmount > 0m
+                ? decimal.Round(settlementFunctionalAmount / settledForeignAmount, 6, MidpointRounding.AwayFromZero)
+                : basis.SettlementRate,
+            SettlementExchangeRateId = allocation.IsCrossCurrency ? null : basis.SettlementRateId,
             HistoricalFunctionalAmount = historicalFunctionalAmount,
             SettlementFunctionalAmount = settlementFunctionalAmount,
             GainLossAmount = amount,
@@ -995,42 +1022,6 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             .ToListAsync(cancellationToken);
 
         return lines;
-    }
-
-    private static void EnsureApSettlementCurrencySupported(VendorPayment payment, string paymentCurrency)
-    {
-        foreach (var allocation in payment.Allocations.Where(a => !a.IsReversal))
-        {
-            if (allocation.VendorInvoice == null)
-            {
-                continue;
-            }
-
-            var invoiceCurrency = NormalizeCurrency(allocation.VendorInvoice.CurrencyCode, paymentCurrency);
-            if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    "Cross-currency AP settlements are not supported in FX Batch 18. Vendor payment currency must match each allocated invoice currency.");
-            }
-        }
-    }
-
-    private static void EnsureArSettlementCurrencySupported(CustomerPayment payment, string paymentCurrency)
-    {
-        foreach (var allocation in payment.Allocations.Where(a => !a.IsReversal))
-        {
-            if (allocation.Invoice == null)
-            {
-                continue;
-            }
-
-            var invoiceCurrency = NormalizeCurrency(allocation.Invoice.CurrencyCode, paymentCurrency);
-            if (!string.Equals(invoiceCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    "Cross-currency AR settlements are not supported in FX Batch 18. Customer receipt currency must match each allocated invoice currency.");
-            }
-        }
     }
 
     private async Task EnsureExchangeRateSnapshotBelongsToTenantAsync(
@@ -1519,6 +1510,11 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
     private static decimal RoundMoney(decimal value)
     {
         return Math.Round(value, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static decimal NormalizeExchangeRate(decimal value)
+    {
+        return value <= 0m ? 1m : decimal.Round(value, 6, MidpointRounding.AwayFromZero);
     }
 
     private Guid? GetCurrentUserGuid()
