@@ -268,7 +268,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         string? currencyCode,
         CancellationToken cancellationToken = default)
     {
-        var query = BuildUnremittedLiabilityQuery(fromDate, toDate, currencyCode);
+        var functionalCurrency = await ResolveFunctionalCurrencyAsync(cancellationToken);
+        var query = BuildUnremittedLiabilityQuery(fromDate, toDate, currencyCode, functionalCurrency);
         var payments = await query
             .OrderBy(payment => payment.PaymentDate)
             .ThenBy(payment => payment.PaymentNumber)
@@ -288,7 +289,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
                 SupplierId = payment.SupplierId,
                 SupplierName = payment.Supplier?.Name ?? string.Empty,
                 SupplierTin = payment.Supplier?.TaxId,
-                CurrencyCode = NormalizeCurrency(payment.CurrencyCode),
+                CurrencyCode = functionalCurrency,
                 TaxCode = payment.WithholdingTax?.Code,
                 TaxableBase = ResolveTaxableBase(payment),
                 WithholdingAmount = RoundMoney(payment.WithholdingTaxAmount),
@@ -553,7 +554,9 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var certificateNumber = requestedNumber
             ?? await GenerateCertificateNumberAsync(payment.PaymentDate, cancellationToken);
         await EnsureCertificateNumberIsUniqueAsync(certificateNumber, cancellationToken);
-        var certificate = CreateCertificateSnapshot(payment, certificateNumber, 1, dto.CertificateDate ?? DateTime.UtcNow, null, null);
+        var functionalCurrency = await ResolveFunctionalCurrencyAsync(cancellationToken);
+        var certificate = CreateCertificateSnapshot(
+            payment, certificateNumber, 1, dto.CertificateDate ?? DateTime.UtcNow, null, null, functionalCurrency);
         await _context.WithholdingTaxCertificates.AddAsync(certificate, cancellationToken);
         UpdatePaymentCertificateProjection(payment, certificate);
         await _context.SaveChangesAsync(cancellationToken);
@@ -597,13 +600,15 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
 
         var certificateNumber = await GenerateCertificateNumberAsync(payment.PaymentDate, cancellationToken);
         await EnsureCertificateNumberIsUniqueAsync(certificateNumber, cancellationToken);
+        var functionalCurrency = await ResolveFunctionalCurrencyAsync(cancellationToken);
         var replacement = CreateCertificateSnapshot(
             payment,
             certificateNumber,
             versions.Max(certificate => certificate.VersionNumber) + 1,
             dto.CertificateDate ?? DateTime.UtcNow,
             current.Id,
-            reason);
+            reason,
+            functionalCurrency);
         var before = CertificateAuditSnapshot(current);
         current.Status = WhtCertificateStatus.Superseded;
         current.LifecycleReason = reason;
@@ -691,7 +696,13 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             throw new InvalidOperationException("Select at least one unremitted posted WHT liability.");
         }
         var currency = NormalizeCurrency(dto.CurrencyCode);
-        var eligible = await BuildUnremittedLiabilityQuery(dto.PeriodFrom, dto.PeriodTo, currency)
+        var functionalCurrency = await ResolveFunctionalCurrencyAsync(cancellationToken);
+        if (!string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"WHT remittances must use the tenant functional currency {functionalCurrency} because statutory WHT values are functional-currency snapshots.");
+        }
+        var eligible = await BuildUnremittedLiabilityQuery(dto.PeriodFrom, dto.PeriodTo, currency, functionalCurrency)
             .Where(payment => paymentIds.Contains(payment.Id))
             .OrderBy(payment => payment.PaymentDate)
             .ThenBy(payment => payment.PaymentNumber)
@@ -763,6 +774,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             .Include(payment => payment.Supplier)
             .Include(payment => payment.WithholdingTax)
             .Include(payment => payment.WithholdingTaxAccount)
+            .Include(payment => payment.Allocations)
             .Where(payment => payment.TenantId == tenantId && !payment.IsDeleted
                 && payment.WithholdingTaxAmount > 0m
                 && payment.Status != VendorPaymentStatus.Reversed
@@ -797,13 +809,20 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         return payments;
     }
 
-    private IQueryable<VendorPayment> BuildUnremittedLiabilityQuery(DateTime? fromDate, DateTime? toDate, string? currencyCode)
+    private IQueryable<VendorPayment> BuildUnremittedLiabilityQuery(
+        DateTime? fromDate,
+        DateTime? toDate,
+        string? currencyCode,
+        string functionalCurrency)
     {
         var query = BuildEligibleApPaymentQuery(new WhtCertificateQueryDto { FromDate = fromDate, ToDate = toDate });
         var normalizedCurrency = Normalize(currencyCode)?.ToUpperInvariant();
-        if (!string.IsNullOrWhiteSpace(normalizedCurrency))
+        if (!string.IsNullOrWhiteSpace(normalizedCurrency)
+            && !string.Equals(normalizedCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
         {
-            query = query.Where(payment => payment.CurrencyCode == normalizedCurrency);
+            // WHT liabilities are statutory functional-currency amounts. A foreign requested
+            // currency therefore has no eligible rows, regardless of the supplier cash currency.
+            query = query.Where(payment => false);
         }
         return query.Where(payment => !_context.WithholdingTaxRemittanceLines.Any(line =>
             line.TenantId == TenantId && !line.IsDeleted && line.VendorPaymentId == payment.Id
@@ -816,6 +835,7 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             .Include(payment => payment.Supplier)
             .Include(payment => payment.WithholdingTax)
             .Include(payment => payment.WithholdingTaxAccount)
+            .Include(payment => payment.Allocations)
             .Where(payment => payment.TenantId == TenantId && !payment.IsDeleted && payment.Id == vendorPaymentId
                 && payment.WithholdingTaxAmount > 0m
                 && payment.Status != VendorPaymentStatus.Reversed
@@ -890,7 +910,8 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         int versionNumber,
         DateTime issueDate,
         Guid? supersedesCertificateId,
-        string? lifecycleReason)
+        string? lifecycleReason,
+        string functionalCurrency)
     {
         var now = DateTime.UtcNow;
         return new WithholdingTaxCertificate
@@ -912,14 +933,18 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
             SupplierName = payment.Supplier?.Name ?? string.Empty,
             SupplierTin = payment.Supplier?.TaxId,
             PaymentDate = payment.PaymentDate.Date,
-            CurrencyCode = NormalizeCurrency(payment.CurrencyCode),
+            // Certificate amounts are statutory functional values even when the supplier was
+            // paid in another currency; label the immutable snapshot accordingly.
+            CurrencyCode = functionalCurrency,
             TaxId = payment.WithholdingTaxId,
             TaxCode = payment.WithholdingTax?.Code,
             TaxName = payment.WithholdingTax?.Name,
             TaxRate = RoundRate(payment.WithholdingTaxRate != 0m ? payment.WithholdingTaxRate : payment.WithholdingTax?.Rate ?? 0m),
             TaxableBase = ResolveTaxableBase(payment),
             WithholdingAmount = RoundMoney(payment.WithholdingTaxAmount),
-            NetPaidAmount = RoundMoney(payment.TotalAmount),
+            NetPaidAmount = RoundMoney(payment.Allocations
+                .Where(allocation => !allocation.IsDeleted)
+                .Sum(allocation => allocation.PaymentFunctionalAmount)),
             TaxAccountId = payment.WithholdingTaxAccountId,
             TaxAccountNumber = payment.WithholdingTaxAccount?.AccountNumber,
             TaxAccountName = payment.WithholdingTaxAccount?.AccountName,
@@ -1219,10 +1244,24 @@ body{font-family:Arial,sans-serif;color:#111827;margin:40px}.certificate{positio
 """;
     }
 
+    private async Task<string> ResolveFunctionalCurrencyAsync(CancellationToken cancellationToken)
+    {
+        var configured = await _context.FinanceSettings
+            .AsNoTracking()
+            .Where(settings => settings.TenantId == TenantId && !settings.IsDeleted)
+            .Select(settings => settings.BaseCurrency)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // TDC's configured functional currency is GHS. The fallback only protects a partially
+        // seeded development tenant; posted Finance transactions normally require settings.
+        return NormalizeCurrency(string.IsNullOrWhiteSpace(configured) ? "GHS" : configured);
+    }
+
     private static decimal ResolveTaxableBase(VendorPayment payment)
         => RoundMoney(payment.WithholdingTaxBaseAmount > 0m
             ? payment.WithholdingTaxBaseAmount
-            : payment.TotalAmount + payment.WithholdingTaxAmount);
+            : payment.Allocations.Where(allocation => !allocation.IsDeleted)
+                .Sum(allocation => allocation.SettlementFunctionalAmount));
 
     private static DateTime DefaultRemittanceDueDate(DateTime periodTo)
         => new DateTime(periodTo.Year, periodTo.Month, 1).AddMonths(1).AddDays(14);

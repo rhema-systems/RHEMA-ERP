@@ -418,20 +418,33 @@ namespace ErpSystem.Api.Services.Finance.AR
                     FinanceAccessLevel.Operate,
                     cancellationToken);
 
-                if (dto.WithholdingTaxAmount < 0m || dto.VatWithholdingAmount < 0m)
+                var hasLineWithholding = dto.Allocations?.Any(allocation => allocation.WithholdingTaxAmount > 0m) == true;
+                var hasLineVatWithholding = dto.Allocations?.Any(allocation => allocation.VatWithholdingAmount > 0m) == true;
+                if (dto.WithholdingTaxAmount < 0m || dto.VatWithholdingAmount < 0m ||
+                    dto.Allocations?.Any(allocation =>
+                        allocation.WithholdingTaxAmount < 0m || allocation.VatWithholdingAmount < 0m) == true)
                 {
                     throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
                 }
-                if ((dto.WithholdingTaxAmount > 0m || dto.VatWithholdingAmount > 0m)
+                if ((hasLineWithholding || hasLineVatWithholding)
                     && string.IsNullOrWhiteSpace(dto.WithholdingCertificateNumber))
                 {
                     throw new InvalidOperationException("Customer withholding certificate/reference number is required when WHT or VAT withholding is recorded.");
+                }
+                if ((dto.WithholdingTaxAmount > 0m || dto.VatWithholdingAmount > 0m) &&
+                    !(hasLineWithholding || hasLineVatWithholding))
+                {
+                    // Header-only deductions cannot identify which invoice currency and rate
+                    // reduced the receivable. New writes must provide the statutory amount on
+                    // each allocation; the header is now a functional-currency roll-up.
+                    throw new InvalidOperationException(
+                        "Allocate AR WHT and VAT withholding to individual invoices; receipt-header deduction amounts are calculated by Finance.");
                 }
 
                 // Resolve the account exclusively from the selected, effective-dated sales tax.
                 // This prevents a browser from redirecting statutory receivables to an unrelated
                 // same-tenant account while retaining the existing posting engine as authority.
-                Guid? withholdingReceivableAccountId = dto.WithholdingTaxAmount > 0m
+                Guid? withholdingReceivableAccountId = hasLineWithholding
                     ? await ResolveConfiguredWithholdingReceivableAccountAsync(
                         dto.PaymentDate,
                         dto.WithholdingTaxId ?? throw new InvalidOperationException("Configured WHT receivable tax is required."),
@@ -439,7 +452,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         cancellationToken)
                         ?? throw new InvalidOperationException("The selected WHT tax has no effective receivable account configured.")
                     : null;
-                Guid? vatWithholdingReceivableAccountId = dto.VatWithholdingAmount > 0m
+                Guid? vatWithholdingReceivableAccountId = hasLineVatWithholding
                     ? await ResolveConfiguredWithholdingReceivableAccountAsync(
                         dto.PaymentDate,
                         dto.VatWithholdingTaxId ?? throw new InvalidOperationException("Configured VAT withholding receivable tax is required."),
@@ -468,12 +481,12 @@ namespace ErpSystem.Api.Services.Finance.AR
                     CheckNumber = dto.CheckNumber,
                     ChequeDrawerBank = dto.ChequeDrawerBank,
                     TransactionReference = dto.TransactionReference,
-                    WithholdingTaxId = dto.WithholdingTaxAmount > 0m ? dto.WithholdingTaxId : null,
+                    WithholdingTaxId = hasLineWithholding ? dto.WithholdingTaxId : null,
                     WithholdingTaxAccountId = withholdingReceivableAccountId,
-                    WithholdingTaxAmount = dto.WithholdingTaxAmount,
-                    VatWithholdingTaxId = dto.VatWithholdingAmount > 0m ? dto.VatWithholdingTaxId : null,
+                    WithholdingTaxAmount = 0m,
+                    VatWithholdingTaxId = hasLineVatWithholding ? dto.VatWithholdingTaxId : null,
                     VatWithholdingAccountId = vatWithholdingReceivableAccountId,
-                    VatWithholdingAmount = dto.VatWithholdingAmount,
+                    VatWithholdingAmount = 0m,
                     WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
                     WithholdingCertificateDate = dto.WithholdingCertificateDate,
                     Notes = dto.Notes,
@@ -504,6 +517,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                         throw new InvalidOperationException(
                             allocationResult.Message ?? "The customer receipt allocations could not be applied completely.");
                     }
+
+                    // Receipt header amounts are functional-currency statutory roll-ups. The
+                    // native evidence remains line-scoped because a receipt may settle USD and
+                    // EUR invoices together while the GRA/control accounts report in GHS.
+                    payment.WithholdingTaxAmount = RoundMoney(payment.Allocations
+                        .Where(allocation => !allocation.IsReversal)
+                        .Sum(allocation => allocation.WithholdingTaxFunctionalAmount));
+                    payment.VatWithholdingAmount = RoundMoney(payment.Allocations
+                        .Where(allocation => !allocation.IsReversal)
+                        .Sum(allocation => allocation.VatWithholdingFunctionalAmount));
                 }
 
                 if (dto.IsCreditNote)
@@ -544,7 +567,9 @@ namespace ErpSystem.Api.Services.Finance.AR
         public async Task<CustomerPaymentDto> UpdateAsync(PaymentUpdateDto dto, CancellationToken cancellationToken = default)
         {
             var payment = await _unitOfWork.Repository<CustomerPayment>()
-                .FirstOrDefaultAsync(p => p.TenantId == TenantId && p.Id == dto.Id);
+                .GetQueryable(p => p.TenantId == TenantId && p.Id == dto.Id)
+                .Include(p => p.Allocations)
+                .FirstOrDefaultAsync(cancellationToken);
 
             if (payment == null)
                 throw new KeyNotFoundException($"Payment with Id '{dto.Id}' not found.");
@@ -589,11 +614,17 @@ namespace ErpSystem.Api.Services.Finance.AR
                 FinanceAccessLevel.Operate,
                 cancellationToken);
 
-            if (dto.WithholdingTaxAmount < 0m || dto.VatWithholdingAmount < 0m)
+            if (dto.WithholdingTaxAmount != 0m || dto.VatWithholdingAmount != 0m)
             {
-                throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
+                // Deductions are invoice-currency facts. Accepting a header amount here would
+                // discard the invoice/rate evidence required for cross-currency posting.
+                throw new InvalidOperationException(
+                    "AR receipt WHT and VAT-WHT must be recorded against invoice allocations, not on the receipt header.");
             }
-            if ((dto.WithholdingTaxAmount > 0m || dto.VatWithholdingAmount > 0m)
+            var activeAllocations = payment.Allocations.Where(allocation => !allocation.IsDeleted).ToList();
+            var withholdingFunctionalAmount = RoundMoney(activeAllocations.Sum(allocation => allocation.WithholdingTaxFunctionalAmount));
+            var vatWithholdingFunctionalAmount = RoundMoney(activeAllocations.Sum(allocation => allocation.VatWithholdingFunctionalAmount));
+            if ((withholdingFunctionalAmount > 0m || vatWithholdingFunctionalAmount > 0m)
                 && string.IsNullOrWhiteSpace(dto.WithholdingCertificateNumber))
             {
                 throw new InvalidOperationException("Customer withholding certificate/reference number is required when WHT or VAT withholding is recorded.");
@@ -601,7 +632,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             // Pending-receipt edits have the same configuration boundary as creation. Never let
             // an update reintroduce client-selected GL accounts after the create path was hardened.
-            Guid? withholdingReceivableAccountId = dto.WithholdingTaxAmount > 0m
+            Guid? withholdingReceivableAccountId = withholdingFunctionalAmount > 0m
                 ? await ResolveConfiguredWithholdingReceivableAccountAsync(
                     dto.PaymentDate,
                     dto.WithholdingTaxId ?? throw new InvalidOperationException("Configured WHT receivable tax is required."),
@@ -609,7 +640,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     cancellationToken)
                     ?? throw new InvalidOperationException("The selected WHT tax has no effective receivable account configured.")
                 : null;
-            Guid? vatWithholdingReceivableAccountId = dto.VatWithholdingAmount > 0m
+            Guid? vatWithholdingReceivableAccountId = vatWithholdingFunctionalAmount > 0m
                 ? await ResolveConfiguredWithholdingReceivableAccountAsync(
                     dto.PaymentDate,
                     dto.VatWithholdingTaxId ?? throw new InvalidOperationException("Configured VAT withholding receivable tax is required."),
@@ -628,12 +659,14 @@ namespace ErpSystem.Api.Services.Finance.AR
             payment.CheckNumber = dto.CheckNumber;
             payment.ChequeDrawerBank = dto.ChequeDrawerBank;
             payment.TransactionReference = dto.TransactionReference;
-            payment.WithholdingTaxId = dto.WithholdingTaxAmount > 0m ? dto.WithholdingTaxId : null;
+            // Header tax values are reporting conveniences only. Rebuild them from immutable
+            // allocation snapshots on every edit so a client cannot make the header disagree.
+            payment.WithholdingTaxId = withholdingFunctionalAmount > 0m ? dto.WithholdingTaxId : null;
             payment.WithholdingTaxAccountId = withholdingReceivableAccountId;
-            payment.WithholdingTaxAmount = dto.WithholdingTaxAmount;
-            payment.VatWithholdingTaxId = dto.VatWithholdingAmount > 0m ? dto.VatWithholdingTaxId : null;
+            payment.WithholdingTaxAmount = withholdingFunctionalAmount;
+            payment.VatWithholdingTaxId = vatWithholdingFunctionalAmount > 0m ? dto.VatWithholdingTaxId : null;
             payment.VatWithholdingAccountId = vatWithholdingReceivableAccountId;
-            payment.VatWithholdingAmount = dto.VatWithholdingAmount;
+            payment.VatWithholdingAmount = vatWithholdingFunctionalAmount;
             payment.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
             payment.WithholdingCertificateDate = dto.WithholdingCertificateDate;
             payment.Notes = dto.Notes;
@@ -928,7 +961,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 var restoredCustomerBalance = 0m;
                 foreach (var allocation in activeAllocations)
                 {
-                    var settledAmount = allocation.AllocatedAmount + allocation.DiscountAmount;
+                    var settledAmount = allocation.AllocatedAmount + allocation.DiscountAmount +
+                        allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount;
                     restoredCustomerBalance += settledAmount;
                     allocation.Invoice.PaidAmount = Math.Max(
                         0m,
@@ -961,6 +995,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                         PaymentFunctionalAmount = -allocation.PaymentFunctionalAmount,
                         SettlementFunctionalAmount = -allocation.SettlementFunctionalAmount,
                         DiscountAmount = -allocation.DiscountAmount,
+                        DiscountFunctionalAmount = -allocation.DiscountFunctionalAmount,
+                        WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
+                        WithholdingTaxFunctionalAmount = -allocation.WithholdingTaxFunctionalAmount,
+                        VatWithholdingAmount = -allocation.VatWithholdingAmount,
+                        VatWithholdingFunctionalAmount = -allocation.VatWithholdingFunctionalAmount,
                         AllocationDate = reversalDate,
                         Notes = $"Receipt reversal of allocation {allocation.Id}: {reason}",
                         IsReversal = true,
@@ -1413,15 +1452,22 @@ namespace ErpSystem.Api.Services.Finance.AR
                     allocationDto.PaymentCurrencyAmount ?? allocationDto.AllocatedAmount,
                     0m);
                 var requestedDiscountAmount = Math.Max(allocationDto.DiscountAmount, 0m);
+                var requestedWithholdingAmount = Math.Max(allocationDto.WithholdingTaxAmount, 0m);
+                var requestedVatWithholdingAmount = Math.Max(allocationDto.VatWithholdingAmount, 0m);
 
-                if (cashAmount <= 0 && requestedDiscountAmount <= 0)
+                if (cashAmount <= 0 && requestedDiscountAmount <= 0 &&
+                    requestedWithholdingAmount <= 0 && requestedVatWithholdingAmount <= 0)
                 {
                     throw new InvalidOperationException(
-                        $"Allocation for invoice '{invoice.InvoiceNumber}' must include a positive cash or discount amount.");
+                        $"Allocation for invoice '{invoice.InvoiceNumber}' must include a positive cash or deduction amount.");
                 }
+                if (requestedWithholdingAmount > 0m && !payment.WithholdingTaxId.HasValue)
+                    throw new InvalidOperationException("Select the configured AR WHT tax before allocating WHT to an invoice.");
+                if (requestedVatWithholdingAmount > 0m && !payment.VatWithholdingTaxId.HasValue)
+                    throw new InvalidOperationException("Select the configured AR VAT withholding tax before allocating VAT-WHT to an invoice.");
 
                 // Cap at outstanding balance to prevent over-allocation
-                var totalApplied = cashAmount + requestedDiscountAmount;
+                var totalApplied = cashAmount + requestedDiscountAmount + requestedWithholdingAmount + requestedVatWithholdingAmount;
                 var postedSalesCreditTotal = await GetPostedSalesCreditAmountForInvoiceAsync(invoice.Id, cancellationToken);
                 var outstandingBalance = RoundMoney(invoice.TotalAmount - invoice.PaidAmount - postedSalesCreditTotal);
                 if (outstandingBalance <= 0m)
@@ -1447,7 +1493,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                             $"Discount {requestedDiscountAmount:C} exceeds the eligible amount {maximumDiscount:C} for invoice '{invoice.InvoiceNumber}'.");
                     }
 
-                    if (Math.Abs(RoundMoney(cashAmount + requestedDiscountAmount - outstandingBalance)) > 0.01m)
+                    if (Math.Abs(RoundMoney(
+                        cashAmount + requestedDiscountAmount + requestedWithholdingAmount + requestedVatWithholdingAmount - outstandingBalance)) > 0.01m)
                     {
                         throw new InvalidOperationException(
                             $"An early-payment discount may only be taken when invoice '{invoice.InvoiceNumber}' is fully settled by this allocation.");
@@ -1468,11 +1515,15 @@ namespace ErpSystem.Api.Services.Finance.AR
                         "Allocation of {Requested} exceeds outstanding balance {Outstanding} on invoice {InvoiceNumber}. Capping.",
                         totalApplied, outstandingBalance, invoice.InvoiceNumber);
 
-                    // Proportionally reduce both amounts so their sum equals outstandingBalance
+                    // Proportionally reduce every native component so their sum equals the
+                    // outstanding invoice balance without changing the maker's relative split.
                     var ratio = totalApplied > 0 ? outstandingBalance / totalApplied : 0m;
                     cashAmount = Math.Round(cashAmount * ratio, 2);
-                    requestedDiscountAmount = outstandingBalance - cashAmount;
-                    if (requestedDiscountAmount < 0) requestedDiscountAmount = 0;
+                    requestedDiscountAmount = Math.Round(requestedDiscountAmount * ratio, 2);
+                    requestedWithholdingAmount = Math.Round(requestedWithholdingAmount * ratio, 2);
+                    requestedVatWithholdingAmount = Math.Max(
+                        outstandingBalance - cashAmount - requestedDiscountAmount - requestedWithholdingAmount,
+                        0m);
                     paymentCashAmount = cashAmount;
                     totalApplied = outstandingBalance;
                 }
@@ -1487,12 +1538,14 @@ namespace ErpSystem.Api.Services.Finance.AR
                         : invoice.ExchangeRate,
                     requireApprovedSource: !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase),
                     cancellationToken);
-                var settlement = CrossCurrencySettlementCalculator.Calculate(
+                var settlement = CrossCurrencySettlementCalculator.CalculateWithDeductions(
                     paymentCurrency,
                     invoiceCurrency,
                     paymentCashAmount,
                     cashAmount,
                     requestedDiscountAmount,
+                    requestedWithholdingAmount,
+                    requestedVatWithholdingAmount,
                     paymentRate.Rate,
                     invoiceRate.Rate);
 
@@ -1516,6 +1569,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                     PaymentFunctionalAmount = settlement.PaymentFunctionalAmount,
                     SettlementFunctionalAmount = settlement.SettlementFunctionalAmount,
                     DiscountAmount = requestedDiscountAmount,
+                    DiscountFunctionalAmount = settlement.DiscountFunctionalAmount,
+                    WithholdingTaxAmount = requestedWithholdingAmount,
+                    WithholdingTaxFunctionalAmount = settlement.WithholdingFunctionalAmount,
+                    VatWithholdingAmount = requestedVatWithholdingAmount,
+                    VatWithholdingFunctionalAmount = settlement.VatWithholdingFunctionalAmount,
                     AllocationDate = now,
                     Notes = allocationDto.Notes,
                     IsReversal = false,
@@ -1565,6 +1623,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                     PaymentFunctionalAmount = allocation.PaymentFunctionalAmount,
                     SettlementFunctionalAmount = allocation.SettlementFunctionalAmount,
                     DiscountAmount = allocation.DiscountAmount,
+                    DiscountFunctionalAmount = allocation.DiscountFunctionalAmount,
+                    WithholdingTaxAmount = allocation.WithholdingTaxAmount,
+                    WithholdingTaxFunctionalAmount = allocation.WithholdingTaxFunctionalAmount,
+                    VatWithholdingAmount = allocation.VatWithholdingAmount,
+                    VatWithholdingFunctionalAmount = allocation.VatWithholdingFunctionalAmount,
                     AllocationDate = allocation.AllocationDate,
                     Notes = allocation.Notes
                 });
@@ -1581,7 +1644,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             {
                 var totalNewlyAllocated = payment.Allocations
                     .Where(a => a.CreatedAt == now) // Only allocations created in this request
-                    .Sum(a => a.AllocatedAmount + a.DiscountAmount);
+                    .Sum(a => a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount + a.VatWithholdingAmount);
                 customerPartner.OutstandingBalance = (customerPartner.OutstandingBalance ?? 0m) - totalNewlyAllocated;
                 customerPartner.UpdatedAt = now;
                 customerPartner.UpdatedBy = UserName;
@@ -1869,7 +1932,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             var now = DateTime.UtcNow;
 
             // Reverse invoice balances
-            var totalApplied = allocation.AllocatedAmount + allocation.DiscountAmount;
+            var totalApplied = allocation.AllocatedAmount + allocation.DiscountAmount +
+                allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount;
             allocation.Invoice.PaidAmount -= totalApplied;
 
             // Update invoice status
@@ -1977,12 +2041,14 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             // Capture the amount to reverse BEFORE the loop marks allocations as reversed
             var activeAllocations = payment.Allocations.Where(a => !a.IsReversal).ToList();
-            var reversedAmount = activeAllocations.Sum(a => a.AllocatedAmount + a.DiscountAmount);
+            var reversedAmount = activeAllocations.Sum(a =>
+                a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount + a.VatWithholdingAmount);
 
             // Reverse all active allocations
             foreach (var allocation in activeAllocations)
             {
-                var totalApplied = allocation.AllocatedAmount + allocation.DiscountAmount;
+                var totalApplied = allocation.AllocatedAmount + allocation.DiscountAmount +
+                    allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount;
                 allocation.Invoice.PaidAmount -= totalApplied;
 
                 if (allocation.Invoice.PaidAmount <= 0)
@@ -2059,6 +2125,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaymentFunctionalAmount = a.PaymentFunctionalAmount,
                 SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                 DiscountAmount = a.DiscountAmount,
+                DiscountFunctionalAmount = a.DiscountFunctionalAmount,
+                WithholdingTaxAmount = a.WithholdingTaxAmount,
+                WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                VatWithholdingAmount = a.VatWithholdingAmount,
+                VatWithholdingFunctionalAmount = a.VatWithholdingFunctionalAmount,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
                 IsReversal = a.IsReversal,
@@ -2326,7 +2397,9 @@ namespace ErpSystem.Api.Services.Finance.AR
                         a.InvoiceId == allocation.InvoiceId &&
                         !a.IsReversal &&
                         !a.IsDeleted)
-                    .SumAsync(a => a.AllocatedAmount + a.DiscountAmount, cancellationToken);
+                    .SumAsync(a =>
+                        a.AllocatedAmount + a.DiscountAmount + a.WithholdingTaxAmount + a.VatWithholdingAmount,
+                        cancellationToken);
                 var postedSalesCreditTotal = await GetPostedSalesCreditAmountForInvoiceAsync(
                     allocation.InvoiceId,
                     cancellationToken);
@@ -2416,30 +2489,23 @@ namespace ErpSystem.Api.Services.Finance.AR
                 requireDirectPosting: false,
                 cancellationToken);
 
-            var discountAllowed = RoundMoney(activeAllocations.Sum(a => a.DiscountAmount));
-            var withholdingTaxAmount = RoundMoney(payment.WithholdingTaxAmount);
-            var vatWithholdingAmount = RoundMoney(payment.VatWithholdingAmount);
+            var discountAllowed = RoundMoney(activeAllocations.Sum(a => a.DiscountFunctionalAmount));
+            var withholdingTaxAmount = RoundMoney(activeAllocations.Sum(a => a.WithholdingTaxFunctionalAmount));
+            var vatWithholdingAmount = RoundMoney(activeAllocations.Sum(a => a.VatWithholdingFunctionalAmount));
             if (withholdingTaxAmount < 0m || vatWithholdingAmount < 0m)
                 throw new InvalidOperationException("AR receipt withholding amounts cannot be negative.");
 
-            var hasCrossCurrencyAllocation = activeAllocations.Any(a => a.IsCrossCurrency);
-            if (hasCrossCurrencyAllocation &&
-                (discountAllowed != 0m || withholdingTaxAmount != 0m || vatWithholdingAmount != 0m))
-            {
-                // Cash-only cross-currency settlement is released first because AR currently
-                // stores WHT/VAT-WHT at receipt level rather than per invoice. Guessing how a
-                // multi-invoice deduction converts would make the statutory and control postings
-                // irreproducible; the future deduction allocation must be explicit per invoice.
-                throw new InvalidOperationException(
-                    "Cross-currency AR settlement cannot include discounts, WHT, or VAT withholding until each deduction is allocated explicitly to an invoice currency.");
-            }
+            // Validate in functional currency because native receipt cash, invoice reductions and
+            // statutory deductions may all use different currencies. Each allocation already
+            // freezes the approved conversion used in this comparison.
+            var allocatedSettlementFunctionalAmount = RoundMoney(activeAllocations.Sum(a => a.SettlementFunctionalAmount));
+            var expectedSettlementFunctionalAmount = RoundMoney(
+                RoundMoney(payment.TotalAmount * exchangeRate) + discountAllowed + withholdingTaxAmount + vatWithholdingAmount);
+            if (!isCustomerAdvance && allocatedSettlementFunctionalAmount != expectedSettlementFunctionalAmount)
+                throw new InvalidOperationException("AR receipt allocations do not reconcile to cash and line-scoped deductions in functional currency.");
 
-            var allocatedSettlementAmount = RoundMoney(activeAllocations.Sum(a =>
-                a.PaymentCurrencyAmount > 0m ? a.PaymentCurrencyAmount : a.AllocatedAmount));
-            if (!isCustomerAdvance && allocatedSettlementAmount != RoundMoney(payment.TotalAmount + withholdingTaxAmount + vatWithholdingAmount))
-                throw new InvalidOperationException("AR receipt allocations must equal cash received plus configured withholding amounts before posting. Use the customer-advance path for an unapplied receipt.");
-
-            var arSettlementAmount = RoundMoney(payment.TotalAmount + discountAllowed + withholdingTaxAmount + vatWithholdingAmount);
+            payment.WithholdingTaxAmount = withholdingTaxAmount;
+            payment.VatWithholdingAmount = vatWithholdingAmount;
 
             var postingLines = new List<FinancePostingLineDto>();
             var lineNumber = 1;
@@ -2465,18 +2531,21 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ?? throw new InvalidOperationException("AR withholding tax receivable account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(withholdingAccountId, "withholding tax receivable account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    withholdingAccountId,
-                    $"Withholding tax receivable - {payment.PaymentNumber}",
-                    debitTransactionAmount: withholdingTaxAmount,
-                    creditTransactionAmount: 0m,
-                    paymentCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    payment.PaymentDate,
-                    payment.PaymentNumber,
-                    lineNumber++,
-                    "AR-WHT"));
+                foreach (var allocation in activeAllocations.Where(a => a.WithholdingTaxAmount > 0m))
+                    postingLines.Add(BuildPostingLine(
+                        withholdingAccountId,
+                        $"Withholding tax receivable - {payment.PaymentNumber} / {allocation.Invoice.InvoiceNumber}",
+                        debitTransactionAmount: allocation.WithholdingTaxAmount,
+                        creditTransactionAmount: 0m,
+                        allocation.InvoiceCurrencyCode,
+                        functionalCurrency,
+                        allocation.InvoiceSettlementExchangeRate,
+                        payment.PaymentDate,
+                        payment.PaymentNumber,
+                        lineNumber++,
+                        "AR-WHT",
+                        allocation.InvoiceSettlementExchangeRateId,
+                        functionalDebitOverride: allocation.WithholdingTaxFunctionalAmount));
             }
 
             if (vatWithholdingAmount > 0m)
@@ -2486,18 +2555,21 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ?? throw new InvalidOperationException("AR VAT withholding receivable account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(vatWithholdingAccountId, "VAT withholding receivable account", accountCache, allowControlAccount: true, requireDirectPosting: false, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    vatWithholdingAccountId,
-                    $"VAT withholding receivable - {payment.PaymentNumber}",
-                    debitTransactionAmount: vatWithholdingAmount,
-                    creditTransactionAmount: 0m,
-                    paymentCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    payment.PaymentDate,
-                    payment.PaymentNumber,
-                    lineNumber++,
-                    "AR-VAT-WHT"));
+                foreach (var allocation in activeAllocations.Where(a => a.VatWithholdingAmount > 0m))
+                    postingLines.Add(BuildPostingLine(
+                        vatWithholdingAccountId,
+                        $"VAT withholding receivable - {payment.PaymentNumber} / {allocation.Invoice.InvoiceNumber}",
+                        debitTransactionAmount: allocation.VatWithholdingAmount,
+                        creditTransactionAmount: 0m,
+                        allocation.InvoiceCurrencyCode,
+                        functionalCurrency,
+                        allocation.InvoiceSettlementExchangeRate,
+                        payment.PaymentDate,
+                        payment.PaymentNumber,
+                        lineNumber++,
+                        "AR-VAT-WHT",
+                        allocation.InvoiceSettlementExchangeRateId,
+                        functionalDebitOverride: allocation.VatWithholdingFunctionalAmount));
             }
 
             if (discountAllowed > 0m)
@@ -2506,21 +2578,24 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ?? throw new InvalidOperationException("Sales discounts allowed account is not configured for this tenant.");
                 await ResolveReceiptPostingAccountAsync(discountAccountId, "sales discount allowed account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    discountAccountId,
-                    $"Sales discount allowed - {payment.PaymentNumber}",
-                    debitTransactionAmount: discountAllowed,
-                    creditTransactionAmount: 0m,
-                    paymentCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    payment.PaymentDate,
-                    payment.PaymentNumber,
-                    lineNumber++,
-                    "AR-Discount"));
+                foreach (var allocation in activeAllocations.Where(a => a.DiscountAmount > 0m))
+                    postingLines.Add(BuildPostingLine(
+                        discountAccountId,
+                        $"Sales discount allowed - {payment.PaymentNumber} / {allocation.Invoice.InvoiceNumber}",
+                        debitTransactionAmount: allocation.DiscountAmount,
+                        creditTransactionAmount: 0m,
+                        allocation.InvoiceCurrencyCode,
+                        functionalCurrency,
+                        allocation.InvoiceSettlementExchangeRate,
+                        payment.PaymentDate,
+                        payment.PaymentNumber,
+                        lineNumber++,
+                        "AR-Discount",
+                        allocation.InvoiceSettlementExchangeRateId,
+                        functionalDebitOverride: allocation.DiscountFunctionalAmount));
             }
 
-            if (isCustomerAdvance || !hasCrossCurrencyAllocation)
+            if (isCustomerAdvance)
             {
                 postingLines.Add(BuildPostingLine(
                     creditAccountId,
@@ -2528,21 +2603,23 @@ namespace ErpSystem.Api.Services.Finance.AR
                         ? $"Customer advance {payment.PaymentNumber}"
                         : $"AR receipt {payment.PaymentNumber}",
                     debitTransactionAmount: 0m,
-                    creditTransactionAmount: isCustomerAdvance ? payment.TotalAmount : arSettlementAmount,
+                    creditTransactionAmount: payment.TotalAmount,
                     paymentCurrency,
                     functionalCurrency,
                     exchangeRate,
                     payment.PaymentDate,
                     payment.PaymentNumber,
                     lineNumber++,
-                    isCustomerAdvance ? "AR-CustomerAdvance" : "AR-Control",
+                    "AR-CustomerAdvance",
                     payment.ExchangeRateId));
             }
             else
             {
                 foreach (var allocation in activeAllocations)
                 {
-                    var invoiceGrossAmount = RoundMoney(allocation.AllocatedAmount + allocation.DiscountAmount);
+                    var invoiceGrossAmount = RoundMoney(
+                        allocation.AllocatedAmount + allocation.DiscountAmount +
+                        allocation.WithholdingTaxAmount + allocation.VatWithholdingAmount);
                     var settlementFunctionalAmount = RoundMoney(allocation.SettlementFunctionalAmount);
                     var effectiveControlRate = invoiceGrossAmount <= 0m
                         ? 1m
@@ -3446,6 +3523,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                     PaymentFunctionalAmount = a.PaymentFunctionalAmount,
                     SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                     DiscountAmount = a.DiscountAmount,
+                    DiscountFunctionalAmount = a.DiscountFunctionalAmount,
+                    WithholdingTaxAmount = a.WithholdingTaxAmount,
+                    WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                    VatWithholdingAmount = a.VatWithholdingAmount,
+                    VatWithholdingFunctionalAmount = a.VatWithholdingFunctionalAmount,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
                     IsReversal = a.IsReversal,

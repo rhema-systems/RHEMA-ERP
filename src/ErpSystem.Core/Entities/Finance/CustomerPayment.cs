@@ -88,6 +88,10 @@ public class CustomerPayment : BusinessEntity
     public Guid? WithholdingTaxAccountId { get; set; }
     public virtual Account? WithholdingTaxAccount { get; set; }
 
+    /// <summary>
+    /// Functional/statutory WHT roll-up derived from the active invoice allocations. The native
+    /// invoice-currency evidence is retained on PaymentAllocation for posting and audit trace.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
@@ -97,6 +101,9 @@ public class CustomerPayment : BusinessEntity
     public Guid? VatWithholdingAccountId { get; set; }
     public virtual Account? VatWithholdingAccount { get; set; }
 
+    /// <summary>
+    /// Functional/statutory VAT-WHT roll-up derived from the active invoice allocations.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal VatWithholdingAmount { get; set; }
 

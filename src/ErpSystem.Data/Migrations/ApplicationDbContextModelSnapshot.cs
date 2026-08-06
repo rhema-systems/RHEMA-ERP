@@ -17771,6 +17771,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal>("DiscountFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("InvoiceCurrencyCode")
                         .IsRequired()
                         .HasMaxLength(3)
@@ -17822,6 +17825,18 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("SettlementFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("VatWithholdingAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("VatWithholdingFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("WithholdingTaxAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("WithholdingTaxFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("TenantId")
@@ -22501,6 +22516,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal>("DiscountFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("InvoiceCurrencyCode")
                         .IsRequired()
                         .HasMaxLength(3)
@@ -22577,6 +22595,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("WithholdingTaxAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("WithholdingTaxFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
