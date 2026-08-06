@@ -103,6 +103,14 @@ public class AddApArCrossCurrencySettlement : Migration
         // existing legitimate row has one shared native currency and the payment header's frozen
         // rate is the only defensible settlement-rate snapshot. Fail loudly if hand-edited data
         // violates that invariant; silently inventing a cross-rate would corrupt AP/AR control.
+        //
+        // TDC-0505 also protects VendorPaymentAllocation with an AFTER UPDATE payment-readiness
+        // trigger. This one-time update does not authorize a payment or change its amount, invoice,
+        // match, receipt or AP-003 evidence; it only copies immutable currency evidence into newly
+        // added columns. Temporarily suspending that named trigger prevents historical development
+        // allocations from being re-adjudicated as if a user had edited them. The SQL preserves the
+        // trigger's prior state and restores it in both the success and failure paths, so runtime
+        // payment-readiness enforcement remains unchanged after the migration.
         migrationBuilder.Sql(
             """
             IF EXISTS
@@ -125,22 +133,50 @@ public class AddApArCrossCurrencySettlement : Migration
             )
                 THROW 51000, 'Cannot safely backfill pre-migration AR cross-currency allocations. Recreate those development drafts through the controlled settlement workflow.', 1;
 
-            UPDATE [a]
-            SET
-                [PaymentCurrencyAmount] = [a].[AllocatedAmount],
-                [InvoiceCurrencyCode] = UPPER(LTRIM(RTRIM([i].[CurrencyCode]))),
-                [PaymentCurrencyCode] = UPPER(LTRIM(RTRIM([p].[CurrencyCode]))),
-                [IsCrossCurrency] = 0,
-                [InvoiceSettlementExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
-                [PaymentExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
-                [PaymentFunctionalAmount] = ROUND([a].[AllocatedAmount] * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END, 2),
-                [SettlementFunctionalAmount] = ROUND(
-                    ([a].[AllocatedAmount] + [a].[DiscountAmount] + [a].[WithholdingTaxAmount])
-                    * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
-                    2)
-            FROM [VendorPaymentAllocation] AS [a]
-            INNER JOIN [VendorPayment] AS [p] ON [p].[Id] = [a].[VendorPaymentId]
-            INNER JOIN [VendorInvoice] AS [i] ON [i].[Id] = [a].[VendorInvoiceId];
+            DECLARE @apReadinessTriggerId int =
+                OBJECT_ID(N'[dbo].[TR_VendorPaymentAllocation_TDC0505PaymentReadiness]', N'TR');
+            DECLARE @apReadinessTriggerWasDisabled bit = 1;
+
+            IF @apReadinessTriggerId IS NOT NULL
+            BEGIN
+                SET @apReadinessTriggerWasDisabled = CONVERT(
+                    bit,
+                    OBJECTPROPERTY(@apReadinessTriggerId, 'ExecIsTriggerDisabled'));
+
+                IF @apReadinessTriggerWasDisabled = 0
+                    DISABLE TRIGGER [dbo].[TR_VendorPaymentAllocation_TDC0505PaymentReadiness]
+                        ON [dbo].[VendorPaymentAllocation];
+            END;
+
+            BEGIN TRY
+                UPDATE [a]
+                SET
+                    [PaymentCurrencyAmount] = [a].[AllocatedAmount],
+                    [InvoiceCurrencyCode] = UPPER(LTRIM(RTRIM([i].[CurrencyCode]))),
+                    [PaymentCurrencyCode] = UPPER(LTRIM(RTRIM([p].[CurrencyCode]))),
+                    [IsCrossCurrency] = 0,
+                    [InvoiceSettlementExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                    [PaymentExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                    [PaymentFunctionalAmount] = ROUND([a].[AllocatedAmount] * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END, 2),
+                    [SettlementFunctionalAmount] = ROUND(
+                        ([a].[AllocatedAmount] + [a].[DiscountAmount] + [a].[WithholdingTaxAmount])
+                        * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                        2)
+                FROM [VendorPaymentAllocation] AS [a]
+                INNER JOIN [VendorPayment] AS [p] ON [p].[Id] = [a].[VendorPaymentId]
+                INNER JOIN [VendorInvoice] AS [i] ON [i].[Id] = [a].[VendorInvoiceId];
+
+                IF @apReadinessTriggerId IS NOT NULL AND @apReadinessTriggerWasDisabled = 0
+                    ENABLE TRIGGER [dbo].[TR_VendorPaymentAllocation_TDC0505PaymentReadiness]
+                        ON [dbo].[VendorPaymentAllocation];
+            END TRY
+            BEGIN CATCH
+                IF @apReadinessTriggerId IS NOT NULL AND @apReadinessTriggerWasDisabled = 0
+                    ENABLE TRIGGER [dbo].[TR_VendorPaymentAllocation_TDC0505PaymentReadiness]
+                        ON [dbo].[VendorPaymentAllocation];
+
+                THROW;
+            END CATCH;
 
             UPDATE [a]
             SET
