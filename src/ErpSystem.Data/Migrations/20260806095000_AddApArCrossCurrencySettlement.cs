@@ -13,7 +13,7 @@ namespace ErpSystem.Data.Migrations;
 /// </summary>
 [DbContext(typeof(ApplicationDbContext))]
 [Migration("20260806095000_AddApArCrossCurrencySettlement")]
-public sealed class AddApArCrossCurrencySettlement : Migration
+public class AddApArCrossCurrencySettlement : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
@@ -34,6 +34,8 @@ public sealed class AddApArCrossCurrencySettlement : Migration
         AddAllocationCurrencyEvidence(migrationBuilder, "VendorPaymentAllocation");
         AddAllocationCurrencyEvidence(migrationBuilder, "PaymentAllocation");
 
+        BackfillExistingAllocationCurrencyEvidence(migrationBuilder);
+
         // Realized-FX rows must be understandable without joining back to mutable operational
         // projections, so they retain the payment-side currency evidence as well.
         migrationBuilder.AddColumn<bool>("IsCrossCurrency", "FxRealizedSettlements", "bit", nullable: false, defaultValue: false);
@@ -41,6 +43,8 @@ public sealed class AddApArCrossCurrencySettlement : Migration
         migrationBuilder.AddColumn<decimal>("PaymentCurrencyAmount", "FxRealizedSettlements", "decimal(18,2)", nullable: false, defaultValue: 0m);
         migrationBuilder.AddColumn<Guid>("PaymentExchangeRateId", "FxRealizedSettlements", "uniqueidentifier", nullable: true);
         migrationBuilder.AddColumn<decimal>("PaymentExchangeRate", "FxRealizedSettlements", "decimal(18,6)", nullable: false, defaultValue: 1m);
+
+        BackfillExistingRealizedFxPaymentEvidence(migrationBuilder);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
@@ -91,5 +95,99 @@ public sealed class AddApArCrossCurrencySettlement : Migration
         migrationBuilder.DropColumn("PaymentExchangeRate", table);
         migrationBuilder.DropColumn("PaymentFunctionalAmount", table);
         migrationBuilder.DropColumn("SettlementFunctionalAmount", table);
+    }
+
+    private static void BackfillExistingAllocationCurrencyEvidence(MigrationBuilder migrationBuilder)
+    {
+        // Before this migration the application rejected cross-currency allocations, so an
+        // existing legitimate row has one shared native currency and the payment header's frozen
+        // rate is the only defensible settlement-rate snapshot. Fail loudly if hand-edited data
+        // violates that invariant; silently inventing a cross-rate would corrupt AP/AR control.
+        migrationBuilder.Sql(
+            """
+            IF EXISTS
+            (
+                SELECT 1
+                FROM [VendorPaymentAllocation] AS [a]
+                INNER JOIN [VendorPayment] AS [p] ON [p].[Id] = [a].[VendorPaymentId]
+                INNER JOIN [VendorInvoice] AS [i] ON [i].[Id] = [a].[VendorInvoiceId]
+                WHERE UPPER(LTRIM(RTRIM([p].[CurrencyCode]))) <> UPPER(LTRIM(RTRIM([i].[CurrencyCode])))
+            )
+                THROW 51000, 'Cannot safely backfill pre-migration AP cross-currency allocations. Recreate those development drafts through the controlled settlement workflow.', 1;
+
+            IF EXISTS
+            (
+                SELECT 1
+                FROM [PaymentAllocation] AS [a]
+                INNER JOIN [CustomerPayment] AS [p] ON [p].[Id] = [a].[CustomerPaymentId]
+                INNER JOIN [Invoices] AS [i] ON [i].[Id] = [a].[InvoiceId]
+                WHERE UPPER(LTRIM(RTRIM([p].[CurrencyCode]))) <> UPPER(LTRIM(RTRIM([i].[CurrencyCode])))
+            )
+                THROW 51000, 'Cannot safely backfill pre-migration AR cross-currency allocations. Recreate those development drafts through the controlled settlement workflow.', 1;
+
+            UPDATE [a]
+            SET
+                [PaymentCurrencyAmount] = [a].[AllocatedAmount],
+                [InvoiceCurrencyCode] = UPPER(LTRIM(RTRIM([i].[CurrencyCode]))),
+                [PaymentCurrencyCode] = UPPER(LTRIM(RTRIM([p].[CurrencyCode]))),
+                [IsCrossCurrency] = 0,
+                [InvoiceSettlementExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                [PaymentExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                [PaymentFunctionalAmount] = ROUND([a].[AllocatedAmount] * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END, 2),
+                [SettlementFunctionalAmount] = ROUND(
+                    ([a].[AllocatedAmount] + [a].[DiscountAmount] + [a].[WithholdingTaxAmount])
+                    * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                    2)
+            FROM [VendorPaymentAllocation] AS [a]
+            INNER JOIN [VendorPayment] AS [p] ON [p].[Id] = [a].[VendorPaymentId]
+            INNER JOIN [VendorInvoice] AS [i] ON [i].[Id] = [a].[VendorInvoiceId];
+
+            UPDATE [a]
+            SET
+                [PaymentCurrencyAmount] = [a].[AllocatedAmount],
+                [InvoiceCurrencyCode] = UPPER(LTRIM(RTRIM([i].[CurrencyCode]))),
+                [PaymentCurrencyCode] = UPPER(LTRIM(RTRIM([p].[CurrencyCode]))),
+                [IsCrossCurrency] = 0,
+                [InvoiceSettlementExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                [PaymentExchangeRate] = CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                [PaymentFunctionalAmount] = ROUND([a].[AllocatedAmount] * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END, 2),
+                [SettlementFunctionalAmount] = ROUND(
+                    ([a].[AllocatedAmount] + [a].[DiscountAmount])
+                    * CASE WHEN [p].[ExchangeRate] > 0 THEN [p].[ExchangeRate] ELSE 1 END,
+                    2)
+            FROM [PaymentAllocation] AS [a]
+            INNER JOIN [CustomerPayment] AS [p] ON [p].[Id] = [a].[CustomerPaymentId]
+            INNER JOIN [Invoices] AS [i] ON [i].[Id] = [a].[InvoiceId];
+            """);
+    }
+
+    private static void BackfillExistingRealizedFxPaymentEvidence(MigrationBuilder migrationBuilder)
+    {
+        // Realized-FX rows are immutable audit evidence. Copy the now-repaired allocation values
+        // so reports do not label historical USD/EUR settlements as zero-value GHS payments.
+        migrationBuilder.Sql(
+            """
+            UPDATE [fx]
+            SET
+                [PaymentCurrencyCode] = [a].[PaymentCurrencyCode],
+                [PaymentCurrencyAmount] = [a].[PaymentCurrencyAmount],
+                [PaymentExchangeRateId] = [a].[PaymentExchangeRateId],
+                [PaymentExchangeRate] = [a].[PaymentExchangeRate],
+                [IsCrossCurrency] = [a].[IsCrossCurrency]
+            FROM [FxRealizedSettlements] AS [fx]
+            INNER JOIN [VendorPaymentAllocation] AS [a] ON [a].[Id] = [fx].[SettlementAllocationId]
+            WHERE [fx].[SettlementDocumentType] = N'VendorPayment';
+
+            UPDATE [fx]
+            SET
+                [PaymentCurrencyCode] = [a].[PaymentCurrencyCode],
+                [PaymentCurrencyAmount] = [a].[PaymentCurrencyAmount],
+                [PaymentExchangeRateId] = [a].[PaymentExchangeRateId],
+                [PaymentExchangeRate] = [a].[PaymentExchangeRate],
+                [IsCrossCurrency] = [a].[IsCrossCurrency]
+            FROM [FxRealizedSettlements] AS [fx]
+            INNER JOIN [PaymentAllocation] AS [a] ON [a].[Id] = [fx].[SettlementAllocationId]
+            WHERE [fx].[SettlementDocumentType] = N'CustomerPayment';
+            """);
     }
 }
