@@ -32,6 +32,7 @@
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
     <Compile Include="Middleware\GlobalExceptionHandlingMiddlewareTests.cs" />
+    <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />

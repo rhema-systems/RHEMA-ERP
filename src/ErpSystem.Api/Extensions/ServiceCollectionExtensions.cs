@@ -1345,10 +1345,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         {
             // Custom middleware registered as IMiddleware
             services.AddTransient<ErpSystem.Api.Middleware.ExternalUserAccessMiddleware>();
+            services.AddScoped<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
 
             services.AddControllers(options =>
                 {
                     options.Conventions.Add(new FinancePermissionAuthorizationConvention());
+                    options.Filters.AddService<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
                 })
                 .AddJsonOptions(options =>
                 {

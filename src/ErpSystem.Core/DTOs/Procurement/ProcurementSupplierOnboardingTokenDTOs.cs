@@ -31,6 +31,15 @@ public sealed class ProcurementSupplierOnboardingTokenSummaryDto
     public decimal PostedAmount { get; set; }
 }
 
+public sealed class ProcurementSupplierOnboardingRegistrationOptionDto
+{
+    public Guid RegistrationId { get; set; }
+    public string RegistrationNumber { get; set; } = string.Empty;
+    public string ApplicantName { get; set; } = string.Empty;
+    public ProcurementSupplierRegistrationCategory? RegistrationCategory { get; set; }
+    public string Status { get; set; } = string.Empty;
+}
+
 public class ProcurementSupplierOnboardingTokenListItemDto
 {
     public Guid Id { get; set; }
