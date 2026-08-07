@@ -650,8 +650,9 @@ public class VendorPaymentAllocation : TenantEntity
     public decimal AllocatedAmount { get; set; }
 
     /// <summary>
-    /// Cash consumed from the vendor payment, expressed in payment currency. AllocatedAmount is
-    /// deliberately retained as the invoice-currency reduction for aging and invoice balance.
+    /// Cash or supplier-advance lot consumed in payment currency. AllocatedAmount is deliberately
+    /// retained as the invoice-currency reduction for aging and invoice balance; when this row is
+    /// a posted advance application, the two amounts may differ and are reversed as one pair.
     /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal PaymentCurrencyAmount { get; set; }
@@ -668,7 +669,8 @@ public class VendorPaymentAllocation : TenantEntity
 
     /// <summary>
     /// Approved rate ids and frozen values retain both audit lineage and deterministic arithmetic
-    /// if the exchange-rate master is corrected after posting.
+    /// if the exchange-rate master is corrected after posting. For an advance application the
+    /// payment rate is the advance's origin rate and the invoice rate is the application-date rate.
     /// </summary>
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
 

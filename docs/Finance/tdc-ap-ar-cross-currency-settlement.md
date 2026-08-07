@@ -15,6 +15,8 @@ TDC can now use a payment or receipt in one currency to settle an AP or AR invoi
 
 The maker records the amount that reduces the invoice and the separate amount consumed from the bank or receipt currency. Discounts and withholding are recorded against the particular invoice in that invoice's currency. Finance freezes both approved exchange-rate snapshots, converts each deduction independently into functional currency, posts through the central Finance engine, calculates realized FX from the invoice's historical carrying value, and retains the evidence through reversal, statutory reporting, and audit views.
 
+Posted supplier and customer advances use the same evidence model. The original payment or receipt is the immutable currency lot: its native amount and approved origin rate establish the advance carrying value. When that lot is later applied, Finance values the invoice at the approved application-date rate and posts the difference as realized FX in the application journal.
+
 ### Demo wow factors
 
 - The entry screen visibly distinguishes **Invoice Cash** from **Payment/Receipt Cash**; the system does not conceal a cross-rate inside one ambiguous amount.
@@ -24,6 +26,8 @@ The maker records the amount that reduces the invoice and the separate amount co
 - Auto-allocation skips cross-currency rows so a user must confirm the commercial amount pair; the server independently rejects missing, negative, or over-settling legs.
 - Reversals copy and negate the original currency/rate snapshots, preserving an intelligible correction chain instead of rewriting history.
 - AP discounts/WHT and AR discounts/WHT/VAT-WHT retain both invoice-native and independently rounded functional values, so a stakeholder can trace each statutory or accounting line without reverse-engineering a mixed-currency header.
+- A foreign advance can be applied partially or across currencies without losing its origin rate; the detail view shows how much of the original currency lot remains.
+- Reversing an advance application restores both the invoice and the original currency lot with a linked negative allocation and compensating journal—no posted history is edited.
 
 ## Why the model changed
 
@@ -52,6 +56,10 @@ The payment header stores its approved `ExchangeRateId` alongside the existing f
 8. The central posting engine records the bank/cash leg in payment currency, the deductions in invoice currency with exact functional overrides, and the AP/AR control leg in invoice currency with the actual functional settlement value.
 9. The FX service compares that settlement value with the invoice's historical carrying amount and posts realized gain/loss where required.
 10. Detail, statutory reporting, audit, FX, and reversal paths retain the same allocation evidence.
+11. If the payment/receipt was posted without an invoice, it becomes a supplier/customer advance currency lot at its approved origin rate.
+12. The allocation workspace locks that posted header, accepts the invoice-native and lot-native application amounts, and resolves the approved application-date invoice rate.
+13. The application journal releases the advance at historical carrying value, clears AP/AR control at application value, and posts the balancing realized gain or loss.
+14. A controlled application reversal copies and negates the two native amounts, both rate snapshots, and both functional values, restoring the lot for later use.
 
 ## Controls and intentional boundaries
 
@@ -59,11 +67,11 @@ Cross-currency invoice deductions are now line-scoped. AP supports invoice disco
 
 Before posting, AP and AR reconstruct the expected functional evidence from each allocation's native amounts and frozen rates. A missing or contradictory cross-currency snapshot fails closed; the service never substitutes a `1.0` foreign rate. The narrowly scoped normalization path applies only to deterministic same-currency draft evidence. AP also re-runs configured WHT policy at posting and rejects a stale header total or an allocation total that no longer agrees with the statutory calculation.
 
-The AP/AR control and deduction accounts must be configured as multi-currency accounts with an effective link for every invoice currency they accept. This preserves the posting engine's existing account-currency governance instead of weakening it for subledger convenience.
+The AP/AR control and deduction accounts must be configured as multi-currency accounts with an effective link for every invoice currency they accept. Supplier/customer advance and bank/liquidity accounts likewise need an effective link for the advance currency. This preserves the posting engine's existing account-currency governance instead of weakening it for subledger convenience.
 
-Supplier and customer advances also remain functional-currency only. Advance application clears a previously posted advance control balance; that balance needs currency-lot evidence before foreign or third-currency application can be correct.
+Foreign supplier/customer advance creation and application are now supported. The full payment or receipt cannot be reversed while an active posted advance application exists; each application must first be reversed so the control balance and currency lot remain reconstructable. Advance application intentionally supports cash-only allocation—discount and withholding adjustments remain in their dedicated workflows.
 
-The advance boundary keeps `FIN-LIM-0022` partially resolved until currency-lotted supplier and customer advance work is implemented.
+No additional migration was required for the advance extension. The dual native amounts, dual approved-rate snapshots, functional values, application journal/event links, and reversal lineage introduced by `20260806095000_AddApArCrossCurrencySettlement` already provide the necessary immutable lot evidence. `FIN-LIM-0022` is therefore resolved in code; deployment and client workflow UAT remain release gates.
 
 ## Technical ownership notes
 
@@ -71,6 +79,8 @@ The advance boundary keeps `FIN-LIM-0022` partially resolved until currency-lott
 - `VendorPaymentService` and `PaymentService` resolve approved rates, validate both native legs, persist snapshots, build settlement journals, and preserve reversal values.
 - `CurrencyRevaluationService` uses the invoice currency for historical exposure and the allocation's frozen functional settlement amount for realized FX.
 - `VendorPaymentAllocation`, `PaymentAllocation`, and `FxRealizedSettlement` carry the immutable evidence introduced by the migrations.
+- `VendorPayment` and `CustomerPayment` are the advance-lot headers; their currency, rate id/value, total, and effective allocation facts determine the remaining native lot balance.
+- Posted advance applications use their own posting event rather than changing the original cash journal. Application reversals post against that event and add a linked negative allocation fact.
 - Header WHT/VAT-WHT/discount amounts are functional-currency roll-ups; allocation-native amounts remain authoritative for invoice settlement and foreign-currency journal lines.
 - Outstanding AP invoice responses now expose invoice currency so the client never assumes that all supplier invoices match the selected bank currency.
 
@@ -79,6 +89,6 @@ The advance boundary keeps `FIN-LIM-0022` partially resolved until currency-lott
 - Backend API build: passes with zero errors; repository warnings remain pre-existing.
 - Frontend Finance changes: no Finance TypeScript errors; the repository-wide type check is currently blocked by unrelated Inventory and Reports errors on the synced baseline.
 - Migration structure: verified by a focused Up/Down regression test covering all seven AP/AR deduction evidence columns.
-- Focused AP, AR and calculator regression tests: 3 passed. They exercise independently rounded deductions through the real Finance posting engine, including approved rate evidence and multi-currency account links.
-- The Finance integration workflow now includes the new AP, AR, calculator and migration contracts and raises its exact consumer count from 22 to 26. The new SQL Server schema contract passed locally against SQL Server Express and raises the exact SQL count from 3 to 4.
+- Four focused same-currency and foreign-currency advance regressions pass through the real Finance posting engine. They cover USD lots applied to EUR invoices, approved rate evidence, multi-currency account links, realized FX, immutable application reversal, restored lot/invoice balances, and rejection of tax deductions from the cash-only advance path.
+- The Finance integration workflow now includes the two foreign-advance contracts and raises its exact consumer count from 26 to 28. The existing SQL Server schema contract remains at four because this extension reuses the already verified allocation-evidence columns and requires no new migration.
 - Local database verification: `20260806143000_AddLineScopedCrossCurrencyDeductions` was applied to `RHEMAERP` on 2026-08-07, its migration-history row was confirmed, and all seven AP/AR deduction-evidence columns were queried directly from SQL Server. The older `RhemaERP_UAT_DryRun` database was deliberately left unchanged because it has a large mixed-module migration backlog; updating it would not be an isolated Finance dry run. A current shared UAT deployment and client workflow UAT therefore remain separate release gates.

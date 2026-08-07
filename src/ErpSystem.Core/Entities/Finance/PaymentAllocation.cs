@@ -24,8 +24,9 @@ public class PaymentAllocation : BaseEntity
     public decimal AllocatedAmount { get; set; }
 
     /// <summary>
-    /// Portion of the receipt consumed by this allocation in receipt currency. AllocatedAmount
-    /// remains the invoice reduction in invoice currency; they only match for same-currency AR.
+    /// Portion of the receipt or customer-advance lot consumed in receipt currency. AllocatedAmount
+    /// remains the invoice reduction in invoice currency; cross-currency applications preserve and
+    /// reverse these as a pair rather than treating either amount as a functional-currency proxy.
     /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal PaymentCurrencyAmount { get; set; }
@@ -42,7 +43,8 @@ public class PaymentAllocation : BaseEntity
 
     /// <summary>
     /// Immutable approved-rate evidence and calculated functional values used by posting,
-    /// reversal, settlement read-model rebuilds, and audit traces.
+    /// reversal, settlement read-model rebuilds, and audit traces. Advance applications retain
+    /// the origin receipt rate alongside the approved application-date invoice rate.
     /// </summary>
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
 

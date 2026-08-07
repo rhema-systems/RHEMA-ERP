@@ -243,6 +243,141 @@ public sealed class ApPaymentPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
+    public async Task ForeignSupplierAdvance_ShouldApplyAtFrozenLotAndCurrentInvoiceRatesThenReverseImmutably()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var supplierAdvanceAccount = SeedAccount(db, tenantId, "1500", AccountType.Asset);
+        var realizedFxGainAccount = SeedAccount(db, tenantId, "4700", AccountType.Revenue);
+        var settings = await db.Set<FinanceSettings>().SingleAsync(s => s.TenantId == tenantId);
+        settings.SupplierAdvanceAccountId = supplierAdvanceAccount.Id;
+        settings.RealizedFxGainAccountId = realizedFxGainAccount.Id;
+
+        var originRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 10m,
+            InverseRate = 0.1m,
+            EffectiveDate = new DateTime(2026, 7, 5),
+            RateType = ExchangeRateType.Daily,
+            RateSource = "Regression fixture",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow
+        };
+        var applicationRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "EUR",
+            Rate = 13m,
+            InverseRate = 1m / 13m,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            RateType = ExchangeRateType.Daily,
+            RateSource = "Regression fixture",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.AddRange(originRate, applicationRate);
+
+        // The payment is the USD advance lot (USD 10 at GHS 10). The invoice is reduced by
+        // EUR 8 at the approved application rate of GHS 13, producing a GHS 4 realized gain.
+        db.Remove(fixture.Allocation);
+        fixture.Payment.TotalAmount = 10m;
+        fixture.Payment.AllocatedAmount = 0m;
+        fixture.Payment.CurrencyCode = "USD";
+        fixture.Payment.ExchangeRate = originRate.Rate;
+        fixture.Payment.ExchangeRateId = originRate.Id;
+        fixture.BankAccount.Currency = "USD";
+        fixture.Invoice.TotalAmount = 8m;
+        fixture.Invoice.PaidAmount = 0m;
+        fixture.Invoice.CurrencyCode = "EUR";
+        fixture.Invoice.ExchangeRate = applicationRate.Rate;
+        fixture.Invoice.BaseCurrencyAmount = 104m;
+        fixture.Invoice.Status = VendorInvoiceStatus.Approved;
+        EnableCurrencyForAccounts(db, tenantId, "USD", fixture.BankGlAccount, supplierAdvanceAccount);
+        EnableCurrencyForAccounts(db, tenantId, "EUR", fixture.ApAccount);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var exchangeRates = new Mock<IExchangeRateService>();
+        exchangeRates
+            .Setup(service => service.GetExchangeRateByIdAsync(applicationRate.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExchangeRateDto
+            {
+                Id = applicationRate.Id,
+                TenantId = tenantId,
+                BaseCurrencyCode = "GHS",
+                TargetCurrencyCode = "EUR",
+                Rate = applicationRate.Rate,
+                InverseRate = applicationRate.InverseRate,
+                EffectiveDate = applicationRate.EffectiveDate,
+                RateType = "Daily",
+                QuoteSide = "Mid",
+                IsActive = true,
+                ApprovalStatus = "Approved"
+            });
+        var (service, _) = CreateService(db, tenantId, exchangeRateService: exchangeRates.Object);
+
+        await service.PostAsync(fixture.Payment.Id);
+        var application = await service.AllocatePaymentAsync(fixture.Payment.Id, new List<VendorPaymentAllocationCreateDto>
+        {
+            new()
+            {
+                VendorInvoiceId = fixture.Invoice.Id,
+                AllocatedAmount = 8m,
+                PaymentCurrencyAmount = 10m,
+                InvoiceSettlementExchangeRateId = applicationRate.Id
+            }
+        });
+
+        var allocation = await db.Set<VendorPaymentAllocation>()
+            .SingleAsync(item => item.Id == application.Allocations.Single().Id);
+        allocation.PaymentCurrencyCode.Should().Be("USD");
+        allocation.PaymentCurrencyAmount.Should().Be(10m);
+        allocation.PaymentExchangeRate.Should().Be(10m);
+        allocation.PaymentFunctionalAmount.Should().Be(100m);
+        allocation.InvoiceCurrencyCode.Should().Be("EUR");
+        allocation.AllocatedAmount.Should().Be(8m);
+        allocation.InvoiceSettlementExchangeRate.Should().Be(13m);
+        allocation.SettlementFunctionalAmount.Should().Be(104m);
+        var applicationJournal = await db.JournalEntries
+            .Include(entry => entry.Transactions)
+            .SingleAsync(entry => entry.Id == allocation.ApplicationJournalEntryId);
+        applicationJournal.Transactions.Single(line => line.AccountId == fixture.ApAccount.Id).DebitAmount.Should().Be(104m);
+        applicationJournal.Transactions.Single(line => line.AccountId == supplierAdvanceAccount.Id).CreditAmount.Should().Be(100m);
+        applicationJournal.Transactions.Single(line => line.AccountId == realizedFxGainAccount.Id).CreditAmount.Should().Be(4m);
+
+        await service.ReverseAllocationAsync(
+            allocation.Id,
+            "Supplier advance application entered against the wrong invoice");
+
+        var allocationFacts = await db.Set<VendorPaymentAllocation>()
+            .Where(item => item.VendorPaymentId == fixture.Payment.Id)
+            .OrderBy(item => item.CreatedAt)
+            .ToListAsync();
+        allocationFacts.Should().HaveCount(2);
+        allocationFacts.Single(item => item.IsReversal).Should().Match<VendorPaymentAllocation>(item =>
+            item.OriginalAllocationId == allocation.Id &&
+            item.AllocatedAmount == -8m &&
+            item.PaymentCurrencyAmount == -10m &&
+            item.PaymentFunctionalAmount == -100m &&
+            item.SettlementFunctionalAmount == -104m);
+        (await db.Set<VendorPayment>().SingleAsync(item => item.Id == fixture.Payment.Id)).AllocatedAmount.Should().Be(0m);
+        (await db.Set<VendorInvoice>().SingleAsync(item => item.Id == fixture.Invoice.Id)).PaidAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
     public async Task UnapprovedApPayment_ShouldNotPost()
     {
         var tenantId = Guid.NewGuid();
@@ -719,7 +854,8 @@ public sealed class ApPaymentPostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         IFxAccountingService? fxAccountingService = null,
-        IWithholdingTaxCertificateService? withholdingTaxService = null)
+        IWithholdingTaxCertificateService? withholdingTaxService = null,
+        IExchangeRateService? exchangeRateService = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -784,7 +920,8 @@ public sealed class ApPaymentPostingMigrationTests
             fxAccountingService: fxAccountingService,
             withholdingTaxService: withholdingTaxService,
             procurementControlEvents: procurementControlEvents.Object,
-            invoicePaymentSod: invoicePaymentSod.Object);
+            invoicePaymentSod: invoicePaymentSod.Object,
+            exchangeRateService: exchangeRateService);
 
         return (service, subledgerPostingMock);
     }
