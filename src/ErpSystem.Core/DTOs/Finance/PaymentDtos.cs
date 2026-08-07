@@ -155,6 +155,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal PaymentFunctionalAmount { get; set; }
         public decimal SettlementFunctionalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
+        public decimal DiscountFunctionalAmount { get; set; }
+        public decimal WithholdingTaxAmount { get; set; }
+        public decimal WithholdingTaxFunctionalAmount { get; set; }
+        public decimal VatWithholdingAmount { get; set; }
+        public decimal VatWithholdingFunctionalAmount { get; set; }
         public DateTime AllocationDate { get; set; }
         public string? Notes { get; set; }
         public bool IsReversal { get; set; }

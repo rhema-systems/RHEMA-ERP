@@ -221,6 +221,11 @@ export interface PaymentAllocation {
     paymentFunctionalAmount: number;
     settlementFunctionalAmount: number;
     discountAmount?: number;
+    discountFunctionalAmount: number;
+    withholdingTaxAmount: number;
+    withholdingTaxFunctionalAmount: number;
+    vatWithholdingAmount: number;
+    vatWithholdingFunctionalAmount: number;
     allocationDate: string;
     notes?: string;
     isReversal: boolean;
@@ -306,6 +311,10 @@ export interface InvoiceAllocationRequest {
     paymentCurrencyAmount?: number;
     invoiceSettlementExchangeRateId?: string;
     discountAmount?: number;
+    /** Invoice-currency statutory deduction allocated to this invoice. */
+    withholdingTaxAmount?: number;
+    /** Invoice-currency VAT withholding allocated to this invoice. */
+    vatWithholdingAmount?: number;
     notes?: string;
 }
 

@@ -705,6 +705,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaymentFunctionalAmount = a.PaymentFunctionalAmount,
                 SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                 DiscountAmount = a.DiscountAmount,
+                DiscountFunctionalAmount = a.DiscountFunctionalAmount,
+                WithholdingTaxAmount = a.WithholdingTaxAmount,
+                WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                VatWithholdingAmount = a.VatWithholdingAmount,
+                VatWithholdingFunctionalAmount = a.VatWithholdingFunctionalAmount,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
                 IsReversal = a.IsReversal

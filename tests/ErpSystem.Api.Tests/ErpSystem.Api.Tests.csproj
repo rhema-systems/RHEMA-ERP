@@ -170,6 +170,7 @@
          silently remove coverage that protects PR #30's accounting evidence. -->
     <Compile Include="Services\Finance\CrossCurrencySettlementCalculatorTests.cs" />
     <Compile Include="Services\Finance\CrossCurrencySettlementMigrationTests.cs" />
+    <Compile Include="Services\Finance\LineScopedCrossCurrencyDeductionMigrationTests.cs" />
     <Compile Include="Services\Finance\FiscalYearCloseTests.cs" />
     <Compile Include="Services\Finance\FiscalYearDeletionGuardTests.cs" />
     <Compile Include="Services\Finance\FiscalPeriodModuleLockTests.cs" />

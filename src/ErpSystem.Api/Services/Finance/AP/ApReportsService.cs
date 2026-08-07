@@ -2254,6 +2254,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     p.Status != VendorPaymentStatus.Voided &&
                     p.WithholdingTaxAmount > 0)
                 .Include(p => p.Supplier)
+                .Include(p => p.Allocations)
                 .ToListAsync(cancellationToken);
             var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
 
@@ -2274,9 +2275,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                     SupplierId = g.Key.SupplierId,
                     SupplierName = g.Key.Name,
                     TaxId = g.Key.TaxId,
-                    TotalInvoiceAmount = g.Sum(p => p.TotalAmount),
+                    // All summary money is labelled in functional currency. Allocation snapshots
+                    // prevent payment-currency cash from being combined with functional WHT.
+                    TotalInvoiceAmount = g.Sum(p => p.Allocations
+                        .Where(a => !a.IsDeleted)
+                        .Sum(a => a.SettlementFunctionalAmount)),
                     TotalWithholdingTax = g.Sum(p => p.WithholdingTaxAmount),
-                    TotalNetPayment = g.Sum(p => p.TotalAmount - p.WithholdingTaxAmount),
+                    TotalNetPayment = g.Sum(p => p.Allocations
+                        .Where(a => !a.IsDeleted)
+                        .Sum(a => a.PaymentFunctionalAmount)),
                     TransactionCount = g.Count()
                 })
                 .OrderByDescending(s => s.TotalWithholdingTax)

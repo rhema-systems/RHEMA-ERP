@@ -144,10 +144,10 @@ jobs:
         fi
 
         # The exact count prevents an accidental rename, filter drift, or skipped opt-in test from
-        # making the gate green without exercising all three real SQL Server contracts: rollback,
-        # concurrent claims, and posting when consumer-loaded Account entities are already tracked.
-        if ! grep -Eq '<Counters[^>]*total="3"[^>]*executed="3"[^>]*passed="3"' "$trx"; then
-          echo "Expected exactly three executed and passing Finance SQL release-gate tests."
+        # making the gate green without exercising all four real SQL Server contracts: schema,
+        # rollback, concurrent claims, and posting with consumer-loaded Account entities tracked.
+        if ! grep -Eq '<Counters[^>]*total="4"[^>]*executed="4"[^>]*passed="4"' "$trx"; then
+          echo "Expected exactly four executed and passing Finance SQL release-gate tests."
           cat "$trx"
           exit 1
         fi

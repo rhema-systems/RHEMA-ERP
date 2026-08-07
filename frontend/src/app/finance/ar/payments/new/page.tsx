@@ -140,6 +140,11 @@ export default function NewReceiptPage() {
     const [allocations, setAllocations] = useState<Record<string, number>>({});
     const [paymentCurrencyAllocations, setPaymentCurrencyAllocations] = useState<Record<string, number>>({});
     const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
+    // Statutory deductions belong to the invoice allocation, not the receipt header. This is
+    // essential when one receipt settles invoices in different currencies because each row must
+    // retain its own native amount and approved functional conversion.
+    const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
+    const [vatWithholdingAllocations, setVatWithholdingAllocations] = useState<Record<string, number>>({});
 
     // Fetch customers
     const { data: customersData } = useQuery({
@@ -156,6 +161,15 @@ export default function NewReceiptPage() {
         queryKey: ['payment-methods', 'active'],
         queryFn: () => cashManagementDataService.getActivePaymentMethods(),
     });
+
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+    // TDC currently operates in GHS, while the shared Finance module remains tenant-aware. Use
+    // the configured functional currency for rate behavior and labels rather than baking GHS into
+    // a cross-currency workflow that is specifically intended to support other deployments.
+    const functionalCurrencyCode = (financeSettings?.baseCurrency || 'GHS').toUpperCase();
 
     const { data: liquidityAccounts } = useQuery({
         queryKey: ['liquidity-accounts', 'active'],
@@ -281,12 +295,18 @@ export default function NewReceiptPage() {
 
     useEffect(() => {
         form.setValue('withholdingTaxAccountId', selectedWithholdingTax?.taxReceivableAccountId ?? undefined);
-        if (!selectedWithholdingTax) form.setValue('withholdingTaxAmount', 0);
+        if (!selectedWithholdingTax) {
+            form.setValue('withholdingTaxAmount', 0);
+            setWithholdingAllocations({});
+        }
     }, [form, selectedWithholdingTax]);
 
     useEffect(() => {
         form.setValue('vatWithholdingAccountId', selectedVatWithholdingTax?.taxReceivableAccountId ?? undefined);
-        if (!selectedVatWithholdingTax) form.setValue('vatWithholdingAmount', 0);
+        if (!selectedVatWithholdingTax) {
+            form.setValue('vatWithholdingAmount', 0);
+            setVatWithholdingAllocations({});
+        }
     }, [form, selectedVatWithholdingTax]);
 
     // Fetch outstanding invoices for selected customer
@@ -343,6 +363,8 @@ export default function NewReceiptPage() {
             const invoiceIds = new Set([
                 ...Object.keys(allocations),
                 ...Object.keys(discountAllocations),
+                ...Object.keys(withholdingAllocations),
+                ...Object.keys(vatWithholdingAllocations),
             ]);
 
             const allocationRows = Array.from(invoiceIds)
@@ -359,9 +381,12 @@ export default function NewReceiptPage() {
                             ? Number(paymentCurrencyAllocations[invoiceId]) || 0
                             : invoiceAmount,
                         discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                        withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
+                        vatWithholdingAmount: Number(vatWithholdingAllocations[invoiceId]) || 0,
                     };
                 })
-                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0);
+                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0 ||
+                    row.withholdingTaxAmount > 0 || row.vatWithholdingAmount > 0);
 
             const incompleteCrossCurrencyAllocation = allocationRows.find(row =>
                 row.allocatedAmount > 0 && (row.paymentCurrencyAmount ?? 0) <= 0);
@@ -374,25 +399,26 @@ export default function NewReceiptPage() {
                 return;
             }
 
-            if (data.withholdingTaxAmount > 0 && !data.withholdingTaxId) {
+            const hasWithholding = allocationRows.some(row => row.withholdingTaxAmount > 0);
+            const hasVatWithholding = allocationRows.some(row => row.vatWithholdingAmount > 0);
+            if (hasWithholding && !data.withholdingTaxId) {
                 toast({ title: 'WHT tax required', description: 'Select the configured WHT receivable tax.', variant: 'destructive' });
                 return;
             }
-            if (data.vatWithholdingAmount > 0 && !data.vatWithholdingTaxId) {
+            if (hasVatWithholding && !data.vatWithholdingTaxId) {
                 toast({ title: 'VAT withholding tax required', description: 'Select the configured VAT withholding receivable tax.', variant: 'destructive' });
                 return;
             }
-            if ((data.withholdingTaxAmount > 0 || data.vatWithholdingAmount > 0) && !data.withholdingCertificateNumber?.trim()) {
+            if ((hasWithholding || hasVatWithholding) && !data.withholdingCertificateNumber?.trim()) {
                 toast({ title: 'Certificate reference required', description: 'Record the customer withholding certificate/reference number.', variant: 'destructive' });
                 return;
             }
 
             const totalAllocated = allocationRows.reduce((sum, row) => sum + (row.paymentCurrencyAmount ?? row.allocatedAmount), 0);
-            const totalReceiptSettlement = data.totalAmount + data.withholdingTaxAmount + data.vatWithholdingAmount;
-            if (totalAllocated > totalReceiptSettlement) {
+            if (totalAllocated > data.totalAmount) {
                 toast({
                     title: 'Allocation exceeds receipt',
-                    description: 'Allocated invoice amounts cannot exceed cash received plus withholding suffered.',
+                    description: 'Receipt-currency cash allocations cannot exceed the cash received.',
                     variant: 'destructive',
                 });
                 return;
@@ -400,6 +426,10 @@ export default function NewReceiptPage() {
 
             await arService.createPayment({
                 ...data,
+                // The API derives functional header totals from the per-invoice evidence below.
+                // Sending zero prevents mixed native currencies from being added at the header.
+                withholdingTaxAmount: 0,
+                vatWithholdingAmount: 0,
                 paymentDate: data.paymentDate.toISOString(),
                 transactionReference: data.referenceNumber,
                 allocations: allocationRows.length > 0 ? allocationRows : undefined,
@@ -428,15 +458,15 @@ export default function NewReceiptPage() {
             : Number(paymentCurrencyAllocations[invoice.id]) || 0);
     }, 0) ?? 0;
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
-    const withholdingAmount = form.watch('withholdingTaxAmount') || 0;
-    const vatWithholdingAmount = form.watch('vatWithholdingAmount') || 0;
-    const totalWithholdingSuffered = withholdingAmount + vatWithholdingAmount;
-    const remainingAmount = currentAmount + totalWithholdingSuffered - totalAllocated;
+    const hasLineWithholding = Object.values(withholdingAllocations).some(amount => amount > 0);
+    const hasLineVatWithholding = Object.values(vatWithholdingAllocations).some(amount => amount > 0);
+    const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = () => {
         if (!outstandingInvoices) return;
-        // AR allocation settles the gross receivable: cash plus tax withheld by the customer.
-        let remaining = currentAmount + totalWithholdingSuffered;
+        // Auto-allocation distributes cash only. Statutory deductions require explicit invoice
+        // attribution and therefore remain a maker-entered decision.
+        let remaining = currentAmount;
         const newAllocations: Record<string, number> = {};
         const newDiscountAllocations: Record<string, number> = {};
 
@@ -616,10 +646,10 @@ export default function NewReceiptPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === 'GHS'}
+                                    disabled={isSubmitting || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} GHS
+                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
@@ -644,14 +674,9 @@ export default function NewReceiptPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <Input
-                                    type="number"
-                                    step="0.01"
-                                    min={0}
-                                    placeholder="WHT amount"
-                                    {...form.register('withholdingTaxAmount')}
-                                    disabled={isSubmitting || !selectedWithholdingTax}
-                                />
+                                <p className="rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                    Select the tax here, then enter the invoice-currency WHT on each allocation row below.
+                                </p>
                                 {selectedWithholdingTax && !selectedWithholdingTax.taxReceivableAccountId && (
                                     <p className="text-xs text-red-600">Receivable account is not configured for this tax.</p>
                                 )}
@@ -675,20 +700,15 @@ export default function NewReceiptPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <Input
-                                    type="number"
-                                    step="0.01"
-                                    min={0}
-                                    placeholder="VAT withholding amount"
-                                    {...form.register('vatWithholdingAmount')}
-                                    disabled={isSubmitting || !selectedVatWithholdingTax}
-                                />
+                                <p className="rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                    Select the tax here, then attribute VAT-WHT to the relevant invoice row below.
+                                </p>
                                 {selectedVatWithholdingTax && !selectedVatWithholdingTax.taxReceivableAccountId && (
                                     <p className="text-xs text-red-600">Receivable account is not configured for this tax.</p>
                                 )}
                             </div>
 
-                            {totalWithholdingSuffered > 0 && (
+                            {(hasLineWithholding || hasLineVatWithholding) && (
                                 <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
                                     <Label htmlFor="withholdingCertificateNumber">Customer certificate/reference</Label>
                                     <Input
@@ -803,9 +823,9 @@ export default function NewReceiptPage() {
                                                 Discounts allowed: {formatCurrency(totalDiscounts, currentCurrencyCode)}
                                             </div>
                                         )}
-                                        {totalWithholdingSuffered > 0 && (
+                                        {(hasLineWithholding || hasLineVatWithholding) && (
                                             <div className="text-xs text-muted-foreground">
-                                                Withholding suffered: {formatCurrency(totalWithholdingSuffered, currentCurrencyCode)}
+                                                Withholding suffered is attributed per invoice currency below; Finance calculates the functional total.
                                             </div>
                                         )}
                                     </div>
@@ -824,6 +844,8 @@ export default function NewReceiptPage() {
                                                 <th className="p-3 text-right w-[150px]">Invoice Cash</th>
                                                 <th className="p-3 text-right w-[150px]">Receipt Cash</th>
                                                 <th className="p-3 text-right w-[150px]">Discount</th>
+                                                <th className="p-3 text-right w-[140px]">WHT</th>
+                                                <th className="p-3 text-right w-[140px]">VAT-WHT</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -896,8 +918,6 @@ export default function NewReceiptPage() {
                                                             )}
                                                         </td>
                                                         <td className="p-3">
-                                                            {/* Receipt-level deductions are one-currency metadata today; keep
-                                                                them off FX rows until the statutory evidence is line-scoped. */}
                                                             <Input
                                                                 type="number"
                                                                 className="text-right h-8"
@@ -911,7 +931,35 @@ export default function NewReceiptPage() {
                                                                         [inv.id]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || availableDiscount <= 0 || isCrossCurrency}
+                                                                disabled={isSubmitting || availableDiscount <= 0}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                value={withholdingAllocations[inv.id] || ''}
+                                                                onChange={(e) => setWithholdingAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: Number(e.target.value),
+                                                                }))}
+                                                                disabled={isSubmitting || !selectedWithholdingTax}
+                                                                aria-label={`WHT in ${inv.currencyCode} for ${inv.invoiceNumber}`}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                value={vatWithholdingAllocations[inv.id] || ''}
+                                                                onChange={(e) => setVatWithholdingAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: Number(e.target.value),
+                                                                }))}
+                                                                disabled={isSubmitting || !selectedVatWithholdingTax}
+                                                                aria-label={`VAT withholding in ${inv.currencyCode} for ${inv.invoiceNumber}`}
                                                             />
                                                         </td>
                                                     </tr>

@@ -1,10 +1,10 @@
 # TDC AP/AR Cross-Currency Settlement
 
-Date: 2026-08-06
+Date: 2026-08-07
 
 Limitation: `FIN-LIM-0022`
 
-Migration: `20260806095000_AddApArCrossCurrencySettlement`
+Migrations: `20260806095000_AddApArCrossCurrencySettlement`, `20260806143000_AddLineScopedCrossCurrencyDeductions`
 
 ## Stakeholder summary
 
@@ -13,7 +13,7 @@ TDC can now use a payment or receipt in one currency to settle an AP or AR invoi
 - functional-currency cash settling a foreign invoice, such as GHS paying a USD supplier invoice; and
 - third-currency cash settling a foreign invoice, such as EUR settling a USD receivable.
 
-The maker records the amount that reduces the invoice and the separate amount consumed from the bank or receipt currency. Finance freezes both approved exchange-rate snapshots, posts through the central Finance engine, calculates realized FX from the invoice's historical carrying value, and retains the evidence through reversal and audit views.
+The maker records the amount that reduces the invoice and the separate amount consumed from the bank or receipt currency. Discounts and withholding are recorded against the particular invoice in that invoice's currency. Finance freezes both approved exchange-rate snapshots, converts each deduction independently into functional currency, posts through the central Finance engine, calculates realized FX from the invoice's historical carrying value, and retains the evidence through reversal, statutory reporting, and audit views.
 
 ### Demo wow factors
 
@@ -23,6 +23,7 @@ The maker records the amount that reduces the invoice and the separate amount co
 - Realized gain or loss is derived from immutable functional-value evidence and is posted through the same controlled engine as the settlement.
 - Auto-allocation skips cross-currency rows so a user must confirm the commercial amount pair; the server independently rejects missing, negative, or over-settling legs.
 - Reversals copy and negate the original currency/rate snapshots, preserving an intelligible correction chain instead of rewriting history.
+- AP discounts/WHT and AR discounts/WHT/VAT-WHT retain both invoice-native and independently rounded functional values, so a stakeholder can trace each statutory or accounting line without reverse-engineering a mixed-currency header.
 
 ## Why the model changed
 
@@ -34,6 +35,7 @@ The previous model used `AllocatedAmount` for two incompatible meanings: the amo
 - invoice-settlement and payment exchange-rate ids and values;
 - payment functional amount;
 - total settlement functional amount; and
+- separate functional discount, WHT, and VAT-WHT values; and
 - whether the allocation is cross-currency.
 
 The payment header stores its approved `ExchangeRateId` alongside the existing frozen rate value. A realized-FX event duplicates the payment-side evidence so the accounting event remains self-contained even if operational projections are rebuilt.
@@ -44,31 +46,39 @@ The payment header stores its approved `ExchangeRateId` alongside the existing f
 2. The selected account establishes the payment/receipt currency.
 3. For a same-currency invoice, the established single-amount behavior remains available.
 4. For a different-currency invoice, the maker enters both the invoice-currency cash reduction and payment-currency cash consumption.
-5. The API resolves tenant-owned, active, approved daily rates for the settlement date and freezes their ids and values.
-6. The central posting engine records the bank/cash leg in payment currency and the AP/AR control leg in invoice currency with the actual functional settlement value.
-7. The FX service compares that settlement value with the invoice's historical carrying amount and posts realized gain/loss where required.
-8. Detail, audit, FX, and reversal paths retain the same allocation evidence.
+5. Any discount, WHT, or VAT-WHT is entered on that invoice row, never as an ambiguous receipt/payment-header amount.
+6. The API resolves tenant-owned, active, approved daily rates for the settlement date and freezes their ids and values.
+7. Each deduction is converted and rounded independently because it posts to a different account and must reconcile to its own evidence.
+8. The central posting engine records the bank/cash leg in payment currency, the deductions in invoice currency with exact functional overrides, and the AP/AR control leg in invoice currency with the actual functional settlement value.
+9. The FX service compares that settlement value with the invoice's historical carrying amount and posts realized gain/loss where required.
+10. Detail, statutory reporting, audit, FX, and reversal paths retain the same allocation evidence.
 
 ## Controls and intentional boundaries
 
-Cross-currency settlement is currently cash-only. The API rejects discounts, AP WHT, AR WHT, and AR VAT-WHT on cross-currency allocations because those statutory values are presently held at payment/receipt header level rather than allocated per invoice and currency. Allowing them now would make a balanced journal possible but the statutory evidence ambiguous.
+Cross-currency invoice deductions are now line-scoped. AP supports invoice discount and WHT; AR supports invoice discount, WHT, and VAT-WHT. Header values are server-derived functional-currency roll-ups for reporting and cannot be used as an alternative write path. Statutory reports, AP certificates, remittances, and summaries use the functional snapshots rather than combining payment-currency cash with functional deductions.
+
+Before posting, AP and AR reconstruct the expected functional evidence from each allocation's native amounts and frozen rates. A missing or contradictory cross-currency snapshot fails closed; the service never substitutes a `1.0` foreign rate. The narrowly scoped normalization path applies only to deterministic same-currency draft evidence. AP also re-runs configured WHT policy at posting and rejects a stale header total or an allocation total that no longer agrees with the statutory calculation.
+
+The AP/AR control and deduction accounts must be configured as multi-currency accounts with an effective link for every invoice currency they accept. This preserves the posting engine's existing account-currency governance instead of weakening it for subledger convenience.
 
 Supplier and customer advances also remain functional-currency only. Advance application clears a previously posted advance control balance; that balance needs currency-lot evidence before foreign or third-currency application can be correct.
 
-These are explicit safe boundaries, not silent omissions. They keep `FIN-LIM-0022` partially resolved until the remaining line-scoped deduction and advance work is implemented.
+The advance boundary keeps `FIN-LIM-0022` partially resolved until currency-lotted supplier and customer advance work is implemented.
 
 ## Technical ownership notes
 
 - `CrossCurrencySettlementCalculator` is a pure shared calculator used by AP and AR so rounding and functional-value rules cannot drift between subledgers.
 - `VendorPaymentService` and `PaymentService` resolve approved rates, validate both native legs, persist snapshots, build settlement journals, and preserve reversal values.
 - `CurrencyRevaluationService` uses the invoice currency for historical exposure and the allocation's frozen functional settlement amount for realized FX.
-- `VendorPaymentAllocation`, `PaymentAllocation`, and `FxRealizedSettlement` carry the immutable evidence introduced by the migration.
+- `VendorPaymentAllocation`, `PaymentAllocation`, and `FxRealizedSettlement` carry the immutable evidence introduced by the migrations.
+- Header WHT/VAT-WHT/discount amounts are functional-currency roll-ups; allocation-native amounts remain authoritative for invoice settlement and foreign-currency journal lines.
 - Outstanding AP invoice responses now expose invoice currency so the client never assumes that all supplier invoices match the selected bank currency.
 
 ## Verification status
 
 - Backend API build: passes with zero errors; repository warnings remain pre-existing.
 - Frontend Finance changes: no Finance TypeScript errors; the repository-wide type check is currently blocked by unrelated Inventory and Reports errors on the synced baseline.
-- Migration discovery and generated SQL: verified; the script contains only the intended Finance columns and the migration-history insert.
-- Focused calculator and FX scenarios are included in the API test project. Execution is currently blocked by unrelated inherited test-project compilation failures and must be rerun when that baseline is repaired.
-- Database application and client UAT are separate deployment gates and have not been performed by this implementation slice.
+- Migration structure: verified by a focused Up/Down regression test covering all seven AP/AR deduction evidence columns.
+- Focused AP, AR and calculator regression tests: 3 passed. They exercise independently rounded deductions through the real Finance posting engine, including approved rate evidence and multi-currency account links.
+- The Finance integration workflow now includes the new AP, AR, calculator and migration contracts and raises its exact consumer count from 22 to 26. The new SQL Server schema contract passed locally against SQL Server Express and raises the exact SQL count from 3 to 4.
+- Local database verification: `20260806143000_AddLineScopedCrossCurrencyDeductions` was applied to `RHEMAERP` on 2026-08-07, its migration-history row was confirmed, and all seven AP/AR deduction-evidence columns were queried directly from SQL Server. The older `RhemaERP_UAT_DryRun` database was deliberately left unchanged because it has a large mixed-module migration backlog; updating it would not be an isolated Finance dry run. A current shared UAT deployment and client workflow UAT therefore remain separate release gates.
