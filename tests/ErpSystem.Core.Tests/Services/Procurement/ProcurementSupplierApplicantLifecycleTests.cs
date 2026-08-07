@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
@@ -20,6 +22,43 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementSupplierApplicantLifecycleTests
 {
+    [Fact]
+    public async Task ApplicationTokenDeliveryAcceptsUppercaseOnboardingHash()
+    {
+        await using var fixture = new Fixture();
+        var issued = await fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "token-delivery@example.test",
+                CompanyName = "Token Delivery Supplier",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Services
+            },
+            "issue-token-delivery-test");
+        const string plaintextToken = "Application_Token-Case-Safe-001";
+        var token = await fixture.Context.ProcurementSupplierOnboardingTokens
+            .SingleAsync(item => item.Id == issued.TokenId);
+        token.TokenHashSha256 = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(plaintextToken)));
+        await fixture.Context.SaveChangesAsync();
+
+        var delivery = await fixture.Service.DeliverApplicationTokenAsync(
+            token.Id,
+            plaintextToken,
+            "deliver-uppercase-token");
+
+        delivery.ApplicantAccessFound.Should().BeTrue();
+        delivery.Delivered.Should().BeTrue();
+        delivery.Status.Should().Be("Sent");
+        fixture.DeliveredMessages.Should().ContainSingle(message =>
+            message.Contains(plaintextToken, StringComparison.Ordinal));
+        var access = await fixture.Context.ProcurementSupplierApplicantAccesses
+            .SingleAsync(item => item.TokenId == token.Id);
+        access.NotificationAttemptCount.Should().Be(1);
+        access.LastNotificationStatus.Should().Be("ApplicationTokenSent");
+    }
+
     [Fact]
     public async Task PaidVerifiedApplicationWithholdsTokenAndCreatesOnlyPaymentSession()
     {

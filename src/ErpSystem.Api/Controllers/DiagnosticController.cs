@@ -174,15 +174,9 @@ namespace ErpSystem.Api.Controllers
                     tenantId = tenantId.Value.ToString()
                 });
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Error getting simple online users");
-                return StatusCode(500, new
-                {
-                    error = ex.Message,
-                    innerError = ex.InnerException?.Message,
-                    stackTrace = ex.StackTrace
-                });
+                throw;
             }
         }
 
@@ -218,15 +212,9 @@ namespace ErpSystem.Api.Controllers
 
                 return Ok(result);
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Error in SignalR test endpoint");
-                return StatusCode(500, new
-                {
-                    error = ex.Message,
-                    innerError = ex.InnerException?.Message,
-                    stackTrace = ex.StackTrace
-                });
+                throw;
             }
         }
     }

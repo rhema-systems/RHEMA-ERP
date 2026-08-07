@@ -44,15 +44,11 @@ namespace ErpSystem.Api.Controllers
                     DataSources = dataSources
                 });
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Debug: Error retrieving data sources");
-                return Ok(new
-                {
-                    Success = false,
-                    Error = ex.Message,
-                    StackTrace = ex.StackTrace
-                });
+                // Let the central exception middleware return a safe problem response and
+                // retain the diagnostic details in the tenant administrator exception log.
+                throw;
             }
         }
 
@@ -89,15 +85,9 @@ namespace ErpSystem.Api.Controllers
                     DataSource = dataSource
                 });
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Debug: Error creating ERP data source");
-                return Ok(new
-                {
-                    Success = false,
-                    Error = ex.Message,
-                    StackTrace = ex.StackTrace
-                });
+                throw;
             }
         }
 
@@ -134,15 +124,9 @@ namespace ErpSystem.Api.Controllers
                     DataSource = dataSource
                 });
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Debug: Error creating data source");
-                return Ok(new
-                {
-                    Success = false,
-                    Error = ex.Message,
-                    StackTrace = ex.StackTrace
-                });
+                throw;
             }
         }
 
@@ -192,15 +176,9 @@ namespace ErpSystem.Api.Controllers
                     Schema = schema // Full schema for debugging
                 });
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Debug: Error testing schema retrieval");
-                return Ok(new
-                {
-                    Success = false,
-                    Error = ex.Message,
-                    StackTrace = ex.StackTrace
-                });
+                throw;
             }
         }
 
@@ -231,15 +209,9 @@ namespace ErpSystem.Api.Controllers
                     ConnectionString = connectionString.Replace("Password=sa", "Password=***")
                 });
             }
-            catch (Exception ex)
+            catch
             {
-                _logger.LogError(ex, "Debug connection test failed: {Error}", ex.Message);
-                return Ok(new
-                {
-                    Success = false,
-                    Error = ex.Message,
-                    StackTrace = ex.StackTrace
-                });
+                throw;
             }
         }
 

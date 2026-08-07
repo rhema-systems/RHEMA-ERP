@@ -560,9 +560,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "SUPPLIER_APPLICANT_TOKEN_NOT_ACTIVE",
                 "The application token can be delivered only after activation and before application completion.");
         }
-        if (!CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(Hash(plaintextToken)),
-                Encoding.UTF8.GetBytes(access.Token.TokenHashSha256)))
+        if (!MatchesSha256Secret(plaintextToken, access.Token.TokenHashSha256))
         {
             throw Error(
                 "SUPPLIER_APPLICANT_TOKEN_SECRET_INVALID",
@@ -1937,6 +1935,23 @@ public sealed class ProcurementSupplierApplicantAccessService :
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
             .ToLowerInvariant();
+
+    private static bool MatchesSha256Secret(string plaintext, string storedHash)
+    {
+        byte[] storedBytes;
+        try
+        {
+            storedBytes = Convert.FromHexString(storedHash);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        var suppliedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(plaintext));
+        return storedBytes.Length == suppliedBytes.Length &&
+            CryptographicOperations.FixedTimeEquals(suppliedBytes, storedBytes);
+    }
 
     private static string NormalizeCorrelation(string value)
     {

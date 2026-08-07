@@ -10,4 +10,8 @@ public class CandidatePortalOptions
 
     /// <summary>Root URL of the Blazor Server front-end, e.g. http://localhost:5085</summary>
     public string PortalUrl { get; set; } = string.Empty;
+
+    public static bool IsValidPortalUrl(string? portalUrl) =>
+        Uri.TryCreate(portalUrl, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 }

@@ -1,0 +1,61 @@
+{
+  "_comment": "TEMPLATE. Copy to appsettings.Development.json or set the equivalent user secrets. Replace all development-only keys before using this configuration outside a local development environment.",
+  "Database": {
+    "Provider": "SqlServer"
+  },
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=(localdb)\\MSSQLLocalDB;Database=ErpSystemDb;Trusted_Connection=true;TrustServerCertificate=true;",
+    "Redis": ""
+  },
+  "JwtSettings": {
+    "SecretKey": "ThisIsASecretKeyForDevelopmentOnlyThatIsAtLeast32CharactersLong!",
+    "PortalSecretKey": "ThisIsASeparatePortalSecretKeyForDevelopmentOnlyAndIsAtLeast32CharactersLong!",
+    "Issuer": "ErpSystem.Api",
+    "Audience": "ErpSystem.Client",
+    "PortalAudience": "ErpSystem.Portal",
+    "ExpiryInHours": 24
+  },
+  "CandidatePortal": {
+    "PortalUrl": "http://localhost:3000"
+  },
+  "Security": {
+    "EncryptionKeys": "ThisIsAnEncryptionKeyForDevelopmentThatIsAtLeast32CharactersLong!"
+  },
+  "SmartCaptcha": {
+    "Enabled": false,
+    "RecaptchaSecretKey": "",
+    "HCaptchaSecretKey": ""
+  },
+  "StartupInitialization": {
+    "DatabaseConnectionTimeoutSeconds": 5,
+    "MigrationTimeoutSeconds": 120,
+    "FailFastOnDatabaseInitializationError": false,
+    "SeedDevelopmentData": true,
+    "FailFastOnDevelopmentSeedError": false
+  },
+  "Application": {
+    "Environment": "Development",
+    "EnvironmentName": "Development",
+    "IsDevelopment": true
+  },
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "ErpSystem": "Warning",
+        "Microsoft": "Warning",
+        "Microsoft.Hosting.Lifetime": "Information",
+        "Microsoft.EntityFrameworkCore": "Warning",
+        "Microsoft.AspNetCore.SignalR": "Warning",
+        "Microsoft.AspNetCore.Http.Connections": "Warning",
+        "ErpSystem.Api.Hubs.DashboardHub": "Warning",
+        "System": "Warning"
+      }
+    }
+  },
+  "HttpRequestResponseLogging": {
+    "Enabled": false,
+    "LogBodies": false,
+    "MaxBodyLength": 4000
+  }
+}

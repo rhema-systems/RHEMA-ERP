@@ -141,6 +141,12 @@ public sealed class IssueProcurementSupplierOnboardingTokenRequest
 {
     [Required]
     public Guid RegistrationId { get; set; }
+
+    /// <summary>
+    /// Retained for wire compatibility only. Token issue always resolves the
+    /// policy effective at the trusted server time; callers cannot backdate or
+    /// future-date fee-policy selection.
+    /// </summary>
     public DateTime? EffectiveAtUtc { get; set; }
 }
 
