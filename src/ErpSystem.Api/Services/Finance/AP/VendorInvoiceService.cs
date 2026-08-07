@@ -978,6 +978,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 FinancePostingResultDto? reversal = null;
                 if (invoice.JournalEntryId.HasValue)
                 {
+                    // AP-created fixed assets share the invoice journal. Validate the asset
+                    // lifecycle before reversing that journal; otherwise a successful AP void
+                    // could leave depreciation/valuation based on cost that no longer exists.
+                    // The post-step below then updates the register using this same reversal event
+                    // rather than creating a second journal that would duplicate AP/tax reversal.
+                    if (_fixedAssetService != null)
+                        await _fixedAssetService.ValidateApInvoiceCapitalizationReversalAsync(invoice.Id, cancellationToken);
+
                     var originalEvent = await GetPostedInvoiceEventAsync(invoice, cancellationToken);
                     var originalJournal = await _unitOfWork.Repository<JournalEntry>()
                         .GetQueryable(j =>
@@ -1016,6 +1024,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                             "VendorInvoice",
                             cancellationToken);
                     }
+                }
+
+                if (reversal != null && _fixedAssetService != null)
+                {
+                    await _fixedAssetService.RecordApInvoiceCapitalizationReversalAsync(
+                        invoice.Id,
+                        reversal.JournalEntryId,
+                        reversal.PostingEventId,
+                        reason.Trim(),
+                        cancellationToken);
                 }
 
                 if (invoice.Status != VendorInvoiceStatus.Voided)

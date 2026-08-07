@@ -287,6 +287,12 @@ public static class FinanceAuditEvents
     public const string FixedAssetActivated = "Finance.FixedAsset.Activated";
     public const string FixedAssetCapitalizationConfigurationUsed = "Finance.FixedAsset.CapitalizationConfigurationUsed";
     public const string FixedAssetCapitalizationBlockedClosedPeriod = "Finance.FixedAsset.CapitalizationBlockedClosedPeriod";
+    public const string FixedAssetCapitalizationReversalRequested = "Finance.FixedAsset.CapitalizationReversalRequested";
+    public const string FixedAssetCapitalizationReversalApproved = "Finance.FixedAsset.CapitalizationReversalApproved";
+    public const string FixedAssetCapitalizationReversalRejected = "Finance.FixedAsset.CapitalizationReversalRejected";
+    public const string FixedAssetCapitalizationReversed = "Finance.FixedAsset.CapitalizationReversed";
+    public const string FixedAssetCapitalizationReversalFailed = "Finance.FixedAsset.CapitalizationReversalFailed";
+    public const string FixedAssetCapitalizationReversalBlocked = "Finance.FixedAsset.CapitalizationReversalBlocked";
     public const string FixedAssetCrossTenantRejected = "Finance.FixedAsset.CrossTenantRejected";
     public const string FixedAssetDepreciationPolicyConfigured = "Finance.FixedAsset.DepreciationPolicyConfigured";
     public const string FixedAssetDepreciationScheduleGenerated = "Finance.FixedAsset.DepreciationScheduleGenerated";
