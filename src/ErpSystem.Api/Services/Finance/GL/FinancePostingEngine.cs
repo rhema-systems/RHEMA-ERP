@@ -658,7 +658,18 @@ WHERE [Id] = {delta.AccountId}
 
     private void SyncTrackedAccountBalanceSnapshot(Guid tenantId, AccountBalanceDelta delta)
     {
-        foreach (var entry in _context.ChangeTracker.Entries<Account>())
+        // Materialize the tracker query before changing property state below. EF Core's
+        // Entries<T>() iterator may run DetectChanges while it is being enumerated, and assigning
+        // OriginalValue/IsModified can in turn mutate tracker state. Procurement and other module
+        // integrations commonly enter Finance with the posting accounts already tracked, so walking
+        // the live iterator here caused "Collection was modified" after SQL Server had applied the
+        // atomic balance update. A stable snapshot keeps the raw-SQL balance and the tracked read-side
+        // entity synchronized without invalidating EF's enumerator.
+        var trackedAccounts = _context.ChangeTracker
+            .Entries<Account>()
+            .ToArray();
+
+        foreach (var entry in trackedAccounts)
         {
             if (entry.Entity.TenantId != tenantId ||
                 entry.Entity.Id != delta.AccountId ||
