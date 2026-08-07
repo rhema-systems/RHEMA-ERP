@@ -422,11 +422,7 @@ if (app.Configuration.GetValue("HttpRequestResponseLogging:Enabled", false))
 // Add security headers
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage();
-}
-else
+if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }

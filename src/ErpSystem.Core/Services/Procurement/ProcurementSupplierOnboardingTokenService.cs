@@ -224,6 +224,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 item.CreationCorrelationId == correlation, cancellationToken);
         if (replay is not null)
         {
+            if (replay.RegistrationId != request.RegistrationId)
+                throw Conflict(
+                    "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH",
+                    "The supplied correlation id was already used for a different supplier registration.");
             await EnsureReaderAsync(replay, cancellationToken);
             return new ProcurementSupplierOnboardingTokenIssueResultDto { Token = Map(replay) };
         }
@@ -247,7 +251,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             registration,
             _currentUser.TenantId,
             correlation,
-            EnsureUtc(request.EffectiveAtUtc ?? DateTime.UtcNow),
+            DateTime.UtcNow,
             systemEvent: false,
             cancellationToken: cancellationToken);
     }
@@ -272,7 +276,13 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             .AsNoTracking()
             .SingleOrDefaultAsync(cancellationToken);
         if (replay is not null)
+        {
+            if (replay.RegistrationId != registrationId)
+                throw Conflict(
+                    "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH",
+                    "The supplied correlation id was already used for a different supplier registration.");
             return new ProcurementSupplierOnboardingTokenIssueResultDto { Token = Map(replay) };
+        }
 
         var registration = await Registrations.GetQueryable(item =>
                 item.TenantId == tenantId && item.Id == registrationId && !item.IsDeleted)
@@ -603,7 +613,19 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         var replay = entity.Payments.SingleOrDefault(item =>
             item.CreationCorrelationId == correlation);
         if (replay is not null)
+        {
+            if (replay.PaymentMethodId != request.PaymentMethodId ||
+                !string.Equals(
+                    replay.PaymentReference,
+                    Trim(request.PaymentReference, 200),
+                    StringComparison.Ordinal))
+            {
+                throw Conflict(
+                    "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH",
+                    "The supplied correlation id was already used for a different payment claim.");
+            }
             return new ProcurementSupplierOnboardingTokenIssueResultDto { Token = Map(entity) };
+        }
         EnsureRowVersion(entity.RowVersion, request.RowVersion);
         if (entity.FeeMode != ProcurementSupplierOnboardingFeeMode.Paid)
             throw Conflict("SUPPLIER_ONBOARDING_PAYMENT_NOT_REQUIRED",
@@ -719,12 +741,33 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         var payment = entity.Payments.SingleOrDefault(item => item.Id == paymentId)
             ?? throw NotFound("SUPPLIER_ONBOARDING_PAYMENT_NOT_FOUND",
                 "The token payment was not found.");
+        var reconciliationReference = request.ReconciliationReference?.Trim();
+        if (string.IsNullOrWhiteSpace(reconciliationReference))
+            throw Validation(
+                "SUPPLIER_ONBOARDING_RECONCILIATION_REFERENCE_REQUIRED",
+                "A trusted cashier receipt or provider transaction reference is required.");
+        var reconciliationNotes = Trim(request.Notes, 1000);
         if (IsReplay(payment.LastOperation, payment.LastOperationCorrelationId,
                 "Verified", correlation))
+        {
+            if (!string.Equals(
+                    payment.ReconciliationReference,
+                    reconciliationReference,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    payment.ReconciliationNotes,
+                    reconciliationNotes,
+                    StringComparison.Ordinal))
+            {
+                throw Conflict(
+                    "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH",
+                    "The supplied correlation id was already used for a different payment-verification decision.");
+            }
             return new ProcurementSupplierOnboardingTokenIssueResultDto
             {
                 Token = Map(entity)
             };
+        }
         EnsureRowVersion(payment.RowVersion, request.RowVersion);
         if (payment.Status is not (
                 ProcurementSupplierOnboardingPaymentStatus.Pending or
@@ -774,9 +817,12 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 await ValidatePostingAccountsAsync(entity, method, cancellationToken);
                 await ValidateFunctionalCurrencyAsync(entity, cancellationToken);
 
-                payment.PaidAtUtc = now;
                 var posting = await _financePosting.PostAsync(BuildPostingRequest(
-                    entity, payment, method.DefaultGLAccountId.Value), cancellationToken);
+                    entity,
+                    payment,
+                    method.DefaultGLAccountId.Value,
+                    reconciliationReference,
+                    now), cancellationToken);
                 var receipt = await _documentNumbering.GenerateConfiguredAsync(
                     DocumentNumberingModules.Procurement,
                     $"SupplierOnboardingReceipt-{entity.SourceConfigurationProfileId:N}",
@@ -792,6 +838,12 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                     throw Validation("SUPPLIER_ONBOARDING_RECEIPT_NUMBER_TOO_LONG",
                         "The configured DEC-007 receipt format produced a number longer than 50 characters.");
 
+                // Do not mutate protected payment lineage before Finance has
+                // completed validation and posting. Finance audit writes share
+                // this unit of work and may save tracked entities while
+                // reporting a blocked posting. The verified payment timestamp
+                // must therefore be persisted only with Pending -> Posted.
+                payment.PaidAtUtc = now;
                 payment.PostingEventId = posting.PostingEventId;
                 payment.JournalEntryId = posting.JournalEntryId;
                 payment.PostedAtUtc = now;
@@ -804,16 +856,22 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 payment.Status = ProcurementSupplierOnboardingPaymentStatus.Posted;
                 Touch(payment, "Posted", correlation, now);
                 Capture(payment);
+                // The parent token has its own SQL-protected payment lifecycle.
+                // Persist it in lockstep with the payment row so the database
+                // observes Pending -> Posted before the final Posted ->
+                // Reconciled transition below.
+                entity.PaymentStatus = ProcurementSupplierOnboardingPaymentStatus.Posted;
+                Touch(entity, "PaymentPosted", correlation, now);
+                Capture(entity);
                 await Payments.UpdateAsync(payment);
+                await Tokens.UpdateAsync(entity);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
             payment.ReconciledAtUtc = now;
             payment.ReconciledById = _currentUser.UserId;
-            payment.ReconciliationReference = request.ReconciliationReference.Trim();
-            payment.ReconciliationNotes = string.IsNullOrWhiteSpace(request.Notes)
-                ? null
-                : request.Notes.Trim();
+            payment.ReconciliationReference = reconciliationReference;
+            payment.ReconciliationNotes = reconciliationNotes;
             payment.Status = ProcurementSupplierOnboardingPaymentStatus.Reconciled;
             Touch(payment, "Verified", correlation, now);
             Capture(payment);
@@ -1331,10 +1389,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
     private static FinancePostingRequestDto BuildPostingRequest(
         ProcurementSupplierOnboardingToken token,
         ProcurementSupplierOnboardingPayment payment,
-        Guid receiptAccountId)
+        Guid receiptAccountId,
+        string trustedReference,
+        DateTime verifiedAtUtc)
     {
-        var trustedReference = payment.ReconciliationReference ??
-            payment.PaymentReference ?? token.TokenReference;
         var lines = new List<FinancePostingLineDto>
         {
             new()
@@ -1383,7 +1441,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             SourceDocumentTenantId = token.TenantId,
             SourceDocumentReference = trustedReference,
             PostingAction = "Post",
-            PostingDate = payment.PaidAtUtc.Date,
+            PostingDate = verifiedAtUtc.Date,
             Description = $"Supplier onboarding token payment {token.TokenReference}",
             JournalType = "System Generated",
             FunctionalCurrencyCode = payment.CurrencyCode,

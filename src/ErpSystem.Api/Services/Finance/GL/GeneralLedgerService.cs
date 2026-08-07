@@ -151,15 +151,11 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 return account;
             }
-            catch (Exception ex)
+            catch
             {
-                // Log the error (in production, use proper logging framework)
-                Console.WriteLine($"ERROR in CreateSegmentedAccountAsync: {ex.Message}");
-                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                    Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
-                
-                throw; // Re-throw to let the controller handle it
+                // The request-level exception middleware owns diagnostic logging and the
+                // tenant administrator audit record. Do not duplicate it on the console.
+                throw;
             }
         }
 

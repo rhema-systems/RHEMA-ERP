@@ -170,7 +170,7 @@ namespace ErpSystem.Api.Extensions
             // shipping broken emails.
             services.AddOptions<ErpSystem.Core.Models.CandidatePortalOptions>()
                 .Bind(configuration.GetSection(ErpSystem.Core.Models.CandidatePortalOptions.SectionName))
-                .Validate(o => !string.IsNullOrWhiteSpace(o.PortalUrl),
+                .Validate(o => ErpSystem.Core.Models.CandidatePortalOptions.IsValidPortalUrl(o.PortalUrl),
                     "CandidatePortal:PortalUrl must be configured with an absolute portal base URL.")
                 .ValidateOnStart();
 

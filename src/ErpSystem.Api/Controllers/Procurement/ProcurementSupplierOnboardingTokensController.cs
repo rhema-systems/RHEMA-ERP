@@ -125,11 +125,22 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
         if (string.IsNullOrWhiteSpace(value.PlaintextToken))
             return value;
 
-        var delivery = await _applicantAccess.DeliverApplicationTokenAsync(
-            value.Token.Id,
-            value.PlaintextToken,
-            correlationId,
-            cancellationToken);
+        SupplierApplicantTokenDeliveryDto delivery;
+        try
+        {
+            delivery = await _applicantAccess.DeliverApplicationTokenAsync(
+                value.Token.Id,
+                value.PlaintextToken,
+                correlationId,
+                cancellationToken);
+        }
+        catch (ProcurementSupplierApplicantAccessException)
+        {
+            throw new ProcurementSupplierOnboardingTokenConflictException(
+                "SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED",
+                "Application-token delivery could not be completed. " +
+                "Reissue the token to retry delivery.");
+        }
         if (!delivery.ApplicantAccessFound)
             return value;
         if (!delivery.Delivered)

@@ -48,6 +48,68 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
     }
 
     [Fact]
+    public async Task IssueUsesServerTimeInsteadOfCallerSelectedPolicyDate()
+    {
+        await using var fixture = new Fixture(paid: true);
+
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id,
+                EffectiveAtUtc = DateTime.UtcNow.AddYears(-10)
+            },
+            "server-time-policy-selection");
+
+        issued.Token.FeeMode.Should().Be(ProcurementSupplierOnboardingFeeMode.Paid);
+        issued.Token.SourceConfigurationProfileVersion.Should().BePositive();
+    }
+
+    [Fact]
+    public async Task IssueRejectsCorrelationReuseForAnotherRegistration()
+    {
+        await using var fixture = new Fixture(paid: false);
+        await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-correlation-bound-to-registration");
+
+        var action = () => fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = Guid.NewGuid()
+            },
+            "issue-correlation-bound-to-registration");
+
+        await action.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenConflictException>()
+            .Where(exception => exception.Code ==
+                "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH");
+    }
+
+    [Fact]
+    public async Task VerifiedApplicantIssueRejectsCorrelationReuseForAnotherRegistration()
+    {
+        await using var fixture = new Fixture(paid: false);
+        fixture.SeedSystemActor();
+        await fixture.Service.IssueForVerifiedApplicantAsync(
+            fixture.TenantId,
+            fixture.Registration.Id,
+            "applicant-correlation-bound-to-registration");
+
+        var action = () => fixture.Service.IssueForVerifiedApplicantAsync(
+            fixture.TenantId,
+            Guid.NewGuid(),
+            "applicant-correlation-bound-to-registration");
+
+        await action.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenConflictException>()
+            .Where(exception => exception.Code ==
+                "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH");
+    }
+
+    [Fact]
     public async Task FreeTokenIsIssuedOnceRemainsActiveAndExpiresOnlyAtTerminalApplicationState()
     {
         await using var fixture = new Fixture(paid: false);
@@ -135,7 +197,21 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         pending.ReceiptNumber.Should().BeNull();
         fixture.FinancePostCount.Should().Be(0);
         replay.Token.Payments.Should().ContainSingle();
+        var mismatchedPaymentReplay = () => fixture.Service.RecordPaymentAsync(
+            issued.Token.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod.Id,
+                PaymentReference = "DIFFERENT-CLAIM-REFERENCE",
+                RowVersion = issued.Token.RowVersion
+            },
+            "post-payment");
+        await mismatchedPaymentReplay.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenConflictException>()
+            .Where(exception => exception.Code ==
+                "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH");
 
+        fixture.ResetPaymentLifecycleSnapshots();
         fixture.SetUser(Guid.NewGuid());
         var verified = await fixture.Service.ReconcilePaymentAsync(
             issued.Token.Id,
@@ -171,6 +247,11 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         fixture.PostedRequest!.OriginModuleCode.Should().Be("PROC");
         fixture.PostedRequest.SourceDocumentType.Should()
             .Be("SupplierOnboardingTokenPayment");
+        fixture.PostedRequest.SourceDocumentReference.Should()
+            .Be("PROVIDER-CONFIRM-0001",
+                "Finance must use the independently verified provider reference, not the applicant claim reference");
+        fixture.PostedRequest.Lines.Should().OnlyContain(item =>
+            item.SourceReferenceNumber == "PROVIDER-CONFIRM-0001");
         fixture.PostedRequest.Lines.Sum(item => item.DebitAmount).Should()
             .Be(fixture.PostedRequest.Lines.Sum(item => item.CreditAmount));
         fixture.PostedRequest.Lines.Should().Contain(item =>
@@ -178,11 +259,81 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             item.AccountId == fixture.RevenueAccount!.Id);
         verificationReplay.Token.Payments.Should().ContainSingle();
         verificationReplay.PlaintextToken.Should().BeNull();
+        var mismatchedVerificationReplay = () => fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            pending.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "DIFFERENT-PROVIDER-REFERENCE",
+                RowVersion = pending.RowVersion
+            },
+            "verify-payment");
+        await mismatchedVerificationReplay.Should()
+            .ThrowAsync<ProcurementSupplierOnboardingTokenConflictException>()
+            .Where(exception => exception.Code ==
+                "SUPPLIER_ONBOARDING_IDEMPOTENCY_MISMATCH");
         (await fixture.Context.ProcurementSupplierApplicantSessions
                 .SingleAsync(item => item.Id == paymentSession.Id))
             .Status.Should().Be(ProcurementSupplierApplicantSessionStatus.Revoked);
         fixture.FinancePostCount.Should().Be(1,
             "verification replays must not create duplicate Finance postings");
+        fixture.AssertPostedThenReconciledLifecycle();
+    }
+
+    [Fact]
+    public async Task ReconciliationDoesNotExposeProtectedPaymentMutationToFinanceSave()
+    {
+        await using var fixture = new Fixture(paid: true);
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-for-shared-save");
+        var submitted = await fixture.Service.RecordPaymentAsync(
+            issued.Token.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod!.Id,
+                PaymentReference = "MOMO-SHARED-SAVE-001",
+                RowVersion = issued.Token.RowVersion
+            },
+            "record-for-shared-save");
+        var pending = submitted.Token.Payments.Should().ContainSingle().Subject;
+        var originalPaidAtUtc = DateTime.UtcNow.AddDays(-2);
+        var storedPayment = await fixture.Context.ProcurementSupplierOnboardingPayments
+            .SingleAsync(item => item.Id == pending.Id);
+        storedPayment.PaidAtUtc = originalPaidAtUtc;
+        await fixture.Context.SaveChangesAsync();
+
+        fixture.FinancePostHandler = async (request, cancellationToken) =>
+        {
+            var entry = fixture.Context.Entry(storedPayment);
+            entry.Property(item => item.PaidAtUtc).IsModified.Should().BeFalse(
+                "Finance validation and audit saves must not flush a protected payment timestamp");
+            storedPayment.Status.Should().Be(ProcurementSupplierOnboardingPaymentStatus.Pending);
+            storedPayment.PaidAtUtc.Should().Be(originalPaidAtUtc);
+            request.PostingDate.Should().Be(DateTime.UtcNow.Date);
+
+            // Finance audit records use the shared DbContext and call
+            // SaveChangesAsync while validating a posting request.
+            await fixture.Context.SaveChangesAsync(cancellationToken);
+        };
+        fixture.SetUser(Guid.NewGuid());
+
+        var reconciled = await fixture.Service.ReconcilePaymentAsync(
+            issued.Token.Id,
+            pending.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "PROVIDER-SHARED-SAVE-001",
+                RowVersion = pending.RowVersion
+            },
+            "verify-after-shared-save");
+
+        var payment = reconciled.Token.Payments.Should().ContainSingle().Subject;
+        payment.Status.Should().Be(ProcurementSupplierOnboardingPaymentStatus.Reconciled);
+        payment.PaidAtUtc.Should().BeAfter(originalPaidAtUtc);
     }
 
     [Fact]
@@ -578,6 +729,60 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             RequirementKey = "DEC-007"
         };
 
+    private sealed class PaymentLifecycleSaveInterceptor : SaveChangesInterceptor
+    {
+        private readonly List<(
+            ProcurementSupplierOnboardingPaymentStatus TokenPaymentStatus,
+            ProcurementSupplierOnboardingPaymentStatus PaymentStatus)> _snapshots = [];
+
+        public void Reset() => _snapshots.Clear();
+
+        public void AssertPostedThenReconciled()
+        {
+            _snapshots.Should().Equal(
+                (
+                    ProcurementSupplierOnboardingPaymentStatus.Posted,
+                    ProcurementSupplierOnboardingPaymentStatus.Posted),
+                (
+                    ProcurementSupplierOnboardingPaymentStatus.Reconciled,
+                    ProcurementSupplierOnboardingPaymentStatus.Reconciled));
+        }
+
+        public override InterceptionResult<int> SavingChanges(
+            DbContextEventData eventData,
+            InterceptionResult<int> result)
+        {
+            Capture(eventData.Context);
+            return base.SavingChanges(eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            Capture(eventData.Context);
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+
+        private void Capture(DbContext? context)
+        {
+            if (context is null)
+                return;
+
+            var token = context.ChangeTracker
+                .Entries<ProcurementSupplierOnboardingToken>()
+                .FirstOrDefault(entry => entry.State == EntityState.Modified)?.Entity;
+            var payment = context.ChangeTracker
+                .Entries<ProcurementSupplierOnboardingPayment>()
+                .FirstOrDefault(entry => entry.State == EntityState.Modified)?.Entity;
+            if (token is null || payment is null)
+                return;
+
+            _snapshots.Add((token.PaymentStatus, payment.Status));
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Guid _tenantId;
@@ -586,6 +791,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         private string _authenticationProvider = "Local";
         private readonly Dictionary<string, string> _claims = new();
         private readonly UnitOfWork _unitOfWork;
+        private readonly PaymentLifecycleSaveInterceptor _paymentLifecycleInterceptor = new();
 
         public Fixture(bool paid)
         {
@@ -597,6 +803,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             JournalEntryId = Guid.NewGuid();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                .AddInterceptors(_paymentLifecycleInterceptor)
                 .ConfigureWarnings(warnings =>
                     warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
                 .Options;
@@ -776,18 +983,20 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
             finance.Setup(item => item.PostAsync(
                     It.IsAny<FinancePostingRequestDto>(),
                     It.IsAny<CancellationToken>()))
-                .Callback((FinancePostingRequestDto request, CancellationToken _) =>
+                .Returns(async (FinancePostingRequestDto request, CancellationToken cancellationToken) =>
                 {
                     PostedRequest = request;
                     FinancePostCount++;
-                })
-                .ReturnsAsync(new FinancePostingResultDto
-                {
-                    PostingEventId = PostingEventId,
-                    JournalEntryId = JournalEntryId,
-                    JournalEntryNumber = "JE-2026-00001",
-                    PostingStatus = "Posted",
-                    FunctionalCurrencyCode = "GHS"
+                    if (FinancePostHandler != null)
+                        await FinancePostHandler(request, cancellationToken);
+                    return new FinancePostingResultDto
+                    {
+                        PostingEventId = PostingEventId,
+                        JournalEntryId = JournalEntryId,
+                        JournalEntryNumber = "JE-2026-00001",
+                        PostingStatus = "Posted",
+                        FunctionalCurrencyCode = "GHS"
+                    };
                 });
             var numbering = new Mock<IDocumentNumberingService>();
             numbering.Setup(item => item.GenerateConfiguredAsync(
@@ -827,8 +1036,15 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         public WorkflowInstance? WorkflowInstance { get; private set; }
         public FinancePostingRequestDto? PostedRequest { get; private set; }
         public int FinancePostCount { get; private set; }
+        public Func<FinancePostingRequestDto, CancellationToken, Task>? FinancePostHandler { get; set; }
         public ProcurementSupplierOnboardingTokenService Service { get; }
         public bool HasActiveTransaction => _unitOfWork.HasActiveTransaction;
+
+        public void ResetPaymentLifecycleSnapshots() =>
+            _paymentLifecycleInterceptor.Reset();
+
+        public void AssertPostedThenReconciledLifecycle() =>
+            _paymentLifecycleInterceptor.AssertPostedThenReconciled();
 
         public void SetExternal(bool value) => _external = value;
         public void SetTenant(Guid value) => _tenantId = value;
