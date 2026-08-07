@@ -211,6 +211,19 @@ export default function SystemExceptionLogs() {
     return [m, p].filter(Boolean).join(" ")
   }
 
+  const friendlyDateTime = (value?: string | null) => {
+    if (!value) return "-"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "-"
+    return new Intl.DateTimeFormat(undefined, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date)
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -275,7 +288,6 @@ export default function SystemExceptionLogs() {
                   <TableHead>Logger</TableHead>
                   <TableHead>User</TableHead>
                   <TableHead>Request</TableHead>
-                  <TableHead>Count</TableHead>
                   <TableHead>Last Seen</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -317,9 +329,8 @@ export default function SystemExceptionLogs() {
                       <TableCell className="text-xs text-muted-foreground max-w-[340px] truncate">
                         {compactPath(x.requestMethod, x.requestPath) || "-"}
                       </TableCell>
-                      <TableCell className="text-sm">{x.occurrenceCount}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {new Date(x.lastOccurredAt || x.createdAt).toLocaleString()}
+                        {friendlyDateTime(x.lastOccurredAt || x.createdAt)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
@@ -379,7 +390,7 @@ export default function SystemExceptionLogs() {
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Created</div>
-                  <div className="text-sm">{new Date(selected.createdAt).toLocaleString()}</div>
+                  <div className="text-sm">{friendlyDateTime(selected.createdAt)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">User</div>
@@ -391,18 +402,14 @@ export default function SystemExceptionLogs() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div>
-                  <div className="text-xs text-muted-foreground">Count</div>
-                  <div className="text-sm font-medium">{selected.occurrenceCount}</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <div className="text-xs text-muted-foreground">First Seen</div>
-                  <div className="text-sm">{new Date(selected.firstOccurredAt).toLocaleString()}</div>
+                  <div className="text-sm">{friendlyDateTime(selected.firstOccurredAt)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Last Seen</div>
-                  <div className="text-sm">{new Date(selected.lastOccurredAt).toLocaleString()}</div>
+                  <div className="text-sm">{friendlyDateTime(selected.lastOccurredAt)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Fingerprint</div>

@@ -105,6 +105,11 @@ public sealed class GlobalExceptionHandlingMiddlewareTests
             entry.QueryString.Contains("token=[REDACTED]") &&
             !entry.QueryString.Contains("plain-secret") &&
             entry.StackTrace != null)), Times.Once);
+        repository.Verify(value => value.FirstOrDefaultAsync(
+            It.IsAny<System.Linq.Expressions.Expression<Func<SystemExceptionLog, bool>>>()),
+            Times.Never);
+        repository.Verify(value => value.UpdateAsync(It.IsAny<SystemExceptionLog>()),
+            Times.Never);
         unitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
 
         var publicBody = (await ReadResponseAsync(context)).RootElement.GetRawText();

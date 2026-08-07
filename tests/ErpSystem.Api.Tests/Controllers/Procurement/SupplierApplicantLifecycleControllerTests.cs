@@ -27,6 +27,37 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class SupplierApplicantLifecycleControllerTests
 {
     [Fact]
+    public async Task SubmitReturnsEvidenceValidationProblemInsteadOfUnexpectedFailure()
+    {
+        var sessionReference = Guid.NewGuid();
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.SubmitAsync(
+                sessionReference,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementSupplierEvidencePackValidationException(
+                "SUPPLIER_REGISTRATION_EVIDENCE_INCOMPLETE",
+                "Upload the mandatory supplier evidence before submission."));
+        var controller = Controller(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            Mock.Of<IControlledFileUploadService>(),
+            sessionReference);
+
+        var result = await controller.Submit(CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Detail.Should().Be(
+            "Upload the mandatory supplier evidence before submission.");
+        problem.Extensions["code"].Should().Be(
+            "SUPPLIER_REGISTRATION_EVIDENCE_INCOMPLETE");
+        problem.Extensions["correlationId"].Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task RetainedDraftIdentifierIsForwardedAfterContactVerification()
     {
         var tenantId = Guid.NewGuid();
