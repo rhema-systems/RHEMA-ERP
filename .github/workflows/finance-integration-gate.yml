@@ -92,13 +92,18 @@ jobs:
           dotnet restore tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj
 
       - name: Build Finance API test assembly once
-        # The merged ERP graph is expensive to compile. Build it once, single-threaded and without
-        # repository-wide analyzers, then make every contract step below reuse the same binaries.
+        # The Data project intentionally provides TdcFastEfBuild for routine Debug verification:
+        # runtime migration discovery is retained, while 350+ MB of historical generated EF target
+        # models are omitted. The standard GitHub runner cannot compile that historical metadata in
+        # its memory envelope, and these contracts use EnsureCreated rather than migration tooling.
+        # Keep the property explicit here so a future project-default change cannot silently make the
+        # integration gate resource-dependent. Release migration validation remains a separate gate.
         run: |
           dotnet build tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-restore \
             --maxcpucount:1 \
+            /p:TdcFastEfBuild=true \
             /p:UseSharedCompilation=false \
             /p:RunAnalyzers=false \
             /p:RunAnalyzersDuringBuild=false
@@ -108,7 +113,7 @@ jobs:
         run: |
           api_filter='FullyQualifiedName~FinancePostingEngineTests|FullyQualifiedName~ApPaymentPostingMigrationTests.ApprovedApPayment_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~ArReceiptPostingMigrationTests.ApprovedArReceipt_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~E2E012InventoryAdjustmentFinancePostingTests|FullyQualifiedName~InventoryValuationFinancePostingTests|FullyQualifiedName~ProcurementFinanceReconciliationTests.Reconciliation_ShouldComposeExistingCommitmentReceiptApGlRetentionAndMilestones'
           dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-build \
             --filter "$api_filter" \
             --logger "trx;LogFileName=finance-consumer-contracts.trx" \
@@ -121,7 +126,7 @@ jobs:
           # mode isolates the active supplier-onboarding contract without hiding production builds,
           # because the API assembly and all project references were compiled in the preceding step.
           dotnet build tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-restore \
             --maxcpucount:1 \
             /p:BuildProjectReferences=false \
@@ -133,7 +138,7 @@ jobs:
 
           procurement_filter='FullyQualifiedName~ProcurementSupplierOnboardingTokenServiceTests.PaidTokenRequiresTrustedVerificationBeforePostingAndActivation|FullyQualifiedName~ProcurementSupplierOnboardingTokenServiceTests.FinanceReconciliationRequiresAnIndependentActorAndIsReplaySafe|FullyQualifiedName~ProcurementSupplierOnboardingTokenServiceTests.ApplicantPaymentUsesSessionLineageAndDoesNotImpersonateAdministrator'
           dotnet test tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-build \
             --filter "$procurement_filter" \
             --logger "trx;LogFileName=finance-procurement-contracts.trx" \
@@ -143,7 +148,7 @@ jobs:
         shell: bash
         run: |
           dotnet build tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-restore \
             --maxcpucount:1 \
             /p:BuildProjectReferences=false \
@@ -154,7 +159,7 @@ jobs:
             /p:RunAnalyzersDuringBuild=false
 
           dotnet test tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-build \
             --filter "FullyQualifiedName~E2E012CycleCountFinanceLifecycleTests.Abc_blind_count_recount_dual_approval_and_audit_attestation_reconcile_to_finance_posting" \
             --logger "trx;LogFileName=finance-inventory-contract.trx" \
@@ -165,7 +170,7 @@ jobs:
           RHEMA_TEST_SQLSERVER: "Server=localhost,1433;Database=master;User Id=sa;Password=FinanceContractGate2026!;Encrypt=True;TrustServerCertificate=True"
         run: |
           dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
-            --configuration Release \
+            --configuration Debug \
             --no-build \
             --filter "FullyQualifiedName~JournalBatchSqlServerReleaseGateTests" \
             --logger "trx;LogFileName=finance-sql-server-contracts.trx" \
