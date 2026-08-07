@@ -1,0 +1,216 @@
+name: Finance Integration Gate
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/finance-integration-gate.yml"
+      - "src/ErpSystem.Api/Controllers/Finance/**"
+      - "src/ErpSystem.Api/Services/Finance/**"
+      - "src/ErpSystem.Core/DTOs/Finance/**"
+      - "src/ErpSystem.Core/Entities/Finance/**"
+      - "src/ErpSystem.Core/Interfaces/Finance/**"
+      - "src/ErpSystem.Core/Services/Finance/**"
+      - "src/ErpSystem.Core/Services/Procurement/ProcurementSupplierOnboardingTokenService.cs"
+      - "src/ErpSystem.Core/Services/Inventory/**"
+      - "src/ErpSystem.Data/Configuration/Finance/**"
+      - "src/ErpSystem.Data/Migrations/**"
+      - "src/ErpSystem.Data/Seeders/FinanceDataSeeder.cs"
+      - "tests/ErpSystem.Api.Tests/Services/Finance/**"
+      - "tests/ErpSystem.Core.Tests/Services/Procurement/ProcurementSupplierOnboardingTokenServiceTests.cs"
+      - "tests/ErpSystem.Core.Tests/Services/Inventory/**"
+  workflow_dispatch:
+
+# A new commit supersedes an older run for the same PR. This keeps the SQL Server service and the
+# repository's memory-heavy merged build from consuming runner capacity for obsolete revisions.
+concurrency:
+  group: finance-integration-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "8.0.x"
+
+jobs:
+  finance-contracts:
+    name: Finance consumer and SQL Server contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: FinanceContractGate2026!
+          MSSQL_PID: Developer
+        ports:
+          - 1433:1433
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Wait for isolated SQL Server
+        shell: bash
+        run: |
+          container_id="$(docker ps -q --filter ancestor=mcr.microsoft.com/mssql/server:2022-latest | head -n 1)"
+          if [ -z "$container_id" ]; then
+            echo "The SQL Server service container was not created."
+            exit 1
+          fi
+
+          for attempt in $(seq 1 30); do
+            if docker exec "$container_id" /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P 'FinanceContractGate2026!' -C -Q 'SELECT 1' >/dev/null 2>&1; then
+              exit 0
+            fi
+
+            if docker exec "$container_id" /opt/mssql-tools/bin/sqlcmd \
+              -S localhost -U sa -P 'FinanceContractGate2026!' -Q 'SELECT 1' >/dev/null 2>&1; then
+              exit 0
+            fi
+
+            echo "Waiting for SQL Server ($attempt/30)..."
+            sleep 2
+          done
+
+          echo "SQL Server did not become ready."
+          docker logs "$container_id"
+          exit 1
+
+      - name: Restore focused test projects
+        run: |
+          dotnet restore tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj
+          dotnet restore tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj
+
+      - name: Build Finance API test assembly once
+        # The Data project intentionally provides TdcFastEfBuild for routine Debug verification:
+        # runtime migration discovery is retained, while 350+ MB of historical generated EF target
+        # models are omitted. The standard GitHub runner cannot compile that historical metadata in
+        # its memory envelope, and these contracts use EnsureCreated rather than migration tooling.
+        # Keep the property explicit here so a future project-default change cannot silently make the
+        # integration gate resource-dependent. Release migration validation remains a separate gate.
+        run: |
+          dotnet build tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
+            --configuration Debug \
+            --no-restore \
+            --maxcpucount:1 \
+            /p:TdcFastEfBuild=true \
+            /p:UseSharedCompilation=false \
+            /p:RunAnalyzers=false \
+            /p:RunAnalyzersDuringBuild=false
+
+      - name: Run Finance-owned consumer contracts
+        shell: bash
+        run: |
+          api_filter='FullyQualifiedName~FinancePostingEngineTests|FullyQualifiedName~ApPaymentPostingMigrationTests.ApprovedApPayment_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~ArReceiptPostingMigrationTests.ApprovedArReceipt_ShouldPostThroughFinancePostingEngineAndCreateAuditEvent|FullyQualifiedName~E2E012InventoryAdjustmentFinancePostingTests|FullyQualifiedName~InventoryValuationFinancePostingTests|FullyQualifiedName~ProcurementFinanceReconciliationTests.Reconciliation_ShouldComposeExistingCommitmentReceiptApGlRetentionAndMilestones'
+          dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
+            --configuration Debug \
+            --no-build \
+            --filter "$api_filter" \
+            --logger "trx;LogFileName=finance-consumer-contracts.trx" \
+            --results-directory artifacts/finance-test-results
+
+      - name: Build and run Procurement-to-Finance contracts
+        shell: bash
+        run: |
+          # The Core test project contains unrelated legacy compile debt. Its existing focused-build
+          # mode isolates the active supplier-onboarding contract without hiding production builds,
+          # because the API assembly and all project references were compiled in the preceding step.
+          dotnet build tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
+            --configuration Debug \
+            --no-restore \
+            --maxcpucount:1 \
+            /p:BuildProjectReferences=false \
+            /p:TdcFocusedTestBuild=true \
+            /p:TdcFocusedTestFile=Services/Procurement/ProcurementSupplierOnboardingTokenServiceTests.cs \
+            /p:UseSharedCompilation=false \
+            /p:RunAnalyzers=false \
+            /p:RunAnalyzersDuringBuild=false
+
+          procurement_filter='FullyQualifiedName~ProcurementSupplierOnboardingTokenServiceTests.PaidTokenRequiresTrustedVerificationBeforePostingAndActivation|FullyQualifiedName~ProcurementSupplierOnboardingTokenServiceTests.FinanceReconciliationRequiresAnIndependentActorAndIsReplaySafe|FullyQualifiedName~ProcurementSupplierOnboardingTokenServiceTests.ApplicantPaymentUsesSessionLineageAndDoesNotImpersonateAdministrator'
+          dotnet test tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
+            --configuration Debug \
+            --no-build \
+            --filter "$procurement_filter" \
+            --logger "trx;LogFileName=finance-procurement-contracts.trx" \
+            --results-directory artifacts/finance-test-results
+
+      - name: Build and run Inventory-to-Finance contract
+        shell: bash
+        run: |
+          dotnet build tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
+            --configuration Debug \
+            --no-restore \
+            --maxcpucount:1 \
+            /p:BuildProjectReferences=false \
+            /p:TdcFocusedTestBuild=true \
+            /p:TdcFocusedTestFile=Services/Inventory/E2E012CycleCountFinanceLifecycleTests.cs \
+            /p:UseSharedCompilation=false \
+            /p:RunAnalyzers=false \
+            /p:RunAnalyzersDuringBuild=false
+
+          dotnet test tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
+            --configuration Debug \
+            --no-build \
+            --filter "FullyQualifiedName~E2E012CycleCountFinanceLifecycleTests.Abc_blind_count_recount_dual_approval_and_audit_attestation_reconcile_to_finance_posting" \
+            --logger "trx;LogFileName=finance-inventory-contract.trx" \
+            --results-directory artifacts/finance-test-results
+
+      - name: Run real SQL Server Finance contracts
+        env:
+          RHEMA_TEST_SQLSERVER: "Server=localhost,1433;Database=master;User Id=sa;Password=FinanceContractGate2026!;Encrypt=True;TrustServerCertificate=True"
+        run: |
+          dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj \
+            --configuration Debug \
+            --no-build \
+            --filter "FullyQualifiedName~JournalBatchSqlServerReleaseGateTests" \
+            --logger "trx;LogFileName=finance-sql-server-contracts.trx" \
+            --results-directory artifacts/finance-test-results
+
+      - name: Verify every required contract executed
+        shell: bash
+        run: |
+          assert_trx_count() {
+            local trx="$1"
+            local expected="$2"
+            local label="$3"
+
+            if [ ! -f "$trx" ]; then
+              echo "$label did not produce a TRX result."
+              exit 1
+            fi
+
+            if grep -q 'outcome="NotExecuted"' "$trx"; then
+              echo "$label skipped at least one required contract."
+              cat "$trx"
+              exit 1
+            fi
+
+            if ! grep -Eq "<Counters[^>]*total=\"$expected\"[^>]*executed=\"$expected\"[^>]*passed=\"$expected\"" "$trx"; then
+              echo "$label expected exactly $expected executed and passing contracts."
+              cat "$trx"
+              exit 1
+            fi
+          }
+
+          assert_trx_count "artifacts/finance-test-results/finance-consumer-contracts.trx" 22 "Finance consumer gate"
+          assert_trx_count "artifacts/finance-test-results/finance-procurement-contracts.trx" 3 "Procurement-to-Finance gate"
+          assert_trx_count "artifacts/finance-test-results/finance-inventory-contract.trx" 1 "Inventory-to-Finance gate"
+          assert_trx_count "artifacts/finance-test-results/finance-sql-server-contracts.trx" 3 "SQL Server Finance gate"
+
+      - name: Upload Finance contract results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-integration-contract-results
+          path: artifacts/finance-test-results/
+          retention-days: 14
