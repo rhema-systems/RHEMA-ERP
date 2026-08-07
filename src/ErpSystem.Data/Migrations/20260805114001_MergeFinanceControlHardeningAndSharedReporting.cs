@@ -42,10 +42,10 @@ namespace ErpSystem.Data.Migrations
     /// <para>Follow-up for the Finance owner, unchanged from <c>MergeFinanceModule</c>: master's model
     /// remains ahead of its migrations, so a <c>Database.Migrate()</c> build of the Finance schema is
     /// still incomplete and only <c>rebuild-db</c> (EnsureCreated from the model) produces it in full.
-    /// Separately, <c>20260719120000_FixFinanceWorkflowConformance</c> carries no <c>[Migration]</c>
-    /// attribute, has no generated designer, and is absent from
-    /// <c>Migrations/FastBuildMigrationMetadata.cs</c>, so EF cannot discover it in any build
-    /// configuration and its repair has never run — on master either.</para>
+    /// Separately, <c>20260719120000_FixFinanceWorkflowConformance</c> carries no inline
+    /// <c>[Migration]</c> attribute or generated designer. It is therefore registered in
+    /// <c>Migrations/FastBuildMigrationMetadata.cs</c> so runtime migration discovery remains
+    /// complete when historical designers are excluded.</para>
     /// </remarks>
     public partial class MergeFinanceControlHardeningAndSharedReporting : Migration
     {
