@@ -176,6 +176,34 @@ IF COL_LENGTH('EvaluatorEvaluations','EvaluationDate') IS NOT NULL INSERT @R EXE
 IF OBJECT_ID(N'CriterionScores',N'U') IS NOT NULL INSERT @R EXEC(N'SELECT ''CriterionScores'',COUNT_BIG(*) FROM CriterionScores');
 IF OBJECT_ID(N'AppraisalEmployeeResponses',N'U') IS NOT NULL INSERT @R EXEC(N'SELECT ''AppraisalEmployeeResponses'',COUNT_BIG(*) FROM AppraisalEmployeeResponses');
 IF OBJECT_ID(N'AppraisalAttachments',N'U') IS NOT NULL INSERT @R EXEC(N'SELECT ''AppraisalAttachments'',COUNT_BIG(*) FROM AppraisalAttachments');
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'dbo.SystemExceptionLogs')
+      AND [name] = N'IX_SystemExceptionLogs_TenantId_Fingerprint')
+    INSERT @R VALUES(N'SystemExceptionLogs fingerprint index prerequisite', 1);
+IF OBJECT_ID(N'dbo.BusinessPartnerRegistrations',N'U') IS NULL
+   OR OBJECT_ID(N'dbo.ProcurementSupplierEvidencePackVersions',N'U') IS NULL
+   OR OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS NULL
+    INSERT @R VALUES(N'Supplier evidence binding trigger prerequisites', 1);
+IF OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.BusinessPartnerRegistrations',N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.ProcurementSupplierEvidencePackVersions',N'U') IS NOT NULL
+    INSERT @R EXEC(N'
+        SELECT ''Supplier evidence binding stored lineage'', COUNT_BIG(*)
+        FROM dbo.ProcurementSupplierRegistrationEvidencePackBindings i
+        JOIN dbo.BusinessPartnerRegistrations r ON r.Id = i.RegistrationId
+        JOIN dbo.ProcurementSupplierEvidencePackVersions p ON p.Id = i.PackVersionId
+        WHERE r.TenantId <> i.TenantId
+           OR p.TenantId <> i.TenantId
+           OR r.RegistrationCategory <> i.RegistrationCategory
+           OR p.Category <> i.RegistrationCategory
+           OR p.PackCode <> i.PackCode
+           OR p.Version <> i.PackVersion
+           OR TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.PackSnapshotJson, ''$.id'')) <> p.Id
+           OR TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.PackSnapshotJson, ''$.tenantId'')) <> i.TenantId
+           OR JSON_VALUE(i.PackSnapshotJson, ''$.packCode'') <> p.PackCode
+           OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.category'')) <> i.RegistrationCategory
+           OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.version'')) <> p.Version');
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -243,6 +271,8 @@ function Invoke-Preflight {
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
     Write-Output 'GUARD_COVERAGE|20260720181131_AddHRModule'
     Write-Output 'GUARD_COVERAGE|20260720193903_AddHRPerformanceModule'
+    Write-Output 'GUARD_COVERAGE|20260807233500_FixSupplierEvidencePackBindingLineageTrigger'
+    Write-Output 'GUARD_COVERAGE|20260807234500_RecordEverySystemExceptionOccurrence'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
