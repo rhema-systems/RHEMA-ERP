@@ -96,6 +96,7 @@ export default function NewVendorPaymentPage() {
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
+    const existingAdvancePaymentId = searchParams.get('paymentId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
     const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
@@ -168,6 +169,33 @@ export default function NewVendorPaymentPage() {
         },
     });
 
+    const { data: existingAdvancePayment, isLoading: isLoadingAdvancePayment } = useQuery({
+        queryKey: ['vendor-payment', existingAdvancePaymentId],
+        queryFn: () => {
+            if (!existingAdvancePaymentId) throw new Error('Supplier advance payment id is required.');
+            return accountsPayableService.getPayment(existingAdvancePaymentId);
+        },
+        enabled: !!existingAdvancePaymentId,
+    });
+
+    useEffect(() => {
+        if (!existingAdvancePaymentId || !existingAdvancePayment) return;
+
+        // A posted payment is the immutable supplier-advance currency lot. Populate the header
+        // from that record and lock it in the UI; this screen creates only new application facts
+        // and must never silently replace the lot's currency, origin rate, bank, or supplier.
+        const remainingAdvance = roundMoney(
+            Number(existingAdvancePayment.totalAmount) - Number(existingAdvancePayment.allocatedAmount || 0),
+        );
+        form.setValue('supplierId', existingAdvancePayment.supplierId);
+        form.setValue('bankAccountId', existingAdvancePayment.bankAccountId || 'advance-origin');
+        form.setValue('paymentDate', new Date(existingAdvancePayment.paymentDate));
+        form.setValue('totalAmount', remainingAdvance);
+        form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
+        form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('transactionReference', existingAdvancePayment.paymentNumber);
+    }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
+
     const selectedSupplierId = form.watch('supplierId');
     const selectedBankAccountId = form.watch('bankAccountId');
     const selectedPaymentMethodId = form.watch('paymentMethodId');
@@ -184,6 +212,7 @@ export default function NewVendorPaymentPage() {
     );
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!paymentMethods?.length) return;
 
         if (selectedPaymentMethodId) {
@@ -201,9 +230,10 @@ export default function NewVendorPaymentPage() {
 
         form.setValue('paymentMethodId', preferredMethod.id);
         form.setValue('paymentMethod', toVendorPaymentMethod(preferredMethod.type));
-    }, [paymentMethods, selectedPaymentMethodId, form]);
+    }, [paymentMethods, selectedPaymentMethodId, form, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!selectedBankAccountId || !bankAccounts) return;
 
         const account = bankAccounts.find((item) => item.id === selectedBankAccountId);
@@ -218,7 +248,7 @@ export default function NewVendorPaymentPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedBankAccountId, bankAccounts, form]);
+    }, [selectedBankAccountId, bankAccounts, form, existingAdvancePaymentId]);
 
     useEffect(() => {
         if (!selectedWithholdingTax) {
@@ -258,17 +288,17 @@ export default function NewVendorPaymentPage() {
         setIsSubmitting(true);
         try {
             const selectedPaymentMethod = paymentMethods?.find((method) => method.id === data.paymentMethodId);
-            if (data.paymentMethodId && !selectedPaymentMethod) {
+            if (!existingAdvancePaymentId && data.paymentMethodId && !selectedPaymentMethod) {
                 form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
                 return;
             }
 
-            if (selectedPaymentMethod?.requiresBankAccount && !data.bankAccountId) {
+            if (!existingAdvancePaymentId && selectedPaymentMethod?.requiresBankAccount && !data.bankAccountId) {
                 form.setError('bankAccountId', { type: 'manual', message: `${selectedPaymentMethod.name} requires a bank account` });
                 return;
             }
 
-            if (selectedPaymentMethod?.requiresReference && !data.transactionReference?.trim()) {
+            if (!existingAdvancePaymentId && selectedPaymentMethod?.requiresReference && !data.transactionReference?.trim()) {
                 form.setError('transactionReference', { type: 'manual', message: `${selectedPaymentMethod.name} requires a reference number` });
                 return;
             }
@@ -333,6 +363,16 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
+            if (existingAdvancePaymentId && paymentAllocations.some(allocation =>
+                (allocation.discountAmount || 0) > 0 || (allocation.withholdingTaxAmount || 0) > 0)) {
+                toast({
+                    title: 'Advance application supports cash only',
+                    description: 'Apply the advance amount here, then use the dedicated adjustment workflow for discounts or withholding.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
             if (totalWithholdingTax > 0 && !data.withholdingTaxId) {
                 toast({
                     title: 'WHT tax required',
@@ -390,6 +430,18 @@ export default function NewVendorPaymentPage() {
                     description: `${overSettledInvoice.invoiceNumber} exceeds its outstanding balance after cash, discount, and WHT.`,
                     variant: 'destructive',
                 });
+                return;
+            }
+
+
+            if (existingAdvancePaymentId) {
+                if (paymentAllocations.length === 0) {
+                    toast({ title: 'Allocation required', description: 'Select at least one payment-ready supplier invoice.', variant: 'destructive' });
+                    return;
+                }
+                await accountsPayableService.allocatePayment(existingAdvancePaymentId, paymentAllocations);
+                toast({ title: 'Advance applied', description: 'The supplier advance and any realized FX were posted successfully.' });
+                router.push(`/finance/ap/payments/${existingAdvancePaymentId}`);
                 return;
             }
 
@@ -517,9 +569,13 @@ export default function NewVendorPaymentPage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Vendor Payment</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {existingAdvancePaymentId ? 'Apply Supplier Advance' : 'Record Vendor Payment'}
+                    </h1>
                     <p className="text-muted-foreground">
-                        Post a payment made to a supplier and allocate it to outstanding bills.
+                        {existingAdvancePaymentId
+                            ? 'Consume the posted advance currency lot against payment-ready supplier invoices.'
+                            : 'Post a payment made to a supplier and allocate it to outstanding bills.'}
                     </p>
                 </div>
             </div>
@@ -528,7 +584,7 @@ export default function NewVendorPaymentPage() {
                 {/* Payment Details Form */}
                 <Card className="md:col-span-1 h-fit">
                     <CardHeader>
-                        <CardTitle>Payment Details</CardTitle>
+                        <CardTitle>{existingAdvancePaymentId ? 'Advance Lot' : 'Payment Details'}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <form id="payment-form" onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-4">
@@ -537,7 +593,7 @@ export default function NewVendorPaymentPage() {
                                 <Select
                                     onValueChange={(val) => form.setValue('supplierId', val)}
                                     value={form.watch('supplierId') || undefined}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select supplier..." />
@@ -561,7 +617,7 @@ export default function NewVendorPaymentPage() {
                                 <Select
                                     onValueChange={(val) => form.setValue('bankAccountId', val)}
                                     value={form.watch('bankAccountId') || undefined}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select bank account..." />
@@ -593,7 +649,7 @@ export default function NewVendorPaymentPage() {
                                                         "w-full justify-start text-left font-normal",
                                                         !field.value && "text-muted-foreground"
                                                     )}
-                                                    disabled={isSubmitting}
+                                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
                                                     {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
@@ -624,7 +680,7 @@ export default function NewVendorPaymentPage() {
                                         className="pl-14"
                                         step="0.01"
                                         {...form.register('totalAmount')}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     />
                                 </div>
                                 {form.formState.errors.totalAmount && (
@@ -647,7 +703,7 @@ export default function NewVendorPaymentPage() {
                                         form.setValue('withholdingTaxId', val);
                                     }}
                                     value={form.watch('withholdingTaxId') || 'none'}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="No WHT" />
@@ -684,7 +740,7 @@ export default function NewVendorPaymentPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === functionalCurrencyCode}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
@@ -703,7 +759,7 @@ export default function NewVendorPaymentPage() {
                                         form.setValue('paymentMethod', toVendorPaymentMethod(method?.type));
                                     }}
                                     value={form.watch('paymentMethodId') || undefined}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select payment method..." />
@@ -723,7 +779,7 @@ export default function NewVendorPaymentPage() {
 
                             <div className="space-y-2">
                                 <Label htmlFor="reference">Reference #</Label>
-                                <Input id="reference" placeholder="e.g. Cheque No. / Receipt" {...form.register('transactionReference')} disabled={isSubmitting} />
+                                <Input id="reference" placeholder="e.g. Cheque No. / Receipt" {...form.register('transactionReference')} disabled={isSubmitting || !!existingAdvancePaymentId} />
                                 {form.formState.errors.transactionReference && (
                                     <p className="text-sm text-red-500">{form.formState.errors.transactionReference.message}</p>
                                 )}
@@ -736,9 +792,16 @@ export default function NewVendorPaymentPage() {
                         </form>
                     </CardContent>
                     <CardFooter>
-                        <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
+                        <Button
+                            type="submit"
+                            form="payment-form"
+                            className="w-full"
+                            // Do not allow an application request until the immutable lot header
+                            // has loaded; otherwise a fast click could submit default form values.
+                            disabled={isSubmitting || (!!existingAdvancePaymentId && !existingAdvancePayment)}
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Record Payment
+                            {isLoadingAdvancePayment ? 'Loading Advance...' : existingAdvancePaymentId ? 'Apply Advance' : 'Record Payment'}
                         </Button>
                     </CardFooter>
                 </Card>

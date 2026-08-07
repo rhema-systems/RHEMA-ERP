@@ -121,6 +121,7 @@ export default function NewReceiptPage() {
     const searchParams = useSearchParams();
     const preselectedCustomerId = searchParams.get('customerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
+    const existingAdvancePaymentId = searchParams.get('paymentId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
     const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
@@ -211,6 +212,34 @@ export default function NewReceiptPage() {
         },
     });
 
+    const { data: existingAdvancePayment, isLoading: isLoadingAdvancePayment } = useQuery({
+        queryKey: ['customer-payment', existingAdvancePaymentId],
+        queryFn: () => {
+            if (!existingAdvancePaymentId) throw new Error('Customer advance payment id is required.');
+            return arService.getPayment(existingAdvancePaymentId);
+        },
+        enabled: !!existingAdvancePaymentId,
+    });
+
+    useEffect(() => {
+        if (!existingAdvancePaymentId || !existingAdvancePayment) return;
+
+        // The posted receipt is the immutable customer-advance lot. Freeze its origin evidence in
+        // this workspace; only invoice applications are new. Changing header currency/rate here
+        // would destroy the historical carrying value used to calculate realized FX.
+        const remainingAdvance = Math.round((
+            Number(existingAdvancePayment.totalAmount) - Number(existingAdvancePayment.allocatedAmount || 0)
+        ) * 100) / 100;
+        form.setValue('customerId', existingAdvancePayment.customerId);
+        form.setValue('bankAccountId', existingAdvancePayment.bankAccountId || undefined);
+        form.setValue('liquidityAccountId', existingAdvancePayment.liquidityAccountId || undefined);
+        form.setValue('paymentDate', new Date(existingAdvancePayment.paymentDate));
+        form.setValue('totalAmount', remainingAdvance);
+        form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
+        form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('referenceNumber', existingAdvancePayment.paymentNumber);
+    }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
+
     const selectedCustomerId = form.watch('customerId');
     const selectedBankAccountId = form.watch('bankAccountId');
     const selectedLiquidityAccountId = form.watch('liquidityAccountId');
@@ -233,6 +262,7 @@ export default function NewReceiptPage() {
     ) ?? [];
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!paymentMethods?.length) return;
 
         if (selectedPaymentMethodId) {
@@ -250,9 +280,10 @@ export default function NewReceiptPage() {
 
         form.setValue('paymentMethodId', preferredMethod.id);
         form.setValue('paymentMethod', toCustomerPaymentMethod(preferredMethod.type));
-    }, [paymentMethods, selectedPaymentMethodId, form]);
+    }, [paymentMethods, selectedPaymentMethodId, form, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!isDirectBankReceipt || !selectedBankAccountId || !bankAccounts) return;
 
         const account = bankAccounts.find((item) => item.id === selectedBankAccountId);
@@ -267,9 +298,10 @@ export default function NewReceiptPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt]);
+    }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (isDirectBankReceipt || !selectedLiquidityAccountId || !liquidityAccounts) return;
 
         const account = liquidityAccounts.find((item) => item.id === selectedLiquidityAccountId);
@@ -284,14 +316,15 @@ export default function NewReceiptPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt]);
+    }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
 
     useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (isDirectBankReceipt) return;
         const selectionIsEligible = eligibleLiquidityAccounts.some(account => account.id === selectedLiquidityAccountId);
         if (selectionIsEligible) return;
         form.setValue('liquidityAccountId', eligibleLiquidityAccounts[0]?.id);
-    }, [eligibleLiquidityAccounts, form, isDirectBankReceipt, selectedLiquidityAccountId]);
+    }, [eligibleLiquidityAccounts, form, isDirectBankReceipt, selectedLiquidityAccountId, existingAdvancePaymentId]);
 
     useEffect(() => {
         form.setValue('withholdingTaxAccountId', selectedWithholdingTax?.taxReceivableAccountId ?? undefined);
@@ -334,28 +367,28 @@ export default function NewReceiptPage() {
         setIsSubmitting(true);
         try {
             const method = paymentMethods?.find((item) => item.id === data.paymentMethodId);
-            if (data.paymentMethodId && !method) {
+            if (!existingAdvancePaymentId && data.paymentMethodId && !method) {
                 form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
                 return;
             }
 
             const directBankReceipt = method ? directBankMethodTypes.has(method.type) : true;
-            if (directBankReceipt && !data.bankAccountId) {
+            if (!existingAdvancePaymentId && directBankReceipt && !data.bankAccountId) {
                 form.setError('bankAccountId', { type: 'manual', message: `${method?.name ?? 'This method'} requires a bank account` });
                 return;
             }
 
-            if (!directBankReceipt && !data.liquidityAccountId) {
+            if (!existingAdvancePaymentId && !directBankReceipt && !data.liquidityAccountId) {
                 form.setError('liquidityAccountId', { type: 'manual', message: `Select the ${expectedLiquidityType} holding account` });
                 return;
             }
 
-            if (method?.requiresReference && !data.referenceNumber?.trim()) {
+            if (!existingAdvancePaymentId && method?.requiresReference && !data.referenceNumber?.trim()) {
                 form.setError('referenceNumber', { type: 'manual', message: `${method.name} requires a reference number` });
                 return;
             }
 
-            if (method?.type === PaymentMethodType.Cheque && !data.checkNumber?.trim()) {
+            if (!existingAdvancePaymentId && method?.type === PaymentMethodType.Cheque && !data.checkNumber?.trim()) {
                 form.setError('checkNumber', { type: 'manual', message: 'Cheque number is required' });
                 return;
             }
@@ -421,6 +454,30 @@ export default function NewReceiptPage() {
                     description: 'Receipt-currency cash allocations cannot exceed the cash received.',
                     variant: 'destructive',
                 });
+                return;
+            }
+
+            if (existingAdvancePaymentId && allocationRows.some(row =>
+                row.discountAmount > 0 || row.withholdingTaxAmount > 0 || row.vatWithholdingAmount > 0)) {
+                toast({
+                    title: 'Advance application supports cash only',
+                    description: 'Apply the advance amount here, then use the dedicated adjustment workflow for discounts or withholding.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (existingAdvancePaymentId) {
+                if (allocationRows.length === 0) {
+                    toast({ title: 'Allocation required', description: 'Select at least one outstanding customer invoice.', variant: 'destructive' });
+                    return;
+                }
+                await arService.allocatePayment({
+                    customerPaymentId: existingAdvancePaymentId,
+                    allocations: allocationRows,
+                });
+                toast({ title: 'Advance applied', description: 'The customer advance and any realized FX were posted successfully.' });
+                router.push(`/finance/ar/payments/${existingAdvancePaymentId}`);
                 return;
             }
 
@@ -500,9 +557,13 @@ export default function NewReceiptPage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Customer Receipt</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {existingAdvancePaymentId ? 'Apply Customer Advance' : 'Record Customer Receipt'}
+                    </h1>
                     <p className="text-muted-foreground">
-                        Record a receipt from a customer and allocate it to outstanding invoices.
+                        {existingAdvancePaymentId
+                            ? 'Consume the posted receipt currency lot against outstanding customer invoices.'
+                            : 'Record a receipt from a customer and allocate it to outstanding invoices.'}
                     </p>
                 </div>
             </div>
@@ -511,7 +572,7 @@ export default function NewReceiptPage() {
                 {/* Customer receipt details; the API persists receipts as AR payments. */}
                 <Card className="md:col-span-1 h-fit">
                     <CardHeader>
-                        <CardTitle>Receipt Details</CardTitle>
+                        <CardTitle>{existingAdvancePaymentId ? 'Advance Lot' : 'Receipt Details'}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <form id="payment-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -520,7 +581,7 @@ export default function NewReceiptPage() {
                                 <Select
                                     onValueChange={(val) => form.setValue('customerId', val)}
                                     value={form.watch('customerId') || undefined}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select customer" />
@@ -544,7 +605,7 @@ export default function NewReceiptPage() {
                                     <Select
                                         onValueChange={(val) => form.setValue('bankAccountId', val)}
                                         value={form.watch('bankAccountId') || undefined}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select bank account..." />
@@ -568,7 +629,7 @@ export default function NewReceiptPage() {
                                     <Select
                                         onValueChange={(val) => form.setValue('liquidityAccountId', val)}
                                         value={form.watch('liquidityAccountId') || undefined}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder={`Select ${expectedLiquidityType} account...`} />
@@ -602,7 +663,7 @@ export default function NewReceiptPage() {
                                                         "w-full justify-start text-left font-normal",
                                                         !field.value && "text-muted-foreground"
                                                     )}
-                                                    disabled={isSubmitting}
+                                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
                                                     {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
@@ -631,7 +692,7 @@ export default function NewReceiptPage() {
                                         className="pl-14"
                                         step="0.01"
                                         {...form.register('totalAmount')}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     />
                                 </div>
                                 {form.formState.errors.totalAmount && (
@@ -646,7 +707,7 @@ export default function NewReceiptPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === functionalCurrencyCode}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
@@ -783,9 +844,16 @@ export default function NewReceiptPage() {
                         </form>
                     </CardContent>
                     <CardFooter>
-                        <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
+                        <Button
+                            type="submit"
+                            form="payment-form"
+                            className="w-full"
+                            // Existing advances are immutable currency lots. Wait for that source
+                            // record before permitting any invoice application to be submitted.
+                            disabled={isSubmitting || (!!existingAdvancePaymentId && !existingAdvancePayment)}
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Record Receipt
+                            {isLoadingAdvancePayment ? 'Loading Advance...' : existingAdvancePaymentId ? 'Apply Advance' : 'Record Receipt'}
                         </Button>
                     </CardFooter>
                 </Card>

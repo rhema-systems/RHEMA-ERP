@@ -255,8 +255,15 @@ class AccountsPayableService {
         return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/reverse`, request);
     }
 
-    public async allocatePayment(paymentId: string, data: VendorPaymentAllocationCreateRequest): Promise<any> {
-        return apiService.post<any>(`${this.baseUrl}/payments/${paymentId}/allocate`, [data]);
+    public async allocatePayment(
+        paymentId: string,
+        data: VendorPaymentAllocationCreateRequest | VendorPaymentAllocationCreateRequest[],
+    ): Promise<any> {
+        // The backend applies a set of advance allocations in one serializable transaction. Keep
+        // the single-row form compatible, while allowing the allocation workspace to submit all
+        // selected invoices atomically rather than partially consuming a currency lot.
+        const allocations = Array.isArray(data) ? data : [data];
+        return apiService.post<any>(`${this.baseUrl}/payments/${paymentId}/allocate`, allocations);
     }
 
     public async getOutstandingInvoices(supplierId: string): Promise<OutstandingVendorInvoice[]> {

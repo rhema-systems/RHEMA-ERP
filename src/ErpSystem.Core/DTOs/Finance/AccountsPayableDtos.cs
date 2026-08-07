@@ -770,15 +770,16 @@ public class VendorPaymentAllocationCreateDto
     public decimal AllocatedAmount { get; set; }
 
     /// <summary>
-    /// Cash to consume in payment currency. Same-currency callers may omit it and the server will
-    /// use AllocatedAmount; cross-currency callers must state it so Finance never invents the
-    /// commercial conversion agreed with the supplier or bank.
+    /// Payment/advance-lot amount to consume in payment currency. AllocatedAmount always remains
+    /// the invoice-currency reduction. Same-currency callers may omit this value; cross-currency
+    /// callers must state both native amounts so Finance never invents a commercial conversion.
     /// </summary>
     public decimal? PaymentCurrencyAmount { get; set; }
 
     /// <summary>
-    /// Optional approved invoice-currency rate for the settlement date. If omitted, Finance
-    /// resolves the active approved daily mid-rate from the tenant rate master.
+    /// Optional approved invoice-currency rate for the settlement/application date. If omitted,
+    /// Finance resolves the active approved daily mid-rate. A posted advance retains its separate
+    /// origin rate, allowing application-time realized FX to remain reproducible and auditable.
     /// </summary>
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
 

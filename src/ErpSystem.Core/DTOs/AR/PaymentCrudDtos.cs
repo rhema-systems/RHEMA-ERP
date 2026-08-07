@@ -166,11 +166,17 @@ public class InvoiceAllocationDto
     public decimal AllocatedAmount { get; set; }
 
     /// <summary>
-    /// Receipt-currency amount consumed by the invoice allocation. It defaults to
-    /// AllocatedAmount only for same-currency settlement.
+    /// Receipt/advance-lot amount consumed in receipt currency. AllocatedAmount is the separate
+    /// invoice-currency reduction. The values default together only for same-currency settlement;
+    /// cross-currency callers must provide the explicit amount pair agreed with the customer.
     /// </summary>
     public decimal? PaymentCurrencyAmount { get; set; }
 
+    /// <summary>
+    /// Optional approved invoice-currency rate for the settlement/application date. A posted
+    /// advance continues to use its immutable origin receipt rate for the liability carrying
+    /// value, so Finance can recognize and later reverse any application-time realized FX.
+    /// </summary>
     public Guid? InvoiceSettlementExchangeRateId { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }

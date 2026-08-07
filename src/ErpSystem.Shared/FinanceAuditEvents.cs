@@ -102,7 +102,9 @@ public static class FinanceAuditEvents
     public const string ArCreditNoteReversed = "Finance.ARCreditNote.Reversed";
     public const string ArCreditNoteReversalFailed = "Finance.ARCreditNote.ReversalFailed";
     public const string ApSupplierAdvanceApplied = "Finance.AP.SupplierAdvanceApplied";
+    public const string ApSupplierAdvanceApplicationReversed = "Finance.AP.SupplierAdvanceApplicationReversed";
     public const string ArCustomerAdvanceApplied = "Finance.AR.CustomerAdvanceApplied";
+    public const string ArCustomerAdvanceApplicationReversed = "Finance.AR.CustomerAdvanceApplicationReversed";
     public const string ApUnappliedSettlementsGenerated = "Finance.AP.UnappliedSettlements.Generated";
     public const string ApMatchExceptionsGenerated = "Finance.AP.MatchExceptions.Generated";
     public const string ApMatchExceptionsExported = "Finance.AP.MatchExceptions.Exported";
