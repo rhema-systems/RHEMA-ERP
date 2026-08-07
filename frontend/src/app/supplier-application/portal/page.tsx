@@ -404,6 +404,12 @@ export default function SupplierApplicantPortalPage() {
           </Alert>
         )}
 
+        <div className="flex justify-end">
+          <Button disabled={busy || !portal?.canSubmit} onClick={submit}>
+            Submit for review
+          </Button>
+        </div>
+
         <Tabs defaultValue="payment">
           <TabsList className="grid w-full grid-cols-4 md:w-[620px]">
             <TabsTrigger value="payment">Payment</TabsTrigger>
@@ -464,13 +470,6 @@ export default function SupplierApplicantPortalPage() {
                 <div className="flex gap-2 md:col-span-2">
                   <Button disabled={busy || !portal?.canEdit} onClick={save}>
                     Save application
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={busy || !portal?.canSubmit}
-                    onClick={submit}
-                  >
-                    Submit for review
                   </Button>
                 </div>
               </CardContent>

@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog"
 import { Textarea } from "../ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table"
 import { useToast } from "../ui/use-toast"
-import { RefreshCw, Trash2, CheckCircle2, XCircle, Eye, Eraser } from "lucide-react"
+import { RefreshCw, Trash2, CheckCircle2, XCircle, Eye, Eraser, Copy } from "lucide-react"
 
 interface ExceptionLogListItem {
   id: string
@@ -224,6 +224,16 @@ export default function SystemExceptionLogs() {
     }).format(date)
   }
 
+  const copyFullMessage = async () => {
+    if (!selected?.fullMessage) return
+    try {
+      await navigator.clipboard.writeText(selected.fullMessage)
+      toast({ description: "Full message copied" })
+    } catch {
+      toast({ description: "Could not copy the full message", variant: "destructive" })
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -377,12 +387,12 @@ export default function SystemExceptionLogs() {
       />
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[calc(100vh-2rem)] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Exception Details</DialogTitle>
           </DialogHeader>
           {selected ? (
-            <div className="space-y-4">
+            <div className="min-w-0 max-h-[calc(100vh-8rem)] space-y-4 overflow-y-auto pr-1">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
                   <div className="text-xs text-muted-foreground">Level</div>
@@ -394,11 +404,11 @@ export default function SystemExceptionLogs() {
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">User</div>
-                  <div className="text-sm">{selected.username || "-"}</div>
+                  <div className="text-sm break-all">{selected.username || "-"}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Trace</div>
-                  <div className="text-sm font-mono">{selected.traceId || "-"}</div>
+                  <div className="text-sm font-mono break-all">{selected.traceId || "-"}</div>
                 </div>
               </div>
 
@@ -419,7 +429,7 @@ export default function SystemExceptionLogs() {
 
               <div>
                 <div className="text-xs text-muted-foreground">Short Message</div>
-                <div className="text-sm font-medium">{selected.shortMessage}</div>
+                <div className="text-sm font-medium break-words [overflow-wrap:anywhere]">{selected.shortMessage}</div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -436,9 +446,22 @@ export default function SystemExceptionLogs() {
                 </div>
               </div>
 
-              <div>
-                <div className="text-xs text-muted-foreground">Full Message</div>
-                <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-xs max-h-[260px] overflow-auto">
+              <div className="min-w-0 max-w-full">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="text-xs text-muted-foreground">Full Message</div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    disabled={!selected.fullMessage}
+                    onClick={copyFullMessage}
+                  >
+                    <Copy className="mr-1 h-3.5 w-3.5" />
+                    Copy
+                  </Button>
+                </div>
+                <pre className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md bg-muted p-3 text-xs max-h-[260px] overflow-auto">
                   {selected.fullMessage || "-"}
                 </pre>
               </div>

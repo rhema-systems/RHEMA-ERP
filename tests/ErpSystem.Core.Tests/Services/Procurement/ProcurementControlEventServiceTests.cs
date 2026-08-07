@@ -59,17 +59,22 @@ public sealed class ProcurementControlEventServiceTests
     }
 
     [Fact]
-    public async Task RepeatedIdenticalEventIsIdempotentButKeyReuseWithDifferentPayloadConflicts()
+    public async Task RepeatedBusinessEventWithLaterRetryTimestampIsIdempotentButDifferentPayloadConflicts()
     {
         await using var fixture = new Fixture();
         var request = Request("event-idempotent");
 
         var first = await fixture.Service.RecordAsync(request);
-        var retry = await fixture.Service.RecordAsync(request);
-        request.Action = "DifferentAction";
-        var conflict = () => fixture.Service.RecordAsync(request);
+        var retryRequest = Request("event-idempotent") with
+        {
+            OccurredAtUtc = OccurredAt.AddMinutes(5)
+        };
+        var retry = await fixture.Service.RecordAsync(retryRequest);
+        retryRequest.Action = "DifferentAction";
+        var conflict = () => fixture.Service.RecordAsync(retryRequest);
 
         retry.Id.Should().Be(first.Id);
+        retry.OccurredAtUtc.Should().Be(OccurredAt);
         (await fixture.Context.ProcurementControlEvents.CountAsync()).Should().Be(1);
         await conflict.Should().ThrowAsync<ProcurementControlEventConflictException>();
     }
