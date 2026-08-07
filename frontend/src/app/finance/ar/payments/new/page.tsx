@@ -162,6 +162,15 @@ export default function NewReceiptPage() {
         queryFn: () => cashManagementDataService.getActivePaymentMethods(),
     });
 
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+    // TDC currently operates in GHS, while the shared Finance module remains tenant-aware. Use
+    // the configured functional currency for rate behavior and labels rather than baking GHS into
+    // a cross-currency workflow that is specifically intended to support other deployments.
+    const functionalCurrencyCode = (financeSettings?.baseCurrency || 'GHS').toUpperCase();
+
     const { data: liquidityAccounts } = useQuery({
         queryKey: ['liquidity-accounts', 'active'],
         queryFn: () => cashManagementDataService.getLiquidityAccounts(true),
@@ -637,10 +646,10 @@ export default function NewReceiptPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === 'GHS'}
+                                    disabled={isSubmitting || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} GHS
+                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>

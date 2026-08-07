@@ -23,6 +23,37 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class JournalBatchSqlServerReleaseGateTests
 {
     [SqlServerFact]
+    [Trait("Batch", "FinanceSchema")]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task CurrentSqlServerSchema_ShouldExposeEveryLineScopedDeductionEvidenceColumn()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        await using var context = database.CreateContext();
+        await context.Database.OpenConnectionAsync();
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM sys.columns AS column_definition
+            INNER JOIN sys.tables AS table_definition
+                ON table_definition.object_id = column_definition.object_id
+            WHERE
+                (table_definition.name = N'VendorPaymentAllocation'
+                    AND column_definition.name IN
+                        (N'DiscountFunctionalAmount', N'WithholdingTaxFunctionalAmount'))
+                OR
+                (table_definition.name = N'PaymentAllocation'
+                    AND column_definition.name IN
+                        (N'DiscountFunctionalAmount', N'WithholdingTaxAmount',
+                         N'WithholdingTaxFunctionalAmount', N'VatWithholdingAmount',
+                         N'VatWithholdingFunctionalAmount'));
+            """;
+
+        // This SQL Server check complements the provider-neutral migration-operation test. It
+        // guards the relational names consumed by AP/AR integrations after the model is created.
+        Convert.ToInt32(await command.ExecuteScalarAsync()).Should().Be(7);
+    }
+
+    [SqlServerFact]
     [Trait("Batch", "FinancePostingEngine")]
     [Trait("Category", "SqlServerIntegration")]
     public async Task PostingWithAlreadyTrackedAccounts_ShouldSynchronizeBalancesWithoutMutatingTrackerEnumeration()

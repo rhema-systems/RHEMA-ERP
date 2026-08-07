@@ -68,6 +68,110 @@ public sealed class ArReceiptPostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-CrossCurrencyDeductions")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task CrossCurrencyArReceipt_ShouldPostEveryDeductionAtItsFrozenFunctionalValue()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var withholdingReceivable = SeedAccount(
+            db,
+            tenantId,
+            "1301",
+            AccountType.Asset,
+            isControlAccount: true,
+            allowDirectPosting: false);
+        var vatWithholdingReceivable = SeedAccount(
+            db,
+            tenantId,
+            "1302",
+            AccountType.Asset,
+            isControlAccount: true,
+            allowDirectPosting: false);
+        var discountAccountId = (await db.Set<FinanceSettings>().SingleAsync()).DiscountAllowedAccountId!.Value;
+        var discountAccount = await db.Accounts.SingleAsync(account => account.Id == discountAccountId);
+        EnableCurrencyForAccounts(
+            db,
+            tenantId,
+            "USD",
+            fixture.ArAccount,
+            discountAccount,
+            withholdingReceivable,
+            vatWithholdingReceivable);
+        var settlementRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 12.5m,
+            InverseRate = 0.08m,
+            EffectiveDate = new DateTime(2026, 7, 5),
+            RateType = ExchangeRateType.Daily,
+            RateSource = "Regression fixture",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.Add(settlementRate);
+
+        // A GHS receipt settles a USD invoice. Native USD deductions drive the customer aging
+        // reduction, while the frozen functional snapshots drive the four-account GHS journal.
+        fixture.Payment.TotalAmount = 875m;
+        fixture.Payment.AllocatedAmount = 875m;
+        fixture.Payment.CurrencyCode = "GHS";
+        fixture.Payment.ExchangeRate = 1m;
+        fixture.Payment.WithholdingTaxAccountId = withholdingReceivable.Id;
+        fixture.Payment.VatWithholdingAccountId = vatWithholdingReceivable.Id;
+        fixture.Invoice.CurrencyCode = "USD";
+        fixture.Invoice.ExchangeRate = 10m;
+        fixture.Invoice.TotalAmount = 80m;
+        fixture.Invoice.BaseCurrencyAmount = 800m;
+        fixture.Invoice.PaidAmount = 80m;
+        fixture.Allocation.AllocatedAmount = 70m;
+        fixture.Allocation.DiscountAmount = 2m;
+        fixture.Allocation.WithholdingTaxAmount = 3m;
+        fixture.Allocation.VatWithholdingAmount = 5m;
+        fixture.Allocation.PaymentCurrencyCode = "GHS";
+        fixture.Allocation.InvoiceCurrencyCode = "USD";
+        fixture.Allocation.PaymentCurrencyAmount = 875m;
+        fixture.Allocation.PaymentExchangeRate = 1m;
+        fixture.Allocation.PaymentFunctionalAmount = 875m;
+        fixture.Allocation.InvoiceSettlementExchangeRate = 12.5m;
+        fixture.Allocation.InvoiceSettlementExchangeRateId = settlementRate.Id;
+        fixture.Allocation.DiscountFunctionalAmount = 25m;
+        fixture.Allocation.WithholdingTaxFunctionalAmount = 37.50m;
+        fixture.Allocation.VatWithholdingFunctionalAmount = 62.50m;
+        fixture.Allocation.SettlementFunctionalAmount = 1_000m;
+        fixture.Allocation.IsCrossCurrency = true;
+        await db.SaveChangesAsync();
+
+        var fx = new Mock<IFxAccountingService>();
+        fx.Setup(service => service.PostRealizedFxForArReceiptAsync(
+                fixture.Payment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FxRealizedSettlement>());
+        var (service, _) = CreateService(db, tenantId, fx.Object);
+
+        var result = await service.PostAsync(fixture.Payment.Id);
+
+        var journal = await db.JournalEntries
+            .Include(entry => entry.Transactions)
+            .SingleAsync(entry => entry.Id == result.JournalEntryId);
+        journal.Transactions.Single(line => line.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(1_000m);
+        journal.Transactions.Single(line => line.TransactionTag == "AR-Discount").Should().Match<AccountTransaction>(line =>
+            line.AccountId == discountAccountId && line.DebitAmount == 25m &&
+            line.TransactionCurrency == "USD" && line.TransactionDebitAmount == 2m);
+        journal.Transactions.Single(line => line.TransactionTag == "AR-WHT").DebitAmount.Should().Be(37.50m);
+        journal.Transactions.Single(line => line.TransactionTag == "AR-VAT-WHT").DebitAmount.Should().Be(62.50m);
+        journal.Transactions.Single(line => line.AccountId == fixture.BankGlAccount.Id).DebitAmount.Should().Be(875m);
+        journal.TotalDebitAmount.Should().Be(1_000m);
+        journal.TotalCreditAmount.Should().Be(1_000m);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
     [Trait("Category", "AccountsReceivable")]
     public async Task CustomerAdvance_ShouldPostAndApplyThroughFinancePostingEngine()
@@ -734,7 +838,8 @@ public sealed class ArReceiptPostingMigrationTests
 
     private static (PaymentService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateService(
         ApplicationDbContext db,
-        Guid tenantId)
+        Guid tenantId,
+        IFxAccountingService? fxAccountingService = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -775,7 +880,8 @@ public sealed class ArReceiptPostingMigrationTests
             Mock.Of<IFinanceAccessScopeService>(),
             new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
-            auditService);
+            auditService,
+            fxAccountingService: fxAccountingService);
 
         return (service, subledgerPostingMock);
     }
@@ -997,6 +1103,33 @@ public sealed class ArReceiptPostingMigrationTests
 
         db.Accounts.Add(account);
         return account;
+    }
+
+    private static void EnableCurrencyForAccounts(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string currencyCode,
+        params Account[] accounts)
+    {
+        foreach (var account in accounts)
+        {
+            // AR control, discount and statutory receivable accounts are deliberately configured
+            // as multi-currency accounts so the test exercises the same guarded path as a tenant
+            // that accepts invoices in USD while keeping GHS as functional currency.
+            account.IsMultiCurrency = true;
+            db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountId = account.Id,
+                LinkedCurrencyCode = currencyCode,
+                TransactionRateType = "Daily",
+                IsActive = true,
+                EffectiveDate = new DateTime(2026, 1, 1),
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "seed"
+            });
+        }
     }
 
     private static BusinessPartner SeedCustomer(ApplicationDbContext db, Guid tenantId, Guid arAccountId)

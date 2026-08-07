@@ -1,6 +1,6 @@
 # TDC AP/AR Cross-Currency Settlement
 
-Date: 2026-08-06
+Date: 2026-08-07
 
 Limitation: `FIN-LIM-0022`
 
@@ -57,6 +57,10 @@ The payment header stores its approved `ExchangeRateId` alongside the existing f
 
 Cross-currency invoice deductions are now line-scoped. AP supports invoice discount and WHT; AR supports invoice discount, WHT, and VAT-WHT. Header values are server-derived functional-currency roll-ups for reporting and cannot be used as an alternative write path. Statutory reports, AP certificates, remittances, and summaries use the functional snapshots rather than combining payment-currency cash with functional deductions.
 
+Before posting, AP and AR reconstruct the expected functional evidence from each allocation's native amounts and frozen rates. A missing or contradictory cross-currency snapshot fails closed; the service never substitutes a `1.0` foreign rate. The narrowly scoped normalization path applies only to deterministic same-currency draft evidence. AP also re-runs configured WHT policy at posting and rejects a stale header total or an allocation total that no longer agrees with the statutory calculation.
+
+The AP/AR control and deduction accounts must be configured as multi-currency accounts with an effective link for every invoice currency they accept. This preserves the posting engine's existing account-currency governance instead of weakening it for subledger convenience.
+
 Supplier and customer advances also remain functional-currency only. Advance application clears a previously posted advance control balance; that balance needs currency-lot evidence before foreign or third-currency application can be correct.
 
 The advance boundary keeps `FIN-LIM-0022` partially resolved until currency-lotted supplier and customer advance work is implemented.
@@ -74,6 +78,7 @@ The advance boundary keeps `FIN-LIM-0022` partially resolved until currency-lott
 
 - Backend API build: passes with zero errors; repository warnings remain pre-existing.
 - Frontend Finance changes: no Finance TypeScript errors; the repository-wide type check is currently blocked by unrelated Inventory and Reports errors on the synced baseline.
-- Migration discovery and generated SQL: verified; the deduction migration contains only the seven intended allocation evidence columns and the migration-history insert.
-- Focused calculator and FX scenarios are included in the API test project. Execution is currently blocked by unrelated inherited test-project compilation failures and must be rerun when that baseline is repaired.
-- Database application and client UAT are separate deployment gates and have not been performed by this implementation slice.
+- Migration structure: verified by a focused Up/Down regression test covering all seven AP/AR deduction evidence columns.
+- Focused AP, AR and calculator regression tests: 3 passed. They exercise independently rounded deductions through the real Finance posting engine, including approved rate evidence and multi-currency account links.
+- The Finance integration workflow now includes the new AP, AR, calculator and migration contracts and raises its exact consumer count from 22 to 26. The new SQL Server schema contract passed locally against SQL Server Express and raises the exact SQL count from 3 to 4.
+- Local database verification: `20260806143000_AddLineScopedCrossCurrencyDeductions` was applied to `RHEMAERP` on 2026-08-07, its migration-history row was confirmed, and all seven AP/AR deduction-evidence columns were queried directly from SQL Server. The older `RhemaERP_UAT_DryRun` database was deliberately left unchanged because it has a large mixed-module migration backlog; updating it would not be an isolated Finance dry run. A current shared UAT deployment and client workflow UAT therefore remain separate release gates.

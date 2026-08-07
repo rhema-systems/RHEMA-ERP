@@ -134,6 +134,14 @@ export default function NewVendorPaymentPage() {
         queryFn: () => cashManagementDataService.getActivePaymentMethods(),
     });
 
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+    // GHS is TDC's configured default, but the settlement UI must follow tenant settings so the
+    // component does not turn today's deployment decision into a hidden accounting invariant.
+    const functionalCurrencyCode = (financeSettings?.baseCurrency || 'GHS').toUpperCase();
+
     const { data: withholdingTaxes } = useQuery({
         queryKey: ['taxes', 'withholding', 'active'],
         queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
@@ -346,7 +354,7 @@ export default function NewVendorPaymentPage() {
             let verifiedWithholding: WhtCalculationResult | null = null;
             const requiresServerFunctionalWithholding = paymentAllocations.some(allocation => {
                 const invoice = outstandingInvoices?.find(item => item.invoiceId === allocation.vendorInvoiceId);
-                return invoice?.currencyCode !== 'GHS';
+                return invoice?.currencyCode !== functionalCurrencyCode;
             });
             const withholdingTaxableBase = paymentAllocations.reduce((sum, allocation) =>
                 sum + allocation.allocatedAmount + (allocation.discountAmount || 0) + (allocation.withholdingTaxAmount || 0), 0);
@@ -676,10 +684,10 @@ export default function NewVendorPaymentPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === 'GHS'}
+                                    disabled={isSubmitting || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} GHS
+                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>

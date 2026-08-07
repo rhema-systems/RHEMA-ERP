@@ -4,6 +4,7 @@ using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Api.Services.Finance.Taxation;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -12,6 +13,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -665,6 +667,53 @@ public sealed class GhanaStatutoryTaxEngineTests
         var postingEngine = new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>(), auditService);
         var tenantSettings = new Mock<ITenantSettingsService>();
         tenantSettings.Setup(x => x.GetBaseCurrencyAsync()).ReturnsAsync("GHS");
+        var payment = db.Set<VendorPayment>().Single(item => item.TenantId == tenantId);
+        var configuredTax = db.Taxes.Single(item => item.Id == payment.WithholdingTaxId);
+        var withholdingService = new Mock<IWithholdingTaxCertificateService>();
+        withholdingService
+            .Setup(service => service.CalculateApWithholdingAsync(
+                It.IsAny<WhtCalculationRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WhtCalculationRequestDto request, CancellationToken _) =>
+                new WhtCalculationResultDto
+                {
+                    TaxId = configuredTax.Id,
+                    TaxCode = configuredTax.Code,
+                    TaxName = configuredTax.Name,
+                    TaxRate = configuredTax.Rate,
+                    TaxableBase = request.TaxableBase,
+                    WithholdingAmount = 5m,
+                    TaxPayableAccountId = configuredTax.TaxPayableAccountId,
+                    CalculationNote = "Statutory posting regression fixture"
+                });
+        var invoicePaymentSod = new Mock<IProcurementInvoicePaymentSodService>();
+        invoicePaymentSod
+            .Setup(service => service.RevalidatePaymentAuthorizationAsync(
+                payment.Id,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var procurementControlEvents = new Mock<IProcurementControlEventService>();
+        procurementControlEvents
+            .Setup(service => service.RecordAsync(
+                It.IsAny<ProcurementControlEventWriteRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementControlEventWriteRequest request, CancellationToken _) =>
+                new ProcurementControlEventDto
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    EventKey = request.EventKey,
+                    EventType = request.EventType,
+                    Action = request.Action,
+                    Result = request.Result,
+                    SourceType = request.SourceType,
+                    SourceId = request.SourceId,
+                    SourceReference = request.SourceReference ?? string.Empty,
+                    CorrelationId = request.CorrelationId,
+                    OccurredAtUtc = request.OccurredAtUtc == default ? DateTime.UtcNow : request.OccurredAtUtc,
+                    RecordedAtUtc = DateTime.UtcNow,
+                    IntegrityValid = true
+                });
 
         return new VendorPaymentService(
             new UnitOfWork(db),
@@ -678,7 +727,10 @@ public sealed class GhanaStatutoryTaxEngineTests
             Mock.Of<IFinanceAccessScopeService>(),
             new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
-            auditService);
+            auditService,
+            withholdingTaxService: withholdingService.Object,
+            procurementControlEvents: procurementControlEvents.Object,
+            invoicePaymentSod: invoicePaymentSod.Object);
     }
 
     private static PaymentService CreateArPaymentService(ApplicationDbContext db, Guid tenantId)
@@ -928,8 +980,10 @@ public sealed class GhanaStatutoryTaxEngineTests
             CreatedBy = "seed"
         };
 
-        invoice.PaidAmount = 100m;
-        invoice.Status = VendorInvoiceStatus.Paid;
+        // Posting owns the invoice settlement transition; seeding it as already paid would model
+        // a duplicate payment and correctly trip the over-settlement control.
+        invoice.PaidAmount = 0m;
+        invoice.Status = VendorInvoiceStatus.Approved;
         db.Set<VendorPayment>().Add(payment);
         db.Set<VendorPaymentAllocation>().Add(allocation);
         await db.SaveChangesAsync();
@@ -990,7 +1044,20 @@ public sealed class GhanaStatutoryTaxEngineTests
             TenantId = tenantId,
             CustomerPaymentId = payment.Id,
             InvoiceId = invoice.Id,
-            AllocatedAmount = 100m,
+            // Deductions are invoice-scoped native amounts. For this GHS fixture the functional
+            // values are identical, but keeping both snapshots exercises the production model.
+            AllocatedAmount = 88m,
+            PaymentCurrencyAmount = 88m,
+            InvoiceCurrencyCode = "GHS",
+            PaymentCurrencyCode = "GHS",
+            PaymentExchangeRate = 1m,
+            InvoiceSettlementExchangeRate = 1m,
+            PaymentFunctionalAmount = 88m,
+            WithholdingTaxAmount = 5m,
+            WithholdingTaxFunctionalAmount = 5m,
+            VatWithholdingAmount = 7m,
+            VatWithholdingFunctionalAmount = 7m,
+            SettlementFunctionalAmount = 100m,
             AllocationDate = payment.PaymentDate,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"

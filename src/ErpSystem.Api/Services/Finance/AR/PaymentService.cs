@@ -2371,7 +2371,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (allocation.Invoice.BusinessPartnerId != payment.CustomerId)
                     throw new InvalidOperationException("AR receipt allocation references an invoice for another customer.");
 
-                if (allocation.AllocatedAmount < 0m || allocation.DiscountAmount < 0m)
+                if (allocation.AllocatedAmount < 0m || allocation.DiscountAmount < 0m ||
+                    allocation.WithholdingTaxAmount < 0m || allocation.VatWithholdingAmount < 0m)
                     throw new InvalidOperationException("AR receipt allocation amounts cannot be negative.");
 
                 if (!allocation.Invoice.JournalEntryId.HasValue)
@@ -2411,6 +2412,10 @@ namespace ErpSystem.Api.Services.Finance.AR
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            NormalizeAndValidateAllocationCurrencyEvidence(
+                payment,
+                activeAllocations,
+                functionalCurrency);
             if (isCustomerAdvance && !string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Foreign-currency customer advances are not supported until advance application FX settlement is implemented.");
@@ -2696,6 +2701,127 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             await _fxAccountingService.PostRealizedFxForArReceiptAsync(payment.Id, cancellationToken);
+        }
+
+        /// <summary>
+        /// Recomputes receipt allocation evidence from native cash/deduction values and the
+        /// frozen rates before posting. Cross-currency evidence must already be complete and
+        /// immutable. Missing same-currency functional values may be populated because they are
+        /// deterministic and preserve the established pre-FIN-LIM-0022 receipt workflow.
+        /// </summary>
+        private static void NormalizeAndValidateAllocationCurrencyEvidence(
+            CustomerPayment payment,
+            IReadOnlyCollection<PaymentAllocation> allocations,
+            string functionalCurrency)
+        {
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            foreach (var allocation in allocations)
+            {
+                var invoiceCurrency = NormalizeCurrency(allocation.Invoice?.CurrencyCode, functionalCurrency);
+                var storedInvoiceCurrency = NormalizeCurrency(allocation.InvoiceCurrencyCode, invoiceCurrency);
+                var storedPaymentCurrency = NormalizeCurrency(allocation.PaymentCurrencyCode, paymentCurrency);
+                if (!string.Equals(storedInvoiceCurrency, invoiceCurrency, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(storedPaymentCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"AR allocation '{allocation.Id}' currency evidence does not match its receipt and invoice.");
+                }
+
+                var paymentRequiresFx = !string.Equals(
+                    paymentCurrency,
+                    functionalCurrency,
+                    StringComparison.OrdinalIgnoreCase);
+                var invoiceRequiresFx = !string.Equals(
+                    invoiceCurrency,
+                    functionalCurrency,
+                    StringComparison.OrdinalIgnoreCase);
+                // Foreign snapshots are immutable audit evidence. Do not let the generic rate
+                // normalizer turn a missing rate into 1.0. A same-USD receipt/invoice is not
+                // cross-currency commercially, but it still requires GHS functional measurement.
+                if ((invoiceRequiresFx && allocation.InvoiceSettlementExchangeRate <= 0m) ||
+                    (paymentRequiresFx &&
+                     allocation.PaymentExchangeRate <= 0m &&
+                     payment.ExchangeRate <= 0m))
+                {
+                    throw new InvalidOperationException(
+                        $"AR allocation '{allocation.Id}' is missing its frozen foreign-currency exchange-rate evidence.");
+                }
+
+                var paymentCash = allocation.PaymentCurrencyAmount > 0m
+                    ? allocation.PaymentCurrencyAmount
+                    : allocation.AllocatedAmount;
+                var expected = CrossCurrencySettlementCalculator.CalculateWithDeductions(
+                    paymentCurrency,
+                    invoiceCurrency,
+                    paymentCash,
+                    allocation.AllocatedAmount,
+                    allocation.DiscountAmount,
+                    allocation.WithholdingTaxAmount,
+                    allocation.VatWithholdingAmount,
+                    NormalizeExchangeRate(allocation.PaymentExchangeRate > 0m
+                        ? allocation.PaymentExchangeRate
+                        : payment.ExchangeRate),
+                    NormalizeExchangeRate(allocation.InvoiceSettlementExchangeRate));
+
+                var mayNormalizeSameCurrency = !expected.IsCrossCurrency;
+                allocation.PaymentCurrencyAmount = NormalizeEvidenceAmount(
+                    allocation.PaymentCurrencyAmount,
+                    expected.PaymentCurrencyAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "receipt-currency amount");
+                allocation.PaymentFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.PaymentFunctionalAmount,
+                    expected.PaymentFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "receipt functional amount");
+                allocation.DiscountFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.DiscountFunctionalAmount,
+                    expected.DiscountFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "discount functional amount");
+                allocation.WithholdingTaxFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.WithholdingTaxFunctionalAmount,
+                    expected.WithholdingFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "WHT functional amount");
+                allocation.VatWithholdingFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.VatWithholdingFunctionalAmount,
+                    expected.VatWithholdingFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "VAT-WHT functional amount");
+                allocation.SettlementFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.SettlementFunctionalAmount,
+                    expected.SettlementFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "settlement functional amount");
+                allocation.InvoiceCurrencyCode = expected.InvoiceCurrency;
+                allocation.PaymentCurrencyCode = expected.PaymentCurrency;
+                allocation.IsCrossCurrency = expected.IsCrossCurrency;
+            }
+        }
+
+        private static decimal NormalizeEvidenceAmount(
+            decimal stored,
+            decimal expected,
+            bool mayPopulateMissing,
+            Guid allocationId,
+            string evidenceName)
+        {
+            if (stored == 0m && expected != 0m && mayPopulateMissing)
+                return expected;
+            if (Math.Abs(RoundMoney(stored - expected)) > 0.01m)
+            {
+                throw new InvalidOperationException(
+                    $"AR allocation '{allocationId}' {evidenceName} does not reconcile to its frozen currency evidence.");
+            }
+
+            return stored;
         }
 
         private async Task<Guid?> ResolveConfiguredWithholdingReceivableAccountAsync(

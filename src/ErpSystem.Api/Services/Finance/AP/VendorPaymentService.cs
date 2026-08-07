@@ -401,6 +401,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             allocationWhtFunctionalAmount = RoundMoney(allocationWhtFunctionalAmount);
             allocationSettlementFunctionalBase = RoundMoney(allocationSettlementFunctionalBase);
             var requestedWhtAmount = allocationWhtFunctionalAmount;
+            // The header value is retained for API compatibility and functional-currency
+            // reporting, but allocation rows are now the authoritative source. Reject a stale
+            // client total instead of silently accepting two contradictory WHT representations.
+            // Zero is the documented cross-currency client sentinel requesting server derivation;
+            // only a positive legacy/header assertion is compared with the line roll-up.
+            if (dto.WithholdingTaxAmount is > 0m &&
+                Math.Abs(RoundMoney(dto.WithholdingTaxAmount.Value - requestedWhtAmount)) > 0.01m)
+            {
+                throw new InvalidOperationException(
+                    $"Payment WHT total {dto.WithholdingTaxAmount.Value:N2} does not match the line-level functional WHT total {requestedWhtAmount:N2}. Recalculate the payment before saving.");
+            }
             WhtCalculationResultDto? whtCalculation = null;
             if (dto.WithholdingTaxId.HasValue)
             {
@@ -1557,6 +1568,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     0m);
                 var requestedDiscountAmount = Math.Max(alloc.DiscountAmount, 0m);
                 var requestedWithholdingAmount = Math.Max(alloc.WithholdingTaxAmount, 0m);
+                if (requestedWithholdingAmount > 0m && !payment.WithholdingTaxId.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        "Select the configured AP WHT tax before allocating WHT to a supplier invoice.");
+                }
                 if (requestedDiscountAmount > 0m)
                 {
                     if (invoice.EarlyPaymentDiscountPercentage <= 0m ||
@@ -1719,11 +1735,15 @@ namespace ErpSystem.Api.Services.Finance.AP
             var createdAllocationIds = createdAllocations.Select(a => a.Id).ToHashSet();
             // Header discount is a functional-currency roll-up. Native discounts remain on each
             // allocation because adding USD, EUR and GHS invoice deductions would be meaningless.
-            payment.DiscountTaken = RoundMoney(GetEffectiveAllocations(
-                    payment.Allocations
-                        .Where(item => !createdAllocationIds.Contains(item.Id))
-                        .Concat(createdAllocations))
-                .Sum(item => item.DiscountFunctionalAmount));
+            var effectiveAllocations = GetEffectiveAllocations(
+                payment.Allocations
+                    .Where(item => !createdAllocationIds.Contains(item.Id))
+                    .Concat(createdAllocations));
+            payment.DiscountTaken = RoundMoney(effectiveAllocations.Sum(item => item.DiscountFunctionalAmount));
+            // Allocation APIs remain available while a payment is a draft. Recalculate the
+            // server-owned WHT threshold evidence after every allocation change so a caller
+            // cannot bypass the configured Ghana WHT policy by adding lines after creation.
+            await SynchronizeApWithholdingComplianceAsync(payment, effectiveAllocations, cancellationToken);
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
             await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
@@ -2155,6 +2175,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .GetQueryable(a => a.TenantId == TenantId && a.Id == allocationId)
                     .Include(a => a.VendorPayment)
                         .ThenInclude(payment => payment.Allocations)
+                            .ThenInclude(item => item.VendorInvoice)
                     .Include(a => a.VendorInvoice)
                     .SingleOrDefaultAsync(cancellationToken);
 
@@ -2214,10 +2235,25 @@ namespace ErpSystem.Api.Services.Finance.AP
                     0m,
                     allocation.VendorPayment.AllocatedAmount -
                     (allocation.PaymentCurrencyAmount > 0m ? allocation.PaymentCurrencyAmount : allocation.AllocatedAmount));
+                var remainingAllocations = GetEffectiveAllocations(allocation.VendorPayment.Allocations)
+                    .Where(item => item.Id != allocationId)
+                    .ToList();
+                // Established same-currency drafts may predate the functional deduction columns.
+                // Normalize their deterministic evidence before rebuilding header roll-ups; doing
+                // this after summing would incorrectly erase an unaffected remaining discount.
+                var functionalCurrency = NormalizeCurrency(
+                    await _tenantSettingsService.GetBaseCurrencyAsync(),
+                    "GHS");
+                NormalizeAndValidateAllocationCurrencyEvidence(
+                    allocation.VendorPayment,
+                    remainingAllocations,
+                    functionalCurrency);
                 allocation.VendorPayment.DiscountTaken = RoundMoney(
-                    GetEffectiveAllocations(allocation.VendorPayment.Allocations)
-                        .Where(item => item.Id != allocationId)
-                        .Sum(item => item.DiscountFunctionalAmount));
+                    remainingAllocations.Sum(item => item.DiscountFunctionalAmount));
+                await SynchronizeApWithholdingComplianceAsync(
+                    allocation.VendorPayment,
+                    remainingAllocations,
+                    cancellationToken);
                 allocation.VendorPayment.UpdatedAt = now;
                 allocation.VendorPayment.UpdatedBy = UserName;
                 await _unitOfWork.Repository<VendorPayment>().UpdateAsync(allocation.VendorPayment);
@@ -4068,6 +4104,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            NormalizeAndValidateAllocationCurrencyEvidence(
+                payment,
+                activeAllocations,
+                functionalCurrency);
+            payment.DiscountTaken = RoundMoney(activeAllocations.Sum(item => item.DiscountFunctionalAmount));
+            await SynchronizeApWithholdingComplianceAsync(payment, activeAllocations, cancellationToken);
             if (isSupplierAdvance && !string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Foreign-currency supplier advances are not supported until advance application FX settlement is implemented.");
@@ -4607,6 +4649,182 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH",
                     "AP payment amount must equal the effective allocated cash amount. Reversed allocations must be replaced before authorization or posting.");
             }
+        }
+
+        /// <summary>
+        /// Reconciles every persisted allocation snapshot to its native amounts and frozen rates
+        /// before a journal is constructed. New cross-currency rows must carry complete immutable
+        /// evidence. The narrowly scoped same-currency fallback only preserves established draft
+        /// workflows created before line-level functional columns were introduced; it never
+        /// invents a foreign-currency conversion.
+        /// </summary>
+        private static void NormalizeAndValidateAllocationCurrencyEvidence(
+            VendorPayment payment,
+            IReadOnlyCollection<VendorPaymentAllocation> allocations,
+            string functionalCurrency)
+        {
+            var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
+            foreach (var allocation in allocations)
+            {
+                var invoiceCurrency = NormalizeCurrency(
+                    allocation.VendorInvoice?.CurrencyCode,
+                    functionalCurrency);
+                var storedInvoiceCurrency = NormalizeCurrency(allocation.InvoiceCurrencyCode, invoiceCurrency);
+                var storedPaymentCurrency = NormalizeCurrency(allocation.PaymentCurrencyCode, paymentCurrency);
+                if (!string.Equals(storedInvoiceCurrency, invoiceCurrency, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(storedPaymentCurrency, paymentCurrency, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"AP allocation '{allocation.Id}' currency evidence does not match its payment and invoice.");
+                }
+
+                var paymentRequiresFx = !string.Equals(
+                    paymentCurrency,
+                    functionalCurrency,
+                    StringComparison.OrdinalIgnoreCase);
+                var invoiceRequiresFx = !string.Equals(
+                    invoiceCurrency,
+                    functionalCurrency,
+                    StringComparison.OrdinalIgnoreCase);
+                // A missing foreign rate cannot be normalized safely. Treating zero as 1.0 here
+                // would manufacture accounting evidence and could post a balanced but incorrect
+                // journal. This applies to both cross-currency settlements and same-foreign-
+                // currency settlements because both still require functional measurement.
+                if ((invoiceRequiresFx && allocation.InvoiceSettlementExchangeRate <= 0m) ||
+                    (paymentRequiresFx &&
+                     allocation.PaymentExchangeRate <= 0m &&
+                     payment.ExchangeRate <= 0m))
+                {
+                    throw new InvalidOperationException(
+                        $"AP allocation '{allocation.Id}' is missing its frozen foreign-currency exchange-rate evidence.");
+                }
+
+                var paymentCash = allocation.PaymentCurrencyAmount > 0m
+                    ? allocation.PaymentCurrencyAmount
+                    : allocation.AllocatedAmount;
+                var expected = CrossCurrencySettlementCalculator.CalculateWithDeductions(
+                    paymentCurrency,
+                    invoiceCurrency,
+                    paymentCash,
+                    allocation.AllocatedAmount,
+                    allocation.DiscountAmount,
+                    allocation.WithholdingTaxAmount,
+                    invoiceVatWithholdingAmount: 0m,
+                    NormalizeExchangeRate(allocation.PaymentExchangeRate > 0m
+                        ? allocation.PaymentExchangeRate
+                        : payment.ExchangeRate),
+                    NormalizeExchangeRate(allocation.InvoiceSettlementExchangeRate));
+
+                // Same-currency draft allocations historically stored only native values. Fill
+                // their deterministic 1:1/approved-rate evidence in the active transaction, but
+                // fail closed when any cross-currency snapshot is absent or contradictory.
+                var mayNormalizeSameCurrency = !expected.IsCrossCurrency;
+                allocation.PaymentCurrencyAmount = NormalizeEvidenceAmount(
+                    allocation.PaymentCurrencyAmount,
+                    expected.PaymentCurrencyAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "payment-currency amount");
+                allocation.PaymentFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.PaymentFunctionalAmount,
+                    expected.PaymentFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "payment functional amount");
+                allocation.DiscountFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.DiscountFunctionalAmount,
+                    expected.DiscountFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "discount functional amount");
+                allocation.WithholdingTaxFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.WithholdingTaxFunctionalAmount,
+                    expected.WithholdingFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "WHT functional amount");
+                allocation.SettlementFunctionalAmount = NormalizeEvidenceAmount(
+                    allocation.SettlementFunctionalAmount,
+                    expected.SettlementFunctionalAmount,
+                    mayNormalizeSameCurrency,
+                    allocation.Id,
+                    "settlement functional amount");
+                allocation.InvoiceCurrencyCode = expected.InvoiceCurrency;
+                allocation.PaymentCurrencyCode = expected.PaymentCurrency;
+                allocation.IsCrossCurrency = expected.IsCrossCurrency;
+            }
+        }
+
+        private static decimal NormalizeEvidenceAmount(
+            decimal stored,
+            decimal expected,
+            bool mayPopulateMissing,
+            Guid allocationId,
+            string evidenceName)
+        {
+            if (stored == 0m && expected != 0m && mayPopulateMissing)
+                return expected;
+            if (Math.Abs(RoundMoney(stored - expected)) > 0.01m)
+            {
+                throw new InvalidOperationException(
+                    $"AP allocation '{allocationId}' {evidenceName} does not reconcile to its frozen currency evidence.");
+            }
+
+            return stored;
+        }
+
+        /// <summary>
+        /// Makes the allocation snapshots authoritative for the payment header and re-runs the
+        /// configured WHT threshold calculation. Header values are reporting/policy roll-ups in
+        /// functional currency; they are never a second write path for mixed native currencies.
+        /// </summary>
+        private async Task SynchronizeApWithholdingComplianceAsync(
+            VendorPayment payment,
+            IReadOnlyCollection<VendorPaymentAllocation> allocations,
+            CancellationToken cancellationToken)
+        {
+            var functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
+            payment.WithholdingTaxAmount = functionalWht;
+            if (functionalWht == 0m)
+            {
+                payment.WithholdingTaxBaseAmount = 0m;
+                payment.WithholdingTaxRate = 0m;
+                payment.WithholdingTaxCumulativeBefore = 0m;
+                payment.WithholdingTaxThresholdAmount = null;
+                payment.WithholdingTaxThresholdApplied = false;
+                payment.WithholdingTaxCalculationNote = null;
+                payment.WithholdingTaxAccountId = null;
+                return;
+            }
+
+            if (!payment.WithholdingTaxId.HasValue)
+                throw new InvalidOperationException("AP WHT allocations require a configured WHT tax.");
+            if (_withholdingTaxService == null)
+                throw new InvalidOperationException("WHT compliance service is not configured.");
+
+            var taxableBase = RoundMoney(allocations.Sum(item => item.SettlementFunctionalAmount));
+            var calculation = await _withholdingTaxService.CalculateApWithholdingAsync(
+                new WhtCalculationRequestDto
+                {
+                    TaxId = payment.WithholdingTaxId.Value,
+                    SupplierId = payment.SupplierId,
+                    PaymentDate = payment.PaymentDate,
+                    TaxableBase = taxableBase
+                },
+                cancellationToken);
+            if (Math.Abs(RoundMoney(functionalWht - calculation.WithholdingAmount)) > 0.01m)
+            {
+                throw new InvalidOperationException(
+                    $"AP allocation WHT totals {functionalWht:N2}, but configured tax {calculation.TaxCode} requires {calculation.WithholdingAmount:N2}.");
+            }
+
+            payment.WithholdingTaxBaseAmount = calculation.TaxableBase;
+            payment.WithholdingTaxRate = calculation.TaxRate;
+            payment.WithholdingTaxCumulativeBefore = calculation.CumulativeBefore;
+            payment.WithholdingTaxThresholdAmount = calculation.ThresholdAmount;
+            payment.WithholdingTaxThresholdApplied = calculation.ThresholdApplied;
+            payment.WithholdingTaxCalculationNote = calculation.CalculationNote;
+            payment.WithholdingTaxAccountId = calculation.TaxPayableAccountId;
         }
 
         private async Task<Supplier> ResolveSupplierForPaymentAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
