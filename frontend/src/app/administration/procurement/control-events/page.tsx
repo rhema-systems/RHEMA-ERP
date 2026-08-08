@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AuditGovernancePanel } from '@/components/audit/AuditGovernancePanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -130,6 +131,7 @@ const DetailDialog = ({
                 {event.result}
               </Badge>
               <Badge variant="outline">Schema v{event.schemaVersion}</Badge>
+              <Badge variant="outline">{event.operation}</Badge>
               <Badge
                 variant="outline"
                 className={
@@ -141,6 +143,11 @@ const DetailDialog = ({
                   : 'Integrity mismatch'}
               </Badge>
             </div>
+
+            <AuditGovernancePanel
+              storeKey="procurement-inventory-control-event"
+              recordId={event.id}
+            />
 
             <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
               <div>
@@ -298,8 +305,7 @@ export default function ProcurementControlEventsPage() {
       search: draftSearch.trim() || undefined,
       eventType: draftEventType.trim() || undefined,
       result: (draftResult || undefined) as
-        | ProcurementControlEventResult
-        | undefined,
+        ProcurementControlEventResult | undefined,
       sourceType: draftSourceType.trim() || undefined,
     }));
   };

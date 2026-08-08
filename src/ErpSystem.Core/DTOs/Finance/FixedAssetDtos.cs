@@ -109,6 +109,10 @@ public class FixedAssetDto
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public DateTime? CapitalizedAt { get; set; }
+    public Guid? CapitalizationReversalJournalEntryId { get; set; }
+    public Guid? CapitalizationReversalPostingEventId { get; set; }
+    public DateTime? CapitalizationReversedAt { get; set; }
+    public string? CapitalizationReversalReason { get; set; }
     public Guid? MaintenanceAssetId { get; set; }
     public string? SerialNumber { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -143,6 +147,9 @@ public class FixedAssetBookValueDto
     public DateTime? CapitalizationDate { get; set; }
     public Guid? CapitalizationJournalEntryId { get; set; }
     public Guid? CapitalizationPostingEventId { get; set; }
+    public Guid? CapitalizationReversalJournalEntryId { get; set; }
+    public Guid? CapitalizationReversalPostingEventId { get; set; }
+    public DateTime? CapitalizationReversedAt { get; set; }
     public string? SourceDocumentType { get; set; }
     public Guid? SourceDocumentId { get; set; }
     public Guid? SourceDocumentLineId { get; set; }
@@ -206,6 +213,44 @@ public class CapitalizeFixedAssetDto
     public decimal? ExchangeRate { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public DateTime? ExchangeRateDate { get; set; }
+}
+
+public sealed class RequestFixedAssetCapitalizationReversalDto
+{
+    public DateTime ReversalDate { get; set; } = DateTime.UtcNow.Date;
+    public string Reason { get; set; } = string.Empty;
+    public string ImpactAssessment { get; set; } = string.Empty;
+}
+
+public sealed class ReviewFixedAssetCapitalizationReversalDto
+{
+    public bool Approved { get; set; }
+    public string ReviewComment { get; set; } = string.Empty;
+}
+
+public sealed class FixedAssetCapitalizationReversalDto
+{
+    public Guid Id { get; set; }
+    public Guid FixedAssetId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public Guid OriginalPostingEventId { get; set; }
+    public Guid OriginalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string ImpactAssessment { get; set; } = string.Empty;
+    public DateTime RequestedReversalDate { get; set; }
+    public Guid RequestedByUserId { get; set; }
+    public string RequestedByUserName { get; set; } = string.Empty;
+    public DateTime RequestedAt { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    public string? ReviewedByUserName { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public string? ReviewComment { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public string? FailureReason { get; set; }
 }
 
 public class RunDepreciationDto

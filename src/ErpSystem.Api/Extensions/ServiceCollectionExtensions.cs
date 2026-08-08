@@ -35,6 +35,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data.Repositories.HR;
 using ErpSystem.Core.Services.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.Procurement;
 
 namespace ErpSystem.Api.Extensions
 {
@@ -104,6 +105,11 @@ namespace ErpSystem.Api.Extensions
             var jwtSettings = configuration.GetSection("JwtSettings");
             var key = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey not found"));
 
+            // Fail fast if the external-portal key/audience are not distinct from the internal ones —
+            // otherwise portal tokens would validate on the default bearer scheme registered below and
+            // could satisfy internal [Authorize] attributes.
+            ErpSystem.Api.Security.PortalAuth.ValidateDistinctFromInternal(configuration);
+
             services.AddAuthentication(x =>
             {
                 x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -141,10 +147,32 @@ namespace ErpSystem.Api.Extensions
                         return Task.CompletedTask;
                     }
                 };
+            })
+            // Named bearer handler for the external portals (candidate careers + consultant-client).
+            // Portal tokens are signed with JwtSettings:PortalSecretKey and carry JwtSettings:PortalAudience,
+            // both distinct from the internal token settings above, so they only validate on this scheme.
+            // The validation parameters are the single source of truth in PortalAuth, shared with the
+            // portals' own ValidateToken methods so the two can never drift.
+            .AddJwtBearer(ErpSystem.Api.Security.PortalAuth.Scheme, x =>
+            {
+                x.RequireHttpsMetadata = false; // Set to true in production
+                x.SaveToken = true;
+                x.TokenValidationParameters = ErpSystem.Api.Security.PortalAuth.TokenValidationParameters(configuration);
             });
 
             // Register JWT service
             services.AddScoped<IJwtTokenService, JwtTokenService>();
+
+            // Bind the external-portal URL options. Without this, IOptions<CandidatePortalOptions>.Value
+            // .PortalUrl is empty and the candidate/consultant portal auth services build relative
+            // verification / password-reset links (e.g. "/careers/portal/verify-email?...") that recipients
+            // cannot follow. ValidateOnStart makes a missing/empty PortalUrl fail fast at boot rather than
+            // shipping broken emails.
+            services.AddOptions<ErpSystem.Core.Models.CandidatePortalOptions>()
+                .Bind(configuration.GetSection(ErpSystem.Core.Models.CandidatePortalOptions.SectionName))
+                .Validate(o => ErpSystem.Core.Models.CandidatePortalOptions.IsValidPortalUrl(o.PortalUrl),
+                    "CandidatePortal:PortalUrl must be configured with an absolute portal base URL.")
+                .ValidateOnStart();
 
             return services;
         }
@@ -308,6 +336,13 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyRepository, ErpSystem.Data.Repositories.Finance.CurrencyRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ITaxCalculationEngine, ErpSystem.Api.Services.Finance.Taxation.TaxCalculationEngine>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IInvoiceService, ErpSystem.Api.Services.Finance.AR.InvoiceService>();
+            // AR controllers and Finance-owned Estate adapters depend on the interface. Register
+            // the extended service explicitly so receipt trace/reversal cannot fail only at request activation.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IPaymentService, ErpSystem.Api.Services.Finance.AR.PaymentService>();
+            // Cash/bank now owns controlled source-document reversal and trace endpoints. Register
+            // the concrete implementation explicitly so request activation does not depend on the
+            // legacy assembly-scanning conventions used by some older Finance services.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashTransactionService, ErpSystem.Api.Services.Finance.Cash.CashTransactionService>();
 
             // Award Verification repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardVerificationChecklistTemplateRepository, ErpSystem.Data.Repositories.Procurement.AwardVerificationChecklistTemplateRepository>();
@@ -447,6 +482,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ITenantService, TenantService>();
             services.AddScoped<IUserTenantService, UserTenantService>();
             services.AddScoped<ILdapAuthenticationService, LdapAuthenticationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Identity.IHrIdentityAccessService,
+                ErpSystem.Api.Services.Identity.HrIdentityAccessService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Identity.IHrIdentityReconciliationService,
+                ErpSystem.Api.Services.Identity.HrIdentityReconciliationService>();
+            services.AddHostedService<ErpSystem.Api.Services.Identity.HrIdentityReconciliationBackgroundService>();
             services.AddScoped<ISearchService, SearchService>();
 
             // Identity services
@@ -554,15 +594,41 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.IDashboardService, ErpSystem.Data.Services.DashboardService>();
 
             // Reports service
+            services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementStatutoryReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementStatutoryReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.ProcurementStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.ProcurementStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryStatutoryReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAuditComplianceReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
             services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
+            services.AddScoped<IReportTemplateLifecycleService, ErpSystem.Data.Services.ReportTemplateLifecycleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentOutputService, ErpSystem.Api.Services.Documents.DocumentOutputService>();
+            // Controlled cash/bank documents reuse the shared renderer but persist their own
+            // one-original/many-replacement issue sequence and emitted-byte audit evidence.
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IFinanceControlledDocumentIssueService, ErpSystem.Api.Services.Documents.Finance.FinanceControlledDocumentIssueService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.JournalVoucherDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApPaymentVoucherDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashBankPaymentSlipDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CustomerReceiptDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.ApSupplierStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.TrialBalanceDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.IncomeStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.BalanceSheetDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.CashFlowStatementDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.MultiCurrencyDetailDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.DetailedLedgerDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.FinanceClosePackDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Inventory.StoreIssueVoucherDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Inventory.StoreReturnVoucherDocumentBuilder>();
 
             // Data source service
             services.AddScoped<IDataSourceService, EnterpriseDataSourceService>();
@@ -639,6 +705,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryManagementService, ErpSystem.Core.Services.Inventory.InventoryManagementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemIdentifierService, ErpSystem.Core.Services.Inventory.InventoryItemIdentifierService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemProfileService, ErpSystem.Core.Services.Inventory.InventoryItemProfileService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryScanningService, ErpSystem.Core.Services.Inventory.InventoryScanningService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryTrackingControlService, ErpSystem.Core.Services.Inventory.InventoryTrackingControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryNegativeStockControlService, ErpSystem.Core.Services.Inventory.InventoryNegativeStockControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryNegativeStockMutationStore, ErpSystem.Data.Repositories.Inventory.InventoryNegativeStockMutationStore>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryProjectReservationService, ErpSystem.Core.Services.Inventory.InventoryProjectReservationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReplenishmentService, ErpSystem.Core.Services.Inventory.InventoryReplenishmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDirectedOperationService, ErpSystem.Core.Services.Inventory.InventoryDirectedOperationService>();
 
             // Enhanced Inventory services
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IGoodsReceiptNoteService, ErpSystem.Core.Services.Inventory.GoodsReceiptNoteService>();
@@ -646,8 +721,27 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryTransferService, ErpSystem.Core.Services.Inventory.InventoryTransferService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IItemSupplierService, ErpSystem.Core.Services.Inventory.ItemSupplierService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IPhysicalCountService, ErpSystem.Core.Services.Inventory.PhysicalCountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReturnControlService, ErpSystem.Core.Services.Inventory.InventoryReturnControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryRequisitionService, ErpSystem.Core.Services.Inventory.InventoryRequisitionService>();
             services.AddScoped<ErpSystem.Core.Services.Inventory.IStockAdjustmentService, ErpSystem.Core.Services.Inventory.StockAdjustmentService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAdjustmentFinancePostingService, ErpSystem.Api.Services.Finance.InventoryAdjustmentFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReceiptFinancePostingService, ErpSystem.Api.Services.Finance.InventoryReceiptFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryLandedCostFinancePostingService, ErpSystem.Api.Services.Finance.InventoryLandedCostFinancePostingService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationReconciliationService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationReconciliationReportSource>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.InventoryValuationReconciliationService>());
+            services.AddScoped<ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAnalyticsService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAnalyticsReportSource>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryAnalyticsService>());
+            services.AddScoped<ErpSystem.Api.Services.Inventory.InventoryDisposalService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDisposalService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryDisposalService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryDisposalReportSource>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Inventory.InventoryDisposalService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService, ErpSystem.Core.Services.Inventory.InventoryValuationService>();
 
             // Price List repositories
@@ -671,14 +765,32 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IExchangeRateService, ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFiscalPeriodService, ErpSystem.Api.Services.Finance.Fiscal.FiscalPeriodService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutExecutionService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutExecutionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancialStatementLayoutImportService, ErpSystem.Api.Services.Finance.Reporting.FinancialStatementLayoutImportService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IGeneralLedgerService, ErpSystem.Api.Services.Finance.GL.GeneralLedgerService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchSpreadsheetService, ErpSystem.Api.Services.Finance.GL.JournalBatchSpreadsheetService>();
+            // Recurring journals extend the existing GL posting pipeline. The
+            // processor is scoped because every run owns one EF unit of work;
+            // the hosted service below only creates scopes and never posts.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRecurringJournalService, ErpSystem.Api.Services.Finance.GL.RecurringJournalService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.RecurringJournalGenerationProcessor>();
             services.AddScoped<ErpSystem.Core.Finance.IBusinessCalendarProvider, ErpSystem.Data.Services.PayrollBusinessCalendarProvider>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAuditService, ErpSystem.Api.Services.Finance.FinanceAuditService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccessScopeService, ErpSystem.Api.Services.Finance.Security.FinanceAccessScopeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReversalPolicyService, ErpSystem.Api.Services.Finance.FinanceReversalPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePostingEngine, ErpSystem.Api.Services.Finance.GL.FinancePostingEngine>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerSettlementReadModelService, ErpSystem.Api.Services.Finance.SubledgerSettlementReadModelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IOpeningBalanceService, ErpSystem.Api.Services.Finance.Migration.OpeningBalanceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IMigrationSignOffService, ErpSystem.Api.Services.Finance.Migration.MigrationSignOffService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitTypeService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitTypeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitAccountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitJournalEntryService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitJournalEntryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitBudgetService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitBudgetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRatioDefinitionService, ErpSystem.Api.Services.Finance.UnitAccounting.RatioDefinitionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAllocationService, ErpSystem.Api.Services.Finance.UnitAccounting.AllocationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApReportsService, ErpSystem.Api.Services.Finance.AP.ApReportsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IArReportsService, ErpSystem.Api.Services.Finance.AR.ArReportsService>();
             // Customer account endpoints use the Finance AR source model and settlement projection.
@@ -687,6 +799,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ITaxReportingService, ErpSystem.Api.Services.Finance.Taxation.TaxReportingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IWithholdingTaxCertificateService, ErpSystem.Api.Services.Finance.Taxation.WithholdingTaxCertificateService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankAccountService, ErpSystem.Api.Services.Finance.Cash.BankAccountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankingSettlementService, ErpSystem.Api.Services.Finance.Cash.BankingSettlementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashierTillService, ErpSystem.Api.Services.Finance.Cash.CashierTillService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportExportService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportExportService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyRevaluationService>(sp =>
@@ -694,6 +808,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFxAccountingService>(sp =>
                 sp.GetRequiredService<ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceMatchExceptionService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceMatchExceptionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.AP.FinancePurchaseOrderReceiptPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
@@ -801,6 +916,29 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             #region HR Services
 
+            // [HR-MODULE-PORT] All services/repositories ported from HRApi are registered here in one
+            // call; the file is generated so re-syncing HR only rewrites HrModuleServiceRegistration.cs.
+            // It is invoked FIRST on purpose: the explicit registrations below (RHEMA's retained
+            // appraisal/performance model, salary mapping and hrdev bank services) are applied after and
+            // therefore win for those interfaces. See HR_MODULE_PORT_PLAN.md.
+            services.AddHrModuleServices();
+
+            // [HR-MODULE-PORT] Public-recruitment catalogue services + their repository.
+            // These concrete implementations were ported but never registered (the generated
+            // HrModuleServiceRegistration only emits registrations it detected), so
+            // PublicRecruitmentController could not be constructed. Registered here (after the
+            // generated call) so they survive HR re-syncs.
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.ICountryRepository, ErpSystem.Data.Repositories.HR.CountryRepository>();
+            services.AddScoped<ICountryService, CountryService>();
+            services.AddScoped<ISkillService, SkillService>();
+            services.AddScoped<IQualificationCatalogueService, QualificationCatalogueService>();
+
+            // [HR-MODULE-PORT] Nominee availability service — ported from HRApi into
+            // Core/Services/HR/Training (see NomineeAvailabilityService). The concrete class was
+            // left behind during the port (it lived in HRApi's ErpSystem.Data/Services), so
+            // TrainingNominationsController could not be activated.
+            services.AddScoped<INomineeAvailabilityService, NomineeAvailabilityService>();
+
             // HR Services - NOW ENABLED
             services.AddScoped<IEmployeeService, EmployeeService>();
 
@@ -816,6 +954,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ILocationService, LocationService>();
             services.AddScoped<ILocationContactService, LocationContactService>();
 
+            // Payroll owns the salary structure; HR mirrors it. Registered before the salary services
+            // because they depend on it for reconcile-on-read.
+            services.AddScoped<ISalaryStructureProjectionService, SalaryStructureProjectionService>();
             services.AddScoped<ISalaryStructureService, SalaryStructureService>();
             services.AddScoped<ISalaryGradeService, SalaryStructureService>();
             services.AddScoped<ISalaryLevelService, SalaryStructureService>();
@@ -829,13 +970,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<IEmployeeBankService, EmployeeBankService>();
             services.AddScoped<IEmployeeBankBranchService, EmployeeBankBranchService>();
             
-            services.AddScoped<IAppraisalGradeDefinitionService, AppraisalGradeDefinitionService>();
-            services.AddScoped<IKpiDefinitionService, KpiDefinitionService>();
-            services.AddScoped<IAppraisalCriteriaService, AppraisalCriteriaService>();
-            services.AddScoped<IPerformanceAppraisalService, PerformanceAppraisalService>();
             services.AddScoped<IPerformanceImprovementPlanService, PerformanceImprovementPlanService>();
-            services.AddScoped<IPositionCriteriaMappingService, PositionCriteriaMappingService>();
-            services.AddScoped<IEmployeeKpiTargetService, EmployeeKpiTargetService>();
             
             #endregion HR Services
             
@@ -888,6 +1023,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodGuardService, ErpSystem.Core.Services.Procurement.ProcurementSodGuardService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAccessControlService, ErpSystem.Core.Services.Procurement.ProcurementAccessControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementControlEventService, ErpSystem.Core.Services.Procurement.ProcurementControlEventService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditRecordProvider, ErpSystem.Core.Services.Audit.PlatformAuditLogRecordProvider>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditRecordProvider, ErpSystem.Core.Services.Audit.ProcurementControlEventAuditRecordProvider>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Audit.IAuditGovernanceService, ErpSystem.Core.Services.Audit.AuditGovernanceService>();
+            services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageContributor, ErpSystem.Core.Services.Audit.ProcurementInventoryAuditEventCoverageContributor>();
+            services.AddSingleton<ErpSystem.Core.Interfaces.Audit.IAuditEventCoverageService, ErpSystem.Core.Services.Audit.AuditEventCoverageService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementAppSubmissionService, ErpSystem.Core.Services.Procurement.ProcurementAppSubmissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSpecificationTemplateService, ErpSystem.Core.Services.Procurement.ProcurementSpecificationTemplateService>();
             services.AddScoped<ErpSystem.Core.Services.Procurement.ProcurementCalendarService>();
@@ -916,8 +1056,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkAgreementService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementFrameworkCallOffService, ErpSystem.Core.Services.Procurement.ProcurementFrameworkCallOffService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSourceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSourceService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceControlService, ErpSystem.Core.Services.Procurement.ProcurementReceiptSourceControlService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptInspectionService, ErpSystem.Core.Services.Procurement.ProcurementReceiptInspectionService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptInspectionStore, ErpSystem.Data.Repositories.Procurement.ProcurementReceiptInspectionStore>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderComplianceService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderComplianceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderSodService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderSodService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementInvoicePaymentSodService, ErpSystem.Core.Services.Procurement.ProcurementInvoicePaymentSodService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderAmendmentStore, ErpSystem.Data.Repositories.Procurement.ProcurementPurchaseOrderAmendmentStore>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPurchaseOrderAmendmentService, ErpSystem.Core.Services.Procurement.ProcurementPurchaseOrderAmendmentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementContractActivationStore, ErpSystem.Data.Repositories.Procurement.ProcurementContractActivationStore>();
@@ -936,7 +1080,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPrequalificationService, ErpSystem.Core.Services.Procurement.ProcurementPrequalificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementMasterDataChangeService, ErpSystem.Core.Services.Procurement.ProcurementMasterDataChangeService>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementConfigurationProfileSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementSupplierOnboardingTestSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
@@ -978,6 +1126,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IFleetHealthService, ErpSystem.Core.Services.Maintenance.Fleet.FleetHealthService>();
             services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
+            services.AddScoped<ErpSystem.Api.Services.ProcurementInventoryManagementDashboardService>();
             services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardService>();
 
             // RFQ (Request For Quotation) - separate from Tender
@@ -1014,6 +1163,17 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Reconciles temporary fiscal-period module reopenings and sends expiry notices.
             services.AddHostedService<ErpSystem.Api.Services.Finance.Fiscal.ModuleLockExpiryBackgroundService>();
+
+            // Finance close deadlines and maker-checker approvals use the shared notification
+            // pipeline. A scoped processor keeps the durable idempotency state testable while the
+            // lightweight host invokes it for every tenant at a controlled interval.
+            services.AddScoped<ErpSystem.Api.Services.Finance.Fiscal.FinanceCloseAlertService>();
+            services.AddHostedService<ErpSystem.Api.Services.Finance.Fiscal.FinanceCloseAlertBackgroundService>();
+
+            // Materialize due recurring-journal occurrences independently of a
+            // signed-in browser. Generated items remain Pending Approval, so
+            // automation cannot bypass Finance maker-checker controls.
+            services.AddHostedService<ErpSystem.Api.Services.Finance.GL.RecurringJournalBackgroundService>();
 
             // Tenant data retention (audit/security logs, notifications, EHC audit events)
             services.AddHostedService<ErpSystem.Api.Services.DataRetentionBackgroundService>();
@@ -1071,6 +1231,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
                         !ctx.User.IsInRole(Constants.Roles.ExternalUser)))
+                .AddPolicy("AuditGovernanceRead", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
+                .AddPolicy("AuditGovernanceManage", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("settings.update")))
+                .AddPolicy("HrIdentityReconciliationRead", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("settings.read", "settings.update")))
+                .AddPolicy("HrIdentityReconciliationManage", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("settings.update")))
                 .AddPolicy("Finance", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true
@@ -1104,7 +1272,26 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // Fleet inspections are typically performed by drivers/employees, so allow Employee role to write inspections
                 // without granting broader MaintenanceWrite permissions.
                 .AddPolicy("FleetInspectionWrite", policy =>
-                    policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"));
+                    policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"))
+                // External portal policies. These run ONLY on the dedicated PortalBearer scheme (portal
+                // tokens use a distinct signing key + audience, see PortalAuth) and require the matching
+                // user_type claim, so an internal staff token can never satisfy them and vice-versa.
+                //
+                // email_verified is required as defence in depth. Both portal JWT services already emit
+                // the claim as literal "true"/"false" but nothing enforced it, so a token minted before
+                // verification stayed valid for its full seven days. Requiring it here invalidates any
+                // such token immediately — which is the point — so portal clients must treat a 403 on a
+                // portal route as "sign in again", not as a permanent refusal.
+                .AddPolicy("CandidatePortal", policy =>
+                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
+                          .RequireAuthenticatedUser()
+                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.CandidateUserType)
+                          .RequireClaim("email_verified", "true"))
+                .AddPolicy("ConsultantClientPortal", policy =>
+                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
+                          .RequireAuthenticatedUser()
+                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.ClientUserType)
+                          .RequireClaim("email_verified", "true"));
 
             authorizationBuilder
                 .AddPolicy(FinancePermissions.ConfigureChartOfAccountsPolicy, policy =>
@@ -1125,6 +1312,41 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
+
+            foreach (var permission in ProcurementAccessControlRegistry.Permissions)
+            {
+                authorizationBuilder.AddPolicy(permission.Code, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Code)));
+            }
+
+            // HR occupational-health policies. The medical controllers previously carried a bare
+            // [Authorize], so every authenticated employee could read and delete medical records.
+            // Administer implies Write implies Read, so an admin does not need all three granted.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.MedicalReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewMedicalRecords,
+                        HrPermissions.MaintainMedicalRecords,
+                        HrPermissions.AdministerMedical)))
+                .AddPolicy(HrPermissions.MedicalWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainMedicalRecords,
+                        HrPermissions.AdministerMedical)))
+                .AddPolicy(HrPermissions.MedicalAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerMedical)));
+
+            foreach (var permission in HrPermissions.All)
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            // Second handler for PermissionRequirement: keeps existing HR roles working on tenants
+            // provisioned before the HR permission seed. Handlers are OR-ed, so this widens nothing
+            // that the database-backed handler already decides.
+            services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+                HrPermissionRoleFallbackAuthorizationHandler>();
 
             return services;
         }
@@ -1523,6 +1745,21 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddHostedService<
                 ErpSystem.Api.Services.FileStorageCleanupBackgroundService>();
 
+            // Single entry point every HR upload site goes through, so the
+            // upload -> DMS-register -> compensate-on-failure sequence is written once.
+            services.AddScoped<ErpSystem.Api.Services.HR.IHrControlledDocumentService,
+                ErpSystem.Api.Services.HR.HrControlledDocumentService>();
+
+            // Reclaims public CV uploads that were never attached to an application.
+            services.AddHostedService<ErpSystem.Api.Services.HR.PublicCvUploadTicketSweeper>();
+
+            // Durable delivery for emails an account is unusable without (portal verification).
+            services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,
+                ErpSystem.Api.Services.TransactionalEmailQueue>();
+
+            // One-off adoption of pre-boundary HR files; driven by the SuperAdmin-only endpoint.
+            services.AddScoped<ErpSystem.Api.Services.HR.HrLegacyFileMigrationService>();
+
             // Configure multipart body length limit for file uploads
             services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
             {
@@ -1655,6 +1892,64 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             services.AddRateLimiter(rateLimiterOptions =>
             {
+                // Per-caller partition key: authenticated -> user id, anonymous -> client IP.
+                // Mirrors the GlobalLimiter keying below so every named policy is scoped PER CALLER
+                // instead of one shared bucket for the whole service (a few callers would otherwise
+                // exhaust the quota and 429 everyone else). Behind a proxy the client IP is only
+                // accurate when ForwardedHeaders is configured (see Program.cs / trust-none default).
+                static string CallerKey(HttpContext ctx)
+                {
+                    var user = ctx.User;
+                    if (user?.Identity?.IsAuthenticated == true)
+                    {
+                        var uid = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                        if (!string.IsNullOrEmpty(uid)) return $"user:{uid}";
+                    }
+                    return $"ip:{ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+                }
+
+                // [HR-MODULE-PORT] Named policies required by the ported HR portal/recruitment
+                // controllers ([EnableRateLimiting("...")]). Without them those endpoints throw
+                // "no such policy exists" at run time. These are ADDITIVE — named policies apply only
+                // to the endpoints that opt in, and do not alter the global limiter below.
+                // NOTE: "AuthPolicy" is NOT defined here — RHEMA already declares it further down.
+
+                // Public career portal — browsing (vacancies, catalogue, tracking)
+                rateLimiterOptions.AddPolicy("PublicPortalPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 60,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 5
+                        }));
+
+                // Public career portal — application submission (strict, to prevent spam)
+                rateLimiterOptions.AddPolicy("PublicApplyPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 5,
+                            Window = TimeSpan.FromMinutes(10),
+                            QueueLimit = 0
+                        }));
+
+                // Public career portal — CV upload. Separate from PublicApplyPolicy on purpose:
+                // sharing one budget meant an applicant who re-uploaded their CV twice had spent
+                // the allowance they needed to actually submit. Tighter than apply because each
+                // request costs a malware scan and storage quota against an anonymous caller.
+                rateLimiterOptions.AddPolicy("PublicUploadPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 3,
+                            Window = TimeSpan.FromMinutes(10),
+                            QueueLimit = 0
+                        }));
+
                 // Global limiter applies to every request (external portal included)
                 rateLimiterOptions.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 {
@@ -1712,29 +2007,40 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 });
 
                 // General API rate limiting
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "ApiPolicy", options =>
-                {
-                    options.PermitLimit = 100;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                    options.QueueLimit = 10;
-                });
+                rateLimiterOptions.AddPolicy("ApiPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 100,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                            QueueLimit = 10
+                        }));
 
-                // Stricter rate limiting for authentication endpoints
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "AuthPolicy", options =>
-                {
-                    options.PermitLimit = authPolicyPermitLimit;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueLimit = 2;
-                });
+                // Stricter rate limiting for authentication endpoints (per caller — mostly by IP since
+                // login is pre-auth, which is the correct key for brute-force protection).
+                // PermitLimit is environment-scoped (relaxed in Development) per master.
+                rateLimiterOptions.AddPolicy("AuthPolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = authPolicyPermitLimit,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 2
+                        }));
 
                 // Very strict rate limiting for sensitive endpoints
-                rateLimiterOptions.AddFixedWindowLimiter(policyName: "SensitivePolicy", options =>
-                {
-                    options.PermitLimit = 5;
-                    options.Window = TimeSpan.FromMinutes(1);
-                    options.QueueLimit = 0; // No queuing for sensitive endpoints
-                });
+                rateLimiterOptions.AddPolicy("SensitivePolicy", httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: CallerKey(httpContext),
+                        factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 5,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0 // No queuing for sensitive endpoints
+                        }));
 
                 // Global rejection response
                 rateLimiterOptions.OnRejected = async (context, token) =>

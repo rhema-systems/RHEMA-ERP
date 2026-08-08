@@ -278,14 +278,19 @@ export default function VendorInvoicesPage() {
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
                                                         )}
-                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
+                                                        {invoice.status === 'Draft' && !invoice.purchaseOrderId && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
                                                             <DropdownMenuItem onClick={() => submitInvoiceMutation.mutate(invoice.id)}>
                                                                 <CheckCircle className="mr-2 h-4 w-4" /> Submit for Approval
                                                             </DropdownMenuItem>
                                                         )}
-                                                        {invoice.status === 'PendingApproval' && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummaryMap[invoice.id]?.canCurrentUserApprove ?? true) && (
+                                                        {invoice.status === 'PendingApproval' && !invoice.purchaseOrderId && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummaryMap[invoice.id]?.canCurrentUserApprove ?? true) && (
                                                             <DropdownMenuItem onClick={() => approveInvoiceMutation.mutate(invoice.id)}>
                                                                 <CheckCircle className="mr-2 h-4 w-4" /> Approve
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {invoice.purchaseOrderId && !invoice.isOpeningBalance && (invoice.status === 'Draft' || invoice.status === 'PendingApproval') && (
+                                                            <DropdownMenuItem onClick={() => router.push(`/finance/ap/invoices/${invoice.id}`)}>
+                                                                <CheckCircle className="mr-2 h-4 w-4" /> Review mandatory match
                                                             </DropdownMenuItem>
                                                         )}
                                                         {(invoice.status === 'Approved' || invoice.status === 'PartiallyPaid') && invoice.balanceAmount > 0 && (

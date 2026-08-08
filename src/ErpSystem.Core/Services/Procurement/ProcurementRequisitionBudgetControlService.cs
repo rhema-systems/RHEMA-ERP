@@ -163,6 +163,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         commitment.ReservedById = _currentUser.UserId;
         commitment.ReservedByName = ActorName();
         commitment.ReleasedAtUtc = null;
+        commitment.ConsumedAtUtc = null;
         commitment.ReleasedById = null;
         commitment.ReleasedByName = null;
         commitment.ReleaseReason = null;
@@ -599,6 +600,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         commitment.OverrideApprovalReference,
         commitment.ReservedAtUtc,
         commitment.ReleasedAtUtc,
+        commitment.ConsumedAtUtc,
         commitment.ReleaseReason
     };
 

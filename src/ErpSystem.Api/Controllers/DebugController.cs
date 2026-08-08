@@ -130,13 +130,9 @@ public class DebugController : ControllerBase
                 ReportRoleAssignments = reportRoleAssignments
             });
         }
-        catch (Exception ex)
+        catch
         {
-            return StatusCode(500, new
-            {
-                error = ex.Message,
-                stackTrace = ex.StackTrace
-            });
+            throw;
         }
     }
 
@@ -217,13 +213,9 @@ public class DebugController : ControllerBase
                 AssignmentsAdded = addedAssignments.Count
             });
         }
-        catch (Exception ex)
+        catch
         {
-            return StatusCode(500, new
-            {
-                error = ex.Message,
-                stackTrace = ex.StackTrace
-            });
+            throw;
         }
     }
 
@@ -259,13 +251,9 @@ public class DebugController : ControllerBase
                 Reports = reportsWithDetails
             });
         }
-        catch (Exception ex)
+        catch
         {
-            return StatusCode(500, new
-            {
-                error = ex.Message,
-                stackTrace = ex.StackTrace
-            });
+            throw;
         }
     }
 }

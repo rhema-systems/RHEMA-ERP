@@ -15,8 +15,11 @@ public class PaymentCreateDto
     public Guid? PaymentMethodId { get; set; }
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal ExchangeRate { get; set; } = 1.0m;
+    public Guid? ExchangeRateId { get; set; }
     public Guid? BankAccountId { get; set; }
+    public Guid? LiquidityAccountId { get; set; }
     public string? CheckNumber { get; set; }
+    public string? ChequeDrawerBank { get; set; }
     public string? TransactionReference { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
@@ -39,7 +42,9 @@ public class PaymentUpdateDto
     public string PaymentMethod { get; set; } = string.Empty;
     public Guid? PaymentMethodId { get; set; }
     public Guid? BankAccountId { get; set; }
+    public Guid? LiquidityAccountId { get; set; }
     public string? CheckNumber { get; set; }
+    public string? ChequeDrawerBank { get; set; }
     public string? TransactionReference { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
@@ -159,7 +164,23 @@ public class InvoiceAllocationDto
 {
     public Guid InvoiceId { get; set; }
     public decimal AllocatedAmount { get; set; }
+
+    /// <summary>
+    /// Receipt/advance-lot amount consumed in receipt currency. AllocatedAmount is the separate
+    /// invoice-currency reduction. The values default together only for same-currency settlement;
+    /// cross-currency callers must provide the explicit amount pair agreed with the customer.
+    /// </summary>
+    public decimal? PaymentCurrencyAmount { get; set; }
+
+    /// <summary>
+    /// Optional approved invoice-currency rate for the settlement/application date. A posted
+    /// advance continues to use its immutable origin receipt rate for the liability carrying
+    /// value, so Finance can recognize and later reverse any application-time realized FX.
+    /// </summary>
+    public Guid? InvoiceSettlementExchangeRateId { get; set; }
     public decimal DiscountAmount { get; set; }
+    public decimal WithholdingTaxAmount { get; set; }
+    public decimal VatWithholdingAmount { get; set; }
     public string? Notes { get; set; }
 }
 

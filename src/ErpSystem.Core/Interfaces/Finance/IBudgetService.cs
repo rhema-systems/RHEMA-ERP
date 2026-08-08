@@ -10,21 +10,28 @@ public interface IBudgetService
     Task<BudgetScenarioDto> GetScenarioAsync(Guid id);
     Task<IEnumerable<BudgetScenarioDto>> GetScenariosForYearAsync(Guid fiscalYearId);
     Task<bool> DeleteScenarioAsync(Guid id);
-    Task<BudgetScenarioDto> LockScenarioAsync(Guid id);
+    Task<BudgetScenarioDto> OpenScenarioAsync(Guid id, string rowVersion);
+    Task<BudgetScenarioDto> SubmitScenarioAsync(Guid id, string rowVersion);
+    Task<BudgetScenarioDto> AdoptScenarioAsync(Guid id, AdoptBudgetScenarioDto dto);
+    Task<BudgetScenarioDto> ArchiveScenarioAsync(Guid id, string rowVersion);
 
     // Returns (Worksheets/Proposals)
     Task<BudgetReturnDto> CreateReturnAsync(CreateBudgetReturnDto dto);
     Task<BudgetReturnDto> UpdateReturnAsync(Guid id, UpdateBudgetReturnDto dto);
     Task<BudgetReturnDto> GetReturnAsync(Guid id);
+    Task<IEnumerable<BudgetReturnDto>> GetMyReturnsAsync();
     Task<IEnumerable<BudgetReturnDto>> GetReturnsForScenarioAsync(Guid scenarioId);
-    Task<BudgetReturnDto> SubmitReturnAsync(Guid id);
-    Task<BudgetReturnDto> ApproveReturnAsync(Guid id, Guid approverId);
-    Task<BudgetReturnDto> RejectReturnAsync(Guid id, string reason, Guid rejectorId);
+    Task<BudgetReturnDto> SubmitReturnAsync(Guid id, string rowVersion);
+    Task<BudgetReturnDto> RecallReturnAsync(Guid id, string rowVersion, string? reason);
 
     // Entries
     Task<IEnumerable<BudgetEntryDto>> GetEntriesAsync(Guid returnId);
-    Task BulkSaveEntriesAsync(BulkSaveBudgetEntriesDto dto);
+    Task<BudgetReturnDto> BulkSaveEntriesAsync(BulkSaveBudgetEntriesDto dto);
     Task<IEnumerable<BudgetEntryDto>> GetConsolidatedBudgetAsync(Guid scenarioId, Guid? accountId = null);
+    Task<ConsolidatedBudgetViewDto> GetConsolidatedViewAsync(Guid scenarioId, bool approvedOnly);
+    Task<ConsolidatedBudgetViewDto> GetActiveBudgetVsActualAsync(Guid fiscalYearId);
+    Task<BudgetScenarioComparisonDto> CompareScenariosAsync(Guid baseScenarioId, Guid comparisonScenarioId);
+    Task<IReadOnlyList<BudgetAuditEventDto>> GetAuditHistoryAsync(string entityType, Guid entityId);
 
     // Analytics
     Task<BudgetSummaryDto> GetScenarioSummaryAsync(Guid scenarioId);

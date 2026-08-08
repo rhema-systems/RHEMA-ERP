@@ -3,12 +3,14 @@ import { canActivateCommittee, canCheckAccessCapability, validateResponsibilityA
 
 const assignment = {
   userId: 'user-1', roleName: 'TDC_STORES_OFFICER', warehouseScopeMode: 'Restricted' as const,
-  warehouseIds: ['warehouse-1'], effectiveFrom: '2026-07-21', isActive: true, reason: 'Assigned duty',
+  warehouseIds: ['warehouse-1'], locationScopeMode: 'Restricted' as const, locationIds: ['location-1'],
+  effectiveFrom: '2026-07-21', isActive: true, reason: 'Assigned duty',
 };
 
 describe('procurement access UI guards', () => {
   it('requires a selected warehouse for a restricted stores responsibility', () => {
     expect(validateResponsibilityAssignment({ ...assignment, warehouseIds: [] }, true)).toContain('warehouse');
+    expect(validateResponsibilityAssignment({ ...assignment, locationIds: [] }, true)).toContain('location');
     expect(validateResponsibilityAssignment(assignment, true)).toBeUndefined();
   });
 

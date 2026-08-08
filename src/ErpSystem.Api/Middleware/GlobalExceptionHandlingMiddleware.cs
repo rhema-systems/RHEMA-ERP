@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,16 +16,13 @@ public class GlobalExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<GlobalExceptionHandlingMiddleware> _logger;
-    private readonly IWebHostEnvironment _environment;
 
     public GlobalExceptionHandlingMiddleware(
         RequestDelegate next,
-        ILogger<GlobalExceptionHandlingMiddleware> logger,
-        IWebHostEnvironment environment)
+        ILogger<GlobalExceptionHandlingMiddleware> logger)
     {
         _next = next;
         _logger = logger;
-        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -44,6 +42,7 @@ public class GlobalExceptionHandlingMiddleware
         var response = new ErrorResponse
         {
             TraceId = context.TraceIdentifier,
+            CorrelationId = context.TraceIdentifier,
             Instance = context.Request.Path,
             Timestamp = DateTime.UtcNow
         };
@@ -52,73 +51,90 @@ public class GlobalExceptionHandlingMiddleware
         {
             case ValidationException validationEx:
                 response.Title = "Validation Error";
+                response.Code = "VALIDATION_ERROR";
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = "One or more validation errors occurred.";
                 response.Errors = validationEx.Errors;
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
-            case UnauthorizedException unauthorizedEx:
+            case UnauthorizedException:
                 response.Title = "Unauthorized";
+                response.Code = "AUTHENTICATION_REQUIRED";
                 response.Status = (int)HttpStatusCode.Unauthorized;
                 response.Detail = "Authentication is required to access this resource.";
-                context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
                 break;
 
-            case ForbiddenException forbiddenEx:
+            case ForbiddenException:
                 response.Title = "Forbidden";
+                response.Code = "ACCESS_FORBIDDEN";
                 response.Status = (int)HttpStatusCode.Forbidden;
                 response.Detail = "You do not have permission to access this resource.";
-                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
                 break;
 
-            case UnauthorizedAccessException unauthorizedAccessEx:
+            case UnauthorizedAccessException:
                 response.Title = "Forbidden";
+                response.Code = "ACCESS_FORBIDDEN";
                 response.Status = (int)HttpStatusCode.Forbidden;
-                response.Detail = unauthorizedAccessEx.Message;
-                context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
+                response.Detail = "You do not have permission to access this resource.";
                 break;
 
             case NotFoundException notFoundEx:
                 response.Title = "Not Found";
+                response.Code = "RESOURCE_NOT_FOUND";
                 response.Status = (int)HttpStatusCode.NotFound;
                 response.Detail = notFoundEx.Message ?? "The requested resource was not found.";
-                context.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                break;
+
+            // The medical module raises this for domain rejections and missing records. Its own
+            // contract (see MedicalWorkflowException) specifies NotFound -> 404 and everything else
+            // -> 422; without this case all of them fell through to a generic 500.
+            case MedicalWorkflowException medicalEx:
+                var medicalStatus = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
+                    ? HttpStatusCode.NotFound
+                    : HttpStatusCode.UnprocessableEntity;
+                response.Title = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
+                    ? "Not Found"
+                    : "Unprocessable Entity";
+                response.Code = medicalEx.Reason == MedicalWorkflowFailureReason.NotFound
+                    ? "RESOURCE_NOT_FOUND"
+                    : "WORKFLOW_REJECTED";
+                response.Status = (int)medicalStatus;
+                response.Detail = medicalEx.Message;   // safe to display by design
                 break;
 
             case ConflictException conflictEx:
                 response.Title = "Conflict";
+                response.Code = "RESOURCE_CONFLICT";
                 response.Status = (int)HttpStatusCode.Conflict;
                 response.Detail = conflictEx.Message ?? "The request conflicts with the current state of the resource.";
-                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 break;
 
-            case InvalidOperationException invalidOpEx:
+            case InvalidOperationException:
                 response.Title = "Invalid Operation";
+                response.Code = "INVALID_OPERATION";
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = "The operation is not valid for the current state of the object.";
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
-            case ArgumentException argumentEx:
+            case ArgumentException:
                 response.Title = "Bad Request";
+                response.Code = "INVALID_ARGUMENT";
                 response.Status = (int)HttpStatusCode.BadRequest;
                 response.Detail = "Invalid argument provided.";
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
-            case TimeoutException timeoutEx:
+            case TimeoutException:
                 response.Title = "Request Timeout";
+                response.Code = "REQUEST_TIMEOUT";
                 response.Status = (int)HttpStatusCode.RequestTimeout;
                 response.Detail = "The request timed out. Please try again.";
-                context.Response.StatusCode = (int)HttpStatusCode.RequestTimeout;
                 break;
 
             default:
-                response.Title = "Internal Server Error";
+                response.Title = "We couldn't complete your request";
+                response.Code = "UNEXPECTED_ERROR";
                 response.Status = (int)HttpStatusCode.InternalServerError;
-                response.Detail = "An unexpected error occurred while processing your request.";
-                context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                response.Detail = $"Something went wrong while processing your request. Please try again. If the problem continues, contact your administrator. Reference ID: {response.TraceId}.";
                 break;
         }
 
@@ -134,22 +150,18 @@ public class GlobalExceptionHandlingMiddleware
             return;
         }
 
-        // Only include detailed error information in development
-        if (_environment.IsDevelopment())
-        {
-            response.DeveloperMessage = exception.Message;
-            response.StackTrace = exception.StackTrace;
-        }
-
         try
         {
-            context.Response.ContentType = "application/json";
+            // This middleware owns the public error contract. Never expose exception messages,
+            // stack traces or framework diagnostics, including on Development workstations.
+            context.Response.Clear();
+            context.Response.StatusCode = response.Status;
+            context.Response.ContentType = "application/problem+json";
 
-            // Security: Don't leak sensitive information
             await context.Response.WriteAsync(JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = _environment.IsDevelopment()
+                WriteIndented = false
             }));
         }
         catch (ObjectDisposedException writeEx)
@@ -177,7 +189,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException => "Warning",
+                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
@@ -346,6 +358,7 @@ public class GlobalExceptionHandlingMiddleware
             case NotFoundException:
             case ConflictException:
             case ArgumentException:
+            case MedicalWorkflowException:
                 // These are expected exceptions - log as warnings
                 _logger.LogWarning(exception,
                     "Client error occurred for {RequestMethod} {RequestPath}. Context: {@LogContext}",
@@ -517,16 +530,14 @@ public class ConflictException : Exception
 public class ErrorResponse
 {
     public string Title { get; set; } = string.Empty;
+    public string Code { get; set; } = "UNEXPECTED_ERROR";
     public int Status { get; set; }
     public string Detail { get; set; } = string.Empty;
     public string Instance { get; set; } = string.Empty;
     public string TraceId { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
     public Dictionary<string, string[]>? Errors { get; set; }
-
-    // Development-only properties
-    public string? DeveloperMessage { get; set; }
-    public string? StackTrace { get; set; }
 }
 
 // Extension method for easy registration

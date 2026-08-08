@@ -172,6 +172,10 @@ public class AuditLogController : ControllerBase
             await _auditLogService.DeleteOldAuditLogsAsync(beforeDate);
             return NoContent();
         }
+        catch (NotSupportedException ex)
+        {
+            return Conflict(new { code = "AUDIT_LOG_IMMUTABLE", message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting old audit logs before {Date}", beforeDate);

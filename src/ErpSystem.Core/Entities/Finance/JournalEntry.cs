@@ -395,6 +395,12 @@ public class JournalEntry : BusinessEntity
     public virtual ICollection<JournalEntryAttachment> Attachments { get; set; } = new List<JournalEntryAttachment>();
 
     /// <summary>
+    /// Optional journal-batch membership. The foreign key is held by JournalBatchItem
+    /// so standalone journal rows remain unchanged.
+    /// </summary>
+    public virtual JournalBatchItem? JournalBatchItem { get; set; }
+
+    /// <summary>
     /// The fiscal period this entry belongs to.
     /// Used for period locking and financial reporting.
     /// </summary>

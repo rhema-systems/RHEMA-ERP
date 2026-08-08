@@ -118,10 +118,11 @@ public class ItemUnitOfMeasureRepository : GenericRepository<ItemUnitOfMeasure>,
     public async Task<ItemUnitOfMeasure?> GetByBarcodeAsync(string barcode)
     {
         if (string.IsNullOrWhiteSpace(barcode)) return null;
+        var normalized = barcode.Trim().ToUpperInvariant();
         return await _dbSet
             .Include(iu => iu.InventoryItem)
             .Include(iu => iu.UnitOfMeasure)
-            .FirstOrDefaultAsync(iu => iu.Barcode == barcode && !iu.IsDeleted);
+            .FirstOrDefaultAsync(iu => iu.Barcode == normalized && !iu.IsDeleted);
     }
 }
 
@@ -539,8 +540,19 @@ public class PhysicalCountRepository : GenericRepository<PhysicalCount>, IPhysic
             .Include(c => c.Warehouse)
             .Include(c => c.Location)
             .Include(c => c.InitiatedBy)
+            .Include(c => c.CountedBy)
+            .Include(c => c.StoresApprovedBy)
+            .Include(c => c.FinanceApprovedBy)
+            .Include(c => c.AuditAttestedBy)
+            .Include(c => c.Actions.OrderBy(a => a.Sequence))
             .Include(c => c.Items)
                 .ThenInclude(i => i.InventoryItem)
+            .Include(c => c.Items)
+                .ThenInclude(i => i.Location)
+            .Include(c => c.Items)
+                .ThenInclude(i => i.CountedBy)
+            .Include(c => c.Items)
+                .ThenInclude(i => i.RecountedBy)
             .FirstOrDefaultAsync(c => c.Id == countId && !c.IsDeleted);
     }
 

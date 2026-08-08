@@ -11,6 +11,7 @@ export type AccountStatus = 'Active' | 'Inactive' | 'Closed';
 export type JournalType = 'General' | 'Adjusting' | 'Reversing' | 'Recurring' | 'Opening Balance' | 'Closing' | 'Revaluation' | 'System Generated';
 export type PostingStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Posted' | 'Rejected' | 'Reversed';
 export type ExchangeRateType = 'Daily' | 'Average' | 'MonthEnd' | 'QuarterEnd' | 'YearEnd' | 'Budget' | 'Fixed' | 'Spot';
+export type ExchangeRateQuoteSide = 'Mid' | 'Buying' | 'Selling';
 export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency = 'None' | 'Monthly' | 'Quarterly' | 'Annually';
 export type SubledgerModule = 'AR' | 'AP';
@@ -53,6 +54,7 @@ export interface ExchangeRate {
     currentExchangeRate?: number;
     effectiveDate: string;
     rateType: ExchangeRateType;
+    quoteSide: ExchangeRateQuoteSide;
     rateSource: string;
     comments?: string;
     isActive: boolean;
@@ -96,6 +98,10 @@ export interface FiscalPeriod {
     isGlobalLockSuspended?: boolean;
     isPartiallyLocked?: boolean;
     closedDate?: string;
+    /** Latest signed cycle remains available after reopen as historical close evidence. */
+    latestClosePackCycleId?: string;
+    /** Latest controlled reopen decision, including pending higher-tier review evidence. */
+    latestReopenRequest?: FinancePeriodReopenRequest;
     closedByUserId?: string;
     closingNotes?: string;
     moduleLocks?: PeriodModuleLock[];
@@ -207,7 +213,9 @@ export interface AccountCurrencyLink {
     revaluationRequired: boolean;
     revaluationFrequency: RevaluationFrequency;
     transactionRateType: string;
+    transactionQuoteSide: ExchangeRateQuoteSide;
     revaluationRateType: string;
+    revaluationQuoteSide: ExchangeRateQuoteSide;
     foreignCurrencyBalance: number;
     baseCurrencyBalance: number;
     currentExchangeRate?: number;
@@ -336,6 +344,9 @@ export interface JournalEntry {
     reversalDate?: string;
     reversalReason?: string;
     reversalType?: string;
+    journalBatchId?: string;
+    journalBatchNumber?: string;
+    journalBatchItemId?: string;
     notes?: string;
 }
 
@@ -494,6 +505,29 @@ export interface FinanceSettings {
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
+    bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
+    requireBankDepositPrimaryEvidence?: boolean;
+    autoPostBankDepositAfterApproval?: boolean;
+    maximumDepositDeductionAmount?: number;
+    maximumDepositDeductionPercentage?: number;
+    bankStatementMatchDateToleranceDays?: number;
+    chequeClearingPeriodDays?: number;
+    returnedChequeBankChargeAccountId?: string;
+    defaultReturnedChequeChargeTreatment?: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+    directionalExchangeRatePolicyEnabled?: boolean;
+    defaultTransactionQuoteSide?: ExchangeRateQuoteSide;
+    arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    arSettlementQuoteSide?: ExchangeRateQuoteSide;
+    apInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    apSettlementQuoteSide?: ExchangeRateQuoteSide;
+    closingQuoteSide?: ExchangeRateQuoteSide;
+    requireExchangeRateOverrideApproval?: boolean;
+    reversalDatePolicy?: 'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen';
+    minimumReversalReasonLength?: number;
+    enforceFinanceAccessScopes?: boolean;
+    requireDepreciationBeforePeriodClose?: boolean;
+    apInvoicePriceTolerancePercent: number;
+    apInvoiceQuantityTolerancePercent: number;
     /** True when posted transactions exist — base currency and control accounts become locked */
     transactionsExist?: boolean;
 }
@@ -516,6 +550,29 @@ export interface UpdateFinanceSettingsDto {
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
     openingBalanceAutoRoutingEnabled?: boolean;
+    bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
+    requireBankDepositPrimaryEvidence?: boolean;
+    autoPostBankDepositAfterApproval?: boolean;
+    maximumDepositDeductionAmount?: number;
+    maximumDepositDeductionPercentage?: number;
+    bankStatementMatchDateToleranceDays?: number;
+    chequeClearingPeriodDays?: number;
+    returnedChequeBankChargeAccountId?: string;
+    defaultReturnedChequeChargeTreatment?: 'CustomerRecoverable' | 'BankChargeExpense' | 'Split';
+    directionalExchangeRatePolicyEnabled?: boolean;
+    defaultTransactionQuoteSide?: ExchangeRateQuoteSide;
+    arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    arSettlementQuoteSide?: ExchangeRateQuoteSide;
+    apInvoiceQuoteSide?: ExchangeRateQuoteSide;
+    apSettlementQuoteSide?: ExchangeRateQuoteSide;
+    closingQuoteSide?: ExchangeRateQuoteSide;
+    requireExchangeRateOverrideApproval?: boolean;
+    reversalDatePolicy?: 'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen';
+    minimumReversalReasonLength?: number;
+    enforceFinanceAccessScopes?: boolean;
+    requireDepreciationBeforePeriodClose?: boolean;
+    apInvoicePriceTolerancePercent?: number;
+    apInvoiceQuantityTolerancePercent?: number;
 }
 
 // Currency
@@ -552,6 +609,7 @@ export interface CreateExchangeRateDto {
     effectiveDate: string;
     expiryDate?: string;
     rateType: ExchangeRateType;
+    quoteSide?: ExchangeRateQuoteSide;
     rateSource: string;
     sourceName?: string;
     sourceReference?: string;
@@ -563,6 +621,7 @@ export interface CreateExchangeRateDto {
 export interface ExchangeRateFilters {
     currencyCode?: string;
     rateType?: ExchangeRateType;
+    quoteSide?: ExchangeRateQuoteSide;
     from?: string;
     to?: string;
     isActive?: boolean;
@@ -605,15 +664,53 @@ export interface CreateFiscalYearDto {
 }
 
 // Fiscal Period
+export interface PeriodOpenRequestDto {
+    fiscalPeriodId: string;
+    reason: string;
+}
+
 export interface PeriodCloseRequestDto {
     fiscalPeriodId: string;
     closingNotes?: string;
-    bypassValidation?: boolean;
+    reviewerDeclaration: string;
 }
 
 export interface PeriodReopenRequestDto {
     fiscalPeriodId: string;
     reason: string;
+    affectedPeriodAssessment: string;
+}
+
+export interface PeriodReopenReviewDto {
+    approved: boolean;
+    reviewComment: string;
+}
+
+export interface FinancePeriodReopenImpactPeriod {
+    fiscalPeriodId: string;
+    periodCode: string;
+    periodName: string;
+    periodStatus: string;
+}
+
+export interface FinancePeriodReopenRequest {
+    id: string;
+    fiscalPeriodId: string;
+    financeCloseCycleId: string;
+    resultingFinanceCloseCycleId?: string;
+    closedCycleNumber: number;
+    status: 'PendingApproval' | 'Approved' | 'Rejected' | string;
+    reason: string;
+    affectedPeriodAssessment: string;
+    impactFingerprint: string;
+    affectedPeriodCount: number;
+    requestedByUserName: string;
+    requestedAt: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewComment?: string;
+    affectedPeriods: FinancePeriodReopenImpactPeriod[];
+    validationWarnings: string[];
 }
 
 export interface PeriodLockRequestDto {
@@ -631,6 +728,187 @@ export interface PeriodCloseValidationDto {
     };
     blockers: string[];
     warnings: string[];
+}
+
+export interface FinanceCloseTask {
+    id: string;
+    taskCode: string;
+    title: string;
+    category: string;
+    dependsOnTaskCode?: string;
+    checkCode?: string;
+    sequence: number;
+    isMandatory: boolean;
+    isAutomated: boolean;
+    status: 'Pending' | 'Completed' | 'Blocked';
+    assignedToUserId?: string;
+    assignedToUserName?: string;
+    dueAt?: string;
+    isOverdue: boolean;
+    completedAt?: string;
+    completedByUserName?: string;
+    evidenceSummary?: string;
+    evidenceAttachments: FinanceCloseEvidenceAttachment[];
+}
+
+export type FinanceCloseType = 'MonthEnd' | 'QuarterEnd' | 'YearEnd';
+
+export interface FinanceCloseTemplateTask {
+    id: string;
+    taskCode: string;
+    title: string;
+    category: string;
+    dependsOnTaskCode?: string;
+    checkCode?: string;
+    sequence: number;
+    isMandatory: boolean;
+    isAutomated: boolean;
+    dueDaysAfterPeriodEnd: number;
+    defaultAssigneeUserId?: string;
+    instructions?: string;
+}
+
+export interface FinanceCloseTemplate {
+    id: string;
+    templateCode: string;
+    name: string;
+    closeType: FinanceCloseType;
+    version: number;
+    status: 'Draft' | 'Approved' | 'Superseded';
+    isActive: boolean;
+    isSystemDefault: boolean;
+    description?: string;
+    createdBy?: string;
+    createdAt: string;
+    approvedByUserName?: string;
+    approvedAt?: string;
+    approvalDeclaration?: string;
+    supersededAt?: string;
+    canEdit: boolean;
+    canApprove: boolean;
+    tasks: FinanceCloseTemplateTask[];
+}
+
+export interface SaveFinanceCloseTemplateVersion {
+    templateCode: string;
+    name: string;
+    closeType: FinanceCloseType;
+    description?: string;
+    tasks: Array<Omit<FinanceCloseTemplateTask, 'id'>>;
+}
+
+export interface FinanceCloseCheckSnapshot {
+    id: string;
+    evaluationNumber: number;
+    checkCode: string;
+    title: string;
+    category: string;
+    severity: 'Mandatory' | 'Warning';
+    status: 'Passed' | 'Failed' | 'Warning' | 'NotApplicable' | 'Waived';
+    resultSummary: string;
+    exceptionCount: number;
+    exceptionAmount?: number;
+    evaluatedAt: string;
+    evidenceFingerprint?: string;
+    appliedWaiverId?: string;
+    isWaivable: boolean;
+}
+
+export interface FinanceCloseEvidenceAttachment {
+    id: string;
+    financeCloseTaskId: string;
+    fileUploadRecordId: string;
+    evidenceType: 'SupportingDocument' | 'Reconciliation' | 'ManagementApproval';
+    description?: string;
+    originalFileName: string;
+    contentType?: string;
+    fileSize: number;
+    fileUrl: string;
+    uploadedByUserName?: string;
+    uploadedAt: string;
+}
+
+export interface FinanceCloseExceptionWaiver {
+    id: string;
+    financeCloseTaskId: string;
+    financeCloseCheckSnapshotId: string;
+    financeCloseEvidenceAttachmentId: string;
+    checkCode: string;
+    evidenceFingerprint: string;
+    status: 'Requested' | 'Approved' | 'Rejected';
+    justification: string;
+    requestedByUserId: string;
+    requestedByUserName: string;
+    requestedAt: string;
+    reviewedByUserId?: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewComment?: string;
+    matchesLatestEvidence: boolean;
+}
+
+export interface FinanceCloseAlertDelivery {
+    id: string;
+    financeCloseTaskId?: string;
+    financeCloseExceptionWaiverId?: string;
+    alertType: 'TaskDueSoon' | 'TaskAssignmentRequired' | 'TaskOverdue' | 'TaskOverdueEscalation' |
+        'WaiverReviewRequested' | 'WaiverReviewEscalation' | 'CloseApprovalRequested' | 'CloseApprovalEscalation';
+    recipientUserId: string;
+    recipientUserName: string;
+    status: 'Pending' | 'Delivered' | 'Failed';
+    dueAtUtc: string;
+    deliveredAtUtc?: string;
+    attemptCount: number;
+    lastError?: string;
+}
+
+export interface FinanceCloseCertification {
+    id: string;
+    preparedByUserName?: string;
+    preparedAt?: string;
+    preparerDeclaration?: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewerDeclaration?: string;
+    approvedByUserName?: string;
+    approvedAt?: string;
+    isSuperseded: boolean;
+}
+
+export interface FinanceCloseCycleHistory {
+    cycleId: string;
+    cycleNumber: number;
+    status: string;
+    startedAt: string;
+    preparedAt?: string;
+    closedAt?: string;
+    reopenedAt?: string;
+    reopenReason?: string;
+}
+
+export interface FinanceCloseWorkspace {
+    cycleId: string;
+    fiscalPeriodId: string;
+    periodName: string;
+    cycleNumber: number;
+    templateVersion: number;
+    templateCode: string;
+    closeType: FinanceCloseType;
+    templateName: string;
+    status: 'InProgress' | 'Prepared' | 'Closed' | 'Reopened';
+    evaluationNumber: number;
+    startedAt: string;
+    lastEvaluatedAt?: string;
+    mandatoryBlockerCount: number;
+    warningCount: number;
+    canPrepare: boolean;
+    canApproveAndClose: boolean;
+    tasks: FinanceCloseTask[];
+    checks: FinanceCloseCheckSnapshot[];
+    exceptionWaivers: FinanceCloseExceptionWaiver[];
+    alertDeliveries: FinanceCloseAlertDelivery[];
+    certification?: FinanceCloseCertification;
+    history: FinanceCloseCycleHistory[];
 }
 
 // Account
@@ -693,7 +971,9 @@ export interface AddCurrencyLinkDto {
     revaluationRequired: boolean;
     revaluationFrequency: string;
     transactionRateType: string;
+    transactionQuoteSide?: ExchangeRateQuoteSide;
     revaluationRateType: string;
+    revaluationQuoteSide?: ExchangeRateQuoteSide;
     notes?: string;
 }
 
@@ -811,6 +1091,16 @@ export interface CreateOpeningBalanceLineDto {
     counterpartyType?: string;
     counterpartyId?: string;
     sourceReference?: string;
+    notes?: string;
+}
+
+export interface UpdateCurrencyLinkRatePolicyDto {
+    revaluationRequired: boolean;
+    revaluationFrequency: string;
+    transactionRateType: string;
+    transactionQuoteSide: ExchangeRateQuoteSide;
+    revaluationRateType: string;
+    revaluationQuoteSide: ExchangeRateQuoteSide;
     notes?: string;
 }
 
@@ -989,6 +1279,8 @@ export interface IncomeStatementRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    layoutId?: string;
+    useDefaultLayout?: boolean;
 }
 
 export interface BalanceSheetRequestDto {
@@ -996,6 +1288,8 @@ export interface BalanceSheetRequestDto {
     bookClassification?: string;
     includeAccountDetails?: boolean;
     segmentFilters?: FinanceSegmentFilterDto[];
+    layoutId?: string;
+    useDefaultLayout?: boolean;
 }
 
 export interface CashFlowStatementRequestDto {
@@ -1031,6 +1325,8 @@ export interface IncomeStatementReportDto {
     profitBeforeTax: number;
     taxExpense: number;
     netProfit: number;
+    layoutExecution?: FinancialStatementLayoutExecutionDto | null;
+    presentationWarnings: string[];
 }
 
 export interface IncomeStatementSectionDto {
@@ -1057,6 +1353,8 @@ export interface BalanceSheetReportDto {
     totalLiabilities: number;
     totalEquity: number;
     isBalanced: boolean;
+    layoutExecution?: FinancialStatementLayoutExecutionDto | null;
+    presentationWarnings: string[];
 }
 
 export interface BalanceSheetSectionDto {
@@ -1071,6 +1369,261 @@ export interface BalanceSheetCategoryDto {
     categoryOrder: number;
     lineItems: FinancialStatementLineItemDto[];
     categoryTotal: number;
+}
+
+export type FinancialStatementType = 'BalanceSheet' | 'IncomeStatement';
+export type FinancialStatementLayoutVersionStatus = 'Draft' | 'Published' | 'Retired';
+export type FinancialStatementRowType = 'Header' | 'Account' | 'Formula' | 'Total' | 'Spacer';
+export type FinancialStatementRowMappingType = 'Account' | 'AccountRange' | 'AccountHierarchy';
+
+export interface FinancialStatementLayoutSummaryDto {
+    id: string;
+    code: string;
+    name: string;
+    description?: string;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    isDefault: boolean;
+    isActive: boolean;
+    revision: number;
+    latestVersionNumber: number;
+    publishedVersionNumber?: number;
+}
+
+export interface FinancialStatementLayoutDto extends FinancialStatementLayoutSummaryDto {
+    versions: FinancialStatementLayoutVersionDto[];
+}
+
+export interface FinancialStatementLayoutVersionDto {
+    id: string;
+    financialStatementLayoutId: string;
+    versionNumber: number;
+    status: FinancialStatementLayoutVersionStatus;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    publishedAt?: string;
+    publishedById?: string;
+    publishedByName?: string;
+    notes?: string;
+    revision: number;
+    rows: FinancialStatementRowDto[];
+}
+
+export interface FinancialStatementRowDto {
+    id: string;
+    rowCode: string;
+    parentRowCode?: string;
+    label: string;
+    rowType: FinancialStatementRowType;
+    displayOrder: number;
+    formula?: string;
+    signMultiplier: number;
+    isVisible: boolean;
+    suppressIfZero: boolean;
+    showAccountDetails: boolean;
+    isBold: boolean;
+    isItalic: boolean;
+    isUnderlined: boolean;
+    indentLevel: number;
+    mappings: FinancialStatementRowMappingDto[];
+}
+
+export interface FinancialStatementRowMappingDto {
+    id: string;
+    mappingType: FinancialStatementRowMappingType;
+    accountId?: string;
+    accountNumber?: string;
+    accountName?: string;
+    fromAccountNumber?: string;
+    toAccountNumber?: string;
+}
+
+export interface UpdateFinancialStatementLayoutDto {
+    name: string;
+    description?: string;
+    isDefault: boolean;
+    isActive: boolean;
+    expectedRevision: number;
+}
+
+export interface CreateFinancialStatementLayoutVersionDto {
+    sourceVersionId?: string;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    notes?: string;
+}
+
+export interface PublishFinancialStatementLayoutVersionDto {
+    expectedVersionRevision: number;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+}
+
+export interface FinancialStatementLayoutValidationResultDto {
+    isValid: boolean;
+    issues: FinancialStatementLayoutValidationIssueDto[];
+}
+
+export interface FinancialStatementRowMappingInputDto {
+    mappingType: FinancialStatementRowMappingType;
+    accountId?: string;
+    fromAccountNumber?: string;
+    toAccountNumber?: string;
+}
+
+export interface FinancialStatementRowInputDto {
+    rowCode: string;
+    parentRowCode?: string;
+    label: string;
+    rowType: FinancialStatementRowType;
+    displayOrder: number;
+    formula?: string;
+    signMultiplier: number;
+    isVisible: boolean;
+    suppressIfZero: boolean;
+    showAccountDetails: boolean;
+    isBold: boolean;
+    isItalic: boolean;
+    isUnderlined: boolean;
+    indentLevel: number;
+    mappings: FinancialStatementRowMappingInputDto[];
+}
+
+export interface FinancialStatementLayoutImportDefinitionDto {
+    templateVersion: string;
+    targetLayoutId?: string;
+    targetVersionId?: string;
+    sourceVersionId?: string;
+    expectedTargetVersionRevision?: number;
+    code: string;
+    name: string;
+    description?: string;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    isDefault: boolean;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    notes?: string;
+    rows: FinancialStatementRowInputDto[];
+}
+
+export interface FinancialStatementLayoutImportPreviewDto {
+    definitionHash: string;
+    willCreateLayout: boolean;
+    targetLayoutId?: string;
+    targetVersionId?: string;
+    rowCount: number;
+    mappingCount: number;
+    definition: FinancialStatementLayoutImportDefinitionDto;
+    validation: FinancialStatementLayoutValidationResultDto;
+}
+
+export interface FinancialStatementLayoutImportResultDto {
+    definitionHash: string;
+    createdLayout: boolean;
+    layoutId: string;
+    draftVersionId: string;
+    draftVersionNumber: number;
+    draftVersionRevision: number;
+    layout: FinancialStatementLayoutDto;
+}
+
+export interface LegacyFinancialStatementLayoutMigrationRequestDto {
+    code: string;
+    name: string;
+    description?: string;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    isDefault: boolean;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    notes?: string;
+}
+
+export interface FinancialStatementLayoutAuditEventDto {
+    id: string;
+    eventType: string;
+    username: string;
+    timestamp: string;
+    detailsJson?: string;
+}
+
+export interface FinancialStatementLayoutExecutionDto {
+    layoutId: string;
+    layoutCode: string;
+    layoutName: string;
+    versionId: string;
+    versionNumber: number;
+    versionStatus: FinancialStatementLayoutVersionStatus;
+    statementType: FinancialStatementType;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    companyName: string;
+    currencyCode: string;
+    periodStart?: string;
+    periodEnd: string;
+    generatedAt: string;
+    isPreview: boolean;
+    rows: FinancialStatementLayoutExecutionRowDto[];
+    reconciliation: FinancialStatementLayoutReconciliationDto;
+    warnings: FinancialStatementLayoutValidationIssueDto[];
+}
+
+export interface FinancialStatementLayoutExecutionRowDto {
+    rowId: string;
+    rowCode: string;
+    parentRowCode?: string;
+    label: string;
+    rowType: FinancialStatementRowType;
+    displayOrder: number;
+    sequence: number;
+    formula?: string;
+    amount: number;
+    isDisplayed: boolean;
+    suppressIfZero: boolean;
+    showAccountDetails: boolean;
+    isBold: boolean;
+    isItalic: boolean;
+    isUnderlined: boolean;
+    indentLevel: number;
+    accounts: FinancialStatementLayoutAccountDetailDto[];
+}
+
+export interface FinancialStatementLayoutAccountDetailDto {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    accountType: AccountType;
+    normalBalance: number;
+    presentedAmount: number;
+}
+
+export interface FinancialStatementLayoutReconciliationDto {
+    eligibleAccountCount: number;
+    mappedAccountCount: number;
+    mappedNonZeroAccountCount: number;
+    unmappedAccountCount: number;
+    unmappedNonZeroAccountCount: number;
+    mappedNormalBalance: number;
+    unmappedNormalBalance: number;
+    accountCoveragePercent: number;
+    unmappedAccounts: Array<{
+        accountId: string;
+        accountNumber: string;
+        accountName: string;
+        accountType: AccountType;
+        normalBalance: number;
+    }>;
+}
+
+export interface FinancialStatementLayoutValidationIssueDto {
+    severity: 'Information' | 'Warning' | 'Error';
+    code: string;
+    message: string;
+    rowCode?: string;
 }
 
 export interface CashFlowStatementReportDto {

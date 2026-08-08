@@ -6,6 +6,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -84,6 +85,24 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.UnrealizedFxLossAccountId,
                 settings.RealizedFxGainAccountId,
                 settings.RealizedFxLossAccountId
+            };
+            var beforeFxPolicy = new
+            {
+                settings.DirectionalExchangeRatePolicyEnabled,
+                settings.DefaultTransactionQuoteSide,
+                settings.ArInvoiceQuoteSide,
+                settings.ArSettlementQuoteSide,
+                settings.ApInvoiceQuoteSide,
+                settings.ApSettlementQuoteSide,
+                settings.ClosingQuoteSide,
+                settings.RequireExchangeRateOverrideApproval
+            };
+            var beforeControlPolicy = new
+            {
+                settings.ReversalDatePolicy,
+                settings.MinimumReversalReasonLength,
+                settings.EnforceFinanceAccessScopes,
+                settings.RequireDepreciationBeforePeriodClose
             };
 
             // Check if COA type can be changed
@@ -234,6 +253,124 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.DiscountReceivedAccountId.HasValue) settings.DiscountReceivedAccountId = dto.DiscountReceivedAccountId;
             if (dto.MigrationClearingAccountId.HasValue) settings.MigrationClearingAccountId = dto.MigrationClearingAccountId;
             if (dto.OpeningBalanceAutoRoutingEnabled.HasValue) settings.OpeningBalanceAutoRoutingEnabled = dto.OpeningBalanceAutoRoutingEnabled.Value;
+            if (dto.BankDepositPolicy.HasValue) settings.BankDepositPolicy = dto.BankDepositPolicy.Value;
+            if (dto.RequireBankDepositPrimaryEvidence.HasValue)
+                settings.RequireBankDepositPrimaryEvidence = dto.RequireBankDepositPrimaryEvidence.Value;
+            if (dto.AutoPostBankDepositAfterApproval.HasValue)
+                settings.AutoPostBankDepositAfterApproval = dto.AutoPostBankDepositAfterApproval.Value;
+            if (dto.MaximumDepositDeductionAmount.HasValue)
+            {
+                if (dto.MaximumDepositDeductionAmount.Value < 0m)
+                    throw new InvalidOperationException("Maximum deposit deduction amount cannot be negative.");
+                settings.MaximumDepositDeductionAmount = dto.MaximumDepositDeductionAmount;
+            }
+            if (dto.MaximumDepositDeductionPercentage.HasValue)
+            {
+                if (dto.MaximumDepositDeductionPercentage.Value is < 0m or > 100m)
+                    throw new InvalidOperationException("Maximum deposit deduction percentage must be between 0 and 100.");
+                settings.MaximumDepositDeductionPercentage = dto.MaximumDepositDeductionPercentage;
+            }
+            if (dto.BankStatementMatchDateToleranceDays.HasValue)
+                settings.BankStatementMatchDateToleranceDays = Math.Clamp(dto.BankStatementMatchDateToleranceDays.Value, 0, 30);
+            if (dto.ChequeClearingPeriodDays.HasValue)
+                settings.ChequeClearingPeriodDays = Math.Clamp(dto.ChequeClearingPeriodDays.Value, 0, 90);
+            if (dto.CashTillVarianceApprovalThreshold.HasValue)
+            {
+                if (dto.CashTillVarianceApprovalThreshold.Value < 0m)
+                    throw new InvalidOperationException("Cash-till variance approval threshold cannot be negative.");
+                settings.CashTillVarianceApprovalThreshold = dto.CashTillVarianceApprovalThreshold.Value;
+            }
+            if (dto.RequireIndependentCashTillClosure.HasValue)
+                settings.RequireIndependentCashTillClosure = dto.RequireIndependentCashTillClosure.Value;
+            if (dto.ReturnedChequeBankChargeAccountId.HasValue)
+                settings.ReturnedChequeBankChargeAccountId = dto.ReturnedChequeBankChargeAccountId;
+            if (dto.DefaultReturnedChequeChargeTreatment.HasValue)
+                settings.DefaultReturnedChequeChargeTreatment = dto.DefaultReturnedChequeChargeTreatment.Value;
+            if (dto.DirectionalExchangeRatePolicyEnabled.HasValue)
+                settings.DirectionalExchangeRatePolicyEnabled = dto.DirectionalExchangeRatePolicyEnabled.Value;
+            if (dto.DefaultTransactionQuoteSide != null)
+                settings.DefaultTransactionQuoteSide = ParseQuoteSide(dto.DefaultTransactionQuoteSide);
+            if (dto.ArInvoiceQuoteSide != null)
+                settings.ArInvoiceQuoteSide = ParseQuoteSide(dto.ArInvoiceQuoteSide);
+            if (dto.ArSettlementQuoteSide != null)
+                settings.ArSettlementQuoteSide = ParseQuoteSide(dto.ArSettlementQuoteSide);
+            if (dto.ApInvoiceQuoteSide != null)
+                settings.ApInvoiceQuoteSide = ParseQuoteSide(dto.ApInvoiceQuoteSide);
+            if (dto.ApSettlementQuoteSide != null)
+                settings.ApSettlementQuoteSide = ParseQuoteSide(dto.ApSettlementQuoteSide);
+            if (dto.ClosingQuoteSide != null)
+                settings.ClosingQuoteSide = ParseQuoteSide(dto.ClosingQuoteSide);
+            if (dto.RequireExchangeRateOverrideApproval.HasValue)
+            {
+                if (!dto.RequireExchangeRateOverrideApproval.Value)
+                    throw new InvalidOperationException("Exchange-rate policy overrides must retain approval and reason controls.");
+                settings.RequireExchangeRateOverrideApproval = true;
+            }
+
+            if (dto.ReversalDatePolicy.HasValue)
+            {
+                if (!Enum.IsDefined(dto.ReversalDatePolicy.Value))
+                    throw new InvalidOperationException("A valid Finance reversal-date policy is required.");
+                settings.ReversalDatePolicy = dto.ReversalDatePolicy.Value;
+            }
+
+            if (dto.MinimumReversalReasonLength.HasValue)
+            {
+                if (dto.MinimumReversalReasonLength.Value is < 10 or > 500)
+                {
+                    throw new InvalidOperationException(
+                        "Minimum Finance reversal reason length must be between 10 and 500 characters.");
+                }
+                settings.MinimumReversalReasonLength = dto.MinimumReversalReasonLength.Value;
+            }
+
+            if (dto.EnforceFinanceAccessScopes.HasValue)
+            {
+                if (dto.EnforceFinanceAccessScopes.Value && !settings.EnforceFinanceAccessScopes)
+                {
+                    // Enabling fail-closed data scopes before grants exist would lock every
+                    // non-administrator out of Finance. Require deliberate scope preparation first.
+                    var now = DateTime.UtcNow;
+                    var preparedGrantExists = await _context.Set<FinanceAccessScopeGrant>().AnyAsync(item =>
+                        item.TenantId == tenantId &&
+                        item.IsActive &&
+                        !item.IsDeleted &&
+                        item.EffectiveFrom <= now &&
+                        (!item.EffectiveTo.HasValue || item.EffectiveTo >= now) &&
+                        (item.ScopeType == FinanceAccessScopeType.Tenant ||
+                         (item.ScopeType == FinanceAccessScopeType.BankAccount && item.ScopeValue != null)));
+                    if (!preparedGrantExists)
+                    {
+                        throw new InvalidOperationException(
+                            "Create and review at least one active Finance access-scope grant before enabling enforcement.");
+                    }
+                }
+                settings.EnforceFinanceAccessScopes = dto.EnforceFinanceAccessScopes.Value;
+            }
+
+            if (dto.RequireDepreciationBeforePeriodClose.HasValue)
+            {
+                // TDC's default remains mandatory. The explicit setting is retained because
+                // FIN-LIM-0034 calls for a configurable close blocker, not an unchangeable flag.
+                // Every change is included in the Finance control-policy audit below.
+                settings.RequireDepreciationBeforePeriodClose = dto.RequireDepreciationBeforePeriodClose.Value;
+            }
+
+            // Procurement invoice matching consumes the same tenant Finance policy row. Keeping
+            // these bounds in this service prevents report/UI integration from bypassing the
+            // authoritative validation used by invoice readiness controls.
+            if (dto.ApInvoicePriceTolerancePercent.HasValue)
+            {
+                if (dto.ApInvoicePriceTolerancePercent.Value is < 0 or > 100)
+                    throw new InvalidOperationException("AP invoice price tolerance must be between 0 and 100 percent.");
+                settings.ApInvoicePriceTolerancePercent = dto.ApInvoicePriceTolerancePercent.Value;
+            }
+            if (dto.ApInvoiceQuantityTolerancePercent.HasValue)
+            {
+                if (dto.ApInvoiceQuantityTolerancePercent.Value is < 0 or > 100)
+                    throw new InvalidOperationException("AP invoice quantity tolerance must be between 0 and 100 percent.");
+                settings.ApInvoiceQuantityTolerancePercent = dto.ApInvoiceQuantityTolerancePercent.Value;
+            }
 
             await _context.SaveChangesAsync();
 
@@ -256,6 +393,46 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     settings,
                     beforeValues: beforeFxMappings,
                     afterValues: afterFxMappings);
+            }
+
+            var afterFxPolicy = new
+            {
+                settings.DirectionalExchangeRatePolicyEnabled,
+                settings.DefaultTransactionQuoteSide,
+                settings.ArInvoiceQuoteSide,
+                settings.ArSettlementQuoteSide,
+                settings.ApInvoiceQuoteSide,
+                settings.ApSettlementQuoteSide,
+                settings.ClosingQuoteSide,
+                settings.RequireExchangeRateOverrideApproval
+            };
+
+            if (!Equals(beforeFxPolicy, afterFxPolicy))
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.ExchangeRatePolicyChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforeFxPolicy,
+                    afterValues: afterFxPolicy);
+            }
+
+            var afterControlPolicy = new
+            {
+                settings.ReversalDatePolicy,
+                settings.MinimumReversalReasonLength,
+                settings.EnforceFinanceAccessScopes,
+                settings.RequireDepreciationBeforePeriodClose
+            };
+
+            if (!Equals(beforeControlPolicy, afterControlPolicy))
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.FinanceControlPolicyChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforeControlPolicy,
+                    afterValues: afterControlPolicy);
             }
 
             var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
@@ -334,6 +511,14 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 : currencyCode.Trim().ToUpperInvariant();
         }
 
+        private static ExchangeRateQuoteSide ParseQuoteSide(string value)
+        {
+            if (!Enum.TryParse<ExchangeRateQuoteSide>(value.Trim(), ignoreCase: true, out var quoteSide))
+                throw new InvalidOperationException("Exchange-rate quote side must be Mid, Buying, or Selling.");
+
+            return quoteSide;
+        }
+
         private static FinanceSettingsDto MapToDto(FinanceSettings settings, BaseCurrencyReferenceDto baseCurrency, bool transactionsExist)
         {
             return new FinanceSettingsDto
@@ -370,6 +555,31 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
                 MigrationClearingAccountId = settings.MigrationClearingAccountId,
                 OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
+                BankDepositPolicy = settings.BankDepositPolicy,
+                RequireBankDepositPrimaryEvidence = settings.RequireBankDepositPrimaryEvidence,
+                AutoPostBankDepositAfterApproval = settings.AutoPostBankDepositAfterApproval,
+                MaximumDepositDeductionAmount = settings.MaximumDepositDeductionAmount,
+                MaximumDepositDeductionPercentage = settings.MaximumDepositDeductionPercentage,
+                BankStatementMatchDateToleranceDays = settings.BankStatementMatchDateToleranceDays,
+                ChequeClearingPeriodDays = settings.ChequeClearingPeriodDays,
+                CashTillVarianceApprovalThreshold = settings.CashTillVarianceApprovalThreshold,
+                RequireIndependentCashTillClosure = settings.RequireIndependentCashTillClosure,
+                ReturnedChequeBankChargeAccountId = settings.ReturnedChequeBankChargeAccountId,
+                DefaultReturnedChequeChargeTreatment = settings.DefaultReturnedChequeChargeTreatment,
+                DirectionalExchangeRatePolicyEnabled = settings.DirectionalExchangeRatePolicyEnabled,
+                DefaultTransactionQuoteSide = settings.DefaultTransactionQuoteSide.ToString(),
+                ArInvoiceQuoteSide = settings.ArInvoiceQuoteSide.ToString(),
+                ArSettlementQuoteSide = settings.ArSettlementQuoteSide.ToString(),
+                ApInvoiceQuoteSide = settings.ApInvoiceQuoteSide.ToString(),
+                ApSettlementQuoteSide = settings.ApSettlementQuoteSide.ToString(),
+                ClosingQuoteSide = settings.ClosingQuoteSide.ToString(),
+                RequireExchangeRateOverrideApproval = settings.RequireExchangeRateOverrideApproval,
+                ReversalDatePolicy = settings.ReversalDatePolicy,
+                MinimumReversalReasonLength = settings.MinimumReversalReasonLength,
+                EnforceFinanceAccessScopes = settings.EnforceFinanceAccessScopes,
+                RequireDepreciationBeforePeriodClose = settings.RequireDepreciationBeforePeriodClose,
+                ApInvoicePriceTolerancePercent = settings.ApInvoicePriceTolerancePercent,
+                ApInvoiceQuantityTolerancePercent = settings.ApInvoiceQuantityTolerancePercent,
                 TransactionsExist = transactionsExist
             };
         }

@@ -14,7 +14,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
-    "test:e2e": "echo \"No E2E tests specified\" && exit 0",
+    "test:e2e": "npm --prefix ../e2e-tests run test",
+    "test:e2e:journal-batches": "npm --prefix ../e2e-tests run test:journal-batches",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

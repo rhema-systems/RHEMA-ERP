@@ -16,6 +16,8 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
     {
         "JournalEntry",
         "Journal Entry",
+        "JournalBatch",
+        "Journal Batch",
         "FinancePurchaseOrder",
         "Finance Purchase Order",
         "FinancePurchaseOrderReceipt",
@@ -45,6 +47,10 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
         "Bank Transaction",
         "BankReconciliation",
         "Bank Reconciliation",
+        "BankDepositBatch",
+        "Bank Deposit",
+        "ReturnedChequeCase",
+        "Returned Cheque",
         "OpeningBalanceBatch",
         "Opening Balance Batch",
         "FixedAsset",
@@ -85,6 +91,9 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
             case JournalEntry journal:
                 ApplyJournalEntry(journal, outcome, userId, rejectionReason);
                 return;
+            case JournalBatch journalBatch:
+                ApplyJournalBatch(journalBatch, outcome, userId, rejectionReason);
+                return;
             case FinancePurchaseOrder purchaseOrder:
                 SetScalarStatus(purchaseOrder, "Status", outcome, FinancePoDraft, FinancePoPendingApproval, FinancePoApproved, FinancePoRejected);
                 StampWorkflowAudit(purchaseOrder, outcome, userId, rejectionReason);
@@ -115,11 +124,16 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
                 StampWorkflowAudit(customerPayment, outcome, userId, rejectionReason);
                 return;
             case BudgetScenario scenario:
-                SetTextStatus(scenario, "Status", outcome, "Draft", "PendingApproval", "Locked", "Rejected");
+                SetTextStatus(scenario, "Status", outcome, "Collecting", "InReview", "Approved", "Collecting");
                 if (outcome == WorkflowOutcome.Approved)
                 {
                     scenario.LockedDate = DateTime.UtcNow;
                     scenario.LockedByUserId = userId;
+                }
+                else
+                {
+                    scenario.LockedDate = null;
+                    scenario.LockedByUserId = null;
                 }
                 StampWorkflowAudit(scenario, outcome, userId, rejectionReason);
                 return;
@@ -147,6 +161,28 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
             case BankReconciliation reconciliation:
                 SetScalarStatus(reconciliation, "Status", outcome, ReconciliationStatus.InProgress, ReconciliationStatus.Completed, ReconciliationStatus.Approved, ReconciliationStatus.Rejected);
                 StampWorkflowAudit(reconciliation, outcome, userId, rejectionReason);
+                return;
+            case BankDepositBatch deposit:
+                SetScalarStatus(
+                    deposit,
+                    "Status",
+                    outcome,
+                    BankDepositStatus.Draft,
+                    BankDepositStatus.Submitted,
+                    BankDepositStatus.Approved,
+                    BankDepositStatus.Rejected);
+                StampWorkflowAudit(deposit, outcome, userId, rejectionReason);
+                return;
+            case ReturnedChequeCase returnedCheque:
+                SetScalarStatus(
+                    returnedCheque,
+                    "Status",
+                    outcome,
+                    ReturnedChequeCaseStatus.Draft,
+                    ReturnedChequeCaseStatus.Submitted,
+                    ReturnedChequeCaseStatus.Approved,
+                    ReturnedChequeCaseStatus.Rejected);
+                StampWorkflowAudit(returnedCheque, outcome, userId, rejectionReason);
                 return;
             case OpeningBalanceBatch openingBalance:
                 SetTextStatus(openingBalance, "Status", outcome, "Draft", "PendingApproval", "Approved", "Rejected");
@@ -228,6 +264,37 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
         }
 
         StampWorkflowAudit(journal, outcome, userId, rejectionReason);
+    }
+
+    private static void ApplyJournalBatch(JournalBatch batch, WorkflowOutcome outcome, Guid? userId, string? rejectionReason)
+    {
+        batch.ApprovalStatus = outcome switch
+        {
+            WorkflowOutcome.Approved => JournalBatchApprovalStatus.Approved,
+            WorkflowOutcome.Rejected => JournalBatchApprovalStatus.Rejected,
+            WorkflowOutcome.Recalled => JournalBatchApprovalStatus.Draft,
+            _ => JournalBatchApprovalStatus.PendingApproval
+        };
+
+        if (outcome == WorkflowOutcome.Approved)
+        {
+            batch.ApprovedAt = DateTime.UtcNow;
+            batch.ApprovedByUserId = userId;
+        }
+        else
+        {
+            batch.ApprovedAt = null;
+            batch.ApprovedByUserId = null;
+        }
+
+        if (outcome == WorkflowOutcome.Recalled)
+        {
+            batch.WorkflowInstanceId = null;
+            batch.SubmittedAt = null;
+            batch.SubmittedByUserId = null;
+        }
+
+        StampWorkflowAudit(batch, outcome, userId, rejectionReason);
     }
 
     private static void SetTextStatus(object entity, string propertyName, WorkflowOutcome outcome, string draft, string pending, string approved, string rejected)

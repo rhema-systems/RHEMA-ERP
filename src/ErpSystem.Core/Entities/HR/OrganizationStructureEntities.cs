@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR.StaffAttendance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR;
 
@@ -160,6 +162,8 @@ public class OrganizationUnit : TenantEntity
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
 
     public virtual ICollection<EmployeePosition> Positions { get; set; } = new List<EmployeePosition>();
+
+    public virtual ICollection<Team> Teams { get; set; } = new List<Team>();
 }
 
 /// <summary>
@@ -186,6 +190,186 @@ public class OrganizationUnitHistory : TenantEntity
     
     [ForeignKey(nameof(OrganizationUnitId))]
     public virtual OrganizationUnit OrganizationUnit { get; set; } = null!;
+}
+
+#endregion
+
+#region Teams
+
+/// <summary>
+/// Operational working group within or across the organization.
+/// Distinct from <see cref="OrganizationUnit"/>, which represents the formal hierarchy.
+/// </summary>
+public class Team : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public TeamType TeamType { get; set; } = TeamType.Permanent;
+
+    public TeamStatus Status { get; set; } = TeamStatus.Active;
+
+    /// <summary>
+    /// Primary sponsoring / owning org unit. Nullable for cross-functional teams.
+    /// </summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    /// <summary>
+    /// Team lead / manager (not necessarily the org-unit head).
+    /// </summary>
+    public Guid? TeamLeadId { get; set; }
+
+    /// <summary>
+    /// Optional parent for sub-teams (e.g. "Engineering" → "Platform Squad").
+    /// </summary>
+    public Guid? ParentTeamId { get; set; }
+
+    /// <summary>
+    /// Primary work location for the team, when relevant.
+    /// </summary>
+    public Guid? LocationId { get; set; }
+
+    /// <summary>
+    /// Default shift for shift-based teams.
+    /// </summary>
+    public Guid? ShiftId { get; set; }
+
+    [MaxLength(100)]
+    public string? CostCenterCode { get; set; }
+
+    /// <summary>
+    /// External reference for project teams (e.g. project code).
+    /// </summary>
+    [MaxLength(50)]
+    public string? ProjectCode { get; set; }
+
+    [MaxLength(200)]
+    [EmailAddress]
+    public string? TeamEmail { get; set; }
+
+    public DateOnly EffectiveFrom { get; set; }
+
+    /// <summary>
+    /// Null = open-ended (typical for permanent teams).
+    /// </summary>
+    public DateOnly? EffectiveTo { get; set; }
+
+    /// <summary>
+    /// Optional soft cap on membership.
+    /// </summary>
+    [Range(1, 10000)]
+    public int? MaxMembers { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int Sequence { get; set; } = 1;
+
+    public bool IsActive { get; set; } = true;
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    [NotMapped]
+    public int MemberCount { get; set; }
+
+    // Navigation
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    [ForeignKey(nameof(TeamLeadId))]
+    public virtual Employee? TeamLead { get; set; }
+
+    [ForeignKey(nameof(ParentTeamId))]
+    public virtual Team? ParentTeam { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    [ForeignKey(nameof(ShiftId))]
+    public virtual ShiftDefinition? Shift { get; set; }
+
+    public virtual ICollection<Team> ChildTeams { get; set; } = new List<Team>();
+    public virtual ICollection<TeamMember> Members { get; set; } = new List<TeamMember>();
+}
+
+/// <summary>
+/// Links an employee to a team with role, allocation, and effective dates.
+/// </summary>
+public class TeamMember : TenantEntity
+{
+    [Required]
+    public Guid TeamId { get; set; }
+
+    [Required]
+    public Guid EmployeeId { get; set; }
+
+    public TeamMemberRole Role { get; set; } = TeamMemberRole.Member;
+
+    /// <summary>
+    /// For matrix organizations: % of time allocated to this team (0–100).
+    /// </summary>
+    [Column(TypeName = "decimal(5,2)")]
+    [Range(0, 100)]
+    public decimal AllocationPercent { get; set; } = 100m;
+
+    /// <summary>
+    /// Marks the employee's primary team when they belong to several.
+    /// </summary>
+    public bool IsPrimary { get; set; }
+
+    public DateOnly JoinDate { get; set; }
+
+    /// <summary>
+    /// Null = still an active member.
+    /// </summary>
+    public DateOnly? LeaveDate { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    // Navigation
+    [ForeignKey(nameof(TeamId))]
+    public virtual Team Team { get; set; } = null!;
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+}
+
+/// <summary>
+/// Audit trail for team membership changes.
+/// </summary>
+public class TeamMemberHistory : TenantEntity
+{
+    [Required]
+    public Guid TeamId { get; set; }
+
+    [Required]
+    public Guid EmployeeId { get; set; }
+
+    public TeamMemberRole PreviousRole { get; set; }
+
+    public TeamMemberRole NewRole { get; set; }
+
+    public DateOnly EffectiveFrom { get; set; }
+
+    public DateOnly? EffectiveTo { get; set; }
+
+    [MaxLength(500)]
+    public string? ChangeReason { get; set; }
+
+    [ForeignKey(nameof(TeamId))]
+    public virtual Team Team { get; set; } = null!;
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
 }
 
 #endregion
@@ -321,6 +505,14 @@ public class Location : TenantEntity
     
     [MaxLength(500)]
     public string? AddressLine2 { get; set; }
+
+	/// <summary>Building or campus name.</summary>
+	[MaxLength(200)]
+	public string? Building { get; set; }
+
+	/// <summary>Floor or level within the building.</summary>
+	[MaxLength(50)]
+	public string? Floor { get; set; }
     
     [MaxLength(100)]
     public string? City { get; set; }
@@ -332,6 +524,15 @@ public class Location : TenantEntity
     
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
+	/// <summary>Centre latitude of this station (for map display / geofence anchoring).</summary>
+	public double? Latitude { get; set; }
+
+	/// <summary>Centre longitude of this station.</summary>
+	public double? Longitude { get; set; }
+
+	/// <summary>FK to the geofence zone that governs valid clock-in range for this station.</summary>
+	public Guid? GeofenceZoneId { get; set; }
     
     // Contact Information
     [MaxLength(50)]
@@ -348,9 +549,13 @@ public class Location : TenantEntity
 
     public int Sequence { get; set; } = 1;
 
+    [MaxLength(1000)]
     public string Path { get; set; } = string.Empty;
     
     public bool IsActive { get; set; } = true;
+
+    [MaxLength(1000)]
+	public string? Notes { get; set; }
     
     // Navigation Properties
     [ForeignKey(nameof(StructureId))]
@@ -364,10 +569,15 @@ public class Location : TenantEntity
     
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
+
+    [ForeignKey(nameof(GeofenceZoneId))]
+    public virtual GeofenceZone? GeofenceZone { get; set; }
     
     public virtual ICollection<Location> ChildLocations { get; set; } = new List<Location>();
     public virtual ICollection<LocationContact> LocationContacts { get; set; } = new List<LocationContact>();
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
+	public virtual ICollection<StaffAttendanceDevice> Devices { get; set; } = new List<StaffAttendanceDevice>();
+	public virtual ICollection<StaffDailyAttendance> AttendanceDays { get; set; } = new List<StaffDailyAttendance>();
 }
 
 /// <summary>

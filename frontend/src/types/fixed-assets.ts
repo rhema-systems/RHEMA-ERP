@@ -20,7 +20,11 @@ export type FixedAssetStatus =
   | 'HeldForSale'
   | 'WrittenOff'
   | 'UnderConstruction'
-  | 'OnHold';
+  | 'OnHold'
+  | 'Acquired'
+  | 'Capitalized'
+  | 'PendingApproval'
+  | 'Rejected';
 
 export interface FixedAssetCategory {
   id: string;
@@ -69,6 +73,7 @@ export interface FixedAsset {
   fixedAssetCategoryName?: string;
   purchaseDate: string;
   placedInServiceDate?: string;
+  capitalizationDate?: string;
   purchasePrice: number;
   installationCost: number;
   taxAmount: number;
@@ -80,6 +85,18 @@ export interface FixedAsset {
   residualValue: number;
   status: FixedAssetStatus;
   disposalDate?: string;
+  functionalCurrencyCode: string;
+  transactionCurrencyCode?: string;
+  sourceDocumentType?: string;
+  sourceDocumentId?: string;
+  sourceDocumentLineId?: string;
+  journalEntryId?: string;
+  postingEventId?: string;
+  capitalizedAt?: string;
+  capitalizationReversalJournalEntryId?: string;
+  capitalizationReversalPostingEventId?: string;
+  capitalizationReversedAt?: string;
+  capitalizationReversalReason?: string;
   maintenanceAssetId?: string;
   serialNumber?: string;
   createdAt: string;
@@ -110,6 +127,62 @@ export interface FixedAssetBookValue {
   openingPostedToGl: boolean;
   openingPostedDate?: string;
   openingSource: string;
+  capitalizationDate?: string;
+  capitalizationJournalEntryId?: string;
+  capitalizationPostingEventId?: string;
+  capitalizationReversalJournalEntryId?: string;
+  capitalizationReversalPostingEventId?: string;
+  capitalizationReversedAt?: string;
+  sourceDocumentType?: string;
+  sourceDocumentId?: string;
+  sourceDocumentLineId?: string;
+}
+
+export type FixedAssetCapitalizationReversalStatus =
+  | 'PendingApproval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Posted'
+  | 'Failed';
+
+/**
+ * Immutable maker-checker evidence for FR-GL-008/FR-GL-010. The original and
+ * reversal posting IDs let the workspace show the exact ledger lineage instead
+ * of presenting a destructive "undo" action.
+ */
+export interface FixedAssetCapitalizationReversal {
+  id: string;
+  fixedAssetId: string;
+  assetCode: string;
+  assetName: string;
+  originalPostingEventId: string;
+  originalJournalEntryId: string;
+  reversalPostingEventId?: string;
+  reversalJournalEntryId?: string;
+  status: FixedAssetCapitalizationReversalStatus;
+  reason: string;
+  impactAssessment: string;
+  requestedReversalDate: string;
+  requestedByUserId: string;
+  requestedByUserName: string;
+  requestedAt: string;
+  reviewedByUserId?: string;
+  reviewedByUserName?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  postedAt?: string;
+  failureReason?: string;
+}
+
+export interface RequestFixedAssetCapitalizationReversalDto {
+  reversalDate: string;
+  reason: string;
+  impactAssessment: string;
+}
+
+export interface ReviewFixedAssetCapitalizationReversalDto {
+  approved: boolean;
+  reviewComment: string;
 }
 
 export interface CreateFixedAssetDto {

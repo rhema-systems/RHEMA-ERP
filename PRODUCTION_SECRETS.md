@@ -93,6 +93,7 @@ builder.Configuration.AddAzureKeyVault(
 2. Add secrets:
    - `ConnectionStrings--DefaultConnection`
    - `JwtSettings--SecretKey`
+   - `JwtSettings--PortalSecretKey`  (external-portal token key — REQUIRED, MUST differ from `JwtSettings--SecretKey`)
    - `Security--EncryptionKey`
 3. Grant your app's managed identity access
 
@@ -119,7 +120,11 @@ builder.Configuration.AddGoogleSecretManager();
   "JwtSettings": {
     "Issuer": "ErpSystem.Api",
     "Audience": "ErpSystem.Client",
-    "ExpiryInHours": 1
+    "ExpiryInHours": 1,
+    "PortalAudience": "ErpSystem.Portal"
+  },
+  "CandidatePortal": {
+    "PortalUrl": "https://portal.example.com"
   },
   "Security": {
     "EnableHsts": true,

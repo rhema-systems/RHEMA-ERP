@@ -3,7 +3,6 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   BadgeCheck,
@@ -170,7 +169,6 @@ function DetailRow({
 }
 
 export default function EstateLandManagementPage() {
-  const router = useRouter();
   const { hasAnyRole, hasPermission } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
   const canMarkProjectReady = hasPermission('estate.land.project-readiness');
@@ -191,9 +189,6 @@ export default function EstateLandManagementPage() {
   const [gisLinkAsset, setGisLinkAsset] =
     React.useState<EstateManagedAsset | null>(null);
   const [markingReadyKey, setMarkingReadyKey] = React.useState<string | null>(
-    null
-  );
-  const [sendingListingId, setSendingListingId] = React.useState<string | null>(
     null
   );
 
@@ -333,35 +328,6 @@ export default function EstateLandManagementPage() {
     selectedAsset?.externalListingType !== 'None'
       ? 'View Portal Listing'
       : 'Send to Portal Listings';
-
-  const sendLandToPortalListings = async (asset: EstateManagedAsset) => {
-    try {
-      setSendingListingId(asset.id);
-      if (asset.externalListingType === 'None') {
-        await estateLandManagementService.updateExternalListing(asset.id, {
-          isPublishedToExternalPortal: false,
-          externalListingType: 'Sale',
-          externalListingStatus: 'Draft',
-          externalListingPrice: null,
-          externalSalePrice: null,
-          externalMonthlyRent: null,
-          externalLeaseTermMonths: null,
-          externalListingCurrency: asset.currency || 'GHS',
-          externalListingNotes: null,
-        });
-        toast.success(
-          'Land sent to Portal Listings for commercial setup and publication.'
-        );
-      }
-      router.push(
-        `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}&listingType=Sale`
-      );
-    } catch (error: any) {
-      toast.error(error?.message || 'Unable to send land to Portal Listings.');
-    } finally {
-      setSendingListingId(null);
-    }
-  };
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
@@ -718,19 +684,13 @@ export default function EstateLandManagementPage() {
                       {saleListingLabel}
                     </Button>
                   ) : (
-                    <Button
-                      variant="outline"
-                      disabled={sendingListingId === selected.asset.id}
-                      onClick={() =>
-                        void sendLandToPortalListings(selected.asset)
-                      }
-                    >
-                      {sendingListingId === selected.asset.id ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
+                    <Button asChild variant="outline">
+                      <Link
+                        href={`/estate/property-management/listings?assetId=${encodeURIComponent(selected.asset.id)}&listingType=Sale`}
+                      >
                         <Globe2 className="mr-2 h-4 w-4" />
-                      )}
-                      {saleListingLabel}
+                        {saleListingLabel}
+                      </Link>
                     </Button>
                   )}
                   {selected.asset.isReadyForProjectManagement ? (
@@ -745,6 +705,7 @@ export default function EstateLandManagementPage() {
                       variant="outline"
                       disabled={
                         !canMarkProjectReady ||
+                        selected.asset.isPublishedToExternalPortal ||
                         selected.asset.externalListingType !== 'None' ||
                         !selected.asset.boundaryVerified ||
                         selected.asset.demarcationCount === 0 ||
@@ -756,8 +717,9 @@ export default function EstateLandManagementPage() {
                       title={
                         !canMarkProjectReady
                           ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
-                          : selected.asset.externalListingType !== 'None'
-                            ? 'Remove the land from Portal Listings before marking it ready for a project.'
+                          : selected.asset.isPublishedToExternalPortal ||
+                              selected.asset.externalListingType !== 'None'
+                            ? 'Withdraw the active external land listing before marking this land ready for a project.'
                             : !selected.asset.boundaryVerified
                               ? 'Verify the main cadastral boundary first.'
                               : selected.asset.demarcationCount === 0

@@ -19,6 +19,15 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TotalAssets { get; set; }
         public decimal TotalLiabilities { get; set; }
         public decimal TotalEquity { get; set; }
+
+        /// <summary>
+        /// Populated when the report was presented through a published financial
+        /// statement layout. Legacy sections and totals remain populated for
+        /// backwards compatibility and reconciliation.
+        /// </summary>
+        public FinancialStatementLayoutExecutionDto? LayoutExecution { get; set; }
+
+        public List<string> PresentationWarnings { get; set; } = new();
         
         // Validation
         public bool IsBalanced => Math.Abs(TotalAssets - (TotalLiabilities + TotalEquity)) < 0.01m;
@@ -69,5 +78,13 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool IncludeAccountDetails { get; set; } = false;
         public List<Guid> AccountIds { get; set; } = new();
         public List<FinanceSegmentFilterDto> SegmentFilters { get; set; } = new();
+        public Guid? LayoutId { get; set; }
+
+        /// <summary>
+        /// When no layout id is supplied, use the active default layout when one
+        /// has an effective published version. If unavailable, the legacy
+        /// account-classification presentation is returned.
+        /// </summary>
+        public bool UseDefaultLayout { get; set; } = true;
     }
 }

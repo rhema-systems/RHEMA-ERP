@@ -226,6 +226,8 @@ export function WorkflowInstanceMonitor({
   const entityRouteMap: Record<string, (id: string) => string> = {
     journalentry: (id) => `/finance/journal-entries/${id}`,
     journalentries: (id) => `/finance/journal-entries/${id}`,
+    journalbatch: (id) => `/finance/journal-batches/${id}`,
+    journalbatches: (id) => `/finance/journal-batches/${id}`,
     jobcard: (id) => `/maintenance/job-cards?id=${id}`,
     workorder: (id) => `/maintenance/work-orders?id=${id}`,
     asset: (id) => `/maintenance/assets?id=${id}`,

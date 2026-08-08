@@ -204,7 +204,13 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
 
         var settings = await _context.FinanceSettings
             .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken);
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted)
+            .Select(s => new
+            {
+                s.ControlAccountApId,
+                s.ControlAccountArId
+            })
+            .FirstOrDefaultAsync(cancellationToken);
 
         var controlAccountId = module == SubledgerSettlementModules.AccountsPayable
             ? settings?.ControlAccountApId
@@ -330,6 +336,8 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
                 invoiceIds.Contains(a.VendorInvoiceId) &&
                 !a.IsDeleted &&
                 !a.IsReversal &&
+                a.VendorPayment.Status != VendorPaymentStatus.Voided &&
+                a.VendorPayment.Status != VendorPaymentStatus.Failed &&
                 a.AllocationDate.Date <= asOfDate.Date)
             .ToListAsync(cancellationToken);
 

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Documents;
 using QuestPDF.Fluent;
@@ -61,6 +62,12 @@ public abstract class FinanceReportDocumentBuilderBase : IDocumentBuilder
 
     protected bool BoolOption(DocumentRenderRequestDto request, string key, bool fallback)
         => bool.TryParse(Option(request, key), out var value) ? value : fallback;
+
+    protected Guid? GuidOption(DocumentRenderRequestDto request, string key)
+        => Guid.TryParse(Option(request, key), out var value) &&
+           value != Guid.Empty
+            ? value
+            : null;
 
     protected List<FinanceSegmentFilterDto> SegmentFiltersOption(DocumentRenderRequestDto request)
     {
@@ -141,6 +148,31 @@ public abstract class FinanceReportDocumentBuilderBase : IDocumentBuilder
     protected static FinanceReportLine Line(string label, string? detail, decimal amount, int level = 0, bool isTotal = false)
         => new(label, detail, amount, level, isTotal);
 
+    protected static FinanceReportLine LayoutLine(
+        FinancialStatementLayoutExecutionRowDto row)
+    {
+        var accountNumbers = row.Accounts
+            .Select(account => account.AccountNumber)
+            .Where(accountNumber => !string.IsNullOrWhiteSpace(accountNumber))
+            .ToList();
+        var detail = accountNumbers.Count == 0
+            ? row.RowCode
+            : $"{row.RowCode} | {string.Join(", ", accountNumbers)}";
+        var showAmount = row.RowType is not FinancialStatementRowType.Header
+            and not FinancialStatementRowType.Spacer;
+        var isTotal = row.RowType is FinancialStatementRowType.Header
+            or FinancialStatementRowType.Formula
+            or FinancialStatementRowType.Total;
+
+        return new FinanceReportLine(
+            row.RowType == FinancialStatementRowType.Spacer ? " " : row.Label,
+            row.RowType == FinancialStatementRowType.Spacer ? null : detail,
+            row.Amount,
+            row.IndentLevel,
+            isTotal,
+            showAmount);
+    }
+
     protected FinanceReportDocumentModel Model(string companyName, string title, string subtitle, string currency, IReadOnlyList<FinanceReportSection> sections, IReadOnlyList<FinanceReportSummary> summaries)
         => new(
             string.IsNullOrWhiteSpace(companyName) ? "ERP System" : companyName,
@@ -216,7 +248,10 @@ public abstract class FinanceReportDocumentBuilderBase : IDocumentBuilder
                         table.Cell().Element(cell => BodyCell(cell, line.IsTotal)).Text(line.Detail ?? "-");
                         table.Cell().Element(cell => BodyCell(cell, line.IsTotal)).AlignRight().Text(text =>
                         {
-                            var span = text.Span(Money(line.Amount, report.Currency));
+                            var span = text.Span(
+                                line.ShowAmount
+                                    ? Money(line.Amount, report.Currency)
+                                    : string.Empty);
                             if (line.IsTotal)
                             {
                                 span.SemiBold();
@@ -338,17 +373,30 @@ public sealed class IncomeStatementDocumentBuilder : FinanceReportDocumentBuilde
             PeriodEnd = DateOption(request, "periodEnd", DateTime.UtcNow),
             BookClassification = Option(request, "bookClassification") ?? "IFRS",
             IncludeAccountDetails = BoolOption(request, "includeAccountDetails", true),
-            SegmentFilters = segmentFilters
+            SegmentFilters = segmentFilters,
+            LayoutId = GuidOption(request, "layoutId"),
+            UseDefaultLayout = BoolOption(request, "useDefaultLayout", true)
         });
 
-        var sections = report.Sections
-            .OrderBy(section => section.SectionOrder)
-            .Select(section => new FinanceReportSection(section.SectionName, section.LineItems
-                .OrderBy(line => line.LineOrder)
-                .Select(line => Line(line.LineItemName, line.AccountNumbers == null ? null : string.Join(", ", line.AccountNumbers), line.Amount, 1))
-                .Append(Line($"Total {section.SectionName}", section.SectionTotal, 0, true))
-                .ToList()))
-            .ToList();
+        var sections = report.LayoutExecution == null
+            ? report.Sections
+                .OrderBy(section => section.SectionOrder)
+                .Select(section => new FinanceReportSection(section.SectionName, section.LineItems
+                    .OrderBy(line => line.LineOrder)
+                    .Select(line => Line(line.LineItemName, line.AccountNumbers == null ? null : string.Join(", ", line.AccountNumbers), line.Amount, 1))
+                    .Append(Line($"Total {section.SectionName}", section.SectionTotal, 0, true))
+                    .ToList()))
+                .ToList()
+            : new List<FinanceReportSection>
+            {
+                new(
+                    $"{report.LayoutExecution.LayoutName} ({report.LayoutExecution.LayoutCode})",
+                    report.LayoutExecution.Rows
+                        .Where(row => row.IsDisplayed)
+                        .OrderBy(row => row.Sequence)
+                        .Select(LayoutLine)
+                        .ToList())
+            };
 
         var summaries = new[]
         {
@@ -357,7 +405,10 @@ public sealed class IncomeStatementDocumentBuilder : FinanceReportDocumentBuilde
             new FinanceReportSummary("Net Profit", report.NetProfit)
         };
 
-        return Model(report.CompanyName, ReportTitle, $"{report.PeriodStart:dd MMM yyyy} to {report.PeriodEnd:dd MMM yyyy} | Book: {report.BookClassification}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
+        var layoutSubtitle = report.LayoutExecution == null
+            ? "Legacy presentation"
+            : $"Layout: {report.LayoutExecution.LayoutCode} v{report.LayoutExecution.VersionNumber}";
+        return Model(report.CompanyName, ReportTitle, $"{report.PeriodStart:dd MMM yyyy} to {report.PeriodEnd:dd MMM yyyy} | Book: {report.BookClassification} | {layoutSubtitle}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
     }
 }
 
@@ -375,19 +426,32 @@ public sealed class BalanceSheetDocumentBuilder : FinanceReportDocumentBuilderBa
             AsAtDate = DateOption(request, "asAtDate", DateTime.UtcNow),
             BookClassification = Option(request, "bookClassification") ?? "IFRS",
             IncludeAccountDetails = BoolOption(request, "includeAccountDetails", true),
-            SegmentFilters = segmentFilters
+            SegmentFilters = segmentFilters,
+            LayoutId = GuidOption(request, "layoutId"),
+            UseDefaultLayout = BoolOption(request, "useDefaultLayout", true)
         });
 
-        var sections = report.Sections
-            .OrderBy(section => section.SectionOrder)
-            .Select(section => new FinanceReportSection(section.SectionName, section.Categories
-                .OrderBy(category => category.CategoryOrder)
-                .SelectMany(category => new[] { Line(category.CategoryName, category.CategoryTotal, 0, true) }
-                    .Concat(category.LineItems.OrderBy(line => line.LineOrder)
-                        .Select(line => Line(line.LineItemName, line.AccountNumbers == null ? null : string.Join(", ", line.AccountNumbers), line.Amount, 1))))
-                .Append(Line($"Total {section.SectionName}", section.SectionTotal, 0, true))
-                .ToList()))
-            .ToList();
+        var sections = report.LayoutExecution == null
+            ? report.Sections
+                .OrderBy(section => section.SectionOrder)
+                .Select(section => new FinanceReportSection(section.SectionName, section.Categories
+                    .OrderBy(category => category.CategoryOrder)
+                    .SelectMany(category => new[] { Line(category.CategoryName, category.CategoryTotal, 0, true) }
+                        .Concat(category.LineItems.OrderBy(line => line.LineOrder)
+                            .Select(line => Line(line.LineItemName, line.AccountNumbers == null ? null : string.Join(", ", line.AccountNumbers), line.Amount, 1))))
+                    .Append(Line($"Total {section.SectionName}", section.SectionTotal, 0, true))
+                    .ToList()))
+                .ToList()
+            : new List<FinanceReportSection>
+            {
+                new(
+                    $"{report.LayoutExecution.LayoutName} ({report.LayoutExecution.LayoutCode})",
+                    report.LayoutExecution.Rows
+                        .Where(row => row.IsDisplayed)
+                        .OrderBy(row => row.Sequence)
+                        .Select(LayoutLine)
+                        .ToList())
+            };
 
         var summaries = new[]
         {
@@ -396,7 +460,10 @@ public sealed class BalanceSheetDocumentBuilder : FinanceReportDocumentBuilderBa
             new FinanceReportSummary("Total Equity", report.TotalEquity)
         };
 
-        return Model(report.CompanyName, ReportTitle, $"As at {report.AsAtDate:dd MMM yyyy} | Book: {report.BookClassification}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
+        var layoutSubtitle = report.LayoutExecution == null
+            ? "Legacy presentation"
+            : $"Layout: {report.LayoutExecution.LayoutCode} v{report.LayoutExecution.VersionNumber}";
+        return Model(report.CompanyName, ReportTitle, $"As at {report.AsAtDate:dd MMM yyyy} | Book: {report.BookClassification} | {layoutSubtitle}{SegmentFilterSubtitle(segmentFilters)}", report.CurrencyCode, sections, summaries);
     }
 }
 
@@ -514,6 +581,12 @@ public sealed record FinanceReportDocumentModel(
 
 public sealed record FinanceReportSection(string Title, IReadOnlyList<FinanceReportLine> Lines);
 
-public sealed record FinanceReportLine(string Label, string? Detail, decimal Amount, int Level, bool IsTotal);
+public sealed record FinanceReportLine(
+    string Label,
+    string? Detail,
+    decimal Amount,
+    int Level,
+    bool IsTotal,
+    bool ShowAmount = true);
 
 public sealed record FinanceReportSummary(string Label, decimal Amount);

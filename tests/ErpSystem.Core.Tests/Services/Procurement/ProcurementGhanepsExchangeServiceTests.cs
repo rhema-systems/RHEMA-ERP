@@ -2129,6 +2129,11 @@ public sealed class ProcurementGhanepsExchangeServiceTests
             Func<Task> operation,
             CancellationToken cancellationToken = default) =>
             inner.ExecuteInStrategyAsync(operation, cancellationToken);
+        public Task ExecuteInTransactionAsync(
+            Func<CancellationToken, Task> operation,
+            CancellationToken cancellationToken = default) =>
+            inner.ExecuteInTransactionAsync(operation, cancellationToken);
+        public void ClearChangeTracker() => inner.ClearChangeTracker();
         public Task<T> ExecuteInStrategyAsync<T>(
             Func<Task<T>> operation,
             CancellationToken cancellationToken = default) =>

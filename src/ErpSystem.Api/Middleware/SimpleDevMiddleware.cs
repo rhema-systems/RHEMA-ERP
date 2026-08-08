@@ -29,41 +29,37 @@ namespace ErpSystem.Web.Middleware
             var stopwatch = Stopwatch.StartNew();
             var requestId = Guid.NewGuid().ToString("N")[..8];
 
+            _logger.LogDebug("[{RequestId}] {Method} {Path} - Start",
+                requestId, context.Request.Method, context.Request.Path);
+
+            // Set up to add response time header when response starts
+            context.Response.OnStarting(() =>
+            {
+                try
+                {
+                    if (!context.Response.Headers.ContainsKey("X-Response-Time-Ms"))
+                    {
+                        context.Response.Headers["X-Response-Time-Ms"] = stopwatch.ElapsedMilliseconds.ToString();
+                    }
+                }
+                catch
+                {
+                    // Ignore header setting errors
+                }
+                return Task.CompletedTask;
+            });
+
             try
             {
-                _logger.LogDebug("[{RequestId}] {Method} {Path} - Start",
-                    requestId, context.Request.Method, context.Request.Path);
-
-                // Set up to add response time header when response starts
-                context.Response.OnStarting(() =>
-                {
-                    try
-                    {
-                        if (!context.Response.Headers.ContainsKey("X-Response-Time-Ms"))
-                        {
-                            context.Response.Headers["X-Response-Time-Ms"] = stopwatch.ElapsedMilliseconds.ToString();
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore header setting errors
-                    }
-                    return Task.CompletedTask;
-                });
-
                 await _next(context);
 
-                stopwatch.Stop();
                 _logger.LogDebug("[{RequestId}] {Method} {Path} - {StatusCode} - {ElapsedMs}ms",
                     requestId, context.Request.Method, context.Request.Path,
                     context.Response.StatusCode, stopwatch.ElapsedMilliseconds);
             }
-            catch (Exception ex)
+            finally
             {
                 stopwatch.Stop();
-                _logger.LogError(ex, "[{RequestId}] {Method} {Path} - Exception after {ElapsedMs}ms",
-                    requestId, context.Request.Method, context.Request.Path, stopwatch.ElapsedMilliseconds);
-                throw;
             }
         }
     }

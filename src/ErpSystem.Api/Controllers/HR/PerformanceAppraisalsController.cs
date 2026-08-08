@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,11 +14,19 @@ namespace ErpSystem.Api.Controllers.HR;
 public class PerformanceAppraisalsController : ControllerBase
 {
     private readonly IPerformanceAppraisalService _appraisalService;
+    private readonly IPeerNominationService _peerNominationService;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<PerformanceAppraisalsController> _logger;
 
-    public PerformanceAppraisalsController(IPerformanceAppraisalService appraisalService, ILogger<PerformanceAppraisalsController> logger)
+    public PerformanceAppraisalsController(
+        IPerformanceAppraisalService appraisalService,
+        IPeerNominationService peerNominationService,
+        ICurrentUserService currentUserService,
+        ILogger<PerformanceAppraisalsController> logger)
     {
         _appraisalService = appraisalService;
+        _peerNominationService = peerNominationService;
+        _currentUserService = currentUserService;
         _logger = logger;
     }
 
@@ -259,14 +268,14 @@ public class PerformanceAppraisalsController : ControllerBase
     /// File an appeal for an appraisal
     /// </summary>
     [HttpPost("{id:guid}/appeal")]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> FileAppeal(Guid id, [FromBody] FileAppraisalAppealDto appealDto)
+    public async Task<IActionResult> FileAppeal(Guid id, [FromBody] CreateAppraisalAppealDto appealDto)
     {
         try
         {
-            if (id != appealDto.AppraisalId)
+            if (id != appealDto.PerformanceAppraisalId)
             {
                 return BadRequest("ID mismatch");
             }
@@ -291,15 +300,15 @@ public class PerformanceAppraisalsController : ControllerBase
     /// <summary>
     /// Resolve an appraisal appeal
     /// </summary>
-    [HttpPost("{id:guid}/appeal/resolve")]
+    [HttpPost("appeal/{appealId:guid}/resolve")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ResolveAppeal(Guid id, [FromBody] ResolveAppraisalAppealDto resolveDto)
+    public async Task<IActionResult> ResolveAppeal(Guid appealId, [FromBody] ResolveAppraisalAppealDto resolveDto)
     {
         try
         {
-            if (id != resolveDto.AppraisalId)
+            if (appealId != resolveDto.AppealId)
             {
                 return BadRequest("ID mismatch");
             }
@@ -320,7 +329,7 @@ public class PerformanceAppraisalsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error resolving appraisal appeal for appraisal with Id {AppraisalId}", id);
+            _logger.LogError(ex, "Error resolving appraisal appeal with Id {AppealId}", appealId);
             return StatusCode(500, "An error occurred while resolving appraisal appeal");
         }
     }
@@ -676,5 +685,817 @@ public class PerformanceAppraisalsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Get all appraisals for a specific employee (My Appraisals view)
+    /// </summary>
+    [HttpGet("my-appraisals/{employeeId}")]
+    [ProducesResponseType(typeof(IEnumerable<MyAppraisalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyAppraisals(Guid employeeId, [FromQuery] string? cycleFilter = null)
+    {
+        try
+        {
+            var response = await _appraisalService.GetMyAppraisalsAsync(employeeId, cycleFilter);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving appraisals for employee {EmployeeId}", employeeId);
+            return StatusCode(500, "An error occurred while retrieving appraisals");
+        }
+    }
+
+    /// <summary>
+    /// Get self-evaluation context for an appraisal
+    /// </summary>
+    [HttpGet("{appraisalId}/self-evaluation-context")]
+    [ProducesResponseType(typeof(SelfEvaluationContextDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSelfEvaluationContext(Guid appraisalId)
+    {
+        try
+        {
+            var response = await _appraisalService.GetSelfEvaluationContextAsync(appraisalId);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving self-evaluation context for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving self-evaluation context");
+        }
+    }
+
+    /// <summary>
+    /// Save or submit self-evaluation
+    /// </summary>
+    [HttpPost("{appraisalId}/self-evaluation")]
+    [ProducesResponseType(typeof(SelfEvaluationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SaveSelfEvaluation(Guid appraisalId, [FromBody] SaveSelfEvaluationDto saveDto)
+    {
+        try
+        {
+            // Ensure route parameter matches DTO
+            if (appraisalId != saveDto.AppraisalId)
+            {
+                return BadRequest(new { message = "Appraisal ID mismatch" });
+            }
+
+            var response = await _appraisalService.SaveSelfEvaluationAsync(saveDto);
+            
+            if (!response.Success)
+            {
+                _logger.LogWarning("SaveSelfEvaluation returning 400 for appraisal {AppraisalId}: {Message}", appraisalId, response.Message);
+                return BadRequest(response);
+            }
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving self-evaluation for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, new SelfEvaluationResultDto
+            {
+                Success = false,
+                Message = "An error occurred while saving self-evaluation"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Get read-only view of submitted self-evaluation
+    /// </summary>
+    [HttpGet("{appraisalId}/view-submitted-evaluation")]
+    [ProducesResponseType(typeof(ViewSubmittedEvaluationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetViewSubmittedEvaluation(Guid appraisalId)
+    {
+        try
+        {
+            var response = await _appraisalService.GetViewSubmittedEvaluationAsync(appraisalId);
+            return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving submitted evaluation for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving submitted evaluation");
+        }
+    }
+
+    #endregion
+
+    #region Manager Evaluation Endpoints
+
+    /// <summary>
+    /// Get team appraisal cycles for a manager
+    /// </summary>
+    [HttpGet("manager/{managerId}/team-cycles")]
+    [ProducesResponseType(typeof(IEnumerable<TeamAppraisalCycleSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTeamAppraisalCycles(Guid managerId)
+    {
+        try
+        {
+            var response = await _appraisalService.GetTeamAppraisalCyclesAsync(managerId);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving team appraisal cycles for manager {ManagerId}", managerId);
+            return StatusCode(500, "An error occurred while retrieving team appraisal cycles");
+        }
+    }
+
+    /// <summary>
+    /// Get team member appraisals for a specific cycle
+    /// </summary>
+    [HttpGet("manager/{managerId}/cycle/{cycleId}/team-members")]
+    [ProducesResponseType(typeof(IEnumerable<TeamMemberAppraisalDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTeamMemberAppraisals(Guid cycleId, Guid managerId)
+    {
+        try
+        {
+            var response = await _appraisalService.GetTeamMemberAppraisalsAsync(cycleId, managerId);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving team members for cycle {CycleId} and manager {ManagerId}", cycleId, managerId);
+            return StatusCode(500, "An error occurred while retrieving team member appraisals");
+        }
+    }
+
+    /// <summary>
+    /// Get manager evaluation context for the currently authenticated manager (managerId resolved from JWT).
+    /// </summary>
+    [HttpGet("{appraisalId}/manager-evaluation-context")]
+    [ProducesResponseType(typeof(ManagerEvaluationContextDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetManagerEvaluationContextForCurrentUser(Guid appraisalId)
+    {
+        var managerId = _currentUserService.EmployeeId;
+        if (managerId == null)
+            return BadRequest(new { message = "Could not determine current user's employee ID." });
+
+        try
+        {
+            var response = await _appraisalService.GetManagerEvaluationContextAsync(appraisalId, managerId.Value);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving manager evaluation context for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving manager evaluation context");
+        }
+    }
+
+    /// <summary>
+    /// Get manager evaluation context for a specific appraisal
+    /// </summary>
+    [HttpGet("{appraisalId}/manager-evaluation-context/{managerId}")]
+    [ProducesResponseType(typeof(ManagerEvaluationContextDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetManagerEvaluationContext(Guid appraisalId, Guid managerId)
+    {
+        try
+        {
+            var response = await _appraisalService.GetManagerEvaluationContextAsync(appraisalId, managerId);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving manager evaluation context for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving manager evaluation context");
+        }
+    }
+
+    /// <summary>
+    /// Save or submit manager evaluation
+    /// </summary>
+    [HttpPost("{appraisalId}/manager-evaluation")]
+    [ProducesResponseType(typeof(ManagerEvaluationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> SaveManagerEvaluation(Guid appraisalId, [FromBody] SaveManagerEvaluationDto saveDto)
+    {
+        try
+        {
+            // Ensure route parameter matches DTO
+            if (appraisalId != saveDto.AppraisalId)
+            {
+                return BadRequest(new { message = "Appraisal ID mismatch" });
+            }
+
+            var response = await _appraisalService.SaveManagerEvaluationAsync(saveDto);
+            
+            if (!response.Success)
+            {
+                return BadRequest(response);
+            }
+
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving manager evaluation for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, new ManagerEvaluationResultDto
+            {
+                Success = false,
+                Message = "An error occurred while saving manager evaluation"
+            });
+        }
+    }
+
+    /// <summary>
+    /// Get detailed peer evaluations for manager review
+    /// </summary>
+    [HttpGet("{appraisalId}/manager-peer-evaluations")]
+    [ProducesResponseType(typeof(ManagerPeerEvaluationReviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetManagerPeerEvaluationReview(Guid appraisalId)
+    {
+        try
+        {
+            var response = await _appraisalService.GetManagerPeerEvaluationReviewAsync(appraisalId);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving peer evaluations for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving peer evaluations");
+        }
+    }
+
+    #endregion
+
+    #region Peer Nominations
+
+    /// <summary>
+    /// Get peer nomination summary for an appraisal
+    /// </summary>
+    [HttpGet("{appraisalId}/peer-nominations/summary")]
+    [ProducesResponseType(typeof(PeerNominationSummaryDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetPeerNominationSummary(Guid appraisalId)
+    {
+        try
+        {
+            var response = await _peerNominationService.GetNominationSummaryAsync(appraisalId);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving peer nomination summary for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while retrieving peer nomination summary");
+        }
+    }
+
+    /// <summary>
+    /// Create multiple peer nominations for an appraisal
+    /// </summary>
+    [HttpPost("{appraisalId}/peer-nominations/batch")]
+    [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CreatePeerNominationsBatch(Guid appraisalId, [FromBody] BatchCreatePeerNominationsDto batchDto)
+    {
+        try
+        {
+            // Ensure route parameter matches DTO
+            if (appraisalId != batchDto.AppraisalId)
+            {
+                return BadRequest(new { message = "Appraisal ID mismatch" });
+            }
+
+            var response = await _peerNominationService.BatchCreateAsync(batchDto);
+            return CreatedAtAction(nameof(GetPeerNominationSummary), new { appraisalId }, response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating batch peer nominations for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while creating peer nominations");
+        }
+    }
+
+    /// <summary>
+    /// Approve peer nominations and create evaluator evaluation records
+    /// </summary>
+    [HttpPost("{appraisalId}/peer-nominations/approve")]
+    [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApprovePeerNominations(Guid appraisalId, [FromBody] ApprovePeerNominationsDto approveDto)
+    {
+        try
+        {
+            // Ensure route parameter matches DTO
+            if (appraisalId != approveDto.AppraisalId)
+            {
+                return BadRequest(new { message = "Appraisal ID mismatch" });
+            }
+
+            var response = await _peerNominationService.ApproveNominationsAsync(approveDto);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error approving peer nominations for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while approving peer nominations");
+        }
+    }
+
+    /// <summary>
+    /// Reject peer nominations
+    /// </summary>
+    [HttpPost("{appraisalId}/peer-nominations/reject")]
+    [ProducesResponseType(typeof(IEnumerable<PeerNominationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RejectPeerNominations(Guid appraisalId, [FromBody] RejectPeerNominationsDto rejectDto)
+    {
+        try
+        {
+            // Ensure route parameter matches DTO
+            if (appraisalId != rejectDto.AppraisalId)
+            {
+                return BadRequest(new { message = "Appraisal ID mismatch" });
+            }
+
+            var response = await _peerNominationService.RejectNominationsAsync(rejectDto);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error rejecting peer nominations for appraisal {AppraisalId}", appraisalId);
+            return StatusCode(500, "An error occurred while rejecting peer nominations");
+        }
+    }
+
+    #endregion
+
+    #region HR Review
+
+    /// <summary>
+    /// Get HR review details for an appraisal
+    /// </summary>
+    [HttpGet("{id:guid}/hr-review")]
+    [ProducesResponseType(typeof(HRReviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetHRReview(Guid id, [FromQuery] Guid? requestingEmployeeId = null)
+    {
+        try
+        {
+            var response = await _appraisalService.GetHRReviewAsync(id, requestingEmployeeId);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving HR review for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving the HR review");
+        }
+    }
+
+    /// <summary>
+    /// Get list of appraisals for HR review
+    /// </summary>
+    [HttpGet("hr-review-list")]
+    [ProducesResponseType(typeof(IEnumerable<HRReviewListItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetHRReviewList([FromQuery] Guid? cycleId = null, [FromQuery] string? status = null)
+    {
+        try
+        {
+            var response = await _appraisalService.GetHRReviewListAsync(cycleId, status);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving HR review list");
+            return StatusCode(500, "An error occurred while retrieving the HR review list");
+        }
+    }
+
+    /// <summary>
+    /// Approve and finalize an appraisal
+    /// </summary>
+    [HttpPost("{id:guid}/approve")]
+    [ProducesResponseType(typeof(HRReviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApproveAndFinalize(Guid id, [FromBody] ApproveAppraisalDto dto)
+    {
+        try
+        {
+            var response = await _appraisalService.ApproveAndFinalizeAsync(id, dto);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error approving appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while approving the appraisal");
+        }
+    }
+
+    /// <summary>
+    /// Return appraisal to manager for corrections
+    /// </summary>
+    [HttpPost("{id:guid}/return-to-manager")]
+    [ProducesResponseType(typeof(HRReviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReturnToManager(Guid id, [FromBody] ReturnAppraisalDto dto)
+    {
+        try
+        {
+            var response = await _appraisalService.ReturnToManagerAsync(id, dto);
+            return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error returning appraisal {Id} to manager", id);
+            return StatusCode(500, "An error occurred while returning the appraisal");
+        }
+    }
+    
+    /// <summary>
+    /// Employee acknowledges receipt of finalized appraisal
+    /// </summary>
+    [HttpPost("{id:guid}/acknowledge")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> AcknowledgeAppraisal(Guid id, [FromBody] AcknowledgeAppraisalDto dto)
+    {
+        try
+        {
+            await _appraisalService.AcknowledgeAppraisalAsync(id, dto.EmployeeId);
+            return Ok(new { message = "Appraisal acknowledged successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error acknowledging appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while acknowledging the appraisal");
+        }
+    }
+    
+    /// <summary>
+    /// Get appeal page data for an appraisal
+    /// </summary>
+    [HttpGet("{id:guid}/appeal-page-data")]
+    [ProducesResponseType(typeof(AppealPageDataDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetAppealPageData(Guid id, [FromQuery] Guid employeeId)
+    {
+        try
+        {
+            var data = await _appraisalService.GetAppealPageDataAsync(id, employeeId);
+            return Ok(data);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting appeal page data for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving appeal page data");
+        }
+    }
+    
+    /// <summary>
+    /// Submit an appeal for an appraisal
+    /// </summary>
+    [HttpPost("{id:guid}/submit-appeal")]
+    [ProducesResponseType(typeof(AppraisalAppealDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> SubmitAppeal(Guid id, [FromBody] SubmitAppealDto dto)
+    {
+        try
+        {
+            if (id != dto.AppraisalId)
+                return BadRequest(new { message = "Appraisal ID mismatch" });
+            
+            var employeeId = _currentUserService.EmployeeId
+                ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
+            
+            var appeal = await _appraisalService.SubmitAppealAsync(dto, employeeId);
+            return Ok(appeal);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error submitting appeal for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while submitting the appeal");
+        }
+    }
+    
+    /// <summary>
+    /// Get appeal status for viewing (read-only)
+    /// </summary>
+    [HttpGet("{id:guid}/appeal-status")]
+    public async Task<ActionResult<AppealStatusViewDto>> GetAppealStatus(Guid id, [FromQuery] Guid employeeId)
+    {
+        try
+        {
+            var appealStatus = await _appraisalService.GetAppealStatusAsync(id, employeeId);
+            return Ok(appealStatus);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting appeal status for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving the appeal status");
+        }
+    }
+
+    /// <summary>
+    /// Get list of all appraisal appeals with optional filtering
+    /// </summary>
+    [HttpGet("appeals")]
+    [Authorize]
+    public async Task<ActionResult<List<AppealListItemDto>>> GetAppealsList(
+        [FromQuery] Guid? cycleId = null, 
+        [FromQuery] AppraisalAppealStatus? status = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var appeals = await _appraisalService.GetAppealsListAsync(cycleId, status, cancellationToken);
+            return Ok(appeals);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting appeals list");
+            return StatusCode(500, "An error occurred while retrieving the appeals list");
+        }
+    }
+
+    /// <summary>
+    /// Get comprehensive appeal review data for HR resolution
+    /// </summary>
+    [HttpGet("{id:guid}/appeal-review")]
+    [Authorize]
+    public async Task<ActionResult<AppealReviewDto>> GetAppealReview(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reviewData = await _appraisalService.GetAppealReviewDataAsync(id, cancellationToken);
+            return Ok(reviewData);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting appeal review data for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving the appeal review data");
+        }
+    }
+
+    /// <summary>
+    /// Resolve an appraisal appeal
+    /// </summary>
+    [HttpPost("{id:guid}/resolve-appeal")]
+    [Authorize]
+    public async Task<ActionResult> ResolveAppeal(Guid id, [FromBody] ResolveAppealDto resolveDto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reviewerId = _currentUserService.EmployeeId
+                ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
+            
+            await _appraisalService.ResolveAppealAsync(id, resolveDto, reviewerId, cancellationToken);
+            return Ok(new { message = "Appeal resolved successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resolving appeal for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while resolving the appeal");
+        }
+    }
+
+    /// <summary>
+    /// Get post-remand review data including score comparisons for HR final decision
+    /// </summary>
+    [HttpGet("{id:guid}/post-remand-review")]
+    [Authorize]
+    public async Task<ActionResult<PostRemandReviewDto>> GetPostRemandReview(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reviewData = await _appraisalService.GetPostRemandReviewDataAsync(id, cancellationToken);
+            return Ok(reviewData);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting post-remand review data for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving the post-remand review data");
+        }
+    }
+
+    /// <summary>
+    /// Finalize a post-remand appeal with HR's final decision (Uphold or Reject)
+    /// </summary>
+    [HttpPost("{id:guid}/finalize-post-remand-appeal")]
+    [Authorize]
+    public async Task<ActionResult> FinalizePostRemandAppeal(Guid id, [FromBody] PostRemandFinalDecisionDto decisionDto, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var reviewerId = _currentUserService.EmployeeId
+                ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
+            
+            await _appraisalService.FinalizePostRemandAppealAsync(id, decisionDto, reviewerId, cancellationToken);
+            return Ok(new { message = "Appeal finalized successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error finalizing post-remand appeal for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while finalizing the appeal");
+        }
+    }
+
+    /// <summary>
+    /// Get employee read-only view of final appeal outcome
+    /// </summary>
+    [HttpGet("{id:guid}/appeal-outcome")]
+    [Authorize]
+    public async Task<ActionResult<EmployeeAppealOutcomeDto>> GetEmployeeAppealOutcome(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var employeeId = _currentUserService.EmployeeId
+                ?? throw new UnauthorizedAccessException("Employee record not linked to current user");
+            
+            var outcome = await _appraisalService.GetEmployeeAppealOutcomeAsync(id, employeeId, cancellationToken);
+            return Ok(outcome);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting appeal outcome for appraisal {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving the appeal outcome");
+        }
+    }
     #endregion
 }

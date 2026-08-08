@@ -21,6 +21,11 @@ describe('purchase-order SOD client', () => {
           message: 'Independent.',
           evaluatedAtUtc: '2026-07-30T00:00:00Z',
           decisionKeys: ['DEC-001', 'DEC-014'],
+          receiptActionCoverage: [
+            'CreatePurchaseOrderReceipt',
+            'ApproveReceiptInspection',
+            'PostGoodsReceiptNoteToInventory',
+          ],
           checks: [],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -32,6 +37,11 @@ describe('purchase-order SOD client', () => {
       await purchasingService.getPurchaseOrderSodReadiness('po-0405');
 
     expect(result.canApprove).toBe(true);
+    expect(result.receiptActionCoverage).toEqual([
+      'CreatePurchaseOrderReceipt',
+      'ApproveReceiptInspection',
+      'PostGoodsReceiptNoteToInventory',
+    ]);
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/PurchaseOrders/po-0405/sod-readiness',
       expect.objectContaining({ headers: expect.any(Object) })

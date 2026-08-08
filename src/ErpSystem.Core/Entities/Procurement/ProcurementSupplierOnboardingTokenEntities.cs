@@ -122,6 +122,7 @@ public sealed class ProcurementSupplierOnboardingToken : TenantEntity
 public sealed class ProcurementSupplierOnboardingPayment : TenantEntity
 {
     public Guid TokenId { get; set; }
+    public Guid? SubmittedByApplicantSessionId { get; set; }
     public Guid PaymentMethodId { get; set; }
 
     [Required, StringLength(20)]
@@ -183,6 +184,7 @@ public sealed class ProcurementSupplierOnboardingPayment : TenantEntity
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ProcurementSupplierOnboardingToken Token { get; set; } = null!;
+    public ProcurementSupplierApplicantSession? SubmittedByApplicantSession { get; set; }
     public FinancePaymentMethod PaymentMethod { get; set; } = null!;
 }
 
@@ -313,4 +315,6 @@ public sealed class ProcurementSupplierApplicantSession : TenantEntity
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ProcurementSupplierApplicantAccess ApplicantAccess { get; set; } = null!;
+    public ICollection<ProcurementSupplierOnboardingPayment> SubmittedPayments { get; set; } =
+        new List<ProcurementSupplierOnboardingPayment>();
 }

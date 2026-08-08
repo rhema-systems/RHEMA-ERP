@@ -1,6 +1,7 @@
 using ErpSystem.Api.Controllers.Procurement;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -30,6 +31,8 @@ public sealed class TendersCommitteeGuardControllerTests
             service.Object,
             Mock.Of<IWorkflowService>(),
             Mock.Of<ICurrentUserProvider>(),
+            Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
             Mock.Of<ILogger<TendersController>>())
         {
             ControllerContext = new ControllerContext

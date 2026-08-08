@@ -37,6 +37,26 @@ public class FxRealizedSettlement : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal SettledForeignAmount { get; set; }
 
+    /// <summary>
+    /// Cash leg of the settlement. TransactionCurrency above remains the invoice exposure
+    /// currency, while these fields explain functional- or third-currency cash used to clear it.
+    /// They are intentionally duplicated from the allocation so an FX event is self-contained
+    /// audit evidence and remains understandable after operational projections are rebuilt.
+    /// </summary>
+    [Required]
+    [MaxLength(3)]
+    public string PaymentCurrencyCode { get; set; } = string.Empty;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaymentCurrencyAmount { get; set; }
+
+    public Guid? PaymentExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal PaymentExchangeRate { get; set; }
+
+    public bool IsCrossCurrency { get; set; }
+
     [Column(TypeName = "decimal(18,6)")]
     public decimal HistoricalExchangeRate { get; set; }
 
@@ -65,6 +85,18 @@ public class FxRealizedSettlement : TenantEntity
     public Guid? JournalEntryId { get; set; }
 
     public Guid? PostingEventId { get; set; }
+
+    /// <summary>
+    /// Realized FX is a separate accounting event from the settlement journal. A source-payment
+    /// reversal must therefore reverse and link this event as well; otherwise the gain/loss would
+    /// remain in the ledger after the underlying settlement was removed.
+    /// </summary>
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public DateTime? ReversedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReversalReason { get; set; }
 
     [Required]
     [MaxLength(30)]

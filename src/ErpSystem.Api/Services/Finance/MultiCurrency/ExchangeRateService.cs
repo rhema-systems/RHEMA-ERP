@@ -48,6 +48,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             string? targetCurrency = null,
             DateTime? effectiveDate = null,
             string? rateType = null,
+            string? quoteSide = null,
             CancellationToken cancellationToken = default)
         {
             var query = _unitOfWork.Repository<ExchangeRate>()
@@ -63,7 +64,10 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 query = query.Where(r => r.EffectiveDate.Date == effectiveDate.Value.Date);
 
             if (!string.IsNullOrEmpty(rateType))
-                query = query.Where(r => r.RateType == (ExchangeRateType)Enum.Parse(typeof(ExchangeRateType), rateType));
+                query = query.Where(r => r.RateType == ParseRateType(rateType));
+
+            if (!string.IsNullOrEmpty(quoteSide))
+                query = query.Where(r => r.QuoteSide == ParseQuoteSide(quoteSide));
 
             var rates = await query
                 .OrderByDescending(r => r.EffectiveDate)
@@ -85,6 +89,8 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             string targetCurrencyCode,
             string? baseCurrencyCode = null,
             DateTime? effectiveDate = null,
+            string? rateType = null,
+            string? quoteSide = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(baseCurrencyCode))
@@ -95,11 +101,19 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             baseCurrencyCode = NormalizeCurrency(baseCurrencyCode, "Base currency");
             targetCurrencyCode = NormalizeCurrency(targetCurrencyCode, "Target currency");
             var date = effectiveDate?.Date ?? DateTime.UtcNow.Date;
+            var requestedRateType = string.IsNullOrWhiteSpace(rateType)
+                ? ExchangeRateType.Daily
+                : ParseRateType(rateType);
+            var requestedQuoteSide = string.IsNullOrWhiteSpace(quoteSide)
+                ? ExchangeRateQuoteSide.Mid
+                : ParseQuoteSide(quoteSide);
 
             var rate = await _unitOfWork.Repository<ExchangeRate>()
                 .GetQueryable(r => r.TenantId == TenantId
                     && r.BaseCurrencyCode == baseCurrencyCode
                     && r.TargetCurrencyCode == targetCurrencyCode
+                    && r.RateType == requestedRateType
+                    && r.QuoteSide == requestedQuoteSide
                     && r.Rate > 0
                     && r.EffectiveDate <= date
                     && r.IsActive
@@ -147,6 +161,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 .GetQueryable(r => r.TenantId == TenantId
                     && r.BaseCurrencyCode == baseCurrencyCode
                     && r.TargetCurrencyCode == targetCurrencyCode
+                    && r.QuoteSide == ExchangeRateQuoteSide.Mid
                     && r.Rate > 0
                     && r.EffectiveDate >= start
                     && r.EffectiveDate < endExclusive)
@@ -206,6 +221,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
             var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
             var rateType = ParseRateType(dto.RateType);
+            var quoteSide = ParseQuoteSide(dto.QuoteSide);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
                 ? requestedApprovalStatus
@@ -230,6 +246,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 baseCurrencyCode,
                 targetCurrencyCode,
                 rateType,
+                quoteSide,
                 dto.EffectiveDate.Date,
                 dto.ExpiryDate?.Date,
                 excludeId: null,
@@ -247,6 +264,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 EffectiveDate = dto.EffectiveDate.Date,
                 EndDate = dto.ExpiryDate?.Date,
                 RateType = rateType,
+                QuoteSide = quoteSide,
                 RateSource = dto.RateSource ?? "Manual Entry",
                 IsManualEntry = true,
                 APIResponseMetadata = dto.SourceReference,
@@ -290,6 +308,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             var rateType = ParseRateType(dto.RateType);
+            var quoteSide = ParseQuoteSide(dto.QuoteSide);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
                 ? requestedApprovalStatus
@@ -299,6 +318,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 rate.BaseCurrencyCode,
                 rate.TargetCurrencyCode,
                 rateType,
+                quoteSide,
                 rate.EffectiveDate.Date,
                 dto.ExpiryDate?.Date,
                 excludeId: rate.Id,
@@ -310,6 +330,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             rate.InverseRate = 1 / dto.Rate;
             rate.EndDate = dto.ExpiryDate?.Date;
             rate.RateType = rateType;
+            rate.QuoteSide = quoteSide;
             rate.RateSource = dto.RateSource ?? "Manual Entry";
             rate.APIResponseMetadata = dto.SourceReference;
             rate.IsActive = dto.IsActive;
@@ -374,6 +395,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
                     var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
                     var rateType = ParseRateType(dto.RateType);
+                    var quoteSide = ParseQuoteSide(dto.QuoteSide);
                     var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
                     var approvalStatus = _workflowService == null
                         ? requestedApprovalStatus
@@ -383,6 +405,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         baseCurrencyCode,
                         targetCurrencyCode,
                         rateType,
+                        quoteSide,
                         dto.EffectiveDate.Date,
                         dto.ExpiryDate?.Date,
                         excludeId: null,
@@ -400,6 +423,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         EffectiveDate = dto.EffectiveDate.Date,
                         EndDate = dto.ExpiryDate?.Date,
                         RateType = rateType,
+                        QuoteSide = quoteSide,
                         RateSource = dto.RateSource ?? "Manual Entry",
                         IsManualEntry = true,
                         APIResponseMetadata = dto.SourceReference,
@@ -510,6 +534,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 EffectiveDate = rate.EffectiveDate,
                 ExpiryDate = rate.EndDate,
                 RateType = rate.RateType.ToString(),
+                QuoteSide = rate.QuoteSide.ToString(),
                 RateSource = rate.RateSource,
                 SourceName = rate.RateSource,
                 SourceReference = rate.APIResponseMetadata,
@@ -543,6 +568,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             string baseCurrencyCode,
             string targetCurrencyCode,
             ExchangeRateType rateType,
+            ExchangeRateQuoteSide quoteSide,
             DateTime effectiveDate,
             DateTime? expiryDate,
             Guid? excludeId,
@@ -557,6 +583,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     && r.BaseCurrencyCode == baseCurrencyCode
                     && r.TargetCurrencyCode == targetCurrencyCode
                     && r.RateType == rateType
+                    && r.QuoteSide == quoteSide
                     && r.EffectiveDate.Date <= end
                     && (r.EndDate == null || r.EndDate.Value.Date >= start))
                 .AnyAsync(cancellationToken);
@@ -564,7 +591,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (overlapExists)
             {
                 throw new InvalidOperationException(
-                    $"Exchange rate range overlaps an existing {baseCurrencyCode}/{targetCurrencyCode} {rateType} rate for this tenant.");
+                    $"Exchange rate range overlaps an existing {baseCurrencyCode}/{targetCurrencyCode} {rateType}/{quoteSide} rate for this tenant.");
             }
         }
 
@@ -626,6 +653,17 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             return approvalStatus;
+        }
+
+        private static ExchangeRateQuoteSide ParseQuoteSide(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)
+                || !Enum.TryParse<ExchangeRateQuoteSide>(value.Trim(), ignoreCase: true, out var quoteSide))
+            {
+                throw new InvalidOperationException("Exchange-rate quote side must be Mid, Buying, or Selling.");
+            }
+
+            return quoteSide;
         }
 
         private async Task StartExchangeRateWorkflowIfRequiredAsync(
@@ -712,6 +750,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 rate.EffectiveDate,
                 rate.EndDate,
                 rate.RateType,
+                rate.QuoteSide,
                 rate.RateSource,
                 rate.IsActive,
                 rate.ApprovalStatus,

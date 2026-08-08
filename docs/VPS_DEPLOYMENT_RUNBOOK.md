@@ -1,6 +1,6 @@
 # Rhema ERP VPS Deployment Runbook
 
-Last updated: 2026-07-28
+Last updated: 2026-08-07
 
 This note captures the VPS deployment details that have caused repeat failures. Read it before deploying to the current Windows VPS. The server is presently a **test server**, so development-data seeding is intentionally enabled. It must be disabled before this host is promoted to production.
 
@@ -25,6 +25,55 @@ This note captures the VPS deployment details that have caused repeat failures. 
   - `RhemaERPHTTPSIPProxy`
 
 The browser must never be sent to `http://localhost:5000`, `https://localhost:53484`, or `https://localhost:7095` in a deployed build.
+
+## Preferred Automated Workflow
+
+Use the repository deployment command for normal test-VPS releases. It turns the
+manual procedure in this runbook into fail-fast, timed stages and records evidence
+for each run:
+
+```powershell
+# Validate the current VPS without building or changing the deployed application
+pwsh -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -DryRun
+
+# Deploy the current clean origin/master commit. Reuse the package only when its
+# commit and SHA-256 manifest both match; otherwise build a fresh package.
+pwsh -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -ReuseVerifiedArtifacts
+```
+
+The command performs these controls automatically:
+
+- requires a clean, exact `origin/master` commit unless an explicit diagnostic
+  override is supplied;
+- runs VPS/service/configuration/database preflight checks before spending time
+  on a build;
+- compares repository and deployed EF migration IDs and refuses unprobed pending
+  migrations that contain SQL `THROW` guards;
+- publishes the API with `TdcFastEfBuild=true` and builds a clean production
+  frontend using the public HTTPS origin;
+- creates commit-keyed packages, verifies their hashes, and reuses them safely;
+- creates and verifies application and SQL backups before changing services;
+- applies the API and frontend with rollback on readiness failure;
+- verifies services, migrations, foreign keys, public routes, static assets,
+  CORS, direct-port isolation, and the required browser journeys;
+- writes JSON evidence with the duration and result of every stage under
+  `artifacts\vps-releases\<short-sha>` and uploads successful deployment evidence
+  to `C:\RhemaERP\logs`.
+
+The normal deployment target is 15-30 minutes when a build is required and 5-15
+minutes when verified artifacts are reused. Stop and investigate a stage when it
+exceeds its normal range; do not restart the whole deployment speculatively. API
+readiness may legitimately use several minutes while EF migrations apply, but is
+bounded by `-ApiReadyTimeoutSeconds` (420 seconds by default).
+
+`-AllowDirtyWorktree` and `-AllowNonRemoteHead` are diagnostics/emergency
+overrides, not normal release options. They prevent a validation run from being
+blocked while scripts are being developed, but they weaken release traceability.
+For a private HTTPS remote, the command first tries non-interactive Git and then
+uses an authenticated GitHub CLI session to verify the remote commit. It never
+opens an interactive credential prompt during a deployment.
+
+The remainder of this document is the detailed recovery and manual procedure.
 
 ## One-Time SSH Setup and the Port 22 Conflict
 
@@ -133,7 +182,8 @@ dotnet publish src\ErpSystem.Api\ErpSystem.Api.csproj `
     -r win-x64 `
     --self-contained true `
     -o "artifacts\deployment-vps-<short-sha>\api" `
-    /p:PublishSingleFile=false
+    /p:PublishSingleFile=false `
+    -p:TdcFastEfBuild=true
 ```
 
 The API package must not contain or overwrite:
@@ -380,10 +430,16 @@ Restore the database backup only when migration/data rollback is required and ex
      -r win-x64 `
      --self-contained true `
      -o artifacts\api-publish-<stamp> `
-     /p:PublishSingleFile=false
+     /p:PublishSingleFile=false `
+     -p:TdcFastEfBuild=true
    ```
 
    A framework-dependent API publish can fail at service start with fragmented log lines such as `.NET location`, `Framework: 'Microsoft.NETCore.App', version '8.0.0'`, and `App: C:\RhemaERP\api\ErpSystem.Api.exe`.
+
+   `TdcFastEfBuild=true` avoids recompiling the historical migration designer
+   corpus while retaining migration discovery through
+   `FastBuildMigrationMetadata.cs`. The automated deployment validates that every
+   migration remains discoverable before publishing.
 
 9. Do not publish or mirror runtime uploads.
 

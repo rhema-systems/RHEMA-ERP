@@ -104,6 +104,33 @@ namespace ErpSystem.Api.Controllers.Finance
             return userPermissions.Any(p => requiredPermissions.Contains(p, StringComparer.OrdinalIgnoreCase));
         }
 
+        private async Task<ConflictObjectResult?> GetBatchOwnershipConflictAsync(Guid journalEntryId)
+        {
+            var ownership = await _dbContext.JournalBatchItems
+                .AsNoTracking()
+                .Where(x =>
+                    x.TenantId == TenantId &&
+                    x.JournalEntryId == journalEntryId &&
+                    !x.IsDeleted &&
+                    !x.JournalBatch.IsDeleted)
+                .Select(x => new
+                {
+                    BatchId = x.JournalBatchId,
+                    x.JournalBatch.BatchNumber
+                })
+                .FirstOrDefaultAsync();
+
+            return ownership == null
+                ? null
+                : Conflict(new
+                {
+                    code = "JOURNAL_BATCH_OWNED",
+                    message = $"This journal belongs to batch {ownership.BatchNumber}. Edit, approve, post, or reverse it from the journal batch.",
+                    ownership.BatchId,
+                    ownership.BatchNumber
+                });
+        }
+
         private static readonly WorkflowInstanceStatus[] ActiveWorkflowStatuses =
         {
             WorkflowInstanceStatus.Created,
@@ -323,6 +350,10 @@ namespace ErpSystem.Api.Controllers.Finance
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.Edit", "Finance.JournalEntries.Write"))
                     return Forbid();
 
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
+
                 var entry = await _journalEntryService.UpdateJournalEntryAsync(id, dto);
                 return Ok(entry);
             }
@@ -351,6 +382,10 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.Delete", "Finance.JournalEntries.Write"))
                     return Forbid();
+
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
 
                 await _journalEntryService.DeleteJournalEntryAsync(id);
                 return NoContent();
@@ -381,6 +416,10 @@ namespace ErpSystem.Api.Controllers.Finance
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.Post"))
                     return Forbid();
 
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
+
                 await _journalEntryService.PostJournalEntryAsync(id);
                 return Ok(new { message = "Journal entry posted successfully" });
             }
@@ -409,6 +448,10 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.Reverse"))
                     return Forbid();
+
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
 
                 if (request == null || string.IsNullOrWhiteSpace(request.Reason))
                     return BadRequest("A reversal reason is required.");
@@ -444,6 +487,10 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.SubmitForApproval", "Finance.JournalEntries.Approve"))
                     return Forbid();
+
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
 
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
@@ -495,6 +542,10 @@ namespace ErpSystem.Api.Controllers.Finance
                         "Finance.JournalEntries.Delete"))
                     return Forbid();
 
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
+
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
                     return NotFound($"Journal entry with ID {id} not found");
@@ -538,6 +589,10 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
                     return Forbid();
+
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
 
                 var entry = await _journalEntryService.GetJournalEntryByIdAsync(id);
                 if (entry == null)
@@ -589,6 +644,10 @@ namespace ErpSystem.Api.Controllers.Finance
                 if (!await HasAnyPermissionAsync("Finance.JournalEntries.Approve"))
                     return Forbid();
 
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
+
                 if (string.IsNullOrWhiteSpace(request?.Reason))
                     return BadRequest("A rejection reason is required.");
 
@@ -638,6 +697,10 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
+
                 await _journalEntryService.LinkAttachmentAsync(id, fileUploadRecordId);
                 return NoContent();
             }
@@ -663,6 +726,10 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
+                var ownershipConflict = await GetBatchOwnershipConflictAsync(id);
+                if (ownershipConflict != null)
+                    return ownershipConflict;
+
                 await _journalEntryService.UnlinkAttachmentAsync(id, fileUploadRecordId);
                 return NoContent();
             }

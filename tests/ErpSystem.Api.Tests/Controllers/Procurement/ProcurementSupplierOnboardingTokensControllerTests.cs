@@ -1,5 +1,6 @@
 using System.Reflection;
 using ErpSystem.Api.Controllers.Procurement;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -64,9 +65,153 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
             .Which.Extensions["code"].Should().Be("REGISTRATION_REQUIRED");
     }
 
+    [Fact]
+    public async Task TrustedPaymentActivationDeliversSecretButReturnsOnlyTokenMetadata()
+    {
+        var tokenId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var token = new ProcurementSupplierOnboardingTokenDto
+        {
+            Id = tokenId,
+            TokenReference = "TOK-PAID-001"
+        };
+        var service = new Mock<IProcurementSupplierOnboardingTokenService>();
+        service.Setup(item => item.ReconcilePaymentAsync(
+                tokenId,
+                paymentId,
+                It.IsAny<ReconcileProcurementSupplierOnboardingPaymentRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = token,
+                PlaintextToken = "trusted-activation-secret"
+            });
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.DeliverApplicationTokenAsync(
+                tokenId,
+                "trusted-activation-secret",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantTokenDeliveryDto
+            {
+                ApplicantAccessFound = true,
+                Delivered = true,
+                Status = "Sent"
+            });
+        var controller = Controller(service, access);
+
+        var result = await controller.Reconcile(
+            tokenId,
+            paymentId,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "BANK-001",
+                Notes = "Funds verified.",
+                RowVersion = "row-version"
+            },
+            CancellationToken.None);
+
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeSameAs(token);
+        access.Verify(item => item.DeliverApplicationTokenAsync(
+            tokenId,
+            "trusted-activation-secret",
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ActivationDeliveryFailureReturnsRecoverableConflict()
+    {
+        var tokenId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var service = new Mock<IProcurementSupplierOnboardingTokenService>();
+        service.Setup(item => item.ReconcilePaymentAsync(
+                tokenId,
+                paymentId,
+                It.IsAny<ReconcileProcurementSupplierOnboardingPaymentRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = new ProcurementSupplierOnboardingTokenDto { Id = tokenId },
+                PlaintextToken = "trusted-activation-secret"
+            });
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.DeliverApplicationTokenAsync(
+                tokenId,
+                "trusted-activation-secret",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantTokenDeliveryDto
+            {
+                ApplicantAccessFound = true,
+                Delivered = false,
+                Status = "Failed",
+                FailureMessage = "Reissue to retry delivery."
+            });
+        var controller = Controller(service, access);
+
+        var result = await controller.Reconcile(
+            tokenId,
+            paymentId,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest(),
+            CancellationToken.None);
+
+        result.Should().BeOfType<ConflictObjectResult>();
+    }
+
+    [Fact]
+    public async Task ActivationDeliveryInvariantFailureReturnsRecoverableConflict()
+    {
+        var tokenId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var service = new Mock<IProcurementSupplierOnboardingTokenService>();
+        service.Setup(item => item.ReconcilePaymentAsync(
+                tokenId,
+                paymentId,
+                It.IsAny<ReconcileProcurementSupplierOnboardingPaymentRequest>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSupplierOnboardingTokenIssueResultDto
+            {
+                Token = new ProcurementSupplierOnboardingTokenDto { Id = tokenId },
+                PlaintextToken = "trusted-activation-secret"
+            });
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.DeliverApplicationTokenAsync(
+                tokenId,
+                "trusted-activation-secret",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementSupplierApplicantAccessException(
+                "SUPPLIER_APPLICANT_TOKEN_SECRET_INVALID",
+                "The application-token secret does not match the active token.",
+                400));
+        var controller = Controller(service, access);
+
+        var result = await controller.Reconcile(
+            tokenId,
+            paymentId,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest(),
+            CancellationToken.None);
+
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        var problem = conflict.Value.Should().BeAssignableTo<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should()
+            .Be("SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED");
+        problem.Detail.Should().NotContain("secret does not match",
+            "internal delivery invariants must not be exposed to the operator");
+    }
+
     private static ProcurementSupplierOnboardingTokensController Controller(
-        Mock<IProcurementSupplierOnboardingTokenService> service) =>
-        new(service.Object)
+        Mock<IProcurementSupplierOnboardingTokenService> service,
+        Mock<IProcurementSupplierApplicantAccessService>? applicantAccess = null) =>
+        new(
+            service.Object,
+            applicantAccess?.Object ??
+            Mock.Of<IProcurementSupplierApplicantAccessService>())
         {
             ControllerContext = new ControllerContext
             {

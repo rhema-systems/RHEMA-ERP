@@ -20,6 +20,12 @@ public interface IProcurementPurchaseOrderSodService
         string correlationId,
         CancellationToken cancellationToken = default);
 
+    Task<ProcurementPurchaseOrderSodReadinessDto> EnforceReceiptActionAsync(
+        PurchaseOrder purchaseOrder,
+        string receiptAction,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+
     Task RejectApprovalBypassAsync(
         PurchaseOrder purchaseOrder,
         string attempt,

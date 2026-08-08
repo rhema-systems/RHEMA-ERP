@@ -370,6 +370,9 @@ public class TenderDocumentDto
     public DateTime UploadedDate { get; set; }
     public string? UploadedByName { get; set; }
     public bool IsPublic { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
 }
 
 /// <summary>

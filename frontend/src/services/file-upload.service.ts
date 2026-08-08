@@ -2,6 +2,7 @@ import { apiService } from './api.service';
 
 export interface FileUploadResult {
   success: boolean;
+  fileId: string;
   fileName: string;
   originalFileName: string;
   filePath: string;
@@ -154,7 +155,7 @@ class FileUploadService {
     // Check file extension
     const allowedExtensions = [
       '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ico',
-      '.pdf', '.doc', '.docx', '.txt', '.rtf'
+      '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.rtf'
     ];
 
     const extension = '.' + file.name.split('.').pop()?.toLowerCase();

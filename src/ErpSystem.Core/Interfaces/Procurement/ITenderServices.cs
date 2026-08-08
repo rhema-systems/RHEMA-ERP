@@ -31,7 +31,9 @@ public interface ITenderService
     Task DeleteTenderItemAsync(Guid itemId);
     
     // Tender Documents
-    Task<TenderDocumentDto> UploadTenderDocumentAsync(Guid tenderId, UploadTenderDocumentDto dto, string filePath, string? fileType, long? fileSize);
+    Task<TenderDocumentDto> UploadTenderDocumentAsync(Guid tenderId, UploadTenderDocumentDto dto,
+        string logicalFileReference, string? fileType, long? fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId);
     Task DeleteTenderDocumentAsync(Guid documentId);
     Task<IEnumerable<TenderDocumentDto>> GetTenderDocumentsAsync(Guid tenderId, bool includeInternal = false);
     
@@ -100,7 +102,9 @@ public interface ITenderBidService
     Task DeleteBidItemAsync(Guid itemId);
     
     // Bid Documents
-    Task<TenderBidDocumentDto> UploadBidDocumentAsync(Guid bidId, UploadBidDocumentDto dto, string filePath, string? fileType, long? fileSize);
+    Task<TenderBidDocumentDto> UploadBidDocumentAsync(Guid bidId, UploadBidDocumentDto dto,
+        string logicalFileReference, string? fileType, long? fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId);
     Task DeleteBidDocumentAsync(Guid documentId);
     Task<IEnumerable<TenderBidDocumentDto>> GetBidDocumentsAsync(Guid bidId);
     

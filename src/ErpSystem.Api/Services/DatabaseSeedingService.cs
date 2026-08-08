@@ -43,6 +43,10 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+        private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
+        private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
+        private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+        private readonly ProcurementSupplierOnboardingTestSeeder? _procurementSupplierOnboardingTestSeeder;
         private readonly bool _allowDevelopmentDataSeedingOutsideDevelopment;
 
         private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinanceApprovalStages =
@@ -60,6 +64,19 @@ namespace ErpSystem.Web.Services
                     "Financial Controller Final Approval",
                     new[] { "Financial Controller" },
                     "Final finance control approval before the document is released to downstream processing.")
+            };
+
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> FinancePaymentApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Finance Manager Approval",
+                    new[] { "Finance Manager" },
+                    "Finance manager authorization of the supplier payment after invoice processing is complete."),
+                new(
+                    "Financial Controller Final Approval",
+                    new[] { "Financial Controller" },
+                    "Independent final payment authorization before posting, clearing, or settlement finalization.")
             };
 
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
@@ -84,7 +101,11 @@ namespace ErpSystem.Web.Services
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
-            IConfiguration? configuration = null)
+            ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
+            InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
+            IConfiguration? configuration = null,
+            AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
+            ProcurementSupplierOnboardingTestSeeder? procurementSupplierOnboardingTestSeeder = null)
         {
             _context = context;
             _userManager = userManager;
@@ -93,6 +114,10 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
+            _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
+            _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
+            _auditComplianceReportSeeder = auditComplianceReportSeeder;
+            _procurementSupplierOnboardingTestSeeder = procurementSupplierOnboardingTestSeeder;
             _allowDevelopmentDataSeedingOutsideDevelopment = configuration?.GetValue(
                 StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
                 false) ?? false;
@@ -169,6 +194,24 @@ namespace ErpSystem.Web.Services
                     await _procurementAccessControlSeeder.SeedAsync();
                 }
 
+                if (_procurementStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC procurement statutory report catalogue is seeded...");
+                    await _procurementStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_inventoryStatutoryReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC inventory statutory report catalogue is seeded...");
+                    await _inventoryStatutoryReportSeeder.SeedAsync();
+                }
+
+                if (_auditComplianceReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring TDC audit and compliance report catalogue is seeded...");
+                    await _auditComplianceReportSeeder.SeedAsync();
+                }
+
                 // Always ensure baseline EHC notification topics exist (templated in-app/email notifications)
                 _logger.LogInformation("Ensuring EHC notification topics are seeded...");
                 try
@@ -214,6 +257,12 @@ namespace ErpSystem.Web.Services
                     // Seed finance data (currencies, accounts, fiscal years, settings)
                     _logger.LogInformation("Ensuring finance data is seeded...");
                     await SeedFinanceDataAsync();
+
+                    if (_procurementSupplierOnboardingTestSeeder is not null)
+                    {
+                        _logger.LogInformation("Ensuring supplier-onboarding end-to-end test prerequisites are seeded...");
+                        await _procurementSupplierOnboardingTestSeeder.SeedAsync();
+                    }
 
                     // Seed EHC helpdesk demo data (tickets, feedback, problems, service requests, channels, compliance)
                     _logger.LogInformation("Ensuring EHC helpdesk demo data is seeded...");
@@ -339,6 +388,11 @@ namespace ErpSystem.Web.Services
                 {
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
+                        var approvalStages = spec.EntityCode is
+                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                            ? FinancePaymentApprovalStages
+                            : FinanceApprovalStages;
+
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
                             spec.EntityCode,
@@ -346,14 +400,311 @@ namespace ErpSystem.Web.Services
                             spec.EntityClassName,
                             spec.DefinitionName,
                             spec.Description,
-                            FinanceApprovalStages);
+                            approvalStages);
                     }
+                    await EnsureVendorPaymentControlWorkflowSeededAsync(tenant.Id);
+                    await EnsureApPaymentControlPoliciesSeededAsync(tenant.Id);
+                    var chiefAccountantStage = new[]
+                    {
+                        new WorkflowApprovalStageSeed(
+                            "Chief Accountant Approval",
+                            new[] { "Chief Accountant" },
+                            "Maker-checker approval of deposit evidence, net banking, destination account, and returned-cheque accounting.")
+                    };
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        "BankDepositBatch",
+                        "Bank Deposit",
+                        typeof(BankDepositBatch).FullName,
+                        "Bank Deposit Approval",
+                        "Every banking deposit requires Chief Accountant approval before the net bank movement is posted.",
+                        chiefAccountantStage);
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        "ReturnedChequeCase",
+                        "Returned Cheque",
+                        typeof(ReturnedChequeCase).FullName,
+                        "Returned Cheque Approval",
+                        "Returned cheque cases require Chief Accountant approval before AR is reopened and the bank debit is posted.",
+                        chiefAccountantStage);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed finance workflows");
             }
+        }
+
+        private async Task EnsureVendorPaymentControlWorkflowSeededAsync(Guid tenantId)
+        {
+            const string definitionName = "Vendor Payment Approval";
+            await EnsureWorkflowDefinitionSeededAsync(
+                tenantId,
+                entityCode: "VendorPayment",
+                entityName: "Vendor Payment",
+                entityClassName: typeof(VendorPayment).FullName,
+                definitionName,
+                description: "Direct supplier payment approval with effective-dated evidence, exception, and Managing Director authority controls.",
+                approvalRoleNames: new[] { "Chief Accountant", "Managing Director" });
+
+            var definition = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Include(item => item.Steps)
+                .Where(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.Name == definitionName)
+                .OrderByDescending(item => item.Version)
+                .FirstOrDefaultAsync();
+            if (definition == null)
+                return;
+
+            var now = DateTime.UtcNow;
+            var changed = false;
+            if (!definition.IsActive || definition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published)
+            {
+                // A prior conformance migration retired the unused direct-payment route. This slice
+                // supplies the missing domain submit/evidence controls, so the baseline route is now
+                // intentionally re-published rather than creating a second payment approval system.
+                definition.IsActive = true;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+                definition.PublishedAt ??= now;
+                definition.RetiredAt = null;
+                definition.RetiredById = null;
+                changed = true;
+            }
+
+            var approvalStep = definition.Steps
+                .Where(item => item.StepType == WorkflowStepType.Approval && !item.IsDeleted)
+                .OrderBy(item => item.Order)
+                .FirstOrDefault();
+            if (approvalStep != null)
+            {
+                var desired = BuildVendorPaymentStepConfigurationJson();
+                if (!string.Equals(approvalStep.Configuration, desired, StringComparison.Ordinal))
+                {
+                    approvalStep.Configuration = desired;
+                    approvalStep.Name = "Payment Control Approval";
+                    approvalStep.Description = "Chief Accountant review with conditional Managing Director authority and named payment evidence.";
+                    approvalStep.UpdatedAt = now;
+                    approvalStep.UpdatedBy = "System";
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                definition.UpdatedAt = now;
+                definition.UpdatedBy = "System";
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        private async Task EnsureApPaymentControlPoliciesSeededAsync(Guid tenantId)
+        {
+            var baseCurrency = await ResolveBaseCurrencyCodeAsync(tenantId);
+            var now = DateTime.UtcNow;
+            var effectiveFrom = new DateTime(2026, 8, 3, 0, 0, 0, DateTimeKind.Utc);
+            var policies = new[]
+            {
+                new
+                {
+                    Code = "TDC-AP-PAYMENT-BASE",
+                    Name = "TDC AP payment standard control",
+                    Category = (string?)null,
+                    Minimum = (decimal?)null,
+                    Priority = 100,
+                    RequiresMd = false,
+                    Evidence = new[]
+                    {
+                        PaymentEvidence("payment-support", "Approved payment supporting pack", "PaymentSupport")
+                    }
+                },
+                new
+                {
+                    Code = "TDC-AP-PAYMENT-CASH",
+                    Name = "TDC AP cash payment control",
+                    Category = (string?)VendorPaymentMethod.Cash.ToString(),
+                    Minimum = (decimal?)null,
+                    Priority = 200,
+                    RequiresMd = false,
+                    Evidence = new[]
+                    {
+                        PaymentEvidence("payment-support", "Approved payment supporting pack", "PaymentSupport"),
+                        PaymentEvidence("cash-custody", "Cash custody and recipient acknowledgement", "CashCustody")
+                    }
+                },
+                new
+                {
+                    Code = "TDC-AP-PAYMENT-MOBILE",
+                    Name = "TDC AP mobile money payment control",
+                    Category = (string?)VendorPaymentMethod.MobileMoney.ToString(),
+                    Minimum = (decimal?)null,
+                    Priority = 200,
+                    RequiresMd = false,
+                    Evidence = new[]
+                    {
+                        PaymentEvidence("payment-support", "Approved payment supporting pack", "PaymentSupport"),
+                        PaymentEvidence("transaction-confirmation", "Mobile money transaction confirmation", "PaymentConfirmation")
+                    }
+                },
+                new
+                {
+                    Code = "TDC-AP-PAYMENT-HIGH",
+                    Name = "TDC high-value AP payment control",
+                    Category = (string?)null,
+                    Minimum = (decimal?)100_000m,
+                    Priority = 300,
+                    RequiresMd = true,
+                    Evidence = new[]
+                    {
+                        PaymentEvidence("payment-support", "Approved payment supporting pack", "PaymentSupport"),
+                        PaymentEvidence("high-value-authority", "High-value payment authority memorandum", "AuthorityMemo")
+                    }
+                },
+                new
+                {
+                    Code = "TDC-AP-PAYMENT-HIGH-CASH",
+                    Name = "TDC high-value cash AP payment control",
+                    Category = (string?)VendorPaymentMethod.Cash.ToString(),
+                    Minimum = (decimal?)100_000m,
+                    Priority = 400,
+                    RequiresMd = true,
+                    Evidence = new[]
+                    {
+                        PaymentEvidence("payment-support", "Approved payment supporting pack", "PaymentSupport"),
+                        PaymentEvidence("cash-custody", "Cash custody and recipient acknowledgement", "CashCustody"),
+                        PaymentEvidence("high-value-authority", "High-value payment authority memorandum", "AuthorityMemo")
+                    }
+                }
+            };
+
+            foreach (var seed in policies)
+            {
+                var exists = await _context.WorkflowApprovalPolicySets.AnyAsync(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.Code == seed.Code);
+                if (exists)
+                    continue;
+
+                var config = BuildVendorPaymentApprovalConfig(seed.RequiresMd, seed.Evidence);
+                _context.WorkflowApprovalPolicySets.Add(new WorkflowApprovalPolicySet
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Code = seed.Code,
+                    Name = seed.Name,
+                    Description = "Seeded TDC Finance control. Amount bands are functional-currency equivalents; exceptional or evidence-exception requests always add Managing Director authority.",
+                    Module = "Finance",
+                    EntityType = "Vendor Payment",
+                    Category = seed.Category,
+                    MinimumAmount = seed.Minimum,
+                    CurrencyCode = baseCurrency,
+                    EffectiveFrom = effectiveFrom,
+                    Priority = seed.Priority,
+                    IsActive = true,
+                    LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                    PublishedAt = now,
+                    ApprovalConfiguration = JsonSerializer.Serialize(config, WorkflowSeedJsonOptions),
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static WorkflowEvidenceRequirementDto PaymentEvidence(
+            string key,
+            string name,
+            string documentType) => new()
+        {
+            RequirementKey = key,
+            DocumentName = name,
+            DocumentType = documentType,
+            MinimumDocuments = 1,
+            RequireVerification = true
+        };
+
+        private static WorkflowApprovalConfigDto BuildVendorPaymentApprovalConfig(
+            bool requiresManagingDirector,
+            IReadOnlyCollection<WorkflowEvidenceRequirementDto> evidenceRequirements)
+        {
+            return new WorkflowApprovalConfigDto
+            {
+                // Multiple requires every activated approval in the current sequential group.
+                // Each group currently contains one role, while the explicit value keeps the
+                // policy safe if TDC later adds joint approvers to either authority tier.
+                ApprovalType = WorkflowApprovalType.Multiple,
+                ActivationMode = WorkflowApprovalActivationMode.Sequential,
+                MinApprovalsRequired = 1,
+                RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
+                PreventInitiatorApproval = true,
+                RequireDistinctApprovers = true,
+                RequiresManagingDirectorApproval = requiresManagingDirector,
+                ManagingDirectorApproverRole = "Managing Director",
+                AllowEvidenceException = true,
+                EvidenceExceptionApproverRole = "Managing Director",
+                MinimumExceptionReasonLength = 30,
+                EvidenceRequirements = evidenceRequirements.ToList(),
+                ApproverRules = new List<WorkflowAssignmentRuleDto>
+                {
+                    new()
+                    {
+                        AssignmentType = WorkflowAssignmentType.Role,
+                        Role = "Chief Accountant",
+                        ApprovalGroup = 1,
+                        Priority = 100
+                    },
+                    new()
+                    {
+                        AssignmentType = WorkflowAssignmentType.Role,
+                        Role = "Managing Director",
+                        ApprovalGroup = 2,
+                        Priority = 90,
+                        Condition = new WorkflowConditionDto
+                        {
+                            ConditionType = WorkflowConditionType.Expression,
+                            Expression = "requiresManagingDirectorApproval == true"
+                        }
+                    }
+                }
+            };
+        }
+
+        private static string BuildVendorPaymentStepConfigurationJson()
+        {
+            var allUploadKeys = new[]
+            {
+                PaymentEvidence("payment-support", "Approved payment supporting pack", "PaymentSupport"),
+                PaymentEvidence("cash-custody", "Cash custody and recipient acknowledgement", "CashCustody"),
+                PaymentEvidence("transaction-confirmation", "Mobile money transaction confirmation", "PaymentConfirmation"),
+                PaymentEvidence("high-value-authority", "High-value payment authority memorandum", "AuthorityMemo")
+            };
+            var configuration = new WorkflowStepConfigurationDto
+            {
+                ApprovalConfig = BuildVendorPaymentApprovalConfig(false, allUploadKeys),
+                // These keys authorize uploads on the approval step. The applied payment-policy
+                // snapshot decides which subset is mandatory; marking every key required here would
+                // incorrectly force cash evidence on electronic payments.
+                TaskConfig = new WorkflowTaskConfigDto
+                {
+                    TaskActionType = "payment-evidence",
+                    RequiresDocument = false,
+                    Instructions = "Attach documents against the requirement keys shown on the AP payment control card.",
+                    DocumentRequirements = allUploadKeys.Select(item => new WorkflowDocumentRequirementDto
+                    {
+                        Id = item.RequirementKey,
+                        RequirementKey = item.RequirementKey,
+                        DocumentName = item.DocumentName,
+                        DocumentType = item.DocumentType,
+                        IsRequired = false
+                    }).ToList()
+                }
+            };
+
+            return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
         }
 
         private static IReadOnlyList<FinanceWorkflowSeedSpec> GetFinanceWorkflowSeedSpecs()
@@ -363,6 +714,8 @@ namespace ErpSystem.Web.Services
                 // General Ledger
                 new("JournalEntry", "Journal Entry", typeof(JournalEntry).FullName, "Journal Entry Approval",
                     "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
+                new("JournalBatch", "Journal Batch", typeof(JournalBatch).FullName, "Journal Batch Approval",
+                    "Batch-level journal approval with per-entry decisions, control totals, partial posting, and batch reversal controls."),
 
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
@@ -371,6 +724,11 @@ namespace ErpSystem.Web.Services
                     "Goods receipt approval before AP invoice matching and inventory/expense recognition."),
                 new("VendorInvoice", "Vendor Invoice", typeof(VendorInvoice).FullName, "Accounts Payable Invoice Approval",
                     "Supplier invoice approval workflow for AP controls before payment or posting."),
+                new("VendorInvoiceMatchException", "Vendor Invoice Match Exception", typeof(VendorInvoiceMatchException).FullName,
+                    "Vendor Invoice Match Exception Approval",
+                    "Independent AP-006 exception approval: Finance Manager approval -> Financial Controller final approval. This workflow authorizes a precise match variance only and never allocates or posts payment."),
+                new("VendorPayment", "Vendor Payment", typeof(VendorPayment).FullName, "Vendor Payment Authorization",
+                    "Manual supplier payment authorization before posting, clearing, or settlement finalization."),
                 new("PaymentBatch", "Payment Batch", typeof(PaymentBatch).FullName, "Vendor Payment Batch Approval",
                     "Bulk supplier payment batch approval before processing."),
                 new("SupplierReturn", "Supplier Return", typeof(SupplierReturn).FullName, "Supplier Return Approval",
@@ -405,6 +763,8 @@ namespace ErpSystem.Web.Services
                     "Unit budget approval before use in unit-account budget variance reporting."),
                 new("AllocationRule", "Allocation", typeof(AllocationRule).FullName, "Allocation Rule Approval",
                     "Allocation rule approval before use in finance allocation runs."),
+                new("AllocationRunBatch", "Allocation Run Batch", typeof(AllocationRunBatch).FullName, "Allocation Run Batch Approval",
+                    "Controlled allocation run approval before posting generated allocation journals to GL."),
 
                 // Cash and bank
                 new("CashTransaction", "Bank Transaction", typeof(CashTransaction).FullName, "Bank Transaction Approval",
@@ -4281,6 +4641,19 @@ namespace ErpSystem.Web.Services
                     changed = true;
                 }
 
+                // Baseline definitions are runtime controls, not editable drafts. Repair older
+                // seed rows that pre-date workflow lifecycle governance so startup does not leave
+                // Finance submission paths pointing at an "active" definition the repository
+                // correctly excludes from runtime selection.
+                if (sequentialDefinition.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published)
+                {
+                    sequentialDefinition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published;
+                    sequentialDefinition.PublishedAt ??= repairNow;
+                    sequentialDefinition.RetiredAt = null;
+                    sequentialDefinition.RetiredById = null;
+                    changed = true;
+                }
+
                 if (sequentialDefinition.Description != description)
                 {
                     sequentialDefinition.Description = description;
@@ -4377,12 +4750,15 @@ namespace ErpSystem.Web.Services
             _context.WorkflowDefinitions.Add(new WorkflowDefinition
             {
                 Id = definitionId,
+                DefinitionKey = definitionId,
                 TenantId = tenantId,
                 Name = safeDefinitionName,
                 Description = description,
                 EntityTypeId = entityType.Id,
                 Version = version,
                 IsActive = true,
+                LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+                PublishedAt = now,
                 CreatedAt = now,
                 CreatedBy = "System"
             });
@@ -4524,9 +4900,14 @@ namespace ErpSystem.Web.Services
             foreach (var definition in definitions.Where(d =>
                          d.Id != activeDefinitionId
                          && d.IsActive
-                         && IsLegacySeededWorkflowDefinition(d, definitionName, approvalStages)))
+                         && IsReplaceableSeededWorkflowDefinition(d, definitionName, approvalStages)))
             {
                 definition.IsActive = false;
+                if (definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published)
+                {
+                    definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                    definition.RetiredAt ??= now;
+                }
                 definition.UpdatedAt = now;
                 definition.UpdatedBy = "System";
                 changed = true;
@@ -4552,6 +4933,28 @@ namespace ErpSystem.Web.Services
             }
 
             return definition.Steps.Count(s => s.StepType == WorkflowStepType.Approval && !s.IsDeleted) <= 1;
+        }
+
+        private static bool IsReplaceableSeededWorkflowDefinition(
+            WorkflowDefinition definition,
+            string definitionName,
+            IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
+        {
+            if (!string.Equals(definition.Name, definitionName, StringComparison.OrdinalIgnoreCase)
+                && !definition.Name.StartsWith($"{definitionName} ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (HasExpectedApprovalStages(definition, approvalStages))
+            {
+                return false;
+            }
+
+            // Definitions created by this baseline seeder may have multiple stages from an
+            // older release. They remain replaceable; tenant-authored definitions do not.
+            return string.Equals(definition.CreatedBy, "System", StringComparison.OrdinalIgnoreCase)
+                || IsLegacySeededWorkflowDefinition(definition, definitionName, approvalStages);
         }
 
         private static bool EnsureSequentialApprovalStepConfigurations(
@@ -6138,6 +6541,14 @@ namespace ErpSystem.Web.Services
             await CreateTestUserAsync("financial.controller", "financial.controller@default.com", "Finance123!",
                 "Abena", "Dapaah", defaultTenant.Id, "Financial Controller", AuthenticationProvider.Local);
 
+            await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", "Finance123!",
+                "Nana", "Adu", defaultTenant.Id, "Chief Accountant", AuthenticationProvider.Local);
+
+            // The development account lets the conditional executive stage be exercised without
+            // granting broad tenant-administrator privileges to an approval actor.
+            await CreateTestUserAsync("managing.director", "managing.director@default.com", "Finance123!",
+                "TDC", "Managing Director", defaultTenant.Id, "Managing Director", AuthenticationProvider.Local);
+
             await CreateTestUserAsync("budget.officer", "budget.officer@default.com", "Finance123!",
                 "Kojo", "Nkrumah", defaultTenant.Id, "Budget Officer", AuthenticationProvider.Local);
 
@@ -6180,6 +6591,11 @@ namespace ErpSystem.Web.Services
                 new { Department = "Executive Approvals", Code = "LA-EXE", Username = "executive.approver4", First = "Patricia", Last = "Executive", Role = "Executive Approver", Number = "LA-EXE-004" }
             };
 
+            // [HR-MODULE-PORT] Positions require OrganizationUnitId + OrganizationLevelId (DepartmentId
+            // anchoring was removed). Resolve a default org unit/level for the tenant once so the position
+            // inserts below satisfy their FKs. Departments are still created — Employee.DepartmentId keeps them.
+            var (orgUnitId, orgLevelId) = await ErpSystem.Data.Seeders.SeederOrgDefaults.EnsureDefaultUnitAsync(_context, tenant.Id);
+
             foreach (var account in accounts)
             {
                 var department = await _context.Departments.FirstOrDefaultAsync(item =>
@@ -6214,7 +6630,8 @@ namespace ErpSystem.Web.Services
                     {
                         Id = Guid.NewGuid(),
                         TenantId = tenant.Id,
-                        DepartmentId = department.Id,
+                        OrganizationUnitId = orgUnitId,
+                        OrganizationLevelId = orgLevelId,
                         Title = account.Role,
                         Code = positionCode,
                         Description = "Land acquisition workflow test position",
@@ -6458,6 +6875,8 @@ namespace ErpSystem.Web.Services
                 new { Name = "Senior Accountant", Description = "Review role for journals, AP/AR transactions, budgets, and period activities" },
                 new { Name = "Finance Manager", Description = "Finance approval role for journals, budgets, AP/AR, and reporting" },
                 new { Name = "Financial Controller", Description = "Senior finance control role for posting, period close, and finance administration" },
+                new { Name = "Chief Accountant", Description = "Maker-checker approval role for bank deposits, returned cheques, and treasury settlement controls" },
+                new { Name = "Managing Director", Description = "Restricted executive approval role for exceptional and high-value finance transactions" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
                 new { Name = "HR User", Description = "User with access to HR module" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
@@ -6913,6 +7332,13 @@ namespace ErpSystem.Web.Services
                 },
                 new
                 {
+                    Name = "Finance.BudgetReturns.Edit",
+                    DisplayName = "Edit Assigned Budget Returns",
+                    Description = "Edit assigned budget worksheets before submission",
+                    Category = "Finance - Budgeting"
+                },
+                new
+                {
                     Name = "Finance.BudgetReturns.Submit",
                     DisplayName = "Submit Budget Returns",
                     Description = "Submit assigned budget worksheets",
@@ -6941,6 +7367,13 @@ namespace ErpSystem.Web.Services
                 permission.Category
             }))
             .Concat(PropertyManagementPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
+            .Concat(HrPermissions.All.Select(permission => new
             {
                 permission.Name,
                 permission.DisplayName,
@@ -6990,9 +7423,11 @@ namespace ErpSystem.Web.Services
             {
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
+                    .Concat(HrPermissions.AllNames)
                     .ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
+                    .Concat(HrPermissions.AllNames)
                     .ToArray(),
                 [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
                 [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
@@ -7024,7 +7459,8 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
-                    "Finance.JournalEntries.Write"
+                    "Finance.JournalEntries.Write",
+                    "Finance.JournalBatches.View"
                 },
                 ["Finance Clerk"] = new[]
                 {
@@ -7033,6 +7469,13 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Create",
+                    "Finance.JournalBatches.Edit",
+                    "Finance.JournalBatches.Delete",
+                    "Finance.JournalBatches.Import",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.ChartOfAccounts.Manage",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
@@ -7045,6 +7488,8 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Payments.Receive",
                     "Finance.BankAccounts.Manage",
                     "Finance.CashBank.Transactions.Record",
+                    "Finance.CashBank.Documents.Issue",
+                    "Finance.Banking.Deposits.Create",
                     "Finance.Budgeting.Read"
                 },
                 ["Accounts Officer"] = new[]
@@ -7055,6 +7500,15 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
                     "Finance.JournalEntries.SubmitForApproval",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Create",
+                    "Finance.JournalBatches.Edit",
+                    "Finance.JournalBatches.Delete",
+                    "Finance.JournalBatches.SubmitForApproval",
+                    "Finance.JournalBatches.Approve",
+                    "Finance.JournalBatches.Import",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
@@ -7067,6 +7521,14 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Invoices.Send",
                     "Finance.AR.Payments.Receive",
                     "Finance.CashBank.Transactions.Record",
+                    "Finance.CashBank.Documents.Issue",
+                    "Finance.Banking.Deposits.Create",
+                    "Finance.Banking.Deposits.Submit",
+                    "Finance.Banking.ReturnedCheques.Manage",
+                    // Operational accountants may assemble an evidenced waiver request, but a
+                    // separately permissioned reviewer must decide it.
+                    "Finance.PeriodClose.Workspace.Maintain",
+                    "Finance.PeriodClose.Waivers.Request",
                     "Finance.Workflow.Submit",
                     // Accounts Officers are configured as first-stage finance workflow reviewers.
                     // The generic permission opens the endpoint; the workflow assignment check
@@ -7075,6 +7537,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Migration.OpeningBalances.Prepare",
                     "Finance.Budgeting.Read",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 },
                 ["Accounts Payable Officer"] = new[]
@@ -7087,6 +7550,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AP.Invoices.Manage",
                     "Finance.AP.Invoices.SubmitForApproval",
                     "Finance.AP.Payments.Process",
+                    "Finance.CashBank.Documents.Issue",
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write"
@@ -7106,6 +7570,7 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Invoices.Manage",
                     "Finance.AR.Invoices.Send",
                     "Finance.AR.Payments.Receive",
+                    "Finance.CashBank.Documents.Issue",
                     "Finance.JournalEntries.Create",
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write"
@@ -7118,6 +7583,16 @@ namespace ErpSystem.Web.Services
                     "Finance.JournalEntries.Edit",
                     "Finance.JournalEntries.Write",
                     "Finance.JournalEntries.SubmitForApproval",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Create",
+                    "Finance.JournalBatches.Edit",
+                    "Finance.JournalBatches.Delete",
+                    "Finance.JournalBatches.SubmitForApproval",
+                    "Finance.JournalBatches.Approve",
+                    "Finance.JournalBatches.Post",
+                    "Finance.JournalBatches.Import",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Create",
                     "Finance.AP.Invoices.Edit",
                     "Finance.AP.Invoices.Write",
@@ -7132,8 +7607,15 @@ namespace ErpSystem.Web.Services
                     "Finance.AR.Payments.Receive",
                     "Finance.BankAccounts.Manage",
                     "Finance.CashBank.Transactions.Record",
+                    "Finance.CashBank.Documents.Issue",
                     "Finance.BankReconciliation.Perform",
+                    "Finance.Banking.LiquidityAccounts.Manage",
+                    "Finance.Banking.Deposits.Create",
+                    "Finance.Banking.Deposits.Submit",
+                    "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
+                    "Finance.PeriodClose.Workspace.Maintain",
+                    "Finance.PeriodClose.Waivers.Request",
                     "Finance.Workflow.Submit",
                     // Senior Accountants share the first-stage reviewer assignment with
                     // Accounts Officers and therefore require the same action permissions.
@@ -7143,6 +7625,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 },
                 ["Finance Manager"] = new[]
@@ -7150,11 +7633,30 @@ namespace ErpSystem.Web.Services
                     "Finance.Read",
                     "Finance.Write",
                     "Finance.JournalEntries.Approve",
+                    "Finance.JournalBatches.View",
+                    "Finance.JournalBatches.Approve",
+                    "Finance.JournalBatches.Post",
+                    "Finance.JournalBatches.Reverse",
+                    "Finance.JournalBatches.Export",
+                    "Finance.JournalBatches.Copy",
                     "Finance.AP.Invoices.Approve",
                     "Finance.AP.Payments.Approve",
                     "Finance.AR.Invoices.ApprovePost",
                     "Finance.AR.Invoices.Void",
                     "Finance.BankReconciliation.Approve",
+                    // Finance management may issue an original when covering an operational role
+                    // and may authorize a reason-backed replacement. The immutable issue service
+                    // still prevents more than one document from being labelled Original.
+                    "Finance.CashBank.Documents.Issue",
+                    "Finance.CashBank.Documents.Reprint",
+                    // Managers may request or review depending on the case; the service still
+                    // prevents the same identity from performing both maker/checker actions.
+                    "Finance.PeriodClose.Workspace.Maintain",
+                    "Finance.PeriodClose.Waivers.Request",
+                    "Finance.PeriodClose.Waivers.Approve",
+                    // Finance Managers may establish the business case, while the domain still
+                    // requires a distinct higher-tier identity to approve and apply the reopen.
+                    "Finance.PeriodReopen",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export",
                     "Finance.Workflow.Approve",
@@ -7163,8 +7665,53 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Approve",
                     "Finance.Budgeting.Lock"
+                },
+                ["Chief Accountant"] = new[]
+                {
+                    "Finance.Read",
+                    "Finance.Write",
+                    "Finance.BankAccounts.Manage",
+                    "Finance.BankReconciliation.Perform",
+                    "Finance.BankReconciliation.Approve",
+                    "Finance.Banking.LiquidityAccounts.Manage",
+                    "Finance.Banking.Deposits.Create",
+                    "Finance.Banking.Deposits.Submit",
+                    "Finance.Banking.Deposits.Approve",
+                    // TDC baseline assigns the post-lodgement bank acknowledgement to the Chief
+                    // Accountant. Service-level maker-checker still prevents the preparer from
+                    // confirming their own deposit even if roles are customised later.
+                    "Finance.Banking.Deposits.Confirm",
+                    // TDC assigns replacement-copy supervision to the Chief Accountant. Ordinary
+                    // cashiers retain original-issue rights but cannot generate duplicates.
+                    "Finance.CashBank.Documents.Issue",
+                    "Finance.CashBank.Documents.Reprint",
+                    "Finance.Banking.Settings.Manage",
+                    "Finance.Banking.ReturnedCheques.Manage",
+                    "Finance.PeriodClose.Workspace.Maintain",
+                    "Finance.PeriodClose.Waivers.Approve",
+                    "Finance.PeriodReopen.Approve",
+                    "Finance.Workflow.Submit",
+                    "Finance.Workflow.Approve",
+                    "Finance.Workflow.Reject",
+                    "Finance.Workflow.RequestChanges",
+                    "Finance.Workflow.PostAfterApproval",
+                    "Finance.Reports.Run"
+                },
+                ["Managing Director"] = new[]
+                {
+                    // Deliberately narrow: executive approvers can inspect the finance record and
+                    // decide an assigned workflow task, but cannot prepare, edit, post, or
+                    // administer transactions merely because they hold final authority.
+                    "Finance.Read",
+                    "Finance.AP.Payments.Approve",
+                    "Finance.Workflow.Approve",
+                    "Finance.Workflow.Reject",
+                    "Finance.Workflow.RequestChanges",
+                    "Finance.Reports.Run",
+                    "Finance.Reports.Export"
                 },
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
@@ -7173,7 +7720,18 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Read",
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
+                    "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
+                },
+                // "HR User" is the role this seeder actually creates; note the HR controllers'
+                // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded
+                // here. Both names are covered by HrPermissions.MedicalFallbackRoles.
+                // HR staff maintain occupational-health records but do not administer them:
+                // deleting a medical record stays with tenant administrators.
+                ["HR User"] = new[]
+                {
+                    HrPermissions.ViewMedicalRecords,
+                    HrPermissions.MaintainMedicalRecords
                 }
             };
 
@@ -7272,6 +7830,7 @@ namespace ErpSystem.Web.Services
         private async Task EnsureFileUploadPoliciesSeededAsync()
         {
             const string financeJournalCategory = "finance-journal-attachments";
+            const string financeCloseEvidenceCategory = "finance-close-evidence";
             const string financeJournalExtensions = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.jpg,.jpeg,.png";
             const string financeJournalMimeTypes =
                 "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document," +
@@ -7353,6 +7912,60 @@ namespace ErpSystem.Web.Services
                     {
                         journalPolicy.UpdatedAt = DateTime.UtcNow;
                         journalPolicy.UpdatedBy = "System";
+                    }
+                }
+
+                // Close evidence uses the same Office/PDF/image baseline as journal evidence but
+                // receives a distinct policy because close packs can legitimately be larger and
+                // always require a clean scan. Existing tenant-specific size/quota decisions are
+                // preserved; reconciliation only fills the controlled format/security baseline.
+                var closeEvidencePolicy = await _context.FileUploadPolicies
+                    .FirstOrDefaultAsync(p => p.TenantId == tenantId && !p.IsDeleted && p.Category == financeCloseEvidenceCategory);
+                if (closeEvidencePolicy == null)
+                {
+                    _context.FileUploadPolicies.Add(new FileUploadPolicy
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        Category = financeCloseEvidenceCategory,
+                        IsEnabled = true,
+                        MaxFileSizeBytes = 20 * 1024 * 1024,
+                        MaxCategoryTotalBytes = 1024L * 1024 * 1024,
+                        AllowedExtensionsCsv = financeJournalExtensions,
+                        AllowedMimeTypesCsv = financeJournalMimeTypes,
+                        RequireVirusScan = true,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = "System"
+                    });
+                }
+                else
+                {
+                    var updated = false;
+                    var extensions = MergeCsvValues(closeEvidencePolicy.AllowedExtensionsCsv, financeJournalExtensions, ensureLeadingDot: true);
+                    if (!string.Equals(closeEvidencePolicy.AllowedExtensionsCsv, extensions, StringComparison.OrdinalIgnoreCase))
+                    {
+                        closeEvidencePolicy.AllowedExtensionsCsv = extensions;
+                        updated = true;
+                    }
+
+                    var mimeTypes = MergeCsvValues(closeEvidencePolicy.AllowedMimeTypesCsv, financeJournalMimeTypes, ensureLeadingDot: false);
+                    if (!string.Equals(closeEvidencePolicy.AllowedMimeTypesCsv, mimeTypes, StringComparison.OrdinalIgnoreCase))
+                    {
+                        closeEvidencePolicy.AllowedMimeTypesCsv = mimeTypes;
+                        updated = true;
+                    }
+
+                    if (!closeEvidencePolicy.IsEnabled || !closeEvidencePolicy.RequireVirusScan)
+                    {
+                        closeEvidencePolicy.IsEnabled = true;
+                        closeEvidencePolicy.RequireVirusScan = true;
+                        updated = true;
+                    }
+
+                    if (updated)
+                    {
+                        closeEvidencePolicy.UpdatedAt = DateTime.UtcNow;
+                        closeEvidencePolicy.UpdatedBy = "System";
                     }
                 }
             }
@@ -7540,6 +8153,7 @@ namespace ErpSystem.Web.Services
         {
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
+            services.AddScoped<FinanceCloseTemplateBaselineSeeder>();
             return services;
         }
 

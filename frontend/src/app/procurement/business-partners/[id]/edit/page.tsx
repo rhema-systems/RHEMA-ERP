@@ -126,7 +126,7 @@ export default function EditBusinessPartnerPage() {
       router.push(`/procurement/business-partners/${id}`);
     } catch (error) {
       console.error('Error updating business partner:', error);
-      toast.error('Failed to update business partner');
+      toast.error(error instanceof Error ? error.message : 'Failed to update business partner');
     } finally {
       setSaving(false);
     }
@@ -362,24 +362,24 @@ export default function EditBusinessPartnerPage() {
               <div>
                 <Label htmlFor="paymentTerms">Payment Terms</Label>
                 {/* Procurement/Finance boundary: PaymentTermId is authoritative; legacy text is backend-managed. */}
-                <Select value={formData.paymentTermId || ''} onValueChange={(value) => setFormData({ ...formData, paymentTermId: value })}>
+                <Select
+                  value={formData.paymentTermId || ''}
+                  onValueChange={(value) => setFormData({ ...formData, paymentTermId: value })}
+                  disabled={paymentTerms.length === 0}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select payment terms" />
+                    <SelectValue
+                      placeholder={paymentTerms.length > 0
+                        ? 'Select payment terms'
+                        : 'No active payment terms available'}
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {paymentTerms.length > 0 ? (
-                      paymentTerms.map((term) => (
-                        <SelectItem key={term.id} value={term.id}>
-                          {term.code} - {term.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <>
-                        <SelectItem value="COD">Cash on Delivery</SelectItem>
-                        <SelectItem value="Net30">Net 30 Days</SelectItem>
-                        <SelectItem value="Net60">Net 60 Days</SelectItem>
-                      </>
-                    )}
+                    {paymentTerms.map((term) => (
+                      <SelectItem key={term.id} value={term.id}>
+                        {term.code} - {term.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

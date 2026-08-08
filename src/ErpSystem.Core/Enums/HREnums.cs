@@ -107,7 +107,10 @@ public enum StaffStatus
     OnLeave = 7
 }
 
-public enum WorkSchedule
+/// <summary>
+/// Work arrangement / schedule types
+/// </summary>
+public enum WorkArrangementType
 {
     FullTime = 1,
     PartTime = 2,
@@ -199,13 +202,27 @@ public enum SkillLevel
     Master = 5
 }
 
+public enum SkillCategory
+{
+    Technical = 1,
+    SoftSkill = 2,
+    Leadership = 3,
+    Domain = 4,
+    Language = 5,
+    Certification = 6,
+    Tool = 7
+}
+
 /// <summary>
 /// Types of employee emergency contact
 /// </summary>
 public enum EmergencyContactType
 {
     EmergencyContact = 1,
+
     NextOfKin = 2,
+
+    Both = 3
 }
 
 /// <summary>
@@ -214,22 +231,24 @@ public enum EmergencyContactType
 public enum ContractStatus
 {
     Active = 1,
+
     Expired = 2,
+
     Terminated = 3
 }
 
 public enum DependentRelationship
 {
     Spouse = 1,
-    
+
     Son = 2,
-    
+
     Daughter = 3,
-    
+
     Mother = 4,
-    
+
     Father = 5,
-    
+
     Brother = 6,
 
     Sister = 7,
@@ -239,7 +258,7 @@ public enum DependentRelationship
     Aunt = 9,
 
     Nephew = 10,
-    
+
     Niece = 11,
 
     Grandfather = 12,
@@ -255,7 +274,9 @@ public enum PayFrequency
     BiWeekly = 2,
     Monthly = 3,
     Quarterly = 4,
-    Annually = 5
+    Annually = 5,
+    /// <summary>A single, non-recurring payment/value (e.g. one-off bonus or relocation benefit).</summary>
+    OneTime = 6
 }
 
 public enum TaxTreatmentType
@@ -285,16 +306,25 @@ public enum PositionChangeReason
     InitialAssignment = 0,
 
     Promotion = 1,
-    
+
     Demotion = 2,
-    
+
     Transfer = 3,
-    
+
     Restructure = 4,
 
     Termination = 5,
-    
+
     Other = 6
+}
+
+public enum EmployeeBankAccountType
+{
+    Current = 1,
+
+    Savings = 2,
+
+    MobileMoney = 3
 }
 
 public enum EmployeeContactType
@@ -303,15 +333,6 @@ public enum EmployeeContactType
     Postal = 2,
     Temporary = 3,
     Other = 4
-}
-
-public enum EmployeeBankAccountType
-{
-    Current = 1,
-    
-    Savings = 2,
-    
-    MobileMoney = 3
 }
 
 #endregion Employee Details
@@ -396,20 +417,57 @@ public enum StationType
 public enum LocationContactType
 {
     Primary = 1,
-    
+
     Secondary = 2,
-    
+
     Emergency = 3,
 
     Other = 4
 }
 
+/// <summary>
+/// Classification of an HR team.
+/// </summary>
+public enum TeamType
+{
+    Permanent = 1,
+    Project = 2,
+    TaskForce = 3,
+    CrossFunctional = 4,
+    Shift = 5,
+    Committee = 6,
+    Other = 99
+}
+
+/// <summary>
+/// Lifecycle status of a team.
+/// </summary>
+public enum TeamStatus
+{
+    Draft = 1,
+    Active = 2,
+    Inactive = 3,
+    Dissolved = 4
+}
+
+/// <summary>
+/// Role of an employee within a team.
+/// </summary>
+public enum TeamMemberRole
+{
+    Member = 1,
+    DeputyLead = 2,
+    TeamLead = 3,
+    Coordinator = 4,
+    Secretary = 5
+}
+
 public enum WorkMode
 {
     OnSite = 1,
-    
+
     Remote = 2,
-    
+
     Hybrid = 3
 }
 
@@ -424,52 +482,6 @@ public enum BenefitRecipient
     Dependent = 2,
 
     Both = 3
-}
-
-public enum BenefitRelation
-{
-    All = 1,
-
-    Spouse = 2,
-
-    Child = 3,
-
-    Son = 4,
-
-    Daughter = 5,
-
-    Mother = 6,
-
-    Father = 7,
-
-    Brother = 8,
-
-    Sister = 9
-}
-
-public enum BenefitPolicyType
-{
-    Medical = 1,
-
-    Legal = 2,
-
-    Educational = 3,
-
-    Financial = 4,
-
-    FamilyAndLifestyle = 5,
-
-    Insurance = 6,
-
-    Transportation = 7,
-
-    Housing = 8,
-
-    Technology = 9,
-
-    LeaveAndPTO = 10,
-
-    Other = 11
 }
 
 public enum BenefitRelationType
@@ -497,13 +509,13 @@ public enum BenefitRelationType
     Sister = 11,
 
     Uncle = 12,
-    
+
     Aunt = 13,
 
     Nephew = 14,
-    
+
     Niece = 15,
-    
+
     Grandparent = 16,
 
     Grandfather = 17,
@@ -511,13 +523,208 @@ public enum BenefitRelationType
     Grandmother = 18,
 }
 
+public enum BenefitPolicyType
+{
+    Medical = 1,
+
+    Legal = 2,
+
+    Educational = 3,
+
+    Financial = 4,
+
+    FamilyAndLifestyle = 5,
+
+    Insurance = 6,
+
+    Transportation = 7,
+
+    Housing = 8,
+
+    Technology = 9,
+
+    LeaveAndPTO = 10,
+
+    Other = 11
+}
+
 public enum BenefitLimitPeriod
 {
     Monthly = 1,
 
     Annual = 2,
-    
+
     Lifetime = 3
+}
+
+/// <summary>
+/// How a benefit is delivered to the employee. Drives whether it produces a cash payroll line,
+/// a notional (taxable-only) Benefit-in-Kind value, or neither.
+/// </summary>
+public enum BenefitDeliveryType
+{
+    /// <summary>Paid as money (becomes a cash earning on payroll).</summary>
+    Cash = 1,
+
+    /// <summary>Non-cash benefit (car, accommodation, etc.) — valued for tax but not paid out.</summary>
+    InKind = 2,
+
+    /// <summary>Employee incurs cost and is reimbursed against a limit.</summary>
+    Reimbursement = 3,
+
+    /// <summary>Employer-provided service (e.g. gym, transport) with no cash flow to the employee.</summary>
+    Service = 4,
+
+    /// <summary>Voucher / scrip with a face value.</summary>
+    Voucher = 5
+}
+
+/// <summary>
+/// Tax treatment of a benefit's assessed value for income tax (PAYE) purposes.
+/// </summary>
+public enum BenefitTaxTreatment
+{
+    /// <summary>The whole assessed value is added to taxable income.</summary>
+    FullyTaxable = 1,
+
+    /// <summary>Only a portion (see TaxablePercentage / exempt threshold) is taxable.</summary>
+    PartiallyTaxable = 2,
+
+    /// <summary>Not subject to income tax.</summary>
+    TaxExempt = 3,
+
+    /// <summary>Taxed under a special/concessionary statutory rule.</summary>
+    ConcessionaryRate = 4
+}
+
+/// <summary>
+/// How the monetary (or Benefit-in-Kind) value of a benefit is determined.
+/// </summary>
+public enum BenefitValuationMethod
+{
+    /// <summary>Actual invoiced/employer cost.</summary>
+    ActualCost = 1,
+
+    /// <summary>Open-market value of the benefit.</summary>
+    MarketValue = 2,
+
+    /// <summary>A statutory formula (e.g. GRA Benefit-in-Kind percentages) using ValuationRate/ValuationCap.</summary>
+    StatutoryFormula = 3,
+
+    /// <summary>A percentage of the employee's basic salary (ValuationRate).</summary>
+    PercentageOfBasicSalary = 4,
+
+    /// <summary>A percentage of the employee's total cash emoluments (ValuationRate).</summary>
+    PercentageOfCashEmoluments = 5,
+
+    /// <summary>A flat configured amount.</summary>
+    FlatRate = 6,
+
+    /// <summary>Resolved from the per-grade value table (<c>BenefitGradeValue</c>).</summary>
+    GradeBased = 7
+}
+
+/// <summary>
+/// How a benefit's contribution amounts are calculated.
+/// </summary>
+public enum BenefitCalculationBasis
+{
+    FixedAmount = 1,
+
+    PercentageOfBasic = 2,
+
+    PercentageOfGross = 3,
+
+    /// <summary>Driven by the per-grade value table (<c>BenefitGradeValue</c>).</summary>
+    GradeBandTable = 4
+}
+
+/// <summary>
+/// Who bears the cost of a benefit.
+/// </summary>
+public enum BenefitContributionResponsibility
+{
+    EmployerPaysAll = 1,
+
+    EmployeePaysAll = 2,
+
+    Shared = 3,
+
+    EmployeePaysWithSubsidy = 4
+}
+
+/// <summary>
+/// Lifecycle status of an employee's enrollment in a benefit.
+/// </summary>
+public enum EmployeeBenefitEnrollmentStatus
+{
+    Draft = 1,
+
+    PendingApproval = 2,
+
+    Active = 3,
+
+    Suspended = 4,
+
+    Terminated = 5,
+
+    Expired = 6,
+
+    Rejected = 7
+}
+
+/// <summary>
+/// Where an employee benefit enrollment originated. Position/Grade/Mandatory enrollments are
+/// materialized from entitlement templates and kept in sync; Manual ones are created directly.
+/// </summary>
+public enum BenefitEnrollmentSource
+{
+    /// <summary>Materialized from a position's <c>EmployeePositionBenefit</c> entitlement.</summary>
+    Position = 1,
+
+    /// <summary>Derived from a grade/staff-level entitlement.</summary>
+    Grade = 2,
+
+    /// <summary>Created directly for the employee.</summary>
+    Manual = 3,
+
+    /// <summary>Auto-enrolled because the policy is mandatory.</summary>
+    Mandatory = 4
+}
+
+/// <summary>
+/// Nature of a <c>BenefitUtilization</c> drawdown against an enrollment's coverage limit.
+/// </summary>
+public enum BenefitUtilizationType
+{
+    /// <summary>An incurred expense consuming the benefit (the common case).</summary>
+    Expense = 1,
+
+    /// <summary>A reimbursement claim against the benefit limit.</summary>
+    Reimbursement = 2,
+
+    /// <summary>A manual adjustment to the used amount (e.g. correction).</summary>
+    Adjustment = 3,
+
+    /// <summary>A reversal that returns amount to the available balance.</summary>
+    Reversal = 4
+}
+
+/// <summary>
+/// Lifecycle status of a benefit utilization/claim. Only <see cref="Approved"/> and <see cref="Paid"/>
+/// draw down the available balance.
+/// </summary>
+public enum BenefitClaimStatus
+{
+    Pending = 1,
+
+    Approved = 2,
+
+    Rejected = 3,
+
+    Paid = 4,
+
+    Cancelled = 5
 }
 
 #endregion Staff Benefits
@@ -530,54 +737,753 @@ public enum BenefitLimitPeriod
 public enum LeaveStatus
 {
     Draft = 0,
+
     Pending = 1,
+
     Approved = 2,
+
     Rejected = 3,
+
     Cancelled = 4,
-    Closed = 5
+
+    InProgress = 5,
+
+    Completed = 6
+}
+
+public enum LeaveEligibilityType
+{
+    Gender = 1,
+
+    OrganizationLevel = 2,
+
+    OrganizationUnit = 3,
+
+    Position = 4
+}
+
+public enum LeavePlanStatus
+{
+    Draft = 0,
+
+    Submitted = 1,
+
+    Approved = 2,
+
+    Rejected = 3,
+
+    Cancelled = 4,
+
+    /// <summary>
+    /// Manager reviewed the submitted plan and proposed alternative dates; awaiting the
+    /// employee's confirmation (the collaborative leg of the self-service proposal flow).
+    /// The employee submitting their preferred dates is simply <see cref="Submitted"/>.
+    /// </summary>
+    ChangesSuggested = 5
+}
+
+/// <summary>
+/// Categories for the reusable, system-wide reason-code lookup. Lets the same code list be
+/// scoped to where it applies (leave adjustments, encashments, cancellations, etc.).
+/// </summary>
+public enum ReasonCodeCategory
+{
+    General = 0,
+
+    LeaveAdjustment = 1,
+
+    LeaveEncashment = 2,
+
+    LeaveCancellation = 3,
+
+    LeaveRejection = 4
+}
+
+public enum LeaveEncashmentStatus
+{
+    Draft = 0,
+
+    Submitted = 1,
+
+    PendingApproval = 2,
+
+    Approved = 3,
+
+    Rejected = 4,
+
+    Processed = 5,   // Payment made
+
+    Cancelled = 6
+}
+
+public enum AccrualFrequency
+{
+    None = 0,          // Leave does not accrue automatically (allocated yearly)
+
+    Monthly = 1,       // Most common (e.g., 2 days per month)
+
+    Annual = 2,        // Once per year
+
+    PerPayPeriod = 3,  // Based on payroll cycles
+
+    Quarterly = 4,     // Every 3 months
+
+    SemiAnnual = 5     // Every 6 months
+}
+
+/// <summary>
+/// How an accrual policy releases the annual entitlement over the leave year.
+/// </summary>
+public enum AccrualMode
+{
+    /// <summary>
+    /// Earn the entitlement incrementally each accrual period (e.g. 1.5 days/month), reaching
+    /// the full entitlement only after a complete cycle. The common enterprise default.
+    /// </summary>
+    AccrueIncrementally = 0,
+
+    /// <summary>
+    /// Grant the full entitlement the moment the access/service gate is met (e.g. the 1-year
+    /// anniversary); thereafter it remains at the full entitlement for that year. Matches the
+    /// "entitled to the full days on your anniversary" model.
+    /// </summary>
+    FullGrantOnEligibility = 1
 }
 
 #endregion Staff Leave
 
 #region Performance Appraisal
 
+public enum GoalPriority
+{
+    Low = 1,
+
+    Medium = 2,
+
+    High = 3,
+
+    Critical = 4
+}
+
+public enum GoalParentType
+{
+    Company = 1,
+
+    Unit = 2,
+}
+
+public enum GoalStatus
+{
+    Draft = 1,
+
+    PendingApproval = 2,
+
+    Approved = 3,
+
+    Rejected = 4,
+
+    Locked = 5,
+
+    InProgress = 6,
+
+    AtRisk = 7,
+
+    OnTrack = 8,
+
+    Completed = 9,
+}
+
+/// <summary>
+/// Governance completeness status for a team member's goal set within an appraisal cycle.
+/// Derived entirely from goal counts and weight totals — never from UI state.
+/// </summary>
+public enum TeamGovernanceStatus
+{
+    /// <summary>Employee has no goals in this cycle.</summary>
+    NotStarted = 0,
+
+    /// <summary>One or more goals are still in Draft or Rejected state — structural work is incomplete.</summary>
+    InProgress = 1,
+
+    /// <summary>At least one goal is awaiting manager approval.</summary>
+    AwaitingApproval = 2,
+
+    /// <summary>All workflow states are resolved but total weight ≠ 100.</summary>
+    InvalidWeight = 3,
+
+    /// <summary>
+    /// No drafts, no pending approvals, total weight == 100.
+    /// Execution states (InProgress, OnTrack, AtRisk, Completed) do NOT block this status.
+    /// </summary>
+    StructurallyComplete = 4,
+}
+
+public enum GoalProgressStatus
+{
+    NotStarted = 1,
+
+    InProgress = 2,
+
+    OnTrack = 3,
+
+    AtRisk = 4,
+
+    Completed = 5,
+
+    Cancelled = 6
+}
+
+public enum CheckInType
+{
+    OneOnOne = 1,
+
+    AdHocFeedback = 2,
+
+    GoalProgressUpdate = 3,
+
+    CoachingSession = 4,
+
+    MidYearCheckIn = 5
+}
+
+/// <summary>
+/// Controls how many interim review events are generated within an annual cycle.
+/// </summary>
+public enum ReviewFrequency
+{
+    /// <summary>No interim reviews — only the year-end formal review.</summary>
+    None = 0,
+
+    /// <summary>A single mid-year review event is generated.</summary>
+    MidYearOnly = 1,
+
+    /// <summary>Three interim events: Q1, Mid-Year (Q2), Q3.</summary>
+    Quarterly = 2,
+
+    /// <summary>HR manually creates review events as needed (no auto-generation).</summary>
+    Custom = 3
+}
+
+/// <summary>
+/// Controls when peer evaluations open relative to the self-evaluation step.
+/// </summary>
+public enum PeerEvaluationOpenMode
+{
+    /// <summary>Peers can begin evaluating as soon as the self-evaluation window opens (parallel).</summary>
+    WithSelfEval = 0,
+
+    /// <summary>Peer evaluation only opens after the employee submits their self-assessment (sequential).</summary>
+    AfterSelfEval = 1
+}
+
+/// <summary>
+/// Controls where in the pipeline HR performs their review.
+/// </summary>
+public enum HRReviewTiming
+{
+    /// <summary>HR reviews appraisals before calibration meetings.</summary>
+    BeforeCalibration = 0,
+
+    /// <summary>HR reviews appraisals after calibration (final sign-off before employee release).</summary>
+    AfterCalibration = 1
+}
+
 public enum AppraisalType
 {
     Quarterly = 1,
     MidYear = 2,
     Annual = 3,
-    OneOff = 4
+    OneOff = 4,
+    /// <summary>New-hire probation / confirmation appraisal (short cycle, Theme 12).</summary>
+    Probation = 5
 }
 
+/// <summary>
+/// Controls how heavy the interim (quarterly / mid-year) review events are.
+/// LightTouch = progress summary + conversation; FullAppraisal = a full self/manager
+/// evaluation against the period's goals/KPIs producing a period score.
+/// </summary>
+public enum InterimReviewDepth
+{
+    LightTouch = 0,
+    FullAppraisal = 1
+}
+
+/// <summary>
+/// The period a goal/KPI target applies to within the cycle. Lets an organization
+/// run full quarterly/half-year appraisals against period-scoped targets.
+/// </summary>
+public enum GoalPeriod
+{
+    FullCycle = 0,
+    Q1 = 1,
+    Q2 = 2,
+    H1 = 3,
+    Q3 = 4,
+    Q4 = 5,
+    H2 = 6
+}
+
+/// <summary>
+/// The kind of follow-up action an appraisal recommends. Each approved recommendation
+/// is dispatched to the owning module to create a real downstream record (Theme 8 backbone).
+/// </summary>
+public enum RecommendationType
+{
+    MeritIncrease = 1,
+    Bonus = 2,
+    Promotion = 3,
+    TrainingNomination = 4,
+    SuccessionNomination = 5,
+    PerformanceImprovementPlan = 6,
+    ConfirmProbation = 7,
+    ExtendProbation = 8,
+    ContractRenewal = 9,
+    Demotion = 10,
+    Termination = 11,
+    Recognition = 12
+}
+
+/// <summary>
+/// Lifecycle of an appraisal outcome recommendation. Proposed → Approved → Actioned
+/// (or Rejected / Dismissed). "Actioned" means the downstream record was created.
+/// </summary>
+public enum RecommendationStatus
+{
+    Proposed = 1,
+    Approved = 2,
+    Actioned = 3,
+    Rejected = 4,
+    Dismissed = 5
+}
+
+/// <summary>Kind of compensation change proposed by an appraisal (Theme 11).</summary>
+public enum SalaryReviewProposalType
+{
+    MeritIncrease = 1,
+    Bonus = 2
+}
+
+/// <summary>Lifecycle of a salary review proposal handed off to payroll/comp (Theme 11).</summary>
+public enum SalaryReviewProposalStatus
+{
+    Proposed = 1,
+    Approved = 2,
+    Rejected = 3,
+    Applied = 4
+}
+
+/// <summary>
+/// Type of employment action proposed from an appraisal outcome recommendation. These route to a
+/// lightweight <c>EmploymentActionProposal</c> intake record (no heavyweight target container needed at
+/// approval time) for HR to action in the owning module.
+/// </summary>
+public enum EmploymentActionType
+{
+    Promotion = 1,
+    Demotion = 2,
+    ContractRenewal = 3,
+    Termination = 4,
+    Recognition = 5
+}
+
+/// <summary>Lifecycle of an employment-action proposal raised from an appraisal recommendation.</summary>
+public enum EmploymentActionProposalStatus
+{
+    Proposed = 1,
+    Approved = 2,
+    Rejected = 3,
+    Actioned = 4
+}
+
+public enum AppraisalCycleStatus
+{
+    Draft = 1,                    // Being configured
+    Open = 2,                   // Active, appraisals can be created
+    InProgress = 3,               // Evaluations are happening
+    Closed = 4,                   // Finalized, no changes
+}
+
+public enum AppraisalTargetType
+{
+    OrganizationLevel = 1,
+    OrganizationUnit = 2,
+    Position = 3,
+    Employee = 4,
+}
+
+/// <summary>
+/// Coverage status for an employee in the Coverage Preview simulation.
+/// </summary>
+public enum EmployeeCoverageStatus
+{
+    /// <summary>A unique highest-priority template was resolved.</summary>
+    Covered = 1,
+    /// <summary>No active template matched this employee's scope.</summary>
+    NoTemplate = 2,
+    /// <summary>Multiple templates tied at the same priority for the same scope level.</summary>
+    Conflict = 3,
+    /// <summary>Employee is explicitly excluded by a cycle target exclusion rule.</summary>
+    Excluded = 4,
+}
+
+/// <summary>
+/// High-level lifecycle state persisted on <see cref="PerformanceAppraisal"/>.
+/// Use <see cref="AppraisalPhase"/> (computed, not persisted) for fine-grained phase detection.
+/// </summary>
 public enum AppraisalStatus
 {
-    Open = 1,
+    /// <summary>Legacy/transitional 'open' status used by the retained RHEMA appraisal model.</summary>
+    Open = 0,
+
+    /// <summary>
+    /// Appraisal created but not yet opened for employee action (goals may still be pending).
+    /// </summary>
+    Draft = 1,
+
+    /// <summary>
+    /// Appraisal is open and actively progressing through employee/peer/manager evaluation phases.
+    /// Fine-grained phase is computed via <see cref="AppraisalPhase"/>.
+    /// </summary>
+    Active = 2,
+
+    /// <summary>
+    /// Manager evaluation is complete; appraisal is under HR/Calibration governance review.
+    /// </summary>
+    Governance = 3,
+
+    /// <summary>
+    /// Employee has filed an appeal that is under review.
+    /// </summary>
+    Appealed = 4,
+
+    /// <summary>
+    /// HR finalisation complete and employee has acknowledged (or acknowledgment not required).
+    /// Appeal window may still be open.
+    /// </summary>
+    Completed = 5,
+
+    /// <summary>
+    /// Appraisal fully closed — terminal state, no further transitions permitted.
+    /// </summary>
+    Closed = 6,
+}
+
+/// <summary>
+/// Fine-grained sub-status of an appraisal within its lifecycle, derived from entity state and
+/// settings flags by <see cref="AppraisalSubStatusResolver"/>.
+/// Used as the "current stuck step" identifier when HR manually advances a stalled pipeline.
+/// NOT persisted — always derived on demand.
+/// </summary>
+public enum AppraisalSubStatus
+{
+    // ── Pre-pipeline ───────────────────────────────
+    GoalSetting = 0,
+
+    // ── Pipeline active phases ─────────────────────
+    PeerNomination = 1,
+    SelfEvaluation = 2,
+    PeerEvaluation = 3,
+    ManagerEvaluation = 4,
+
+    // ── Post-manager governance ────────────────────
+    PendingCalibration = 5,
+    CalibrationInProgress = 6,
+    PendingHRReview = 7,
+    HRReviewInProgress = 8,
+
+    // ── Employee end ───────────────────────────────
+    PendingConversation = 9,
+    PendingAcknowledgment = 10,
+
+    // ── Appeals ────────────────────────────────────
+    AppealSubmitted = 11,
+    AppealUnderReview = 12,
+    AppealResolved = 13,
+
+    // ── Terminal ───────────────────────────────────
+    Completed = 14,
+    Closed = 15,
+}
+
+/// <summary>
+/// Fine-grained workflow phase computed dynamically from appraisal data.
+/// NOT persisted to the database — derive on demand via <c>IAppraisalWorkflowService.GetCurrentPhase</c>.
+/// </summary>
+public enum AppraisalPhase
+{
+    /// <summary>Goals are required but not yet approved by the manager.</summary>
+    GoalSetting = 1,
+
+    /// <summary>Awaiting employee self-evaluation submission.</summary>
+    SelfEvaluation = 2,
+
+    /// <summary>Awaiting minimum peer evaluator submissions.</summary>
+    PeerEvaluation = 3,
+
+    /// <summary>Awaiting manager evaluation submission.</summary>
+    ManagerEvaluation = 4,
+
+    /// <summary>Awaiting HR calibration session completion.</summary>
+    Calibration = 5,
+
+    /// <summary>HR is reviewing and finalising scores.</summary>
+    HRReview = 6,
+
+    /// <summary>Employee must review and acknowledge results.</summary>
+    EmployeeReview = 7,
+
+    /// <summary>All steps complete — appraisal is in a terminal phase.</summary>
+    Closed = 8,
+}
+
+public enum DevelopmentPlanStatus
+{
+    Draft = 0,
+
+    Active = 1,
+
+    OnHold = 2,
+
+    Completed = 3,
+
+    Cancelled = 4,
+}
+
+public enum DevelopmentObjectiveStatus
+{
+    NotStarted = 1,
+
     InProgress = 2,
-    Submitted = 3,
-    Reviewed = 4,
-    Closed = 5
+
+    Completed = 3,
+
+    Cancelled = 4
+}
+
+/// <summary>
+/// Classifies the type of manager feedback recorded against a development plan.
+/// </summary>
+public enum FeedbackType
+{
+    /// <summary>General observation or comment.</summary>
+    GeneralComment = 1,
+
+    /// <summary>Acknowledgment of progress toward objectives.</summary>
+    ProgressUpdate = 2,
+
+    /// <summary>Concern or warning that the plan may be at risk.</summary>
+    RiskFlag = 3,
+
+    /// <summary>Formal mid-cycle review note.</summary>
+    MidCycleReview = 4,
+
+    /// <summary>End-of-cycle summary feedback.</summary>
+    CycleClosing = 5,
+}
+
+public enum ReviewEventType
+{
+    GoalSetting = 1,
+
+    QuarterlyQ1 = 2,
+
+    QuarterlyQ2 = 3,
+
+    MidYearReview = 4,
+
+    QuarterlyQ3 = 5,
+
+    QuarterlyQ4 = 6,
+
+    YearEndReview = 7,
+}
+
+public enum AppraisalReviewStatus
+{
+    Pending = 1,
+
+    InProgress = 2,
+
+    /// <summary>Employee has formally submitted their side; awaiting manager review and close.</summary>
+    EmployeeSubmitted = 3,
+
+    Completed = 4,
+
+    Cancelled = 5
+}
+
+public enum ConversationType
+{
+    KickOff = 1,
+
+    QuarterlyQ1 = 2,
+
+    MidYear = 3,
+
+    QuarterlyQ3 = 4,
+
+    QuarterlyQ4 = 5,
+
+    FinalReview = 6,
+
+    PIPDiscussion = 7,
+
+    AdHocMeeting = 8
+}
+
+public enum AppraisalAttachmentEntityType
+{
+    PerformanceAppraisal = 1,
+
+    Goal = 2,
+
+    CheckIn = 3,
+
+    PipPlan = 4,
+
+    Appeal = 5,
+
+    KpiEvaluation = 6,
+
+    CalibrationSession = 7
 }
 
 public enum EvaluatorRole
 {
     Self = 1,
+
     Manager = 2,
+
     Peer = 3,
+
     HR = 4
 }
 
-public enum CriteriaType
+/// <summary>Indicates the source that provided the KPI target in a criterion config snapshot.</summary>
+public enum KpiTargetSource
 {
-    Competency = 1,
-    KPI = 2
+    /// <summary>Target came from the employee's locked goal.</summary>
+    Goal = 1,
+
+    /// <summary>Target came from the appraisal template item default.</summary>
+    Template = 3
+}
+
+/// <summary>
+/// Approval lifecycle for an appraisal template. Units draft templates and submit them to HR;
+/// only Approved templates can be assigned to a cycle.
+/// </summary>
+public enum TemplateApprovalStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Rejected = 4
+}
+
+public enum PeerNominationMode
+{
+    Employee = 1,
+
+    Manager = 2,
+}
+
+public enum PeerNominationStatus
+{
+    Pending = 1,
+
+    Approved = 2,
+
+    Rejected = 3
 }
 
 public enum MeasurementType
 {
     NumericAbsolute = 1,
+
     PercentageTarget = 2,
+
     Boolean = 3,
+
     Range = 4
+}
+
+/// <summary>
+/// Represents the lifecycle and final outcome of an appraisal appeal.
+/// 
+/// IMPORTANT SEMANTICS:
+/// - "Remanded" is a PROCESS state (manager action required).
+/// - "Upheld" and "Rejected" are FINAL VERDICT states.
+/// - Once a FINAL state is reached, no further score changes are allowed.
+/// </summary>
+public enum AppraisalAppealStatus
+{
+    /// <summary>
+    /// Employee has submitted an appeal.
+    /// No HR action has started yet.
+    /// </summary>
+    Submitted = 1,
+
+    /// <summary>
+    /// HR is actively reviewing the appeal.
+    /// Scores are read-only at this stage.
+    /// </summary>
+    UnderReview = 2,
+
+    /// <summary>
+    /// HR has determined that the appeal has merit
+    /// but requires manager re-evaluation or clarification
+    /// before a final decision can be made.
+    /// 
+    /// Manager action is required.
+    /// A remand deadline applies.
+    /// </summary>
+    Remanded = 3,
+
+    /// <summary>
+    /// FINAL STATE.
+    /// HR has concluded that the employee's appeal is valid.
+    /// 
+    /// This may occur:
+    /// - Directly after HR review (no remand needed), OR
+    /// - After reviewing post-remand manager re-evaluation.
+    /// 
+    /// Final scores are confirmed and locked.
+    /// </summary>
+    Upheld = 4,
+
+    /// <summary>
+    /// FINAL STATE.
+    /// HR has concluded that the employee's appeal is not valid.
+    /// 
+    /// This may occur:
+    /// - Directly after HR review, OR
+    /// - After reviewing post-remand manager re-evaluation.
+    /// 
+    /// Original or post-remand scores are confirmed and locked.
+    /// </summary>
+    Rejected = 5
+}
+
+public enum AppraisalResponseStatus
+{
+    Draft = 1,
+
+    Submitted = 2,
+
+    Recalled = 3
+}
+
+public enum CalibrationStatus
+{
+    Pending = 1,
+
+    InProgress = 2,
+
+    Completed = 3,
+
+    Cancelled = 4
 }
 
 public enum PipStatus
@@ -638,7 +1544,7 @@ public enum PipOutcome
 
 #region Recruitment
 
-public enum VacancyType
+public enum JobVacancyType
 {
     [Description("New Position")]
     NewPosition = 1,
@@ -653,7 +1559,7 @@ public enum VacancyType
     Internship = 4
 }
 
-public enum VacancyStatus
+public enum JobVacancyStatus
 {
     [Description("Draft")]
     Draft = 1,
@@ -664,32 +1570,35 @@ public enum VacancyStatus
     [Description("Approved")]
     Approved = 3,
 
+    [Description("Rejected")]
+    Rejected = 4,
+
     [Description("Published")]
-    Published = 4,
+    Published = 5,
 
     [Description("Closed for Applications")]
-    ClosedForApplications = 5,
+    ClosedForApplications = 6,
 
     [Description("Shortlisting")]
-    Shortlisting = 6,
+    Shortlisting = 7,
 
     [Description("Interviewing")]
-    Interviewing = 7,
+    Interviewing = 8,
 
     [Description("Offer Stage")]
-    OfferStage = 8,
+    OfferStage = 9,
 
     [Description("Filled")]
-    Filled = 9,
+    Filled = 10,
 
     [Description("Cancelled")]
-    Cancelled = 10,
+    Cancelled = 11,
 
     [Description("On Hold")]
-    OnHold = 11
+    OnHold = 12
 }
 
-public enum VacancyClosureReason
+public enum JobVacancyClosureReason
 {
     [Description("Position Filled")]
     PositionFilled = 1,
@@ -707,49 +1616,155 @@ public enum VacancyClosureReason
     NoSuitableCandidates = 5,
 
     [Description("Other")]
-    Other = 6
+    Other = 6,
+
+    [Description("Application Deadline Passed")]
+    ApplicationDeadlinePassed = 7,
+
+    [Description("Sufficient Applications Received")]
+    SufficientApplicationsReceived = 8,
+
+    [Description("Proceeding to Shortlisting")]
+    ProceedingToShortlisting = 9
+}
+
+public enum JobPostingChannel
+{
+    InternalPortal = 1,
+    CompanyWebsite = 2,
+    LinkedIn = 3,
+    JobBoard = 4,
+    Agency = 5,
+    Indeed = 6,
+    Glassdoor = 7,
+    Newspaper = 8,
+    Other = 9
+}
+
+public enum JobPostingStatus
+{
+    Draft = 1,
+    Published = 2,
+    Expired = 3,
+    Closed = 4,
+    Removed = 5
+}
+
+/// <summary>
+/// Lifecycle status of a <see cref="VacancyPipelineStageAssignment"/> — tracks where a
+/// vacancy-specific pipeline stage activity is in its execution.
+/// </summary>
+public enum VacancyStageAssignmentStatus
+{
+    [Description("Not Started")]
+    NotStarted = 1,
+
+    [Description("In Progress")]
+    InProgress = 2,
+
+    [Description("Completed")]
+    Completed = 3,
+
+    /// <summary>Past the due date and not yet completed.</summary>
+    [Description("Overdue")]
+    Overdue = 4,
+
+    /// <summary>Escalation has been triggered because the responsible person did not complete in time.</summary>
+    [Description("Escalated")]
+    Escalated = 5,
+
+    /// <summary>Intentionally skipped (only valid when the stage's <c>CanSkip</c> flag is true).</summary>
+    [Description("Skipped")]
+    Skipped = 6
+}
+
+public enum RecruitmentPipelineStageType
+{
+    ApplicationReview = 1,
+
+    Screening = 2,
+
+    /// <summary>
+    /// Optional gate where the hiring manager reviews shortlisted CVs before interviews are
+    /// scheduled. Configure only if the client's process requires this explicit approval step.
+    /// </summary>
+    HiringManagerReview = 3,
+
+    /// <summary>
+    /// Any formal test or evaluation — written, practical, psychometric, or cognitive.
+    /// The specific test type is captured on JobApplicantTestResult.TestType.
+    /// </summary>
+    Assessment = 4,
+
+    Interview = 5,
+
+    /// <summary>
+    /// Pre-employment verification stage — background checks, reference checks, and medical
+    /// examinations. These typically run in parallel; each item is tracked individually
+    /// via PreEmploymentCheckItem.
+    /// </summary>
+    PreEmploymentCheck = 6,
+
+    Offer = 7,
+
+    /// <summary>
+    /// Terminal stage — the candidate has been confirmed hired.
+    /// Triggers creation of the JobHireRecord and handoff to the Onboarding subsystem.
+    /// </summary>
+    Hired = 8,
+
+    Other = 9
 }
 
 public enum ApplicationStatus
 {
+    [Description("Draft")]
+    Draft = 0,
+
+    [Description("New")]
+    New = 1,
+
     [Description("Submitted")]
-    Submitted = 1,
+    Submitted = 2,
 
     [Description("Under Review")]
-    UnderReview = 2,
+    UnderReview = 3,
 
     [Description("Shortlisted")]
-    Shortlisted = 3,
+    Shortlisted = 4,
 
     [Description("Interview Scheduled")]
-    InterviewScheduled = 4,
+    InterviewScheduled = 5,
 
     [Description("Interview Completed")]
-    InterviewCompleted = 5,
+    InterviewCompleted = 6,
 
     [Description("Assessment Pending")]
-    AssessmentPending = 6,
+    AssessmentPending = 7,
 
-    [Description("Reference Check")]
-    ReferenceCheck = 7,
+    [Description("Pre-Employment Check")]
+    PreEmploymentCheck = 8,
 
     [Description("Offer Extended")]
-    OfferExtended = 8,
+    OfferExtended = 9,
 
     [Description("Offer Accepted")]
-    OfferAccepted = 9,
+    OfferAccepted = 10,
 
     [Description("Offer Declined")]
-    OfferDeclined = 10,
+    OfferDeclined = 11,
 
     [Description("Rejected")]
-    Rejected = 11,
+    Rejected = 12,
 
     [Description("Withdrawn")]
-    Withdrawn = 12,
+    Withdrawn = 13,
 
     [Description("Hired")]
-    Hired = 13
+    Hired = 14,
+
+    [Description("Waitlisted")]
+    Waitlisted = 15
 }
 
 public enum ApplicationSource
@@ -782,10 +1797,13 @@ public enum ApplicationSource
     NewspaperAd = 9,
 
     [Description("Other")]
-    Other = 10
+    Other = 10,
+
+    [Description("Internal Portal")]
+    InternalPortal = 11
 }
 
-public enum DocumentType
+public enum JobCandidateDocumentType
 {
     [Description("Resume/CV")]
     Resume = 1,
@@ -815,55 +1833,101 @@ public enum DocumentType
     Other = 9
 }
 
-public enum InterviewType
+public enum JobApplicationStageExitReason
 {
-    [Description("Phone Screening")]
-    PhoneScreening = 1,
-
-    [Description("Video Interview")]
-    VideoInterview = 2,
-
-    [Description("In-Person Individual")]
-    InPersonIndividual = 3,
-
-    [Description("Panel Interview")]
-    PanelInterview = 4,
-
-    [Description("Technical Assessment")]
-    TechnicalAssessment = 5,
-
-    [Description("Group Interview")]
-    GroupInterview = 6,
-
-    [Description("Final Interview")]
-    FinalInterview = 7
+    Progressed = 1,
+    Rejected = 2,
+    Withdrawn = 3,
+    OnHold = 4,
+    Merged = 5
 }
 
-public enum InterviewStatus
+public enum JobApplicantTestType
+{
+    Written = 1,
+    Practical = 2
+}
+
+public enum JobInterviewType
+{
+    /// <summary>Initial short conversation to verify basics. Format is set via InterviewMode.</summary>
+    [Description("Screening")]
+    Screening = 1,
+
+    [Description("One-on-One")]
+    OneOnOne = 2,
+
+    [Description("Panel")]
+    Panel = 3,
+
+    [Description("Technical")]
+    Technical = 4,
+
+    /// <summary>Structured behavioural interview using the STAR method. Common in enterprise and public-sector hiring.</summary>
+    [Description("Competency-Based")]
+    CompetencyBased = 5,
+
+    /// <summary>Business case or problem-solving scenario. Common in consulting, finance, and strategy roles.</summary>
+    [Description("Case Study")]
+    CaseStudy = 6,
+
+    /// <summary>Candidate presents on a given topic or their own work. Common for senior and specialist roles.</summary>
+    [Description("Presentation")]
+    Presentation = 7,
+
+    /// <summary>Multiple candidates assessed simultaneously. Common in graduate recruitment and assessment centres.</summary>
+    [Description("Group Assessment")]
+    GroupAssessment = 8,
+
+    [Description("Final")]
+    Final = 9,
+
+    [Description("Other")]
+    Other = 10
+}
+
+/// <summary>
+/// How an interview session is delivered. Stored separately from JobInterviewType so that
+/// any interview format (Panel, Technical, Final, etc.) can be conducted via any modality.
+/// </summary>
+public enum InterviewMode
+{
+    [Description("In Person")]
+    InPerson = 1,
+
+    [Description("Phone")]
+    Phone = 2,
+
+    [Description("Video")]
+    Video = 3,
+
+    /// <summary>Some panelists in-person, others joining remotely.</summary>
+    [Description("Hybrid")]
+    Hybrid = 4
+}
+
+public enum JobInterviewStatus
 {
     [Description("Scheduled")]
     Scheduled = 1,
 
-    [Description("Confirmed")]
-    Confirmed = 2,
-
     [Description("Rescheduled")]
-    Rescheduled = 3,
+    Rescheduled = 2,
 
     [Description("In Progress")]
-    InProgress = 4,
+    InProgress = 3,
 
     [Description("Completed")]
-    Completed = 5,
+    Completed = 4,
 
     [Description("No Show")]
-    NoShow = 6,
+    NoShow = 5,
 
     [Description("Cancelled")]
-    Cancelled = 7
+    Cancelled = 6
 }
 
-public enum InterviewOutcome
+public enum JobInterviewOutcome
 {
     [Description("Highly Recommended")]
     HighlyRecommended = 1,
@@ -881,10 +1945,13 @@ public enum InterviewOutcome
     ProceedToNextRound = 5,
 
     [Description("Rejected")]
-    Rejected = 6
+    Rejected = 6,
+
+    [Description("On Hold")]
+    OnHold = 7
 }
 
-public enum PanelistRole
+public enum JobInterviewPanelistRole
 {
     [Description("Panel Chair")]
     Chair = 1,
@@ -899,7 +1966,7 @@ public enum PanelistRole
     Observer = 4
 }
 
-public enum InterviewRecommendation
+public enum JobInterviewRecommendation
 {
     [Description("Strong Hire")]
     StrongHire = 1,
@@ -907,8 +1974,8 @@ public enum InterviewRecommendation
     [Description("Hire")]
     Hire = 2,
 
-    [Description("Maybe")]
-    Maybe = 3,
+    [Description("Neutral")]
+    Neutral = 3,
 
     [Description("No Hire")]
     NoHire = 4,
@@ -917,22 +1984,176 @@ public enum InterviewRecommendation
     StrongNoHire = 5
 }
 
-public enum ShortlistingCriteriaType
+public enum JobShortlistingCriteriaType
 {
     [Description("Qualification")]
     Qualification = 1,
 
-    [Description("Experience")]
-    Experience = 2,
+    [Description("Years Of Experience")]
+    YearsOfExperience = 2,
 
-    [Description("Skills")]
-    Skills = 3,
+    [Description("Skill")]
+    Skill = 3,
 
     [Description("Certification")]
     Certification = 4,
 
     [Description("Language")]
-    Language = 5
+    Language = 5,
+
+    [Description("Gender")]
+    Gender = 6,
+
+    [Description("Age")]
+    Age = 7,
+
+    [Description("Location")]
+    Location = 8,
+
+    [Description("Education Level")]
+    EducationLevel = 9,
+
+    [Description("Other")]
+    Other = 10
+}
+
+public enum ShortlistingComparisonOperator
+{
+    Equals = 1,
+    NotEquals = 2,
+    Contains = 3,
+    GreaterThan = 4,
+    GreaterThanOrEqual = 5,
+    LessThan = 6,
+    LessThanOrEqual = 7,
+    Between = 8,
+    In = 9
+}
+
+/// <summary>
+/// Controls how a multi-valued shortlisting criterion (Skill, Qualification,
+/// Certification, Language) decides whether a candidate has "passed".
+///
+/// <list type="bullet">
+///   <item>
+///     <term>AnyMatched</term>
+///     <description>
+///       The candidate passes if they satisfy at least one of the listed values.
+///       Use this for broad criteria where any relevant skill or qualification is acceptable.
+///       This is the default so existing rows are unaffected.
+///     </description>
+///   </item>
+///   <item>
+///     <term>AllRequired</term>
+///     <description>
+///       The candidate must match every listed value to pass.
+///       Use this for hard requirements where the full set is non-negotiable.
+///     </description>
+///   </item>
+/// </list>
+/// </summary>
+public enum MandatoryMatchMode
+{
+    [Description("Any matched")]
+    AnyMatched = 0,   // default — preserves legacy behaviour
+
+    [Description("All required")]
+    AllRequired = 1,
+}
+
+/// <summary>
+/// Controls how individual values in a multi-valued criterion's <c>RequiredValue</c> list
+/// are compared against candidate profile strings.
+/// <list type="bullet">
+///   <item><term>Exact</term><description>Case-insensitive exact equality (default, current behaviour).</description></item>
+///   <item><term>Contains</term><description>Passes if either string contains the other (handles abbreviations and prefixes).</description></item>
+///   <item><term>Fuzzy</term><description>Tokenised word-overlap ≥ 50 %, with Levenshtein edit-distance ≤ 2 fallback for short strings.</description></item>
+/// </list>
+/// </summary>
+public enum ValueMatchStrategy
+{
+    [Description("Exact")]
+    Exact = 0,      // default — current behaviour
+
+    [Description("Contains")]
+    Contains = 1,   // candidateValue ⊇ requiredTerm  OR  requiredTerm ⊇ candidateValue
+
+    [Description("Fuzzy")]
+    Fuzzy = 2,      // tokenised word-overlap, with Levenshtein fallback
+}
+
+/// <summary>
+/// Approval state of the completed shortlist before candidates are contacted.
+/// </summary>
+public enum ShortlistApprovalStatus
+{
+    [Description("Not Submitted")]
+    NotSubmitted = 1,
+
+    [Description("Submitted for Approval")]
+    PendingApproval = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    [Description("Rejected — Revise Shortlist")]
+    Rejected = 4
+}
+
+/// <summary>
+/// Whether an auto-shortlist action was triggered by the system or manually overridden.
+/// </summary>
+public enum ShortlistDecisionSource
+{
+    [Description("Manual")]
+    Manual = 1,
+
+    [Description("Auto (Score Threshold)")]
+    AutoScoreThreshold = 2,
+
+    [Description("Manual Override of Auto")]
+    ManualOverride = 3
+}
+
+/// <summary>
+/// The type of shortlisting decision recorded in the immutable audit log.
+/// </summary>
+public enum ShortlistDecisionType
+{
+    [Description("Shortlisted")]
+    Shortlisted = 1,
+
+    [Description("Rejected")]
+    Rejected = 2,
+
+    [Description("Waitlisted")]
+    Waitlisted = 3,
+
+    [Description("Un-shortlisted")]
+    Unshortlisted = 4,
+
+    [Description("Auto-Shortlisted")]
+    AutoShortlisted = 5
+}
+
+public enum JobOfferStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Sent = 4,
+    Negotiating = 5,
+    Accepted = 6,
+    Declined = 7,
+    Withdrawn = 8,
+    Expired = 9,
+    OnHold = 10,
+    /// <summary>Candidate has verbally/formally accepted; pre-employment checks are underway.</summary>
+    ConditionallyAccepted = 11,
+    /// <summary>All blocking pre-employment checks have passed; hire record may now be created.</summary>
+    ChecksCleared = 12,
+    /// <summary>Offer was rejected by an approver during the approval workflow. The preparer must revise and resubmit.</summary>
+    Rejected = 13
 }
 
 public enum EmploymentType
@@ -948,47 +2169,192 @@ public enum EmploymentType
     Freelance = 9
 }
 
+public enum JobApplicantCommunicationType
+{
+    Email = 1,
+    TextMessage = 2,
+    Letter = 3,
+    PortalNotification = 4,
+    PhoneCall = 5
+}
+
+public enum JobApplicantCommunicationDirection
+{
+    Outbound = 1,
+    Inbound = 2,
+    System = 3
+}
+
+public enum JobHireStatus
+{
+    PendingOnboarding = 1,
+    OnboardingInProgress = 2,
+    OnboardingCompleted = 3,
+    Active = 4,
+    Cancelled = 5
+}
+
+public enum PreEmploymentCheckStatus
+{
+    Pending = 1,
+    InProgress = 2,
+    Completed = 3,
+    CompletedWithCaution = 4,
+    Failed = 5,
+    Waived = 6
+}
+
+public enum PreEmploymentCheckType
+{
+    MedicalExamination = 1,
+    PoliceClearance = 2,
+    BackgroundCheck = 3,
+    AcademicVerification = 4,
+    ProfessionalLicenceVerification = 5,
+    ReferenceCheck = 6,
+    CreditCheck = 7,
+    DrugTest = 8,
+    Other = 9
+}
+
+public enum CheckItemStatus
+{
+    Pending = 1,
+    Requested = 2,
+    Received = 3,
+    Verified = 4,
+    Failed = 5,
+    Waived = 6,
+    NotApplicable = 7
+}
+
+public enum ReferenceResponseMethod
+{
+    Email = 1,
+    Phone = 2,
+    InPerson = 3,
+    Form = 4,
+    Letter = 5
+}
+
+public enum ReferenceRating
+{
+    Excellent = 1,
+    Good = 2,
+    Satisfactory = 3,
+    Poor = 4,
+    Unsatisfactory = 5
+}
+
+public enum OnboardingTaskCategory
+{
+    Documentation = 1,
+    SystemAccess = 2,
+    Orientation = 3,
+    Training = 4,
+    EquipmentSetup = 5,
+    PayrollSetup = 6,
+    PolicyAcknowledgement = 7,
+    MeetAndGreet = 8,
+    HealthAndSafety = 9,
+    Compliance = 10,
+    Other = 11
+}
+
+public enum OnboardingStatus
+{
+    NotStarted = 1,
+    InProgress = 2,
+    Completed = 3,
+    Overdue = 4,
+    Cancelled = 5
+}
+
+public enum OnboardingTaskStatus
+{
+    Pending = 1,
+    InProgress = 2,
+    Completed = 3,
+    Overdue = 4,
+    Waived = 5,
+    Blocked = 6
+}
+
+public enum OnboardingAssetType
+{
+    Laptop = 1,
+    Desktop = 2,
+    MobilePhone = 3,
+    AccessCard = 4,
+    ParkingPass = 5,
+    Uniform = 6,
+    SystemAccount = 7,
+    EmailAccount = 8,
+    SoftwareLicence = 9,
+    Keys = 10,
+    Other = 11
+}
+
+public enum OnboardingAssetProvisionStatus
+{
+    Pending = 1,
+    Ordered = 2,
+    Ready = 3,
+    Issued = 4,
+    Acknowledged = 5,
+    NotRequired = 6
+}
+
+public enum ProbationStatus
+{
+    Active = 1,
+    Completed = 2,
+    Terminated = 3
+}
+
+public enum ProbationReviewStatus
+{
+    Scheduled = 1,
+    Completed = 2,
+    Missed = 3,
+    Rescheduled = 4
+}
+
+public enum ProbationReviewRecommendation
+{
+    Confirm = 1,
+    Extend = 2,
+    Terminate = 3,
+    ContinueMonitoring = 4
+}
+
+public enum ProbationPerformanceRating
+{
+    Outstanding = 1,
+    ExceedsExpectations = 2,
+    MeetsExpectations = 3,
+    BelowExpectations = 4,
+    Unsatisfactory = 5
+}
+
+public enum TerminationReason
+{
+    Resignation = 1,
+    Redundancy = 2,
+    Dismissal = 3,
+    ContractExpiry = 4,
+    Retirement = 5,
+    Death = 6,
+    MutualAgreement = 7,
+    EndOfInternship = 8,
+    Other = 9
+}
+
 #endregion Recruitment
 
 #region Disciplinary Actions
 
-public enum OffenseCategory
-{
-    [Description("Attendance/Punctuality")]
-    Attendance = 1,
-
-    [Description("Performance")]
-    Performance = 2,
-
-    [Description("Misconduct")]
-    Misconduct = 3,
-
-    [Description("Insubordination")]
-    Insubordination = 4,
-
-    [Description("Policy Violation")]
-    PolicyViolation = 5,
-
-    [Description("Harassment")]
-    Harassment = 6,
-
-    [Description("Theft/Fraud")]
-    TheftFraud = 7,
-
-    [Description("Safety Violation")]
-    SafetyViolation = 8,
-
-    [Description("Substance Abuse")]
-    SubstanceAbuse = 9,
-
-    [Description("Confidentiality Breach")]
-    ConfidentialityBreach = 10,
-
-    [Description("Other")]
-    Other = 11
-}
-
-public enum OffenseSeverity
+public enum StaffOffenseSeverity
 {
     [Description("Minor")]
     Minor = 1,
@@ -1005,89 +2371,113 @@ public enum OffenseSeverity
 
 public enum DisciplinaryStatus
 {
+    [Description("Draft")]
+    Draft = 1,
+
     [Description("Reported")]
-    Reported = 1,
+    Reported = 2,
+
+    [Description("Under Review")]
+    UnderReview = 3,
 
     [Description("Under Investigation")]
-    UnderInvestigation = 2,
+    UnderInvestigation = 4,
 
     [Description("Investigation Complete")]
-    InvestigationComplete = 3,
+    InvestigationComplete = 5,
 
     [Description("Hearing Scheduled")]
-    HearingScheduled = 4,
+    HearingScheduled = 6,
 
-    [Description("Hearing Completed")]
-    HearingCompleted = 5,
+    [Description("Hearing Conducted")]
+    HearingConducted = 7,
 
-    [Description("Decision Pending")]
-    DecisionPending = 6,
+    [Description("Awaiting Decision")]
+    AwaitingDecision = 8,
 
-    [Description("Action Taken")]
-    ActionTaken = 7,
+    [Description("Decision Made")]
+    DecisionMade = 9,
 
     [Description("Under Appeal")]
-    UnderAppeal = 8,
-
-    [Description("Appeal Completed")]
-    AppealCompleted = 9,
+    UnderAppeal = 10,
 
     [Description("Closed")]
-    Closed = 10,
+    Closed = 11,
 
     [Description("Dismissed")]
-    Dismissed = 11
+    Dismissed = 12,
+
+    [Description("On Hold")]
+    OnHold = 13
 }
 
-public enum DisciplinaryActionType
+public enum DisciplinaryRepresentativeType
 {
-    [Description("Verbal Warning")]
-    VerbalWarning = 1,
+    [Description("Legal Counsel")]
+    LegalCounsel = 1,
 
-    [Description("Written Warning")]
-    WrittenWarning = 2,
+    [Description("Family Member")]
+    FamilyMember = 2,
 
-    [Description("Final Written Warning")]
-    FinalWrittenWarning = 3,
+    [Description("Workplace Colleague")]
+    WorkplaceColleague = 3,
 
-    [Description("Suspension")]
-    Suspension = 4,
+    [Description("Union Representative")]
+    UnionRepresentative = 4,
 
-    [Description("Demotion")]
-    Demotion = 5,
-
-    [Description("Fine/Penalty")]
-    Fine = 6,
-
-    [Description("Termination")]
-    Termination = 7,
-
-    [Description("Training/Counseling")]
-    TrainingCounseling = 8,
-
-    [Description("No Action")]
-    NoAction = 9
+    [Description("Other")]
+    Other = 99
 }
 
-public enum WarningType
+public enum DisciplinaryWarningType
 {
     [Description("Verbal Warning")]
     Verbal = 1,
 
-    [Description("First Written Warning")]
-    FirstWritten = 2,
+    [Description("Written Warning")]
+    Written = 2,
 
-    [Description("Second Written Warning")]
-    SecondWritten = 3,
-
-    [Description("Final Written Warning")]
-    FinalWritten = 4
+    [Description("Final Warning")]
+    Final = 3,
 }
 
-public enum AppealStatus
+public enum DisciplinaryFinePaymentStatus
 {
-    [Description("Submitted")]
-    Submitted = 1,
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Partially Paid")]
+    PartiallyPaid = 2,
+
+    [Description("Fully Paid")]
+    FullyPaid = 3,
+
+    [Description("Waived")]
+    Waived = 4,
+}
+
+public enum DisciplinaryActionStepStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("In Progress")]
+    InProgress = 2,
+
+    [Description("Completed")]
+    Completed = 3,
+
+    [Description("Cancelled")]
+    Cancelled = 4,
+
+    [Description("Skipped")]
+    Skipped = 5,
+}
+
+public enum DisciplineAppealStatus
+{
+    [Description("Filed")]
+    Filed = 1,
 
     [Description("Under Review")]
     UnderReview = 2,
@@ -1095,43 +2485,219 @@ public enum AppealStatus
     [Description("Hearing Scheduled")]
     HearingScheduled = 3,
 
-    [Description("Upheld")]
-    Upheld = 4,
+    [Description("Hearing Conducted")]
+    HearingConducted = 4,
 
-    [Description("Overturned")]
-    Overturned = 5,
+    [Description("Awaiting Decision")]
+    AwaitingDecision = 5,
 
-    [Description("Modified")]
-    Modified = 6,
+    [Description("Decision Made")]
+    DecisionMade = 6,
 
     [Description("Dismissed")]
     Dismissed = 7
 }
 
-public enum DocumentCategory
+public enum DisciplineAppealOutcomeType
+{
+    [Description("Upheld")]
+    Upheld = 1,
+
+    [Description("Overturned")]
+    Overturned = 2,
+
+    [Description("Reduced")]
+    Reduced = 3
+}
+
+public enum DisciplinaryDocumentCategory
 {
     [Description("Evidence")]
     Evidence = 1,
 
-    [Description("Witness Statement")]
-    WitnessStatement = 2,
+    [Description("Notification Letter")]
+    NotificationLetter = 2,
 
-    [Description("Investigation Report")]
-    InvestigationReport = 3,
+    [Description("Statement")]
+    Statement = 3,
+
+    [Description("Report")]
+    Report = 4,
 
     [Description("Hearing Minutes")]
-    HearingMinutes = 4,
+    HearingMinutes = 5,
 
     [Description("Decision Letter")]
-    DecisionLetter = 5,
+    DecisionLetter = 6,
 
     [Description("Appeal Document")]
-    AppealDocument = 6
+    AppealDocument = 7,
+
+    [Description("Legal Document")]
+    LegalDocument = 8,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>
+/// Identifies which context a StaffDisciplineDocument belongs to.
+/// Enforced by the service layer: ActionStepId must be set when ActionStep;
+/// AppealId must be set when Appeal; both must be null when Case.
+/// </summary>
+public enum DisciplinaryDocumentScope
+{
+    [Description("Case")]
+    Case = 1,
+
+    [Description("Action Step")]
+    ActionStep = 2,
+
+    [Description("Appeal")]
+    Appeal = 3,
+}
+
+public enum DisciplinaryNotificationType
+{
+    [Description("Show Cause")]
+    ShowCause = 1, // the notice to the employee to explain the allegations and the opportunity to respond
+
+    [Description("Hearing Notice")]
+    HearingNotice = 2, // the notice to the employee to attend a hearing
+
+    [Description("Investigation Notice")]
+    InvestigationNotice = 3, // the notice to the employee to participate in an investigation
+
+    [Description("Decision Letter")]
+    DecisionLetter = 4, // the notice to the employee of the decision
+
+    [Description("Warning Letter")]
+    WarningLetter = 5, // the notice to the employee of a warning
+
+    [Description("Suspension Notice")]
+    SuspensionNotice = 6, // the notice to the employee of a suspension
+
+    [Description("Termination Letter")]
+    TerminationLetter = 7, // the notice to the employee of a termination
+
+    [Description("Appeal Outcome Notice")]
+    AppealOutcomeNotice = 8, // the notice to the employee of the outcome of an appeal
+
+    [Description("Other")]
+    Other = 99 // other types of notices
+}
+
+public enum DisciplineCorrectiveActionStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("In Progress")]
+    InProgress = 2,
+
+    [Description("Completed")]
+    Completed = 3,
+
+    [Description("Overdue")]
+    Overdue = 4,
+
+    [Description("Cancelled")]
+    Cancelled = 5
+}
+
+public enum DisciplineLegalRiskLevel
+{
+    [Description("None")]
+    None = 0,
+
+    [Description("Low")]
+    Low = 1,
+
+    [Description("Medium")]
+    Medium = 2,
+
+    [Description("High")]
+    High = 3,
+
+    [Description("Critical")]
+    Critical = 4
+}
+
+public enum EmployeeTerminationType
+{
+    [Description("Involuntary For Cause")]
+    InvoluntaryForCause = 1,
+
+    [Description("Involuntary Performance")]
+    InvoluntaryPerformance = 2,
+
+    [Description("Involuntary Redundancy")]
+    InvoluntaryRedundancy = 3,
+
+    [Description("Voluntary Resignation")]
+    VoluntaryResignation = 4,
+
+    [Description("Voluntary Retirement")]
+    VoluntaryRetirement = 5,
+
+    [Description("Mutual Agreement")]
+    MutualAgreement = 6,
+
+    [Description("Contract Expiry")]
+    ContractExpiry = 7,
+
+    [Description("Death")]
+    Death = 8,
+
+    [Description("Other")]
+    Other = 99
 }
 
 #endregion Disciplinary Actions
 
 #region Training Management
+
+public enum TrainingVendorType
+{
+    [Description("Individual Consultant")]
+    IndividualConsultant = 1,
+
+    [Description("Training Firm")]
+    TrainingFirm = 2,
+
+    [Description("Accredited Institution")]
+    AccreditedInstitution = 3,
+
+    [Description("University / Tertiary")]
+    University = 4,
+
+    [Description("Government Agency")]
+    GovernmentAgency = 5,
+
+    [Description("NGO / Non-Profit")]
+    NGO = 6,
+
+    [Description("Other")]
+    Other = 7
+}
+
+public enum VendorAccreditationStatus
+{
+    [Description("Active")]
+    Active = 1,
+
+    [Description("Pending")]
+    Pending = 2,
+
+    [Description("Expired")]
+    Expired = 3,
+
+    [Description("Suspended")]
+    Suspended = 4,
+
+    [Description("Revoked")]
+    Revoked = 5
+}
 
 public enum TrainingCategory
 {
@@ -1166,17 +2732,11 @@ public enum TrainingCategory
     Other = 10
 }
 
+// NOTE: Internal/External/Online were moved out of TrainingType into the new TrainingSource
+// enum (they classify the *provenance* of a training, not its *format*). Values 4+ keep their
+// original integers so existing rows stay valid; a data migration remaps old 1/2/3 rows.
 public enum TrainingType
 {
-    [Description("Internal Training")]
-    Internal = 1,
-
-    [Description("External Training")]
-    External = 2,
-
-    [Description("Online/E-Learning")]
-    Online = 3,
-
     [Description("Workshop")]
     Workshop = 4,
 
@@ -1196,6 +2756,38 @@ public enum TrainingType
     Certification = 9
 }
 
+/// <summary>
+/// What a trainer is engaged on during an availability/blocked window — helps decide whether a
+/// higher-priority training can pull them off it.
+/// </summary>
+public enum TrainerEngagementType
+{
+    [Description("Internal Engagement")]
+    Internal = 1,
+
+    [Description("External Engagement")]
+    External = 2,
+
+    [Description("Other")]
+    Other = 3
+}
+
+/// <summary>
+/// Where/how a training is sourced. Applied in combination with <see cref="TrainingType"/>
+/// (e.g. an External Workshop, or an Internal On-the-Job session).
+/// </summary>
+public enum TrainingSource
+{
+    [Description("Internal")]
+    Internal = 1,
+
+    [Description("External")]
+    External = 2,
+
+    [Description("Online / E-Learning")]
+    OnlineELearning = 3
+}
+
 public enum TrainingLevel
 {
     [Description("Beginner")]
@@ -1208,7 +2800,101 @@ public enum TrainingLevel
     Advanced = 3,
 
     [Description("Expert")]
-    Expert = 4
+    Expert = 4,
+
+    [Description("Any Level")]
+    AnyLevel = 5
+}
+
+public enum TrainingCompletionStatus
+{
+    NotStarted = 1,
+    InProgress = 2,
+    Completed = 3,
+    Failed = 4,
+    Incomplete = 5,
+    Exempted = 6
+}
+
+public enum TrainingAssessmentType
+{
+    PreTraining = 1,
+    PostTraining = 2,
+    FollowUp30Day = 3,
+    FollowUp60Day = 4,
+    FollowUp90Day = 5
+}
+
+public enum CertificateStatus
+{
+    Active = 1,
+    Expired = 2,
+    Revoked = 3,
+    Pending = 4
+}
+
+public enum ComplianceFrequency
+{
+    OneTime = 1,
+    Annual = 2,
+    BiAnnual = 3,
+    Quarterly = 4,
+    Monthly = 5,
+    Custom = 6
+}
+
+public enum TrainingBudgetStatus
+{
+    Draft = 1,
+    Approved = 2,
+    Denied = 3,
+    Active = 4,
+    Closed = 5
+}
+
+public enum TrainingWaitlistStatus
+{
+    Active = 1,
+    Offered = 2,
+    Accepted = 3,
+    Declined = 4,
+    Expired = 5,
+    Removed = 6
+}
+
+public enum TrainingRequestStatus
+{
+    Draft = 1,
+    Submitted = 2,
+    Approved = 3,
+    Rejected = 4,
+    Cancelled = 5
+}
+
+public enum LearningPathStatus
+{
+    Draft = 0,
+
+    Active = 1,
+
+    Inactive = 2,
+}
+
+public enum MentoringStatus
+{
+    Active = 1,
+    Paused = 2,
+    Completed = 3,
+    Cancelled = 4
+}
+
+public enum MentoringSessionFormat
+{
+    InPerson = 1,
+
+    Virtual = 2,
+
+    Hybrid = 3
 }
 
 public enum ScheduleStatus
@@ -1255,6 +2941,9 @@ public enum NominationType
 
 public enum NominationStatus
 {
+    [Description("Draft")]
+    Draft = 0,
+
     [Description("Submitted")]
     Submitted = 1,
 
@@ -1358,6 +3047,40 @@ public enum TrainingPriority
     Low = 4
 }
 
+/// <summary>
+/// Lifecycle of a training service bond (binding service-obligation agreement tied to a nomination).
+/// </summary>
+public enum TrainingBondStatus
+{
+    /// <summary>Bond created, awaiting the employee's (or HR-on-behalf) acceptance of the terms.</summary>
+    [Description("Pending Acceptance")]
+    PendingAcceptance = 1,
+
+    /// <summary>Accepted; the service obligation period is running.</summary>
+    [Description("Active")]
+    Active = 2,
+
+    /// <summary>The full service obligation was served — no repayment owed.</summary>
+    [Description("Fulfilled")]
+    Fulfilled = 3,
+
+    /// <summary>Employee exited before the obligation ended — a pro-rated repayment is owed.</summary>
+    [Description("Breached")]
+    Breached = 4,
+
+    /// <summary>The owed repayment has been settled / resolved.</summary>
+    [Description("Settled")]
+    Settled = 5,
+
+    /// <summary>Obligation waived by HR — no repayment pursued.</summary>
+    [Description("Waived")]
+    Waived = 6,
+
+    /// <summary>Cancelled before acceptance (e.g. the nomination was withdrawn or rejected).</summary>
+    [Description("Cancelled")]
+    Cancelled = 7
+}
+
 #endregion Training Management
 
 #region Staff Awards
@@ -1386,7 +3109,10 @@ public enum AwardCategory
     Leadership = 7,
 
     [Description("Special Recognition")]
-    SpecialRecognition = 8
+    SpecialRecognition = 8,
+
+    [Description("Other")]
+    Other = 9
 }
 
 public enum AwardFrequency
@@ -1402,6 +3128,28 @@ public enum AwardFrequency
 
     [Description("Ad-hoc")]
     AdHoc = 4
+}
+
+public enum AwardScope
+{
+    Employee = 1,
+
+    Position = 2,
+
+    StaffLevel = 3,
+
+    OrganizationUnit = 4
+}
+
+public enum AwardTargetType
+{
+    OrganizationUnit = 1,
+
+    Position = 2,
+
+    StaffLevel = 3,
+
+    Employee = 4,
 }
 
 public enum AwardStatus
@@ -1421,8 +3169,8 @@ public enum AwardStatus
     [Description("Presented")]
     Presented = 5,
 
-    [Description("Deferred")]
-    Deferred = 6
+    [Description("Cancelled")]
+    Cancelled = 6
 }
 
 public enum AwardAttachmentType
@@ -1442,6 +3190,9 @@ public enum AwardAttachmentType
 
 public enum AwardNominationStatus
 {
+    [Description("Draft")]
+    Draft = 0,
+
     [Description("Submitted")]
     Submitted = 1,
 
@@ -1454,157 +3205,19 @@ public enum AwardNominationStatus
     [Description("Rejected")]
     Rejected = 4,
 
-    [Description("Award Granted")]
-    AwardGranted = 5
+    [Description("Withdrawn")]
+    Withdrawn = 5,
 }
 
 #endregion Staff Awards
 
 #region Staff Accidents and Safety
 
-public enum AccidentType
-{
-    [Description("Injury")]
-    Injury = 1,
-
-    [Description("Near Miss")]
-    NearMiss = 2,
-
-    [Description("Property Damage")]
-    PropertyDamage = 3,
-
-    [Description("Vehicle Accident")]
-    VehicleAccident = 4,
-
-    [Description("Fire")]
-    Fire = 5,
-
-    [Description("Chemical Spill")]
-    ChemicalSpill = 6,
-
-    [Description("Equipment Failure")]
-    EquipmentFailure = 7
-}
-
-public enum AccidentSeverity
-{
-    [Description("Minor - First Aid Only")]
-    Minor = 1,
-
-    [Description("Moderate - Medical Treatment")]
-    Moderate = 2,
-
-    [Description("Serious - Hospitalization")]
-    Serious = 3,
-
-    [Description("Critical - Life Threatening")]
-    Critical = 4,
-
-    [Description("Fatality")]
-    Fatality = 5
-}
-
-public enum InjuryType
-{
-    [Description("Cut/Laceration")]
-    Cut = 1,
-
-    [Description("Bruise/Contusion")]
-    Bruise = 2,
-
-    [Description("Sprain/Strain")]
-    Sprain = 3,
-
-    [Description("Fracture/Break")]
-    Fracture = 4,
-
-    [Description("Burn")]
-    Burn = 5,
-
-    [Description("Head Injury")]
-    HeadInjury = 6,
-
-    [Description("Back Injury")]
-    BackInjury = 7,
-
-    [Description("Eye Injury")]
-    EyeInjury = 8,
-
-    [Description("Chemical Exposure")]
-    ChemicalExposure = 9,
-
-    [Description("Other")]
-    Other = 10
-}
-
-public enum AccidentStatus
-{
-    [Description("Reported")]
-    Reported = 1,
-
-    [Description("Under Investigation")]
-    UnderInvestigation = 2,
-
-    [Description("Investigation Complete")]
-    InvestigationComplete = 3,
-
-    [Description("Corrective Actions In Progress")]
-    CorrectiveActionsInProgress = 4,
-
-    [Description("Closed")]
-    Closed = 5
-}
-
-public enum AccidentDocumentType
-{
-    [Description("Medical Report")]
-    MedicalReport = 1,
-
-    [Description("Photos")]
-    Photos = 2,
-
-    [Description("Police Report")]
-    PoliceReport = 3,
-
-    [Description("Witness Statement")]
-    WitnessStatement = 4,
-
-    [Description("Investigation Report")]
-    InvestigationReport = 5
-}
-
-public enum InspectionType
-{
-    [Description("Routine Inspection")]
-    Routine = 1,
-
-    [Description("Compliance Inspection")]
-    Compliance = 2,
-
-    [Description("Follow-up Inspection")]
-    FollowUp = 3,
-
-    [Description("Special Inspection")]
-    Special = 4
-}
-
-public enum InspectionStatus
-{
-    [Description("Scheduled")]
-    Scheduled = 1,
-
-    [Description("In Progress")]
-    InProgress = 2,
-
-    [Description("Completed")]
-    Completed = 3,
-
-    [Description("Corrective Actions Required")]
-    CorrectiveActionsRequired = 4,
-
-    [Description("Closed")]
-    Closed = 5
-}
+// NOTE: The former Staff Accident / Safety / Inspection enums (StaffAccidentType,
+// AccidentSeverity, InjuryType, AccidentStatus, AccidentDocumentType, InspectionType,
+// InspectionStatus) were removed when the SHE module migrated to She-prefixed enums in
+// ErpSystem.Core.Enums.Safety (see SafetyEnums.cs). ComplianceStatus is retained below
+// because the Training module (EmployeeComplianceRecord) still depends on it.
 
 public enum ComplianceStatus
 {
@@ -1623,7 +3236,137 @@ public enum ComplianceStatus
 
 #endregion Staff Accidents and Safety
 
-#region Medical Expenses
+#region Health and Medical Expenses
+
+public enum DisabilityStatus
+{
+    [Description("None")]
+    None = 1,
+
+    [Description("Mild")]
+    Mild = 2,
+
+    [Description("Moderate")]
+    Moderate = 3,
+
+    [Description("Severe")]
+    Severe = 4
+}
+
+public enum BloodGroup
+{
+    [Description("A Positive")]
+    APositive = 1,
+
+    [Description("A Negative")]
+    ANegative = 2,
+
+    [Description("B Positive")]
+    BPositive = 3,
+
+    [Description("B Negative")]
+    BNegative = 4,
+
+    [Description("AB Positive")]
+    ABPositive = 5,
+
+    [Description("AB Negative")]
+    ABNegative = 6,
+
+    [Description("O Positive")]
+    OPositive = 7,
+
+    [Description("O Negative")]
+    ONegative = 8,
+
+    [Description("Unknown")]
+    Unknown = 9
+}
+
+public enum HealthConditionSeverity
+{
+    [Description("Mild")]
+    Mild = 1,
+
+    [Description("Moderate")]
+    Moderate = 2,
+
+    [Description("Severe")]
+    Severe = 3,
+
+    [Description("Critical")]
+    Critical = 4
+}
+
+public enum HealthConditionStatus
+{
+    [Description("Active")]
+    Active = 1,
+
+    [Description("Managed")]
+    Managed = 2,
+
+    [Description("Resolved")]
+    Resolved = 3,
+
+    [Description("In Remission")]
+    InRemission = 4
+}
+
+public enum AllergyType
+{
+    [Description("Drug")]
+    Drug = 1,
+
+    [Description("Food")]
+    Food = 2,
+
+    [Description("Environmental")]
+    Environmental = 3,
+
+    [Description("Latex")]
+    Latex = 4,
+
+    [Description("Insect")]
+    Insect = 5,
+
+    [Description("Other")]
+    Other = 6
+}
+
+public enum AllergySeverity
+{
+    [Description("Mild")]
+    Mild = 1,
+
+    [Description("Moderate")]
+    Moderate = 2,
+
+    [Description("Severe")]
+    Severe = 3,
+
+    [Description("Anaphylactic")]
+    Anaphylactic = 4
+}
+
+public enum MedicalExamResult
+{
+    [Description("Fit")]
+    Fit = 1,
+
+    [Description("Fit With Restrictions")]
+
+    FitWithRestrictions = 2,
+
+    [Description("Temporarily Unfit")]
+    TemporarilyUnfit = 3,
+
+    [Description("Unfit")]
+    Unfit = 4,
+
+    [Description("Requires Further Investigation")]
+    RequiresFurtherInvestigation = 5
+}
 
 public enum MedicalExpenseType
 {
@@ -1634,7 +3377,7 @@ public enum MedicalExpenseType
     Medication = 2,
 
     [Description("Laboratory Tests")]
-    LabTests = 3,
+    LaboratoryTests = 3,
 
     [Description("X-Ray/Imaging")]
     Imaging = 4,
@@ -1645,44 +3388,62 @@ public enum MedicalExpenseType
     [Description("Hospitalization")]
     Hospitalization = 6,
 
-    [Description("Dental")]
-    Dental = 7,
+    [Description("Dental Care")]
+    DentalCare = 7,
 
-    [Description("Optical")]
-    Optical = 8,
+    [Description("Optical Care")]
+    OpticalCare = 8,
 
     [Description("Physiotherapy")]
     Physiotherapy = 9,
 
-    [Description("Emergency Treatment")]
-    Emergency = 10,
+    [Description("Emergency Care")]
+    EmergencyCare = 10,
+
+    [Description("Maternity Care")]
+    MaternityCare = 11,
+
+    [Description("Mental Health")]
+    MentalHealth = 12,
+
+    [Description("Vaccination")]
+    Vaccination = 13,
+
+    [Description("Health Screening")]
+    HealthScreening = 14,
+
+    [Description("Medical Equipment")]
+    MedicalEquipment = 15,
+
+    [Description("Ambulance Service")]
+    AmbulanceService = 16,
 
     [Description("Other")]
-    Other = 11
+    Other = 99
 }
 
 public enum ClaimStatus
 {
+    [Description("Pending")]
+    Pending = 1,
+
     [Description("Submitted")]
-    Submitted = 1,
+    Submitted = 2,
 
     [Description("Supervisor Review")]
-    SupervisorReview = 2,
+    SupervisorReview = 3,
 
     [Description("HR Review")]
-    HrReview = 3,
+    HrReview = 4,
 
     [Description("Finance Review")]
-    FinanceReview = 4,
+    FinanceReview = 5,
 
     [Description("Approved")]
-    Approved = 5,
+    Approved = 6,
 
     [Description("Rejected")]
-    Rejected = 6,
-
-    [Description("Payment Processing")]
-    PaymentProcessing = 7,
+    Rejected = 7,
 
     [Description("Paid")]
     Paid = 8,
@@ -1691,7 +3452,119 @@ public enum ClaimStatus
     PartiallyApproved = 9,
 
     [Description("Additional Info Required")]
-    AdditionalInfoRequired = 10
+    AdditionalInfoRequired = 10,
+
+    [Description("Cancelled")]
+    Cancelled = 11
+}
+
+public enum ClaimPreAuthorizationStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Requested")]
+    Requested = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    [Description("Pending Approval")]
+    PendingApproval = 4,
+
+    [Description("Rejected")]
+    Rejected = 5,
+
+    [Description("Expired")]
+    Expired = 6,
+
+    [Description("Cancelled")]
+    Cancelled = 7
+}
+
+public enum MedicalReferralPriority
+{
+    Routine,
+    Urgent,
+    Emergency
+}
+
+public enum MedicalReferralStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Issued")]
+    Issued = 2,
+
+    [Description("Accepted")]
+    Accepted = 3,
+
+    [Description("Completed")]
+    Completed = 4,
+
+    [Description("Cancelled")]
+    Cancelled = 5,
+
+    [Description("Expired")]
+    Expired = 6
+}
+
+public enum MedicalAppointmentStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Scheduled")]
+    Scheduled = 2,
+
+    [Description("Confirmed")]
+    Confirmed = 3,
+
+    [Description("CheckedIn")]
+    CheckedIn = 4,
+
+    [Description("InProgress")]
+    InProgress = 5,
+
+    [Description("Completed")]
+    Completed = 6,
+
+    [Description("NoShow")]
+    NoShow = 7,
+
+    [Description("Cancelled")]
+    Cancelled = 8,
+
+    [Description("Rescheduled")]
+    Rescheduled = 9
+}
+
+public enum NHISClaimStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Submitted")]
+    Submitted = 2,
+
+    [Description("Under Review")]
+    UnderReview = 3,
+
+    [Description("Approved")]
+    Approved = 4,
+
+    [Description("Partially Approved")]
+    PartiallyApproved = 5,
+
+    [Description("Rejected")]
+    Rejected = 6,
+
+    [Description("Paid")]
+    Paid = 7,
+
+    [Description("Appealed")]
+    Appealed = 8
 }
 
 public enum MedicalItemType
@@ -1700,24 +3573,45 @@ public enum MedicalItemType
     ConsultationFee = 1,
 
     [Description("Laboratory Test")]
-    LabTest = 2,
+    LaboratoryTest = 2,
 
-    [Description("Medication")]
-    Medication = 3,
+    [Description("Imaging/Scan")]
+    Imaging = 3,
 
-    [Description("Procedure")]
-    Procedure = 4,
+    [Description("Medication/Drug")]
+    Medication = 4,
 
-    [Description("Accommodation")]
-    Accommodation = 5,
+    [Description("Medical Procedure")]
+    Procedure = 5,
+
+    [Description("Surgical Procedure")]
+    Surgery = 6,
+
+    [Description("Hospital Bed")]
+    HospitalBed = 7,
+
+    [Description("Medical Supply")]
+    MedicalSupply = 8,
+
+    [Description("Medical Equipment")]
+    MedicalEquipment = 9,
+
+    [Description("Therapy Session")]
+    TherapySession = 10,
+
+    [Description("Professional Fee")]
+    ProfessionalFee = 11,
+
+    [Description("Facility Fee")]
+    FacilityFee = 12,
 
     [Description("Other")]
-    Other = 6
+    Other = 99
 }
 
 public enum MedicalDocumentType
 {
-    [Description("Receipt")]
+    [Description("Medical Receipt")]
     Receipt = 1,
 
     [Description("Invoice")]
@@ -1732,8 +3626,20 @@ public enum MedicalDocumentType
     [Description("Lab Results")]
     LabResults = 5,
 
+    [Description("Imaging Results")]
+    ImagingResults = 6,
+
+    [Description("Discharge Summary")]
+    DischargeSummary = 7,
+
     [Description("Referral Letter")]
-    ReferralLetter = 6
+    ReferralLetter = 8,
+
+    [Description("Insurance Claim Form")]
+    InsuranceClaimForm = 9,
+
+    [Description("Other")]
+    Other = 99
 }
 
 public enum PaymentMethod
@@ -1747,14 +3653,689 @@ public enum PaymentMethod
     [Description("Cheque")]
     Cheque = 3,
 
-    [Description("Direct Reimbursement")]
-    DirectReimbursement = 4,
+    [Description("Mobile Money")]
+    MobileMoney = 4,
 
-    [Description("Salary Deduction Reversal")]
-    SalaryDeductionReversal = 5
+    [Description("Direct Deposit")]
+    DirectDeposit = 5,
+
+    [Description("Salary Deduction")]
+    SalaryDeduction = 6
 }
 
-#endregion Medical Expenses
+public enum HealthFacilityType
+{
+    [Description("General Hospital")]
+    GeneralHospital = 1,
+
+    [Description("Specialized Hospital")]
+    SpecializedHospital = 2,
+
+    [Description("Teaching Hospital")]
+    TeachingHospital = 3,
+
+    [Description("Clinic")]
+    Clinic = 4,
+
+    [Description("Polyclinic")]
+    Polyclinic = 5,
+
+    [Description("Medical Center")]
+    MedicalCenter = 6,
+
+    [Description("Pharmacy")]
+    Pharmacy = 7,
+
+    [Description("Diagnostic Center")]
+    DiagnosticCenter = 8,
+
+    [Description("Laboratory")]
+    Laboratory = 9,
+
+    [Description("Imaging Center")]
+    ImagingCenter = 10,
+
+    [Description("Urgent Care")]
+    UrgentCare = 11,
+
+    [Description("Day Surgery Center")]
+    DaySurgeryCenter = 12,
+
+    [Description("Rehabilitation Center")]
+    RehabilitationCenter = 13,
+
+    [Description("Maternity Home")]
+    MaternityHome = 14,
+
+    [Description("Dental Clinic")]
+    DentalClinic = 15,
+
+    [Description("Optical Center")]
+    OpticalCenter = 16,
+
+    [Description("Mental Health Facility")]
+    MentalHealthFacility = 17,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum MedicalSpecialty
+{
+    [Description("General Practice")]
+    GeneralPractice = 1,
+
+    [Description("Internal Medicine")]
+    InternalMedicine = 2,
+
+    [Description("Pediatrics")]
+    Pediatrics = 3,
+
+    [Description("Obstetrics & Gynecology")]
+    ObstetricsGynecology = 4,
+
+    [Description("Surgery")]
+    Surgery = 5,
+
+    [Description("Orthopedics")]
+    Orthopedics = 6,
+
+    [Description("Cardiology")]
+    Cardiology = 7,
+
+    [Description("Neurology")]
+    Neurology = 8,
+
+    [Description("Psychiatry")]
+    Psychiatry = 9,
+
+    [Description("Dermatology")]
+    Dermatology = 10,
+
+    [Description("Ophthalmology")]
+    Ophthalmology = 11,
+
+    [Description("ENT (Ear, Nose, Throat)")]
+    ENT = 12,
+
+    [Description("Radiology")]
+    Radiology = 13,
+
+    [Description("Anesthesiology")]
+    Anesthesiology = 14,
+
+    [Description("Emergency Medicine")]
+    EmergencyMedicine = 15,
+
+    [Description("Pathology")]
+    Pathology = 16,
+
+    [Description("Oncology")]
+    Oncology = 17,
+
+    [Description("Nephrology")]
+    Nephrology = 18,
+
+    [Description("Gastroenterology")]
+    Gastroenterology = 19,
+
+    [Description("Pulmonology")]
+    Pulmonology = 20,
+
+    [Description("Endocrinology")]
+    Endocrinology = 21,
+
+    [Description("Rheumatology")]
+    Rheumatology = 22,
+
+    [Description("Urology")]
+    Urology = 23,
+
+    [Description("Plastic Surgery")]
+    PlasticSurgery = 24,
+
+    [Description("Dentistry")]
+    Dentistry = 25,
+
+    [Description("Physiotherapy")]
+    Physiotherapy = 26,
+
+    [Description("Nutrition & Dietetics")]
+    NutritionDietetics = 27,
+
+    [Description("Clinical Psychology")]
+    ClinicalPsychology = 28,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum MedicalServiceType
+{
+    [Description("Consultation")]
+    Consultation = 1,
+
+    [Description("Emergency Care")]
+    EmergencyCare = 2,
+
+    [Description("Inpatient Care")]
+    InpatientCare = 3,
+
+    [Description("Outpatient Care")]
+    OutpatientCare = 4,
+
+    [Description("Surgery")]
+    Surgery = 5,
+
+    [Description("Laboratory Services")]
+    LaboratoryServices = 6,
+
+    [Description("Imaging/Radiology")]
+    ImagingRadiology = 7,
+
+    [Description("Pharmacy")]
+    Pharmacy = 8,
+
+    [Description("Physiotherapy")]
+    Physiotherapy = 9,
+
+    [Description("Dental Care")]
+    DentalCare = 10,
+
+    [Description("Optical Care")]
+    OpticalCare = 11,
+
+    [Description("Maternity Care")]
+    MaternityCare = 12,
+
+    [Description("Vaccination")]
+    Vaccination = 13,
+
+    [Description("Health Screening")]
+    HealthScreening = 14,
+
+    [Description("Mental Health")]
+    MentalHealth = 15,
+
+    [Description("Ambulance Service")]
+    AmbulanceService = 16,
+
+    [Description("Home Care")]
+    HomeCare = 17,
+
+    [Description("Telemedicine")]
+    Telemedicine = 18,
+
+    [Description("Rehabilitation")]
+    Rehabilitation = 19,
+
+    [Description("Dialysis")]
+    Dialysis = 20,
+
+    [Description("Psychiatric Services")]
+    PsychiatricServices = 21,
+
+    [Description("Pediatric Services")]
+    PediatricServices = 22,
+
+    [Description("Obstetrics & Gynecology Services")]
+    ObstetricsGynecologyServices = 23,
+
+    [Description("Cardiology Services")]
+    CardiologyServices = 24,
+
+    [Description("Neurology Services")]
+    NeurologyServices = 25,
+
+    [Description("Dermatology Services")]
+    DermatologyServices = 26,
+
+    [Description("Ophthalmology Services")]
+    OphthalmologyServices = 27,
+
+    [Description("ENT (Ear, Nose, Throat) Services")]
+    ENT = 28,
+
+    [Description("Pathology Services")]
+    PathologyServices = 29,
+
+    [Description("Oncology Services")]
+    OncologyServices = 30,
+
+    [Description("Nephrology Services")]
+    NephrologyServices = 31,
+
+    [Description("Gastroenterology Services")]
+    GastroenterologyServices = 32,
+
+    [Description("Pulmonology Services")]
+    PulmonologyServices = 33,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum FacilityDocumentType
+{
+    [Description("Operating License")]
+    OperatingLicense = 1,
+
+    [Description("Business Registration")]
+    BusinessRegistration = 2,
+
+    [Description("Accreditation Certificate")]
+    AccreditationCertificate = 3,
+
+    [Description("Insurance Certificate")]
+    InsuranceCertificate = 4,
+
+    [Description("Tax Clearance")]
+    TaxClearance = 5,
+
+    [Description("Fire Safety Certificate")]
+    FireSafetyCertificate = 6,
+
+    [Description("Health Department Approval")]
+    HealthDepartmentApproval = 7,
+
+    [Description("Memorandum of Understanding")]
+    MOU = 8,
+
+    [Description("Contract Agreement")]
+    ContractAgreement = 9,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum PhysicianDocumentType
+{
+    [Description("Medical License")]
+    MedicalLicense = 1,
+
+    [Description("Medical Degree")]
+    MedicalDegree = 2,
+
+    [Description("Postgraduate Certificate")]
+    PostgraduateCertificate = 3,
+
+    [Description("Board Certification")]
+    BoardCertification = 4,
+
+    [Description("Continuing Education Certificate")]
+    ContinuingEducation = 5,
+
+    [Description("Professional Membership")]
+    ProfessionalMembership = 6,
+
+    [Description("Malpractice Insurance")]
+    MalpracticeInsurance = 7,
+
+    [Description("Background Check")]
+    BackgroundCheck = 8,
+
+    [Description("CV/Resume")]
+    CVResume = 9,
+
+    [Description("ID/Passport")]
+    IDPassport = 10,
+
+    [Description("Contract Agreement")]
+    ContractAgreement = 11,
+
+    [Description("Reference Letter")]
+    ReferenceLetter = 12,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum MedicalInsuranceProviderType
+{
+    [Description("Health Insurance")]
+    HealthInsurance = 1,
+
+    [Description("Life Insurance")]
+    LifeInsurance = 2,
+
+    [Description("Health Maintenance Organization (HMO)")]
+    HMO = 3,
+
+    [Description("Preferred Provider Organization (PPO)")]
+    PPO = 4,
+
+    [Description("National Health Insurance")]
+    NationalHealthInsurance = 5,
+
+    [Description("Private Health Insurance")]
+    PrivateHealthInsurance = 6,
+
+    [Description("Group Insurance")]
+    GroupInsurance = 7,
+
+    [Description("Travel Insurance")]
+    TravelInsurance = 8,
+
+    [Description("Dental Insurance")]
+    DentalInsurance = 9,
+
+    [Description("Vision Insurance")]
+    VisionInsurance = 10,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum MedicalInsurancePlanType
+{
+    [Description("Basic Plan")]
+    BasicPlan = 1,
+
+    [Description("Standard Plan")]
+    StandardPlan = 2,
+
+    [Description("Premium Plan")]
+    PremiumPlan = 3,
+
+    [Description("Executive Plan")]
+    ExecutivePlan = 4,
+
+    [Description("Family Plan")]
+    FamilyPlan = 5,
+
+    [Description("Individual Plan")]
+    IndividualPlan = 6,
+
+    [Description("Corporate Plan")]
+    CorporatePlan = 7,
+
+    [Description("Student Plan")]
+    StudentPlan = 8,
+
+    [Description("Senior Plan")]
+    SeniorPlan = 9,
+
+    [Description("Maternity Plan")]
+    MaternityPlan = 10,
+
+    [Description("Catastrophic Plan")]
+    CatastrophicPlan = 11,
+
+    [Description("Custom Plan")]
+    CustomPlan = 12,
+}
+
+public enum BenefitCategory
+{
+    [Description("Outpatient Care")]
+    OutpatientCare = 1,
+
+    [Description("Inpatient Care")]
+    InpatientCare = 2,
+
+    [Description("Emergency Care")]
+    EmergencyCare = 3,
+
+    [Description("Surgery")]
+    Surgery = 4,
+
+    [Description("Maternity Care")]
+    MaternityCare = 5,
+
+    [Description("Dental Care")]
+    DentalCare = 6,
+
+    [Description("Optical Care")]
+    OpticalCare = 7,
+
+    [Description("Prescription Drugs")]
+    PrescriptionDrugs = 8,
+
+    [Description("Laboratory Tests")]
+    LaboratoryTests = 9,
+
+    [Description("Imaging/Radiology")]
+    Imaging = 10,
+
+    [Description("Physiotherapy")]
+    Physiotherapy = 11,
+
+    [Description("Mental Health")]
+    MentalHealth = 12,
+
+    [Description("Preventive Care")]
+    PreventiveCare = 13,
+
+    [Description("Ambulance Service")]
+    AmbulanceService = 14,
+
+    [Description("Home Care")]
+    HomeCare = 15,
+
+    [Description("Chronic Disease Management")]
+    ChronicDiseaseManagement = 16,
+
+    [Description("Wellness Programs")]
+    WellnessPrograms = 17
+}
+
+public enum PremiumPaymentResponsibility
+{
+    [Description("Employer Pays All")]
+    EmployerPaysAll = 1,
+
+    [Description("Employee Pays All")]
+    EmployeePaysAll = 2,
+
+    [Description("Shared - Employer/Employee")]
+    Shared = 3,
+
+    [Description("Employee Pays with Subsidy")]
+    EmployeePaysWithSubsidy = 4
+}
+
+public enum MedicalInsurancePolicyStatus
+{
+    [Description("Active")]
+    Active = 1,
+
+    [Description("Pending Renewal")]
+    PendingRenewal = 2,
+
+    [Description("Suspended")]
+    Suspended = 3,
+
+    [Description("Cancelled")]
+    Cancelled = 4,
+
+    [Description("Expired")]
+    Expired = 5,
+
+    [Description("Lapsed")]
+    Lapsed = 6,
+
+    [Description("Under Review")]
+    UnderReview = 7
+}
+
+public enum MedicalInsuranceClaimStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Submitted to Provider")]
+    Submitted = 2,
+
+    [Description("Under Review")]
+    UnderReview = 3,
+
+    [Description("Additional Information Required")]
+    AdditionalInfoRequired = 4,
+
+    [Description("Approved")]
+    Approved = 5,
+
+    [Description("Partially Approved")]
+    PartiallyApproved = 6,
+
+    [Description("Rejected")]
+    Rejected = 7,
+
+    [Description("Pending Payment")]
+    PendingPayment = 8,
+
+    [Description("Paid")]
+    Paid = 9,
+
+    [Description("Partially Paid")]
+    PartiallyPaid = 10,
+
+    [Description("Appealed")]
+    Appealed = 11,
+
+    [Description("Cancelled")]
+    Cancelled = 12
+}
+
+public enum InsuranceClaimDocumentType
+{
+    [Description("Claim Form")]
+    ClaimForm = 1,
+
+    [Description("Medical Receipt")]
+    MedicalReceipt = 2,
+
+    [Description("Invoice")]
+    Invoice = 3,
+
+    [Description("Prescription")]
+    Prescription = 4,
+
+    [Description("Medical Report")]
+    MedicalReport = 5,
+
+    [Description("Lab Results")]
+    LabResults = 6,
+
+    [Description("Imaging Results")]
+    ImagingResults = 7,
+
+    [Description("Discharge Summary")]
+    DischargeSummary = 8,
+
+    [Description("Pre-Authorization Form")]
+    PreAuthorizationForm = 9,
+
+    [Description("Referral Letter")]
+    ReferralLetter = 10,
+
+    [Description("Proof of Payment")]
+    ProofOfPayment = 11,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum MedicalInsuranceProviderDocumentType
+{
+    [Description("Operating License")]
+    OperatingLicense = 1,
+
+    [Description("Business Registration")]
+    BusinessRegistration = 2,
+
+    [Description("Insurance Authority Certificate")]
+    InsuranceAuthorityCertificate = 3,
+
+    [Description("Tax Clearance")]
+    TaxClearance = 4,
+
+    [Description("Financial Statements")]
+    FinancialStatements = 5,
+
+    [Description("Solvency Certificate")]
+    SolvencyCertificate = 6,
+
+    [Description("Contract Agreement")]
+    ContractAgreement = 7,
+
+    [Description("Service Level Agreement")]
+    ServiceLevelAgreement = 8,
+
+    [Description("Rate Card")]
+    RateCard = 9,
+
+    [Description("Network List")]
+    NetworkList = 10,
+
+    [Description("Policy Document")]
+    PolicyDocument = 11,
+
+    [Description("Accreditation")]
+    Accreditation = 12,
+
+    [Description("Regulatory Filing")]
+    RegulatoryFiling = 13,
+
+    [Description("Claim Form")]
+    ClaimForm = 14,
+
+    [Description("Other")]
+    Other = 99
+}
+
+public enum MedicalInsurancePremiumPaymentStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Paid")]
+    Paid = 2,
+
+    [Description("Overdue")]
+    Overdue = 3,
+
+    [Description("Waived")]
+    Waived = 4,
+
+    [Description("Refunded")]
+    Refunded = 5
+}
+
+public enum MedicalExpenseClaimNoteType
+{
+    [Description("General")]
+    General = 1,
+
+    [Description("Internal HR")]
+    InternalHR = 2,
+
+    [Description("Finance Note")]
+    FinanceNote = 3,
+
+    [Description("Insurance Correspondence")]
+    InsuranceCorrespondence = 4,
+
+    [Description("Employee Comment")]
+    EmployeeComment = 5
+}
+
+public enum MedicalExpenseApprovalStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3,
+
+    [Description("Escalated")]
+    Escalated = 4
+}
+
+#endregion Health and Medical Expenses
 
 #region Job Analysis
 
@@ -1887,7 +4468,13 @@ public enum QualificationType
     TechnicalSkills = 5,
 
     [Description("Language")]
-    Language = 6
+    Language = 6,
+
+    [Description("Membership")]
+    Membership = 7,
+
+    [Description("Other")]
+    Other = 8,
 }
 
 public enum CompetencyType
@@ -2040,9 +4627,252 @@ public enum BudgetPriority
     Low = 4
 }
 
+/// <summary>Legal form / incorporation type of the employing company (on <c>CompanyProfile</c>).</summary>
+public enum CompanyLegalForm
+{
+    [Description("Limited Liability Company")]
+    LimitedCompany = 1,
+
+    [Description("Public Limited Company")]
+    PublicLimitedCompany = 2,
+
+    [Description("Partnership")]
+    Partnership = 3,
+
+    [Description("Sole Proprietorship")]
+    SoleProprietorship = 4,
+
+    [Description("Non-Governmental Organisation")]
+    Ngo = 5,
+
+    [Description("Statutory / State Entity")]
+    StatutoryBody = 6,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>
+/// How strictly a staff requisition is checked against the position's approved manpower
+/// budget line (<c>ManpowerBudgetLine</c>) for the fiscal year. Configured once per tenant on
+/// <c>CompanyHrPolicySettings</c>. Enforcement only ever applies when a budget line actually
+/// exists for the requisition's position — an unbudgeted position is never blocked.
+/// </summary>
+public enum BudgetEnforcementMode
+{
+    /// <summary>No budget checking — requisitions proceed regardless of the manpower budget.</summary>
+    [Description("Off")]
+    Off = 1,
+
+    /// <summary>Advisory: an over-budget requisition surfaces a warning but is still allowed through.</summary>
+    [Description("Warn")]
+    Warn = 2,
+
+    /// <summary>Hard stop: submitting/approving an over-budget requisition is rejected.</summary>
+    [Description("Block")]
+    Block = 3
+}
+
+public enum PhysicalDemandType
+{
+    Sitting = 1,                  // Remaining in a seated position
+
+    Standing = 2,                 // Remaining on one's feet in an upright position without moving
+
+    Walking = 3,                  // Moving about on foot
+
+    Running = 4,                  // Rapid locomotion on foot
+
+    Climbing = 5,                 // Ascending or descending ladders, stairs, ramps, poles, etc.
+
+    Balancing = 6,                // Maintaining body equilibrium to prevent falling
+
+    Stooping = 7,                 // Bending body downward and forward (waist/spine)
+
+    Kneeling = 8,                 // Bending legs at knee to come to rest on knee(s)
+
+    Crouching = 9,                // Bending body downward and forward (legs and spine)
+
+    Crawling = 10,                 // Moving about on hands and knees or hands and feet
+
+    Reaching = 11,                 // Extending hand(s) and arm(s) in any direction
+
+    Handling = 12,                 // Seizing, holding, grasping, turning, or working with hand(s)
+
+    Fingering = 13,                // Picking, pinching, or otherwise working primarily with fingers
+
+    Feeling = 14,                  // Perceiving attributes of objects by touch (texture, temperature, etc.)
+
+    Talking = 15,                  // Expressing or exchanging ideas by means of spoken word
+
+    Hearing = 16,                  // Perceiving the nature of sounds with or without correction
+
+    SeeingNear = 17,               // Close visual acuity (e.g., computer work, reading)
+
+    SeeingFar = 18,                // Visual acuity at distance
+
+    SeeingPeripheral = 19,         // Side vision
+
+    SeeingColor = 20,              // Distinguishing colors
+
+    SeeingDepth = 21,              // Judging distances and spatial relationships
+
+    TastingSmelling = 22,          // Using taste or smell senses
+
+    LiftingCarrying = 23,          // Raising/lowering or moving objects (often with weight specified separately)
+
+    PushingPulling = 24,           // Exerting force to move objects away/toward
+
+    KeyboardingTyping = 25,        // Repetitive motions of hands, wrists, fingers for data entry
+
+    RepetitiveMotion = 26,         // Substantial movements of wrists, hands, fingers (e.g., assembly line)
+
+    Other = 27                     // Catch-all for rare/unlisted demands
+}
+
+public enum PhysicalDemandFrequency
+{
+    Never = 1,          // 0% of the time
+
+    Rarely = 2,         // Up to 5% (or 1-5% of workday)
+
+    Occasionally = 3,   // 6–33% (up to 1/3 of workday) – most common standard threshold
+
+    Frequently = 4,     // 34–66% (1/3 to 2/3 of workday)
+
+    Continuously = 5,   // 67–100% (2/3 or more of workday) – sometimes called "Constantly"
+}
+
+public enum WorkEnvironmentType
+{
+    Office = 1,
+
+    Outdoor = 2,
+
+    Industrial = 3,
+
+    Laboratory = 4,
+
+    Remote = 5,
+
+    Hybrid = 6,
+
+    FieldBased = 7,
+
+    Other = 8
+}
+
+public enum ExposureLevel
+{
+    None = 1,        // No exposure
+    Rare = 2,        // Very infrequent (e.g., <1% of time)
+    Occasional = 3,  // 6–33% (up to 1/3 of workday)
+    Frequent = 4,    // 34–66% (1/3 to 2/3 of workday)
+    Constant = 5     // 67–100% (2/3 or more of workday)
+}
+
+public enum EquipmentType
+{
+    SoftwareApplication = 1,     // e.g., Microsoft Office, ERP system, specialized software
+    ComputerHardware = 2,        // Desktop, laptop, tablet, server
+    MobileDevice = 3,            // Smartphone, handheld scanner
+    OfficeEquipment = 4,         // Printer, scanner, phone system
+    HandTool = 5,                // Hammer, screwdriver, scalpel
+    PowerTool = 6,               // Drill, saw, grinder
+    HeavyMachinery = 7,          // Forklift, crane, excavator
+    Vehicle = 8,                 // Car, truck, van, motorcycle
+    SpecializedInstrument = 9,   // Lab equipment, medical device, surveying tool
+    SafetyEquipment = 10,         // PPE (harness, respirator) – if used as tool
+    Other = 11
+}
+
+/// <summary>
+/// Working relationships a job interacts with. Supervisory reporting lines
+/// (the position a holder reports to / supervises) are defined in the position
+/// details, NOT here — so this intentionally omits "ReportsTo"/"Supervises".
+/// </summary>
+public enum ReportingRelationshipType
+{
+    CollaboratesWith = 1,
+    InternalCustomers = 2,
+    ExternalCustomers = 3,
+    Vendors = 4,
+    RegulatoryBodies = 5,
+    MatrixReport = 6
+}
+
+/// <summary>
+/// Category for a job's medical / mental / health / special requirement
+/// (e.g. "not suitable if asthmatic" for a dusty environment).
+/// </summary>
+public enum MedicalRequirementCategory
+{
+    Medical = 1,      // e.g. no respiratory conditions, colour-vision normal
+    Mental = 2,       // e.g. ability to cope with high-pressure situations
+    Health = 3,       // e.g. general fitness, immunisation status
+    Sensory = 4,      // e.g. hearing/eyesight acuity
+    Other = 5
+}
+
+/// <summary>
+/// Intrinsic business value/criticality of a role to the organization,
+/// independent of the qualifications/competencies of the holder.
+/// </summary>
+public enum RoleCriticalityLevel
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    MissionCritical = 4
+}
+
+/// <summary>
+/// Level of decision-making authority/autonomy a role carries.
+/// </summary>
+public enum DecisionAuthorityLevel
+{
+    Operational = 1,   // day-to-day execution within set procedures
+    Tactical = 2,      // shapes how objectives are met within a function
+    Strategic = 3      // sets direction / makes decisions with org-wide impact
+}
+
 #endregion Job Analysis
 
 #region Succession Planning
+
+public enum CompetencyCategory
+{
+    Leadership = 1,
+
+    Technical = 2,
+
+    Behavioral = 3,
+
+    Functional = 4,
+
+    Core = 5,
+
+    Other = 6
+}
+
+public enum GapStatus
+{
+    Gap = 1,
+
+    Met = 2,
+
+    Exceeded = 3
+}
+
+/// <summary>
+/// A reviewer's disposition when giving feedback on a succession candidate during selection.
+/// </summary>
+public enum FeedbackDisposition
+{
+    Support = 1,
+    Neutral = 2,
+    Oppose  = 3
+}
 
 public enum SuccessionPlanStatus
 {
@@ -2055,29 +4885,29 @@ public enum SuccessionPlanStatus
     [Description("Approved")]
     Approved = 3,
 
-    [Description("Active")]
-    Active = 4,
-
-    [Description("Under Revision")]
-    UnderRevision = 5,
+    [Description("Rejected")]
+    Rejected = 4,
 
     [Description("Completed")]
-    Completed = 6
+    Completed = 5,
+
+    [Description("Archived")]
+    Archived = 6
 }
 
 public enum PositionCriticality
 {
-    [Description("Critical")]
-    Critical = 1,
-
-    [Description("High")]
-    High = 2,
+    [Description("Low")]
+    Low = 1,
 
     [Description("Medium")]
-    Medium = 3,
+    Medium = 2,
 
-    [Description("Low")]
-    Low = 4
+    [Description("High")]
+    High = 3,
+
+    [Description("Critical")]
+    Critical = 4
 }
 
 public enum SuccessionRisk
@@ -2112,26 +4942,81 @@ public enum VacancyReason
     [Description("Termination")]
     Termination = 5,
 
+    [Description("Restructure")]
+    Restructure = 6,
+
+    [Description("Death")]
+    Death = 7,
+
     [Description("Other")]
-    Other = 6
+    Other = 8
+}
+
+/// <summary>
+/// Lifecycle of a <c>PositionVacancy</c> — an empty seat in the org that HR tracks from the moment it
+/// opens until it is filled or closed. Distinct from <c>JobVacancyStatus</c>, which tracks an approved
+/// recruitment opening being advertised.
+/// </summary>
+public enum PositionVacancyStatus
+{
+    /// <summary>Known future vacancy (e.g. an upcoming retirement or contract expiry) opened ahead of the departure.</summary>
+    [Description("Anticipated")]
+    Anticipated = 1,
+
+    /// <summary>The seat is empty now and awaiting HR review / decision.</summary>
+    [Description("Open")]
+    Open = 2,
+
+    /// <summary>HR is discussing the vacancy with the department head / stakeholders.</summary>
+    [Description("Under Review")]
+    UnderReview = 3,
+
+    /// <summary>A staff requisition has been raised to fill the vacancy.</summary>
+    [Description("Requisition Raised")]
+    RequisitionRaised = 4,
+
+    /// <summary>The seat has been filled (a hire started, or an employee moved into the position).</summary>
+    [Description("Filled")]
+    Filled = 5,
+
+    /// <summary>Closed without filling (e.g. the position was eliminated, or the vacancy was a false positive).</summary>
+    [Description("Closed")]
+    Closed = 6,
+
+    /// <summary>Deliberately left unfilled for now (hiring freeze / on hold).</summary>
+    [Description("Frozen")]
+    Frozen = 7
+}
+
+/// <summary>
+/// Whether a logged <c>PositionVacancy</c> reflects a genuine establishment shortfall. A departure is
+/// ALWAYS logged (never silently swallowed); this classifies whether it is fillable.
+/// </summary>
+public enum VacancyClassification
+{
+    /// <summary>Active headcount is below the position's ExpectedHeadcount — a genuine, fillable shortfall.</summary>
+    [Description("Within Establishment")]
+    WithinEstablishment = 1,
+
+    /// <summary>The position is still at its ExpectedHeadcount after the departure — flagged for HR review, not auto-fillable.</summary>
+    [Description("No Shortfall")]
+    NoShortfall = 2,
+
+    /// <summary>The position is over its ExpectedHeadcount — an over-establishment situation for HR to review.</summary>
+    [Description("Over Establishment")]
+    OverEstablishment = 3
 }
 
 public enum CandidateType
 {
-    [Description("Internal - Ready Now")]
-    InternalReady = 1,
-
-    [Description("Internal - 1-2 Years")]
-    Internal1To2Years = 2,
-
-    [Description("Internal - 3+ Years")]
-    Internal3PlusYears = 3,
+    [Description("Internal")]
+    Internal = 1,
 
     [Description("External")]
-    External = 4,
+    External = 2,
 
     [Description("Emergency/Acting")]
-    Emergency = 5
+    Emergency = 3
 }
 
 public enum ReadinessLevel
@@ -2139,26 +5024,29 @@ public enum ReadinessLevel
     [Description("Ready Now")]
     ReadyNow = 1,
 
-    [Description("Ready in 1 Year")]
-    ReadyIn1Year = 2,
+    [Description("Ready in 12 Months")]
+    ReadyIn12Months = 2,
 
-    [Description("Ready in 2-3 Years")]
-    ReadyIn2To3Years = 3,
+    [Description("Ready in 24 Months")]
+    ReadyIn24Months = 3,
+
+    [Description("Ready in 36+ Months")]
+    ReadyIn36PlusMonths = 4,
 
     [Description("Not Ready")]
-    NotReady = 4
+    NotReady = 5
 }
 
 public enum PotentialRating
 {
+    [Description("Low Potential")]
+    LowPotential = 1,
+
+    [Description("Medium Potential")]
+    MediumPotential = 2,
+
     [Description("High Potential")]
-    HighPotential = 1,
-
-    [Description("Moderate Potential")]
-    ModeratePotential = 2,
-
-    [Description("Limited Potential")]
-    LimitedPotential = 3
+    HighPotential = 3
 }
 
 public enum RetentionRisk
@@ -2197,7 +5085,13 @@ public enum DevelopmentActivityType
     ActingRole = 6,
 
     [Description("External Experience")]
-    ExternalExperience = 7
+    ExternalExperience = 7,
+
+    [Description("Certification")]
+    Certification = 8,
+
+    [Description("Other")]
+    Other = 9
 }
 
 public enum DevelopmentActivityStatus
@@ -2230,7 +5124,10 @@ public enum ActionType
     Retention = 3,
 
     [Description("Assessment Action")]
-    Assessment = 4
+    Assessment = 4,
+
+    [Description("Other Action")]
+    Other = 5
 }
 
 public enum ActionPriority
@@ -2277,41 +5174,14 @@ public enum TalentPoolType
     [Description("Technical Experts")]
     TechnicalExperts = 3,
 
-    [Description("Future Leaders")]
-    FutureLeaders = 4,
+    [Description("Specialized Skills")]
+    Specialist = 4,
 
-    [Description("Key Talent")]
-    KeyTalent = 5
-}
+    [Description("Emergency Pool")]
+    EmergencyPool = 5,
 
-public enum NineBoxCategory
-{
-    [Description("Stars - High Performance, High Potential")]
-    Stars = 1,
-
-    [Description("High Performers - High Performance, Moderate Potential")]
-    HighPerformers = 2,
-
-    [Description("Core Players - High Performance, Low Potential")]
-    CorePlayers = 3,
-
-    [Description("High Potentials - Moderate Performance, High Potential")]
-    HighPotentials = 4,
-
-    [Description("Solid Professionals - Moderate Performance, Moderate Potential")]
-    SolidProfessionals = 5,
-
-    [Description("Solid Contributors - Moderate Performance, Low Potential")]
-    SolidContributors = 6,
-
-    [Description("Inconsistent Players - Low Performance, High Potential")]
-    InconsistentPlayers = 7,
-
-    [Description("Dilemmas - Low Performance, Moderate Potential")]
-    Dilemmas = 8,
-
-    [Description("Low Performers - Low Performance, Low Potential")]
-    LowPerformers = 9
+    [Description("Other")]
+    Other = 6
 }
 
 #endregion Succession Planning
@@ -2326,14 +5196,17 @@ public enum StaffRequisitionType
     [Description("Replacement")]
     Replacement = 2,
 
-    [Description("Temporary/Contract")]
-    Temporary = 3,
+    [Description("Contract")]
+    Contract = 3,
 
     [Description("Internship")]
     Internship = 4,
 
     [Description("Backfill")]
-    Backfill = 5
+    Backfill = 5,
+
+    [Description("Other")]
+    Other = 6
 }
 
 public enum StaffRequisitionPriority
@@ -2359,38 +5232,29 @@ public enum StaffRequisitionStatus
     [Description("Submitted")]
     Submitted = 2,
 
-    [Description("Supervisor Review")]
-    SupervisorReview = 3,
-
-    [Description("HOD Review")]
-    HodReview = 4,
-
-    [Description("HR Review")]
-    HrReview = 5,
-
-    [Description("Finance Review")]
-    FinanceReview = 6,
-
-    [Description("CEO Approval")]
-    CeoApproval = 7,
+    [Description("Under Review")]
+    UnderReview = 3,
 
     [Description("Approved")]
-    Approved = 8,
+    Approved = 4,
 
     [Description("Rejected")]
-    Rejected = 9,
+    Rejected = 5,
 
     [Description("On Hold")]
-    OnHold = 10,
+    OnHold = 6,
 
     [Description("Cancelled")]
-    Cancelled = 11,
+    Cancelled = 7,
+
+    [Description("Partially Fulfilled")]
+    PartiallyFulfilled = 8,
 
     [Description("Fulfilled")]
-    Fulfilled = 12
+    Fulfilled = 9,
 }
 
-public enum ReplacementReason
+public enum StaffReplacementReason
 {
     [Description("Resignation")]
     Resignation = 1,
@@ -2415,6 +5279,39 @@ public enum ReplacementReason
 
     [Description("Other")]
     Other = 8
+}
+
+public enum StaffRequisitionCostCategory
+{
+    [Description("Recruitment Agency Fee")]
+    RecruitmentAgencyFee = 1,
+
+    [Description("Job Advertising")]
+    JobAdvertising = 2,
+
+    [Description("Background Check")]
+    BackgroundCheck = 3,
+
+    [Description("Assessment")]
+    Assessment = 4,
+
+    [Description("Relocation")]
+    Relocation = 5,
+
+    [Description("Onboarding Materials")]
+    OnboardingMaterials = 6,
+
+    [Description("Training and Induction")]
+    TrainingAndInduction = 7,
+
+    [Description("Medical Examination")]
+    MedicalExamination = 8,
+
+    [Description("Travel and Interview")]
+    TravelAndInterview = 9,
+
+    [Description("Other")]
+    Other = 10
 }
 
 #endregion Staff Requisition
@@ -2506,24 +5403,6 @@ public enum CompanyAssetStatus
 
     [Description("Reserved")]
     Reserved = 7
-}
-
-public enum HRAssetCondition
-{
-    [Description("Excellent")]
-    Excellent = 1,
-
-    [Description("Good")]
-    Good = 2,
-
-    [Description("Fair")]
-    Fair = 3,
-
-    [Description("Poor")]
-    Poor = 4,
-
-    [Description("Non-Functional")]
-    NonFunctional = 5
 }
 
 public enum DisposalMethod
@@ -2646,8 +5525,26 @@ public enum AssetAttachmentType
     MaintenanceRecord = 5
 }
 
+public enum AssetRequisitionPriority
+{
+    [Description("Urgent")]
+    Urgent = 1,
+
+    [Description("High")]
+    High = 2,
+
+    [Description("Medium")]
+    Medium = 3,
+
+    [Description("Low")]
+    Low = 4
+}
+
 public enum AssetRequisitionStatus
 {
+    [Description("Draft")]
+    Draft = 0,
+
     [Description("Submitted")]
     Submitted = 1,
 
@@ -2667,38 +5564,6 @@ public enum AssetRequisitionStatus
     Cancelled = 6
 }
 
-public enum HRAssetTransferType
-{
-    [Description("Employee to Employee")]
-    EmployeeToEmployee = 1,
-
-    [Description("Location to Location")]
-    LocationToLocation = 2,
-
-    [Description("Department to Department")]
-    DepartmentToDepartment = 3
-}
-
-public enum HRAssetTransferStatus
-{
-    [Description("Pending")]
-    Pending = 1,
-
-    [Description("Approved")]
-    Approved = 2,
-
-    [Description("In Transit")]
-    InTransit = 3,
-
-    [Description("Completed")]
-    Completed = 4,
-
-    [Description("Rejected")]
-    Rejected = 5,
-
-    [Description("Cancelled")]
-    Cancelled = 6
-}
 
 public enum AssetAttributeDataType
 {
@@ -2715,26 +5580,11 @@ public enum AssetAttributeDataType
     Text = 6
 }
 
-public enum HRAssetRequisitionPriority
-{
-    [Description("Urgent")]
-    Urgent = 1,
-
-    [Description("High")]
-    High = 2,
-
-    [Description("Medium")]
-    Medium = 3,
-
-    [Description("Low")]
-    Low = 4
-}
-
 #endregion Staff Assets
 
 #region Career Movement
 
-public enum MovementType
+public enum StaffMovementType
 {
     [Description("Promotion")]
     Promotion = 1,
@@ -2758,7 +5608,7 @@ public enum MovementType
     Redesignation = 7
 }
 
-public enum MovementCategory
+public enum StaffMovementCategory
 {
     [Description("Voluntary")]
     Voluntary = 1,
@@ -2770,10 +5620,13 @@ public enum MovementCategory
     OrganizationalRestructure = 3,
 
     [Description("Career Development")]
-    CareerDevelopment = 4
+    CareerDevelopment = 4,
+
+    [Description("Administrative")]
+    Administrative = 5
 }
 
-public enum MovementStatus
+public enum StaffMovementStatus
 {
     [Description("Draft")]
     Draft = 1,
@@ -2815,7 +5668,7 @@ public enum MovementStatus
     Cancelled = 13
 }
 
-public enum MovementAttachmentType
+public enum StaffMovementAttachmentType
 {
     [Description("Approval Letter")]
     ApprovalLetter = 1,
@@ -2833,7 +5686,7 @@ public enum MovementAttachmentType
     Other = 5
 }
 
-public enum ChecklistCategory
+public enum StaffMovementChecklistCategory
 {
     [Description("HR Tasks")]
     HRTasks = 1,
@@ -2851,7 +5704,7 @@ public enum ChecklistCategory
     AccessSecurity = 5
 }
 
-public enum PromotionType
+public enum StaffPromotionType
 {
     [Description("Merit-Based")]
     MeritBased = 1,
@@ -2884,7 +5737,7 @@ public enum StaffTransferType
     Temporary = 4
 }
 
-public enum TransferReason
+public enum StaffTransferReasonCategory
 {
     [Description("Career Development")]
     CareerDevelopment = 1,
@@ -2905,7 +5758,7 @@ public enum TransferReason
     PersonalReasons = 6
 }
 
-public enum DemotionReason
+public enum StaffDemotionReason
 {
     [Description("Performance Issues")]
     PerformanceIssues = 1,
@@ -2926,7 +5779,7 @@ public enum DemotionReason
     OrganizationalRestructure = 6
 }
 
-public enum SecondmentType
+public enum StaffSecondmentType
 {
     [Description("Internal Secondment")]
     Internal = 1,
@@ -2941,7 +5794,7 @@ public enum SecondmentType
     International = 4
 }
 
-public enum ActingReason
+public enum StaffActingReason
 {
     [Description("Incumbent on Leave")]
     IncumbentOnLeave = 1,
@@ -2959,7 +5812,7 @@ public enum ActingReason
     DevelopmentOpportunity = 5
 }
 
-public enum ActingStatus
+public enum StaffActingStatus
 {
     [Description("Active")]
     Active = 1,
@@ -2977,7 +5830,7 @@ public enum ActingStatus
     ConvertedToPermanent = 5
 }
 
-public enum AllowanceCalculationMethod
+public enum HRAllowanceCalculationMethod
 {
     [Description("Fixed Amount")]
     FixedAmount = 1,
@@ -2996,7 +5849,7 @@ public enum AllowanceCalculationMethod
 
 #region Attendance
 
-public enum AttendanceStatus
+public enum StaffAttendanceStatus
 {
     [Description("Present")]
     Present = 1,
@@ -3029,7 +5882,7 @@ public enum AttendanceStatus
     OnDuty = 10
 }
 
-public enum ScheduleType
+public enum WorkScheduleType
 {
     [Description("Fixed Schedule")]
     Fixed = 1,
@@ -3055,14 +5908,32 @@ public enum ShiftType
     [Description("Afternoon Shift")]
     Afternoon = 2,
 
+    [Description("Evening Shift")]
+    Evening = 3,
+
     [Description("Night Shift")]
-    Night = 3,
+    Night = 4,
 
     [Description("Rotating Shift")]
-    Rotating = 4,
+    Rotating = 5,
 
     [Description("Split Shift")]
-    Split = 5
+    Split = 6
+}
+
+public enum ShiftRotationCycle
+{
+    [Description("Weekly")]
+    Weekly = 1,
+
+    [Description("Fortnightly")]
+    Fortnightly = 2,
+
+    [Description("Monthly")]
+    Monthly = 3,
+
+    [Description("Quarterly")]
+    Quarterly = 4
 }
 
 public enum RecurrencePattern
@@ -3104,7 +5975,7 @@ public enum RegularizationType
     SystemError = 5
 }
 
-public enum RegularizationStatus
+public enum AttendanceRegularizationStatus
 {
     [Description("Pending")]
     Pending = 1,
@@ -3117,6 +5988,30 @@ public enum RegularizationStatus
 
     [Description("Applied")]
     Applied = 4
+}
+
+public enum OvertimeAllowanceType
+{
+    [Description("Overtime")]
+    Overtime = 1,
+
+    [Description("Night Allowance")]
+    NightAllowance = 2,
+
+    [Description("Shift Differential")]
+    ShiftDifferential = 3,
+
+    [Description("Weekend Allowance")]
+    WeekendAllowance = 4,
+
+    [Description("Holiday Allowance")]
+    HolidayAllowance = 5,
+
+    [Description("Transport Allowance")]
+    TransportAllowance = 6,
+
+    [Description("Other")]
+    Other = 7
 }
 
 public enum OvertimeType
@@ -3152,10 +6047,65 @@ public enum OvertimeRequestStatus
     Cancelled = 5
 }
 
-public enum DeviceType
+public enum BiometricType
+{
+    [Description("Fingerprint")]
+    Fingerprint = 1,
+
+    [Description("Face")]
+    Face = 2,
+
+    [Description("Iris")]
+    Iris = 3,
+
+    [Description("Palm")]
+    Palm = 4,
+
+    [Description("Vein")]
+    Vein = 5,
+
+    [Description("Retina")]
+
+    Retina = 6
+}
+
+public enum FingerPosition
+{
+    [Description("Right Thumb")]
+    RightThumb = 1,
+
+    [Description("Right Index")]
+    RightIndex = 2,
+
+    [Description("Right Middle")]
+    RightMiddle = 3,
+
+    [Description("Right Ring")]
+    RightRing = 4,
+
+    [Description("Right Little")]
+    RightLittle = 5,
+
+    [Description("Left Thumb")]
+    LeftThumb = 6,
+
+    [Description("Left Index")]
+    LeftIndex = 7,
+
+    [Description("Left Middle")]
+    LeftMiddle = 8,
+
+    [Description("Left Ring")]
+    LeftRing = 9,
+
+    [Description("Left Little")]
+    LeftLittle = 10
+}
+
+public enum AttendanceDeviceType
 {
     [Description("Fingerprint Scanner")]
-    FingerprintScanner = 1,
+    Fingerprint = 1,
 
     [Description("Face Recognition")]
     FaceRecognition = 2,
@@ -3163,14 +6113,26 @@ public enum DeviceType
     [Description("RFID Card Reader")]
     RFIDCard = 3,
 
+    [Description("Iris Recognition")]
+    Iris = 4,
+
+    [Description("Palm")]
+    Palm = 5,
+
+    [Description("QR Code Scanner")]
+    QRCode = 6,
+
+    [Description("PIN Pad")]
+    PINPad = 7,
+
     [Description("Mobile App")]
-    MobileApp = 4,
+    MobileApp = 8,
 
     [Description("Web Portal")]
-    WebPortal = 5
+    WebPortal = 9
 }
 
-public enum LogType
+public enum AttendanceLogType
 {
     [Description("Check-In")]
     CheckIn = 1,
@@ -3183,6 +6145,300 @@ public enum LogType
 
     [Description("Break End")]
     BreakEnd = 4
+}
+
+public enum AttendanceImportSourceType
+{
+    [Description("CSV")]
+    CSV = 1,
+
+    [Description("Excel")]
+    Excel = 2,
+
+    [Description("API")]
+    API = 3,
+
+    [Description("Biometric Device")]
+    BiometricDevice = 4,
+
+    [Description("Manual Entry")]
+    ManualEntry = 5
+}
+
+public enum AttendanceImportStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Processing")]
+    Processing = 2,
+
+    [Description("Completed")]
+    Completed = 3,
+
+    [Description("Failed")]
+    Failed = 4,
+
+    [Description("Partial Success")]
+    PartialSuccess = 5
+}
+
+public enum GeofenceShape
+{
+    [Description("Circle")]
+    Circle = 1,
+
+    [Description("Polygon")]
+    Polygon = 2
+}
+
+public enum LocationVerificationStatus
+{
+    [Description("Within Zone")]
+    WithinZone = 1,
+
+    [Description("Outside Zone")]
+    OutsideZone = 2,
+
+    [Description("Unverified")]
+    Unverified = 3,
+
+    [Description("GPS Unavailable")]
+    GPSUnavailable = 4
+}
+
+public enum RemoteWorkRequestStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3,
+
+    [Description("Cancelled")]
+    Cancelled = 4,
+}
+
+public enum HolidayObservanceType
+{
+    [Description("Mandatory")]
+    Mandatory = 1,
+
+    [Description("Optional")]
+    Optional = 2,
+
+    [Description("Substitute Day")]
+    SubstituteDay = 3
+}
+
+public enum PayPeriodType
+{
+    [Description("Weekly")]
+    Weekly = 1,
+
+    [Description("Biweekly")]
+    Biweekly = 2,
+
+    [Description("SemiMonthly")]
+    SemiMonthly = 3,
+
+    [Description("Monthly")]
+    Monthly = 4
+}
+
+public enum PayPeriodStatus
+{
+    [Description("Open")]
+    Open = 1,
+
+    [Description("Pending Close")]
+    PendingClose = 2,
+
+    [Description("Closed")]
+    Closed = 3,
+
+    [Description("Exported to Payroll")]
+    ExportedToPayroll = 4
+}
+
+public enum PayrollExportStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("In Progress")]
+    InProgress = 2,
+
+    [Description("Completed")]
+    Completed = 3,
+
+    [Description("Failed")]
+    Failed = 4,
+
+    [Description("Partial Success")]
+    PartialSuccess = 5
+}
+
+public enum AttendanceAlertTriggerType
+{
+    [Description("Consecutive Absences")]
+    ConsecutiveAbsences = 1,
+
+    [Description("Chronic Lateness")]
+    ChronicLateness = 2,
+
+    [Description("Missing Punch")]
+    MissingPunch = 3,
+
+    [Description("Overtime Threshold Reached")]
+    OvertimeThresholdReached = 4,
+
+    [Description("Excessive Early Departure")]
+    ExcessiveEarlyDeparture = 5,
+
+    [Description("Unauthorised Absence")]
+    UnauthorisedAbsence = 6,
+
+    [Description("Low Attendance Percentage")]
+    LowAttendancePercentage = 7
+}
+
+public enum AttendanceAlertSeverity
+{
+    [Description("Info")]
+    Info = 1,
+
+    [Description("Warning")]
+    Warning = 2,
+
+    [Description("Critical")]
+    Critical = 3
+}
+
+public enum AttendanceAlertStatus
+{
+    [Description("Active")]
+    Active = 1,
+
+    [Description("Acknowledged")]
+    Acknowledged = 2,
+
+    [Description("Resolved")]
+    Resolved = 3,
+
+    [Description("Dismissed")]
+    Dismissed = 4
+}
+
+public enum TimesheetStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Submitted")]
+    Submitted = 2,
+
+    [Description("Sent to Client")]
+    SentToClient = 3,
+
+    [Description("Client Confirmed")]
+    ClientConfirmed = 4,
+
+    [Description("Client Rejected")]
+    ClientRejected = 5,
+
+    [Description("Billed")]
+    Billed = 6,
+
+    [Description("Void")]
+    Void = 7,
+
+    [Description("Approved")]
+    Approved = 8,
+
+    [Description("Rejected")]
+    Rejected = 9
+}
+
+public enum TimesheetConfirmationStatus
+{
+    [Description("Sent")]
+    Sent = 1,
+
+    [Description("Viewed")]
+    Viewed = 2,
+
+    [Description("Confirmed")]
+    Confirmed = 3,
+
+    [Description("Rejected")]
+    Rejected = 4,
+
+    [Description("Expired")]
+    Expired = 5,
+
+    [Description("Resent")]
+    Resent = 6
+}
+
+public enum TimesheetInvoiceStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Sent")]
+    Sent = 2,
+
+    [Description("Partially Paid")]
+    PartiallyPaid = 3,
+
+    [Description("Paid")]
+    Paid = 4,
+
+    [Description("Voided")]
+    Voided = 5,
+
+    [Description("Overdue")]
+    Overdue = 6
+}
+
+public enum BillingCycle
+{
+    [Description("Weekly")]
+    Weekly = 1,
+
+    [Description("Fortnightly")]
+    Fortnightly = 2,
+
+    [Description("Monthly")]
+    Monthly = 3,
+
+    [Description("Milestone-Based")]
+    MilestoneBased = 4,
+
+    [Description("On Completion")]
+    OnCompletion = 5
+}
+
+public enum ClientEngagementStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Active")]
+    Active = 2,
+
+    [Description("Suspended")]
+    Suspended = 3,
+
+    [Description("Completed")]
+    Completed = 4,
+
+    [Description("Terminated")]
+    Terminated = 5
 }
 
 #endregion Attendance
@@ -3381,7 +6637,7 @@ public enum EventAttachmentType
     Resource = 5
 }
 
-public enum TaskCategory
+public enum EventTaskCategory
 {
     [Description("Pre-Event Preparation")]
     Preparation = 1,
@@ -3408,7 +6664,7 @@ public enum TaskPriority
     Low = 4
 }
 
-public enum TaskStatus
+public enum EventTaskStatus
 {
     [Description("Not Started")]
     NotStarted = 1,
@@ -3507,16 +6763,1684 @@ public enum FiscalYearStatus
     Archived = 3
 }
 
-public enum HRSchedulePeriodType
+#endregion Company Schedule
+
+#region Miscellaneous
+
+public enum RequestApprovalStage
 {
-    [Description("Quarter")]
-    Quarter = 1,
+    [Description("Supervisor Approval")]
+    SupervisorApproval = 1,
 
-    [Description("Month")]
-    Month = 2,
+    [Description("HOD Approval")]
+    HodApproval = 2,
 
-    [Description("Semi-Annual")]
-    SemiAnnual = 3
+    [Description("HR Review")]
+    HrReview = 3,
+
+    [Description("Finance Review")]
+    FinanceReview = 4
 }
 
-#endregion Company Schedule
+public enum ApprovalStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3
+}
+
+public enum ApprovalRole
+{
+    [Description("Supervisor")]
+    Supervisor = 1,
+
+    [Description("Head of Department")]
+    HeadOfDepartment = 2,
+
+    [Description("HR Manager")]
+    HRManager = 3,
+
+    [Description("Finance Manager")]
+    FinanceManager = 4,
+
+    [Description("CEO")]
+    CEO = 5
+}
+
+#endregion
+
+#region HR Cycle Dashboard
+
+/// <summary>Describes where a pipeline-step deadline sits relative to today.</summary>
+public enum DeadlineState
+{
+    None = 0,
+    Safe = 1, // > 7 days
+    Approaching = 2, // 4–7 days
+    Imminent = 3, // 1–3 days
+    Today = 4, // due today
+    Overdue = 5, // past due
+    Passed = 6, // completed / no longer relevant
+}
+
+/// <summary>Why an appraisal appears in the HR attention queue.</summary>
+public enum AttentionReason
+{
+    OverdueAtStep = 0,
+    PIPrecommendation = 1,
+    TerminationRecommendation = 2,
+    AppealFiled = 3,
+    AppealOverdue = 4,
+    CalibrationAdjustmentLarge = 5,
+    ManagerEvalIncomplete = 6,
+    LowScore = 7,
+}
+
+/// <summary>Visual severity level for an attention item.</summary>
+public enum AttentionSeverity
+{
+    Info = 0,
+    Warning = 1,
+    Critical = 2,
+}
+
+/// <summary>Event type used for in-app notifications and the cycle activity feed.</summary>
+public enum AppraisalNotificationType
+{
+    SelfEvalWindowOpen = 0,
+    SelfEvalSubmitted = 1,
+    PeerNominationSubmitted = 2,
+    PeerEvaluationAssigned = 3,
+    PeerEvaluationCompleted = 4,
+    AllPeerEvalsComplete = 5,
+    ManagerEvalSubmitted = 6,
+    CalibrationComplete = 7,
+    HRReviewApproved = 8,
+    ConversationCompleted = 9,
+    EmployeeAcknowledged = 10,
+    AppealSubmitted = 11,
+    AppealResolved = 12,
+    DeadlineApproaching = 13,
+    DeadlineImminent = 14,
+    DeadlinePassed = 15,
+    AutoLocked = 16,
+    PeerEvaluationReminder = 17,
+    ActionRequired = 18,
+}
+
+/// <summary>Urgency level for in-app notifications.</summary>
+public enum NotificationUrgency
+{
+    Normal = 0,
+    Warning = 1,
+    Urgent = 2,
+}
+
+#endregion
+
+#region Candidate Portal
+
+/// <summary>Candidate's preferred work arrangement.</summary>
+public enum PreferredWorkArrangement
+{
+    [Description("Any")]
+    Any = 0,
+
+    [Description("On-Site")]
+    OnSite = 1,
+
+    [Description("Hybrid")]
+    Hybrid = 2,
+
+    [Description("Remote")]
+    Remote = 3,
+}
+
+/// <summary>Work authorisation / right-to-work status of the candidate.</summary>
+public enum WorkAuthorizationStatus
+{
+    [Description("Not Specified")]
+    NotSpecified = 0,
+
+    [Description("Citizen")]
+    Citizen = 1,
+
+    [Description("Permanent Resident")]
+    PermanentResident = 2,
+
+    [Description("Work Visa (No Sponsorship Needed)")]
+    WorkVisa = 3,
+
+    [Description("Requires Sponsorship")]
+    RequiresSponsorship = 4,
+}
+
+/// <summary>Self-assessed proficiency level for a spoken/written language.</summary>
+public enum LanguageProficiency
+{
+    [Description("Basic")]
+    Basic = 1,
+
+    [Description("Conversational")]
+    Conversational = 2,
+
+    [Description("Professional Working")]
+    ProfessionalWorking = 3,
+
+    [Description("Full Professional / Fluent")]
+    Fluent = 4,
+
+    [Description("Native / Bilingual")]
+    Native = 5,
+}
+
+// ── Talent Pool (Candidate-facing) ────────────────────────────────────────────
+
+/// <summary>How a job candidate was added to the talent pool.</summary>
+public enum TalentPoolEntrySource
+{
+    [Description("Not Specified")]
+    NotSpecified = 0,
+
+    [Description("Applied & Retained")]
+    AppliedAndRetained = 1,
+
+    [Description("Recruiter Added")]
+    RecruiterAdded = 2,
+
+    [Description("Referral")]
+    Referral = 3,
+
+    [Description("Career Fair / Event")]
+    CareerFair = 4,
+
+    [Description("LinkedIn / Social")]
+    LinkedIn = 5,
+
+    [Description("Unsolicited CV")]
+    UnsolicitedCv = 6,
+
+    [Description("Internal Transfer")]
+    InternalTransfer = 7,
+
+    [Description("Candidate Portal")]
+    CandidatePortal = 8,
+}
+
+/// <summary>The current engagement / activity status of a candidate in the talent pool.</summary>
+public enum TalentPoolCandidateStatus
+{
+    [Description("Active")]
+    Active = 1,
+
+    [Description("Passive")]
+    Passive = 2,
+
+    [Description("Dormant")]
+    Dormant = 3,
+
+    [Description("Expired")]
+    Expired = 4,
+
+    [Description("Converted")]
+    Converted = 5,
+
+    [Description("On Hold")]
+    OnHold = 6,
+}
+
+/// <summary>Type of engagement / contact event logged against a pool candidate.</summary>
+public enum CandidateEngagementEventType
+{
+    [Description("Email")]
+    Email = 1,
+
+    [Description("Phone Call")]
+    PhoneCall = 2,
+
+    [Description("In-Person Meeting")]
+    InPersonMeeting = 3,
+
+    [Description("Invited to Apply")]
+    InvitedToApply = 4,
+
+    [Description("Profile Review")]
+    ProfileReview = 5,
+
+    [Description("Status Update")]
+    StatusUpdate = 6,
+
+    [Description("LinkedIn Message")]
+    LinkedInMessage = 7,
+
+    [Description("SMS")]
+    Sms = 8,
+
+    [Description("Interview / Assessment")]
+    InterviewAssessment = 9,
+
+    [Description("Internal Note")]
+    InternalNote = 10,
+}
+
+/// <summary>Type of bulk operation to perform on talent pool candidates.</summary>
+public enum BulkTalentPoolOperation
+{
+    AssignSegment = 1,
+    RemoveSegment = 2,
+    SetStatus = 3,
+    RemoveFromPool = 4,
+}
+
+#endregion
+
+#region Staff Travels
+
+#region Travel classification
+
+public enum StaffTravelType
+{
+    [Description("Domestic")]
+    Domestic = 1,
+
+    [Description("International")]
+    International = 2,
+
+    [Description("Cross-Border")]
+    CrossBorder = 3,
+
+    [Description("Regional")]
+    Regional = 4,
+
+    [Description("Overseas Assignment")]
+    OverseasAssignment = 5,
+
+    [Description("Field Visit")]
+    FieldVisit = 6,
+
+    [Description("Training")]
+    Training = 7,
+
+    [Description("Conference")]
+    Conference = 8,
+
+    [Description("Client Visit")]
+    ClientVisit = 9,
+
+    [Description("Government Duty")]
+    GovernmentDuty = 10,
+
+    [Description("Emergency")]
+    Emergency = 11
+}
+
+public enum StaffTravelPurpose
+{
+    [Description("Business Development")]
+    BusinessDevelopment = 1,
+
+    [Description("Client Meeting")]
+    ClientMeeting = 2,
+
+    [Description("Conference")]
+    Conference = 3,
+
+    [Description("Training")]
+    Training = 4,
+
+    [Description("Audit")]
+    Audit = 5,
+
+    [Description("Inspection")]
+    Inspection = 6,
+
+    [Description("Project Work")]
+    ProjectWork = 7,
+
+    [Description("Site Visit")]
+    SiteVisit = 8,
+
+    [Description("Government Engagement")]
+    GovernmentEngagement = 9,
+
+    [Description("Personal Combined")]
+    PersonalCombined = 10,
+
+    [Description("Emergency")]
+    Emergency = 11,
+
+    [Description("Other")]
+    Other = 12
+}
+
+public enum StaffTravelPriority
+{
+    [Description("Routine")]
+    Routine = 1,
+
+    [Description("Urgent")]
+    Urgent = 2,
+
+    [Description("Emergency")]
+    Emergency = 3
+}
+
+public enum StaffTravelRequestStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Submitted")]
+    Submitted = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    [Description("Rejected")]
+    Rejected = 4,
+
+    [Description("Cancelled")]
+    Cancelled = 5,
+
+    [Description("Returned For Revision")]
+    ReturnedForRevision = 6,
+
+    [Description("In Progress")]
+    InProgress = 7,
+
+    [Description("Completed")]
+    Completed = 8,
+
+    [Description("Closed")]
+    Closed = 9
+}
+
+public enum TravelItineraryStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Pending Review")]
+    PendingReview = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    [Description("Active")]
+    Active = 4,
+
+    [Description("Completed")]
+    Completed = 5,
+
+    [Description("Cancelled")]
+    Cancelled = 6,
+
+    [Description("Superseded")]
+    Superseded = 7
+}
+
+public enum TravelItineraryLegType
+{
+    [Description("Departure")]
+    Departure = 1,
+
+    [Description("Transit")]
+    Transit = 2,
+
+    [Description("Arrival")]
+    Arrival = 3,
+
+    [Description("Stay")]
+    Stay = 4,
+
+    [Description("Day Trip")]
+    DayTrip = 5,
+
+    [Description("Return")]
+    Return = 6
+}
+
+public enum StaffTravelTransportMode
+{
+    [Description("Flight")]
+    Flight = 1,
+
+    [Description("Train")]
+    Train = 2,
+
+    [Description("Bus")]
+    Bus = 3,
+
+    [Description("Car")]
+    Car = 4,
+
+    [Description("Ferry")]
+    Ferry = 5,
+
+    [Description("Helicopter")]
+    Helicopter = 6,
+
+    [Description("Motorcycle")]
+    Motorcycle = 7,
+
+    [Description("Walk")]
+    Walk = 8
+}
+
+public enum StaffTravelActivityType
+{
+    [Description("Meeting")]
+    Meeting = 1,
+
+    [Description("Conference")]
+    Conference = 2,
+
+    [Description("Training")]
+    Training = 3,
+
+    [Description("Site Visit")]
+    SiteVisit = 4,
+
+    [Description("Client Dinner")]
+    ClientDinner = 5,
+
+    [Description("Free Time")]
+    FreeTime = 6,
+
+    [Description("Transit Layover")]
+    TransitLayover = 7,
+
+    [Description("Other")]
+    Other = 8
+}
+
+#endregion
+
+#region Workflow & approvals
+
+public enum TravelInitiatorRole
+{
+    [Description("Employee")]
+    Employee = 1,
+
+    [Description("Manager")]
+    Manager = 2,
+
+    [Description("HR Admin")]
+    HrAdmin = 3,
+
+    [Description("Travel Desk")]
+    TravelDesk = 4,
+
+    [Description("System")]
+    System = 5
+}
+
+public enum TravelApproverType
+{
+    [Description("Line Manager")]
+    LineManager = 1,
+
+    [Description("Department Head")]
+    DepartmentHead = 2,
+
+    [Description("HR Manager")]
+    HrManager = 3,
+
+    [Description("Finance Manager")]
+    FinanceManager = 4,
+
+    [Description("Travel Desk")]
+    TravelDesk = 5,
+
+    [Description("Executive")]
+    Executive = 6,
+
+    [Description("Specific Person")]
+    SpecificPerson = 7
+}
+
+public enum TravelApprovalDecision
+{
+    [Description("Approved")]
+    Approved = 1,
+
+    [Description("Rejected")]
+    Rejected = 2,
+
+    [Description("Returned For Revision")]
+    ReturnedForRevision = 3,
+
+    [Description("Escalated")]
+    Escalated = 4,
+
+    [Description("Delegated")]
+    Delegated = 5,
+
+    [Description("Abstained")]
+    Abstained = 6
+}
+
+public enum TravelApprovalInstanceStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("In Progress")]
+    InProgress = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    [Description("Rejected")]
+    Rejected = 4,
+
+    [Description("Withdrawn")]
+    Withdrawn = 5,
+
+    [Description("Escalated")]
+    Escalated = 6,
+
+    [Description("Expired")]
+    Expired = 7
+}
+
+#endregion
+
+#region Bookings
+
+public enum FlightCabinClass
+{
+    [Description("Economy")]
+    Economy = 1,
+
+    [Description("Premium Economy")]
+    PremiumEconomy = 2,
+
+    [Description("Business")]
+    Business = 3,
+
+    [Description("First")]
+    First = 4
+}
+
+public enum TravelBookingChannel
+{
+    [Description("Self Service")]
+    SelfService = 1,
+
+    [Description("Travel Desk")]
+    TravelDesk = 2,
+
+    [Description("Travel Agency")]
+    TravelAgency = 3,
+
+    [Description("Direct Airline")]
+    DirectAirline = 4,
+
+    [Description("Direct Hotel")]
+    DirectHotel = 5,
+
+    [Description("Online Portal")]
+    OnlinePortal = 6
+}
+
+public enum TravelBookingStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Confirmed")]
+    Confirmed = 2,
+
+    [Description("Ticketed")]
+    Ticketed = 3,
+
+    [Description("Cancelled")]
+    Cancelled = 4,
+
+    [Description("Refunded")]
+    Refunded = 5,
+
+    [Description("No Show")]
+    NoShow = 6,
+
+    [Description("Completed")]
+    Completed = 7,
+
+    [Description("On Hold")]
+    OnHold = 8
+}
+
+public enum GroundTransportType
+{
+    [Description("Taxi")]
+    Taxi = 1,
+
+    [Description("Rideshare")]
+    Rideshare = 2,
+
+    [Description("Bus")]
+    Bus = 3,
+
+    [Description("Train")]
+    Train = 4,
+
+    [Description("Metro")]
+    Metro = 5,
+
+    [Description("Company Vehicle")]
+    CompanyVehicle = 6,
+
+    [Description("Private Car Hire")]
+    PrivateCarHire = 7,
+
+    [Description("Shuttle")]
+    Shuttle = 8,
+
+    [Description("Motorcycle")]
+    Motorcycle = 9,
+
+    [Description("Ferry")]
+    Ferry = 10
+}
+
+public enum VehicleCategory
+{
+    [Description("Economy")]
+    Economy = 1,
+
+    [Description("Compact")]
+    Compact = 2,
+
+    [Description("Intermediate")]
+    Intermediate = 3,
+
+    [Description("Full Size")]
+    FullSize = 4,
+
+    [Description("SUV")]
+    Suv = 5,
+
+    [Description("Luxury")]
+    Luxury = 6,
+
+    [Description("Minivan")]
+    Minivan = 7,
+
+    [Description("Truck")]
+    Truck = 8
+}
+
+#endregion
+
+#region Finance & expenses
+
+public enum TravelExpenseCategory
+{
+    [Description("Airfare")]
+    Airfare = 1,
+
+    [Description("Accommodation")]
+    Accommodation = 2,
+
+    [Description("Meals")]
+    Meals = 3,
+
+    [Description("Local Transport")]
+    LocalTransport = 4,
+
+    [Description("Taxi / Rideshare")]
+    TaxiRideshare = 5,
+
+    [Description("Car Rental")]
+    CarRental = 6,
+
+    [Description("Fuel")]
+    Fuel = 7,
+
+    [Description("Visa Fees")]
+    VisaFees = 8,
+
+    [Description("Insurance")]
+    Insurance = 9,
+
+    [Description("Communication")]
+    Communication = 10,
+
+    [Description("Conference Fees")]
+    ConferenceFees = 11,
+
+    [Description("Gifts & Entertainment")]
+    GiftsEntertainment = 12,
+
+    [Description("Tips & Gratuity")]
+    TipsGratuity = 13,
+
+    [Description("Laundry")]
+    Laundry = 14,
+
+    [Description("Medical")]
+    Medical = 15,
+
+    [Description("Baggage Fees")]
+    BaggageFees = 16,
+
+    [Description("Miscellaneous")]
+    Miscellaneous = 17
+}
+
+public enum TravelClaimStatus
+{
+    [Description("Draft")]
+    Draft = 1,
+
+    [Description("Submitted")]
+    Submitted = 2,
+
+    [Description("Under Review")]
+    UnderReview = 3,
+
+    [Description("Approved")]
+    Approved = 4,
+
+    [Description("Partially Approved")]
+    PartiallyApproved = 5,
+
+    [Description("Rejected")]
+    Rejected = 6,
+
+    [Description("Paid")]
+    Paid = 7,
+
+    [Description("Returned")]
+    Returned = 8
+}
+
+public enum TravelExpenseLineStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3,
+
+    [Description("Queried")]
+    Queried = 4,
+
+    [Description("Resolved")]
+    Resolved = 5
+}
+
+public enum TravelClaimType
+{
+    [Description("Post Travel")]
+    PostTravel = 1,
+
+    [Description("Advance Settlement")]
+    AdvanceSettlement = 2,
+
+    [Description("Partial Claim")]
+    PartialClaim = 3,
+
+    [Description("Amendment")]
+    Amendment = 4
+}
+
+public enum TravelAdvanceType
+{
+    [Description("Cash")]
+    Cash = 1,
+
+    [Description("Corporate Card Load")]
+    CorporateCardLoad = 2,
+
+    [Description("Petty Cash")]
+    PettyCash = 3,
+
+    [Description("Wire Transfer")]
+    WireTransfer = 4
+}
+
+public enum TravelAdvanceStatus
+{
+    [Description("Requested")]
+    Requested = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Disbursed")]
+    Disbursed = 3,
+
+    [Description("Partially Settled")]
+    PartiallySettled = 4,
+
+    [Description("Fully Settled")]
+    FullySettled = 5,
+
+    [Description("Overdue")]
+    Overdue = 6,
+
+    [Description("Written Off")]
+    WrittenOff = 7
+}
+
+public enum TravelPaymentMethod
+{
+    [Description("Bank Transfer")]
+    BankTransfer = 1,
+
+    [Description("Payroll Offset")]
+    PayrollOffset = 2,
+
+    [Description("Cash")]
+    Cash = 3,
+
+    [Description("Cheque")]
+    Cheque = 4,
+
+    [Description("Corporate Card")]
+    CorporateCard = 5
+}
+
+public enum TravelAllowanceType
+{
+    [Description("Daily Subsistence")]
+    DailySubsistence = 1,
+
+    [Description("Accommodation")]
+    Accommodation = 2,
+
+    [Description("Transport")]
+    Transport = 3,
+
+    [Description("Incidental")]
+    Incidental = 4,
+
+    [Description("Meals Only")]
+    MealsOnly = 5,
+
+    [Description("Hardship")]
+    Hardship = 6
+}
+
+#endregion
+
+#region Policy
+
+public enum TravelPolicyRuleType
+{
+    [Description("Hard Limit")]
+    HardLimit = 1,
+
+    [Description("Soft Limit")]
+    SoftLimit = 2,
+
+    [Description("Warning")]
+    Warning = 3,
+
+    [Description("Mandatory")]
+    Mandatory = 4,
+
+    [Description("Preferred")]
+    Preferred = 5,
+
+    [Description("Prohibited")]
+    Prohibited = 6
+}
+
+public enum TravelPolicyViolationAction
+{
+    [Description("Block")]
+    Block = 1,
+
+    [Description("Warn")]
+    Warn = 2,
+
+    [Description("Flag For Review")]
+    FlagForReview = 3,
+
+    [Description("Require Justification")]
+    RequireJustification = 4,
+
+    [Description("Escalate To Approver")]
+    EscalateToApprover = 5
+}
+
+public enum TravelPolicyExceptionStatus
+{
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3,
+
+    [Description("Expired")]
+    Expired = 4
+}
+
+#endregion
+
+#region Vendors
+
+public enum TravelVendorType
+{
+    [Description("Airline")]
+    Airline = 1,
+
+    [Description("Hotel Chain")]
+    HotelChain = 2,
+
+    [Description("Car Rental")]
+    CarRental = 3,
+
+    [Description("Travel Agency")]
+    TravelAgency = 4,
+
+    [Description("GDS")]
+    Gds = 5,
+
+    [Description("Rideshare")]
+    Rideshare = 6,
+
+    [Description("Insurance")]
+    Insurance = 7,
+
+    [Description("Visa Service")]
+    VisaService = 8,
+
+    [Description("Ground Transport")]
+    GroundTransport = 9,
+
+    [Description("Forex")]
+    Forex = 10,
+
+    [Description("Other")]
+    Other = 11
+}
+
+#endregion
+
+#region Compliance & safety
+
+public enum TravelDocumentType
+{
+    [Description("Passport")]
+    Passport = 1,
+
+    [Description("National ID")]
+    NationalId = 2,
+
+    [Description("Visa")]
+    Visa = 3,
+
+    [Description("Resident Permit")]
+    ResidentPermit = 4,
+
+    [Description("Work Permit")]
+    WorkPermit = 5,
+
+    [Description("Frequent Flyer Card")]
+    FrequentFlyerCard = 6,
+
+    [Description("Hotel Loyalty Card")]
+    HotelLoyaltyCard = 7,
+
+    [Description("Driving Licence")]
+    DrivingLicence = 8,
+
+    [Description("Vaccine Certificate")]
+    VaccineCertificate = 9
+}
+
+public enum VisaRequirementType
+{
+    [Description("Visa Free")]
+    VisaFree = 1,
+
+    [Description("Visa On Arrival")]
+    VisaOnArrival = 2,
+
+    [Description("E-Visa")]
+    EVisa = 3,
+
+    [Description("Embassy Visa")]
+    EmbassyVisa = 4,
+
+    [Description("Prohibited")]
+    Prohibited = 5,
+
+    [Description("Conditional")]
+    Conditional = 6
+}
+
+public enum VisaApplicationStatus
+{
+    [Description("Not Started")]
+    NotStarted = 1,
+
+    [Description("In Preparation")]
+    InPreparation = 2,
+
+    [Description("Submitted")]
+    Submitted = 3,
+
+    [Description("Approved")]
+    Approved = 4,
+
+    [Description("Rejected")]
+    Rejected = 5,
+
+    [Description("Expired")]
+    Expired = 6,
+
+    [Description("Not Required")]
+    NotRequired = 7
+}
+
+public enum TravelRiskLevel
+{
+    [Description("Low")]
+    Low = 1,
+
+    [Description("Medium")]
+    Medium = 2,
+
+    [Description("High")]
+    High = 3,
+
+    [Description("Critical")]
+    Critical = 4,
+
+    [Description("Prohibited")]
+    Prohibited = 5
+}
+
+public enum TravelRiskCategory
+{
+    [Description("Security")]
+    Security = 1,
+
+    [Description("Health")]
+    Health = 2,
+
+    [Description("Natural Disaster")]
+    NaturalDisaster = 3,
+
+    [Description("Political Instability")]
+    PoliticalInstability = 4,
+
+    [Description("Infrastructure")]
+    Infrastructure = 5,
+
+    [Description("Crime")]
+    Crime = 6,
+
+    [Description("Other")]
+    Other = 7
+}
+
+public enum TravelAlertType
+{
+    [Description("Security")]
+    Security = 1,
+
+    [Description("Health Outbreak")]
+    HealthOutbreak = 2,
+
+    [Description("Weather")]
+    Weather = 3,
+
+    [Description("Political Unrest")]
+    PoliticalUnrest = 4,
+
+    [Description("Transport Disruption")]
+    TransportDisruption = 5,
+
+    [Description("Natural Disaster")]
+    NaturalDisaster = 6
+}
+
+public enum TravelAlertSeverity
+{
+    [Description("Info")]
+    Info = 1,
+
+    [Description("Warning")]
+    Warning = 2,
+
+    [Description("Critical")]
+    Critical = 3,
+
+    [Description("Emergency")]
+    Emergency = 4
+}
+
+public enum TravelInsuranceType
+{
+    [Description("Corporate Group")]
+    CorporateGroup = 1,
+
+    [Description("Individual")]
+    Individual = 2,
+
+    [Description("Top Up")]
+    TopUp = 3,
+
+    [Description("Statutory")]
+    Statutory = 4
+}
+
+public enum TravelInsuranceCoverageType
+{
+    [Description("Medical")]
+    Medical = 1,
+
+    [Description("Trip Cancellation")]
+    TripCancellation = 2,
+
+    [Description("Baggage")]
+    Baggage = 3,
+
+    [Description("Personal Liability")]
+    PersonalLiability = 4,
+
+    [Description("Emergency Evacuation")]
+    EmergencyEvacuation = 5,
+
+    [Description("Comprehensive")]
+    Comprehensive = 6
+}
+
+public enum TravelHealthRequirementType
+{
+    [Description("Vaccination")]
+    Vaccination = 1,
+
+    [Description("PCR Test")]
+    PcrTest = 2,
+
+    [Description("Rapid Antigen Test")]
+    RapidAntigenTest = 3,
+
+    [Description("Medical Clearance")]
+    MedicalClearance = 4,
+
+    [Description("Health Declaration")]
+    HealthDeclaration = 5,
+
+    [Description("Quarantine")]
+    Quarantine = 6
+}
+
+#endregion
+
+#region Miscellaneous
+
+public enum TravelRequestCommentType
+{
+    [Description("Comment")]
+    Comment = 1,
+
+    [Description("Internal Note")]
+    InternalNote = 2,
+
+    [Description("Rejection Reason")]
+    RejectionReason = 3,
+
+    [Description("Query")]
+    Query = 4,
+
+    [Description("Response")]
+    Response = 5,
+
+    [Description("System Note")]
+    SystemNote = 6
+}
+
+public enum TravelAttachmentType
+{
+    [Description("Invitation Letter")]
+    InvitationLetter = 1,
+
+    [Description("Conference Brochure")]
+    ConferenceBrochure = 2,
+
+    [Description("Receipt")]
+    Receipt = 3,
+
+    [Description("Visa Document")]
+    VisaDocument = 4,
+
+    [Description("Insurance Certificate")]
+    InsuranceCertificate = 5,
+
+    [Description("Medical Certificate")]
+    MedicalCertificate = 6,
+
+    [Description("Other")]
+    Other = 7
+}
+
+public enum GroupTravelStatus
+{
+    [Description("Planning")]
+    Planning = 1,
+
+    [Description("Open")]
+    Open = 2,
+
+    [Description("Closed")]
+    Closed = 3,
+
+    [Description("In Progress")]
+    InProgress = 4,
+
+    [Description("Completed")]
+    Completed = 5,
+
+    [Description("Cancelled")]
+    Cancelled = 6
+}
+
+#endregion
+
+#region Orientation Management
+
+/// <summary>
+/// Broad category of what an orientation program addresses. Orientation covers
+/// onboarding as well as policy/product/compliance awareness rollouts.
+/// </summary>
+public enum OrientationProgramType
+{
+    /// <summary>
+    /// New-hire or role-transition onboarding.
+    /// </summary>
+    Onboarding = 1,
+
+    /// <summary>
+    /// Awareness of a new or updated company policy.
+    /// </summary>
+    PolicyAwareness = 2,
+
+    /// <summary>
+    /// Introduction or update to a product or service.
+    /// </summary>
+    ProductLaunch = 3,
+
+    /// <summary>
+    /// Mandatory regulatory, legal, or industry compliance.
+    /// </summary>
+    Compliance = 4,
+
+    /// <summary>
+    /// Health, safety, and environmental orientation.
+    /// </summary>
+    HealthAndSafety = 5,
+
+    /// <summary>
+    /// Technology tool or system adoption.
+    /// </summary>
+    SystemsAndTools = 6,
+
+    /// <summary>
+    /// Organizational culture, values, or mission awareness.
+    /// </summary>
+    CultureAndValues = 7,
+
+    /// <summary>
+    /// Catch-all for any other orientation type.
+    /// </summary>
+    General = 99
+}
+
+/// <summary>
+/// Lifecycle state of an orientation program definition.
+/// </summary>
+public enum OrientationProgramStatus
+{
+    /// <summary>
+    /// Being authored; not yet available.
+    /// </summary>
+    Draft = 1,
+
+    /// <summary>
+    /// Submitted for approval before activation.
+    /// </summary>
+    PendingApproval = 2,
+
+    /// <summary>
+    /// Live and available for enrollment.
+    /// </summary>
+    Active = 3,
+
+    /// <summary>
+    /// Temporarily paused.
+    /// </summary>
+    Suspended = 4,
+
+    /// <summary>
+    /// Withdrawn from active use but retained.
+    /// </summary>
+    Retired = 5,
+
+    /// <summary>
+    /// Archived for historical reference only.
+    /// </summary>
+    Archived = 6
+}
+
+/// <summary>
+/// How an orientation is delivered to participants.
+/// </summary>
+public enum OrientationDeliveryMode
+{
+    /// <summary>
+    /// Physical, in-person classroom or meeting room.
+    /// </summary>
+    InPerson = 1,
+
+    /// <summary>
+    /// Live virtual session via video conferencing.
+    /// </summary>
+    VirtualInstructor = 2,
+
+    /// <summary>
+    /// Self-paced online content (e-learning, videos).
+    /// </summary>
+    SelfPacedOnline = 3,
+
+    /// <summary>
+    /// Mix of in-person/virtual and self-paced elements.
+    /// </summary>
+    Blended = 4,
+
+    /// <summary>
+    /// Pre-recorded video with no live component.
+    /// </summary>
+    VideoOnDemand = 5,
+
+    /// <summary>
+    /// Printed material or document-only delivery.
+    /// </summary>
+    PrintedMaterial = 6
+}
+
+/// <summary>
+/// Relative importance of completing an orientation program.
+/// </summary>
+public enum OrientationPriority
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4,
+    Mandatory = 5
+}
+
+/// <summary>
+/// Which employee population an orientation program targets.
+/// </summary>
+public enum OrientationAudienceScope
+{
+    AllEmployees = 1,
+    NewHires = 2,
+    OrganizationUnit = 3,
+    JobGrade = 4,
+    Location = 5,
+    Role = 6,
+    Management = 7,
+    Contractors = 8,
+    Custom = 99
+}
+
+/// <summary>
+/// The type of content a module represents.
+/// </summary>
+public enum OrientationModuleType
+{
+    InformationContent = 1,
+    VideoLesson = 2,
+    Interactive = 3,
+    Assessment = 4,
+    Acknowledgement = 5,
+    Survey = 6,
+    LiveSession = 7
+}
+
+/// <summary>
+/// Format/type of a single orientation content item.
+/// </summary>
+public enum OrientationContentType
+{
+    Video = 1,
+    Audio = 2,
+    PDF = 3,
+    Document = 4,
+    Presentation = 5,
+    ExternalLink = 6,
+    EmbeddedWebPage = 7,
+    Image = 8,
+    Text = 9,
+    Quiz = 10
+}
+
+/// <summary>
+/// Lifecycle state of a scheduled orientation session instance.
+/// </summary>
+public enum OrientationSessionStatus
+{
+    Draft = 1,
+    Published = 2,
+    EnrollmentOpen = 3,
+    EnrollmentClosed = 4,
+    InProgress = 5,
+    Completed = 6,
+    Cancelled = 7,
+    Postponed = 8
+}
+
+/// <summary>
+/// Lifecycle state of a single orientation enrollment record.
+/// </summary>
+public enum OrientationEnrollmentStatus
+{
+    PendingConfirmation = 1,
+    Confirmed = 2,
+    Waitlisted = 3,
+    Active = 4,
+    Completed = 5,
+    Cancelled = 6,
+    NoShow = 7,
+    Withdrawn = 8
+}
+
+/// <summary>
+/// How an orientation enrollment was initiated.
+/// </summary>
+public enum OrientationEnrollmentSource
+{
+    AutoRule = 1,
+    SelfEnrollment = 2,
+    HrAssigned = 3,
+    ManagerAssigned = 4
+}
+
+/// <summary>
+/// Overall completion state for an orientation enrollment.
+/// </summary>
+public enum OrientationCompletionStatus
+{
+    NotStarted = 1,
+    InProgress = 2,
+    PendingAssessment = 3,
+    PendingAcknowledgement = 4,
+    Completed = 5,
+    Failed = 6,
+    Overdue = 7,
+    Exempted = 8
+}
+
+/// <summary>
+/// Consumption state of a single orientation content item.
+/// </summary>
+public enum OrientationContentProgressStatus
+{
+    NotStarted = 1,
+    InProgress = 2,
+    Completed = 3,
+    Skipped = 4
+}
+
+/// <summary>
+/// Attendance status for an instructor-led orientation session day.
+/// </summary>
+public enum OrientationAttendanceStatus
+{
+    NotRecorded = 0,
+    Present = 1,
+    Absent = 2,
+    Excused = 3,
+    Partial = 4,
+    Late = 5
+}
+
+/// <summary>
+/// Role of a person facilitating an orientation session.
+/// </summary>
+public enum OrientationFacilitatorRole
+{
+    Lead = 1,
+    CoFacilitator = 2,
+    SubjectMatterExpert = 3,
+    Observer = 4
+}
+
+/// <summary>
+/// What triggers automatic enrollment for an audience rule.
+/// </summary>
+public enum OrientationEnrollmentTrigger
+{
+    OnHire = 1,
+    OnTransfer = 2,
+    OnPromotion = 3,
+    OnProgramPublish = 4,
+    Scheduled = 5,
+    Manual = 6
+}
+
+/// <summary>
+/// Format of an orientation assessment question.
+/// </summary>
+public enum OrientationQuestionType
+{
+    SingleChoice = 1,
+    MultiSelect = 2,
+    TrueFalse = 3,
+    FreeText = 4
+}
+
+/// <summary>
+/// State of a participant's acknowledgement declaration.
+/// </summary>
+public enum OrientationAcknowledgementStatus
+{
+    Pending = 1,
+    Presented = 2,
+    Signed = 3,
+    Declined = 4,
+    Expired = 5
+}
+
+/// <summary>
+/// Status of an issued orientation certificate.
+/// </summary>
+public enum OrientationCertificateStatus
+{
+    Active = 1,
+    Expired = 2,
+    Revoked = 3,
+    Reissued = 4
+}
+
+/// <summary>
+/// Type of orientation lifecycle notification.
+/// </summary>
+public enum OrientationNotificationType
+{
+    Enrollment = 1,
+    Reminder = 2,
+    DeadlineApproaching = 3,
+    Overdue = 4,
+    Completion = 5,
+    CertificateIssued = 6,
+    Cancellation = 7
+}
+
+/// <summary>
+/// How often a recurring orientation program repeats.
+/// </summary>
+public enum OrientationRecurrenceFrequency
+{
+    Monthly = 1,
+    Quarterly = 2,
+    SemiAnnually = 3,
+    Annually = 4,
+    Biennially = 5
+}
+
+#endregion
+
+#endregion
+
+#region Emoluments / Pay Components
+
+/// <summary>
+/// Classifies a pay component as an earning added to basic pay (Allowance) or an amount
+/// subtracted from gross (Deduction). The consolidated emoluments roll-up is
+/// basic + allowances − deductions.
+/// </summary>
+public enum PayComponentType
+{
+    Allowance = 0,
+    Deduction = 1,
+    /// <summary>
+    /// A non-cash, taxable Benefit-in-Kind line: it raises taxable income (and may be pensionable)
+    /// but is not paid out as cash. Sourced from the Benefits module's BIK valuations.
+    /// </summary>
+    BenefitInKindNotional = 2
+}
+
+/// <summary>
+/// How a pay component's amount is calculated: a fixed monetary amount, or a percentage of
+/// the employee's monthly basic pay.
+/// </summary>
+public enum PayComponentCalculationBasis
+{
+    FixedAmount = 0,
+    PercentageOfBasic = 1
+}
+
+/// <summary>
+/// How a leave type's per-day encashment rate is derived: computed from the employee's
+/// emoluments (basic + linked allowances) or entered manually per leave type.
+/// </summary>
+public enum EncashmentRateBasis
+{
+    DerivedFromEmoluments = 0,
+    Manual = 1
+}
+
+#endregion

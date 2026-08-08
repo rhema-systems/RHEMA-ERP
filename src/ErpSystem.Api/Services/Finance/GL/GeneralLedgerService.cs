@@ -26,6 +26,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IDocumentNumberingService _documentNumberingService;
         private readonly IAccountingBookService _accountingBookService;
         private readonly IFinancePostingEngine _financePostingEngine;
+        private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -35,7 +36,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IFiscalPeriodService fiscalPeriodService,
             IDocumentNumberingService documentNumberingService,
             IAccountingBookService accountingBookService,
-            IFinancePostingEngine financePostingEngine)
+            IFinancePostingEngine financePostingEngine,
+            IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -45,6 +47,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _documentNumberingService = documentNumberingService;
             _accountingBookService = accountingBookService;
             _financePostingEngine = financePostingEngine;
+            _statementLayoutExecutionService = statementLayoutExecutionService;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -148,15 +151,11 @@ namespace ErpSystem.Api.Services.Finance.GL
 
                 return account;
             }
-            catch (Exception ex)
+            catch
             {
-                // Log the error (in production, use proper logging framework)
-                Console.WriteLine($"ERROR in CreateSegmentedAccountAsync: {ex.Message}");
-                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
-                if (ex.InnerException != null)
-                    Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
-                
-                throw; // Re-throw to let the controller handle it
+                // The request-level exception middleware owns diagnostic logging and the
+                // tenant administrator audit record. Do not duplicate it on the console.
+                throw;
             }
         }
 
@@ -675,6 +674,16 @@ namespace ErpSystem.Api.Services.Finance.GL
             balanceSheet.TotalAssets = assetsSection.SectionTotal;
             balanceSheet.TotalLiabilities = liabilitiesSection.SectionTotal;
             balanceSheet.TotalEquity = equitySection.SectionTotal;
+            balanceSheet.LayoutExecution = await ExecuteStatementLayoutAsync(
+                FinancialStatementType.BalanceSheet,
+                bookClassification,
+                null,
+                request.AsAtDate,
+                request.LayoutId,
+                request.UseDefaultLayout,
+                request.IncludeAccountDetails,
+                request.AccountIds,
+                request.SegmentFilters);
 
             return balanceSheet;
         }
@@ -1226,8 +1235,92 @@ namespace ErpSystem.Api.Services.Finance.GL
                 - incomeStatement.TotalOtherExpenses;
             incomeStatement.NetProfit = incomeStatement.ProfitBeforeTax - incomeStatement.TaxExpense;
             incomeStatement.PresentationWarnings = BuildDisposalGainPresentationWarnings(disposalGainPresentationAccounts);
+            incomeStatement.LayoutExecution = await ExecuteStatementLayoutAsync(
+                FinancialStatementType.IncomeStatement,
+                bookClassification,
+                request.PeriodStart,
+                request.PeriodEnd,
+                request.LayoutId,
+                request.UseDefaultLayout,
+                request.IncludeAccountDetails,
+                request.AccountIds,
+                request.SegmentFilters);
 
             return incomeStatement;
+        }
+
+        private async Task<FinancialStatementLayoutExecutionDto?> ExecuteStatementLayoutAsync(
+            FinancialStatementType statementType,
+            string bookClassification,
+            DateTime? periodStart,
+            DateTime periodEnd,
+            Guid? layoutId,
+            bool useDefaultLayout,
+            bool includeAccountDetails,
+            IEnumerable<Guid>? accountIds,
+            IEnumerable<FinanceSegmentFilterDto>? segmentFilters)
+        {
+            var requestedLayoutId = layoutId.HasValue && layoutId.Value != Guid.Empty
+                ? layoutId
+                : null;
+            if (!requestedLayoutId.HasValue && !useDefaultLayout)
+            {
+                return null;
+            }
+
+            if (_statementLayoutExecutionService == null)
+            {
+                if (requestedLayoutId.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        "Financial statement layout execution is not available.");
+                }
+
+                return null;
+            }
+
+            var books = await _accountingBookService.GetBooksAsync();
+            var book = books?.FirstOrDefault(candidate =>
+                NormalizeBookClassification(candidate.Code).Equals(
+                    bookClassification,
+                    StringComparison.OrdinalIgnoreCase));
+            if (book == null)
+            {
+                if (requestedLayoutId.HasValue)
+                {
+                    throw new InvalidOperationException(
+                        $"Accounting book '{bookClassification}' is not available for the selected layout.");
+                }
+
+                return null;
+            }
+
+            try
+            {
+                return await _statementLayoutExecutionService.ExecutePublishedAsync(
+                    new FinancialStatementLayoutExecutionRequestDto
+                    {
+                        LayoutId = requestedLayoutId,
+                        StatementType = statementType,
+                        AccountingBookId = book.Id,
+                        PeriodStart = periodStart,
+                        PeriodEnd = periodEnd,
+                        IncludeAccountDetails = includeAccountDetails,
+                        IncludeHiddenRows = false,
+                        AccountIds = accountIds?
+                            .Where(accountId => accountId != Guid.Empty)
+                            .Distinct()
+                            .ToList() ?? new List<Guid>(),
+                        SegmentFilters = segmentFilters?.ToList()
+                            ?? new List<FinanceSegmentFilterDto>()
+                    });
+            }
+            catch (KeyNotFoundException) when (!requestedLayoutId.HasValue)
+            {
+                // A default layout is optional during rollout. The established
+                // account-classification report remains the safe fallback.
+                return null;
+            }
         }
 
         private async Task<HashSet<Guid>> GetTenantDisposalGainAccountIdsAsync(Guid tenantId)
@@ -2046,236 +2139,47 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         public async Task<PeriodCloseValidationDto> ValidatePeriodCloseAsync(Guid fiscalPeriodId)
         {
-            var tenantId = TenantId;
-
-            var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && p.TenantId == tenantId);
-
-            if (period == null)
-                throw new ArgumentException($"Fiscal period {fiscalPeriodId} not found");
-
-            var validation = new PeriodCloseValidationDto
-            {
-                PeriodName = period.PeriodName,
-                StartDate = period.StartDate,
-                EndDate = period.EndDate
-            };
-
-            // Check if already closed
-            if (period.IsClosed)
-            {
-                validation.ValidationErrors.Add("Period is already closed");
-                validation.CanClose = false;
-                return validation;
-            }
-
-            // Check if locked
-            if (period.IsLocked)
-            {
-                validation.ValidationErrors.Add("Period is locked and cannot be closed again");
-                validation.CanClose = false;
-                return validation;
-            }
-
-            // Validate Trial Balance
-            var transactions = await _context.AccountTransactions
-                .Where(t => t.TenantId == tenantId && t.FiscalPeriodId == fiscalPeriodId && !t.IsDeleted)
-                .ToListAsync();
-
-            validation.TotalDebits = transactions.Sum(t => t.DebitAmount);
-            validation.TotalCredits = transactions.Sum(t => t.CreditAmount);
-            validation.Difference = validation.TotalDebits - validation.TotalCredits;
-            validation.TotalJournalEntries = await _context.JournalEntries
-                .CountAsync(j => j.TenantId == tenantId && j.FiscalPeriodId == fiscalPeriodId && !j.IsDeleted);
-            validation.TotalTransactionLines = transactions.Count;
-
-            if (!validation.IsBalanced)
-            {
-                validation.ValidationErrors.Add($"Trial Balance is out of balance by {validation.Difference:N2}. Debits must equal Credits.");
-                validation.CanClose = false;
-                return validation;
-            }
-
-            // Warnings (not blockers)
-            if (!period.CurrencyRevaluationComplete)
-            {
-                validation.ValidationWarnings.Add("Currency revaluation has not been marked as complete");
-            }
-
-            if (!period.BankReconciliationComplete)
-            {
-                validation.ValidationWarnings.Add("Bank reconciliation has not been marked as complete");
-            }
-
-            if (!period.DepreciationComplete)
-            {
-                validation.ValidationWarnings.Add("Depreciation has not been marked as complete");
-            }
-
-            validation.CanClose = validation.ValidationErrors.Count == 0;
-            return validation;
+            // GeneralLedgerService remains the reporting/year-close facade, but fiscal-period
+            // readiness has one owner. Delegation prevents this older API contract from drifting
+            // away from the persisted checks enforced by FiscalPeriodService.
+            return await _fiscalPeriodService.ValidatePeriodCloseAsync(fiscalPeriodId);
         }
 
         public async Task<PeriodCloseResultDto> CloseFiscalPeriodAsync(PeriodCloseRequestDto request)
         {
-            var tenantId = TenantId;
-            var userId = _currentUserService.UserId;
-            if (userId == null)
-                throw new InvalidOperationException("User context is required.");
-
-            // Run validation unless skipped
-            if (!request.SkipValidation)
-            {
-                var validation = await ValidatePeriodCloseAsync(request.FiscalPeriodId);
-                if (!validation.CanClose)
-                {
-                    return new PeriodCloseResultDto
-                    {
-                        Success = false,
-                        Message = "Period close validation failed",
-                        FiscalPeriodId = request.FiscalPeriodId,
-                        Errors = validation.ValidationErrors
-                    };
-                }
-            }
-
-            var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.Id == request.FiscalPeriodId && p.TenantId == tenantId);
-
-            if (period == null)
-                throw new ArgumentException($"Fiscal period {request.FiscalPeriodId} not found");
-
-            // Calculate and cache statistics
-            var transactions = await _context.AccountTransactions
-                .Where(t => t.TenantId == tenantId && t.FiscalPeriodId == request.FiscalPeriodId && !t.IsDeleted)
-                .ToListAsync();
-
-            period.TotalDebits = transactions.Sum(t => t.DebitAmount);
-            period.TotalCredits = transactions.Sum(t => t.CreditAmount);
-            period.BalanceDifference = period.TotalDebits - period.TotalCredits;
-            period.TotalTransactionLines = transactions.Count;
-            period.TotalJournalEntries = await _context.JournalEntries
-                .CountAsync(j => j.TenantId == tenantId && j.FiscalPeriodId == request.FiscalPeriodId && !j.IsDeleted);
-
-            // Update period status
-            period.IsClosed = true;
-            period.IsOpen = false;
-            period.PeriodStatus = "Closed";
-            period.ClosedDate = DateTime.UtcNow;
-            period.ClosedByUserId = Guid.Parse(userId);
-            period.TrialBalanceValidated = true;
-            period.TrialBalanceValidatedDate = DateTime.UtcNow;
-            period.ClosingNotes = request.ClosingNotes;
-
-            await _context.SaveChangesAsync();
-
-            return new PeriodCloseResultDto
-            {
-                Success = true,
-                Message = $"Period '{period.PeriodName}' closed successfully",
-                FiscalPeriodId = period.Id,
-                PeriodName = period.PeriodName,
-                ClosedDate = period.ClosedDate
-            };
+            // Do not maintain a second mutation path. The primary service owns close-cycle
+            // evidence, maker-checker certification, audit and period status as one operation.
+            return await _fiscalPeriodService.ClosePeriodAsync(request);
         }
 
         public async Task<PeriodCloseResultDto> ReopenFiscalPeriodAsync(PeriodReopenRequestDto request)
         {
-            var tenantId = TenantId;
-            var userId = _currentUserService.UserId;
-            if (userId == null)
-                throw new InvalidOperationException("User context is required.");
-
-            var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.Id == request.FiscalPeriodId && p.TenantId == tenantId);
-
-            if (period == null)
-                throw new ArgumentException($"Fiscal period {request.FiscalPeriodId} not found");
-
-            // Check if locked
-            if (period.IsLocked)
-            {
-                return new PeriodCloseResultDto
-                {
-                    Success = false,
-                    Message = "Cannot reopen a locked period. Please unlock first.",
-                    FiscalPeriodId = period.Id,
-                    PeriodName = period.PeriodName,
-                    Errors = new List<string> { "Period is locked" }
-                };
-            }
-
-            // Check if already open
-            if (!period.IsClosed)
-            {
-                return new PeriodCloseResultDto
-                {
-                    Success = false,
-                    Message = "Period is already open",
-                    FiscalPeriodId = period.Id,
-                    PeriodName = period.PeriodName
-                };
-            }
-
-            // Reopen the period
-            period.IsClosed = false;
-            period.IsOpen = true;
-            period.PeriodStatus = "Open";
-            period.HasBeenReopened = true;
-            period.ReopenCount += 1;
-            period.LastReopenedDate = DateTime.UtcNow;
-            period.LastReopenedByUserId = Guid.Parse(userId);
-            period.ReopenReason = request.Reason;
-
-            await _context.SaveChangesAsync();
-
+            // This legacy GL facade now submits the same controlled maker request as the Finance
+            // period screen. It must never bypass higher-tier approval by editing FiscalPeriod.
+            var reopenRequest = await _fiscalPeriodService.RequestPeriodReopenAsync(request);
             return new PeriodCloseResultDto
             {
                 Success = true,
-                Message = $"Period '{period.PeriodName}' reopened successfully. Reopen count: {period.ReopenCount}",
-                FiscalPeriodId = period.Id,
-                PeriodName = period.PeriodName
+                Message = "Period reopen request submitted; the period remains closed pending independent higher-tier approval.",
+                FiscalPeriodId = reopenRequest.FiscalPeriodId
             };
         }
 
         public async Task LockFiscalPeriodAsync(Guid fiscalPeriodId, string lockReason)
         {
-            var tenantId = TenantId;
-            var userId = _currentUserService.UserId;
-            if (userId == null)
-                throw new InvalidOperationException("User context is required.");
-
-            var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && p.TenantId == tenantId);
-
-            if (period == null)
-                throw new ArgumentException($"Fiscal period {fiscalPeriodId} not found");
-
-            if (!period.IsClosed)
-                throw new InvalidOperationException("Period must be closed before it can be locked");
-
-            period.IsLocked = true;
-            period.LockedDate = DateTime.UtcNow;
-            period.LockedByUserId = Guid.Parse(userId);
-            period.LockReason = lockReason;
-
-            await _context.SaveChangesAsync();
+            // Lock audit and status normalization are owned by FiscalPeriodService.
+            await _fiscalPeriodService.LockPeriodAsync(new PeriodLockRequestDto
+            {
+                FiscalPeriodId = fiscalPeriodId,
+                LockReason = lockReason
+            });
         }
 
         public async Task UnlockFiscalPeriodAsync(Guid fiscalPeriodId, string unlockReason)
         {
-            var tenantId = TenantId;
-
-            var period = await _context.FiscalPeriods
-                .FirstOrDefaultAsync(p => p.Id == fiscalPeriodId && p.TenantId == tenantId);
-
-            if (period == null)
-                throw new ArgumentException($"Fiscal period {fiscalPeriodId} not found");
-
-            period.IsLocked = false;
-            // Note: Keep audit trail of who locked and when, just unlock
-
-            await _context.SaveChangesAsync();
+            // Unlocks are exceptional control events; delegate so the mandatory reason and
+            // Finance audit trail cannot be skipped through this compatibility facade.
+            await _fiscalPeriodService.UnlockPeriodAsync(fiscalPeriodId, unlockReason);
         }
 
         public async Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request)

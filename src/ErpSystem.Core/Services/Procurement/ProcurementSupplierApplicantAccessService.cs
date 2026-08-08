@@ -106,7 +106,28 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 if (_unitOfWork.HasActiveTransaction)
                     await _unitOfWork.RollbackAsync(cancellationToken);
                 _unitOfWork.ClearTrackedChanges();
-                throw ActiveApplicationExists();
+                // Another verified request may have won the active-contact race.
+                // Re-read in a new serializable transaction and recover that
+                // application instead of exposing a transient duplicate error.
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    cancellationToken);
+                try
+                {
+                    var resumed = await CreateVerifiedApplicationCoreAsync(
+                        request,
+                        correlationId,
+                        cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return resumed;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
             }
             catch
             {
@@ -125,21 +146,41 @@ public sealed class ProcurementSupplierApplicantAccessService :
     {
         if (request.TenantId == Guid.Empty)
             throw Error("SUPPLIER_APPLICANT_TENANT_REQUIRED", "A tenant is required.", 400);
-        var contact = NormalizeContact(request.Channel, request.Contact);
+        var contact = SupplierApplicantContactNormalizer.Normalize(
+            request.Channel, request.Contact);
         ValidateContact(request.Channel, contact);
         var correlation = NormalizeCorrelation(correlationId);
         var contactHash = Hash(contact);
+        var contactHashes = SupplierApplicantContactNormalizer
+            .GetLookupAliases(request.Channel, contact)
+            .Select(Hash)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
-        var duplicate = await Accesses.GetQueryable(item =>
+        var existingMatches = await Accesses.GetQueryable(item =>
                 item.TenantId == request.TenantId && !item.IsDeleted &&
-                item.VerifiedContactHashSha256 == contactHash &&
+                contactHashes.Contains(item.VerifiedContactHashSha256) &&
                 item.Status != ProcurementSupplierApplicantAccessStatus.Rejected &&
                 item.Status != ProcurementSupplierApplicantAccessStatus.Activated)
-            .AnyAsync(cancellationToken);
-        if (duplicate)
-            throw ActiveApplicationExists();
+            .Include(item => item.Registration)
+            .Include(item => item.Token)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        if (existingMatches.Count > 1)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_AMBIGUOUS",
+                "More than one active supplier application is bound to this verified contact. Contact procurement support before continuing.",
+                409);
+        if (existingMatches.Count == 1)
+        {
+            return await ResumeVerifiedApplicationAsync(
+                existingMatches[0], request, correlation, cancellationToken);
+        }
 
-        var systemActor = await ResolveSystemActorAsync(request.TenantId, cancellationToken);
+        // A verified applicant is not an ERP user until approval. Use the
+        // applicant-access identity as the external actor instead of borrowing
+        // an administrator account for ownership and audit lineage.
+        var applicantActorId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var retainedApplication = request.RetainedRegistrationId.HasValue;
         Guid? originalCreatedById = null;
@@ -202,7 +243,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 }, JsonOptions),
                 CreatedAt = now,
                 CreatedBy = "Verified Supplier Applicant",
-                CreatedById = systemActor
+                CreatedById = applicantActorId
             };
             await Registrations.AddAsync(registration);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -232,7 +273,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
 
         var access = new ProcurementSupplierApplicantAccess
         {
-            Id = Guid.NewGuid(),
+            Id = applicantActorId,
             TenantId = request.TenantId,
             RegistrationId = registration.Id,
             TokenId = issued.Token.Id,
@@ -244,7 +285,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
             Status = ProcurementSupplierApplicantAccessStatus.ApplicationInProgress,
             CreatedAt = now,
             CreatedBy = "Verified Supplier Applicant",
-            CreatedById = systemActor,
+            CreatedById = applicantActorId,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(access);
@@ -271,6 +312,18 @@ public sealed class ProcurementSupplierApplicantAccessService :
             correlation,
             cancellationToken);
 
+        SupplierApplicantSessionDto? restrictedSession = null;
+        if (issued.Token.Status ==
+            ProcurementSupplierOnboardingTokenStatus.AwaitingPayment)
+        {
+            restrictedSession = await CreateSessionCoreAsync(
+                access,
+                issued.Token,
+                correlation,
+                "ApplicantPaymentSessionStarted",
+                cancellationToken);
+        }
+
         return new SupplierApplicantTokenIssueDto
         {
             RegistrationId = registration.Id,
@@ -282,7 +335,78 @@ public sealed class ProcurementSupplierApplicantAccessService :
             TokenStatus = issued.Token.Status,
             PaymentStatus = issued.Token.PaymentStatus,
             TotalAmount = issued.Token.TotalAmount,
-            CurrencyCode = issued.Token.CurrencyCode
+            CurrencyCode = issued.Token.CurrencyCode,
+            ResumedExistingApplication = false,
+            RestrictedSession = restrictedSession
+        };
+    }
+
+    private async Task<SupplierApplicantTokenIssueDto> ResumeVerifiedApplicationAsync(
+        ProcurementSupplierApplicantAccess access,
+        VerifyAndIssueSupplierApplicantTokenRequest request,
+        string correlation,
+        CancellationToken cancellationToken)
+    {
+        if (request.RetainedRegistrationId.HasValue &&
+            request.RetainedRegistrationId.Value != access.RegistrationId)
+            throw RetainedApplicationNotEligible();
+
+        var registrationTerminal =
+            string.Equals(access.Registration.Status, "Approved",
+                StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(access.Registration.Status, "Rejected",
+                StringComparison.OrdinalIgnoreCase);
+        if (access.Status != ProcurementSupplierApplicantAccessStatus.ApplicationInProgress ||
+            access.TerminalAtUtc.HasValue ||
+            registrationTerminal ||
+            access.Token.Status == ProcurementSupplierOnboardingTokenStatus.Expired)
+        {
+            throw Error(
+                "SUPPLIER_APPLICANT_APPLICATION_NOT_RESUMABLE",
+                "This supplier application is no longer eligible for verified-contact recovery.",
+                409);
+        }
+
+        var now = DateTime.UtcNow;
+        var activeSessions = await Sessions.GetQueryable(item =>
+                item.TenantId == access.TenantId &&
+                item.ApplicantAccessId == access.Id &&
+                !item.IsDeleted &&
+                item.Status == ProcurementSupplierApplicantSessionStatus.Active)
+            .ToListAsync(cancellationToken);
+        foreach (var activeSession in activeSessions)
+        {
+            activeSession.Status = ProcurementSupplierApplicantSessionStatus.Revoked;
+            activeSession.RevokedAtUtc = now;
+            activeSession.RevocationReason =
+                "Replaced after the applicant re-verified the application contact.";
+            Touch(activeSession);
+            Capture(activeSession);
+            await Sessions.UpdateAsync(activeSession);
+        }
+
+        var token = MapToken(access.Token);
+        var session = await CreateSessionCoreAsync(
+            access,
+            token,
+            correlation,
+            "ApplicantVerifiedSessionResumed",
+            cancellationToken);
+
+        return new SupplierApplicantTokenIssueDto
+        {
+            RegistrationId = access.RegistrationId,
+            RegistrationNumber = access.Registration.RegistrationNumber,
+            TokenId = access.TokenId,
+            TokenReference = access.Token.TokenReference,
+            PlaintextToken = null,
+            FeeMode = access.Token.FeeMode,
+            TokenStatus = access.Token.Status,
+            PaymentStatus = access.Token.PaymentStatus,
+            TotalAmount = access.Token.TotalAmount,
+            CurrencyCode = access.Token.CurrencyCode,
+            ResumedExistingApplication = true,
+            RestrictedSession = session
         };
     }
 
@@ -307,12 +431,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     StringComparison.OrdinalIgnoreCase));
     }
 
-    private static ProcurementSupplierApplicantAccessException
-        ActiveApplicationExists() =>
-        Error(
-            "SUPPLIER_APPLICANT_ACTIVE_APPLICATION_EXISTS",
-            "This verified contact already has an active supplier application.");
-
     private static bool VerifiedContactMatchesRegistration(
         BusinessPartnerRegistration registration,
         ProcurementSupplierApplicantVerificationChannel channel,
@@ -324,7 +442,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         if (string.IsNullOrWhiteSpace(recordedContact))
             return false;
         return string.Equals(
-            NormalizeContact(channel, recordedContact),
+            SupplierApplicantContactNormalizer.Normalize(channel, recordedContact),
             verifiedContact,
             StringComparison.Ordinal);
     }
@@ -356,13 +474,26 @@ public sealed class ProcurementSupplierApplicantAccessService :
             throw Error("SUPPLIER_APPLICANT_APPLICATION_COMPLETE",
                 "This application is complete and cannot start another applicant session.", 401);
 
-        var actor = access.CreatedById ??
-            await ResolveSystemActorAsync(request.TenantId, cancellationToken);
+        return await CreateSessionCoreAsync(
+            access,
+            token,
+            correlation,
+            "ApplicantSessionStarted",
+            cancellationToken);
+    }
+
+    private async Task<SupplierApplicantSessionDto> CreateSessionCoreAsync(
+        ProcurementSupplierApplicantAccess access,
+        ProcurementSupplierOnboardingTokenDto token,
+        string correlation,
+        string action,
+        CancellationToken cancellationToken)
+    {
         var now = DateTime.UtcNow;
         var session = new ProcurementSupplierApplicantSession
         {
             Id = Guid.NewGuid(),
-            TenantId = request.TenantId,
+            TenantId = access.TenantId,
             ApplicantAccessId = access.Id,
             SessionReference = Guid.NewGuid(),
             Status = ProcurementSupplierApplicantSessionStatus.Active,
@@ -372,7 +503,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
             LastUsedAtUtc = now,
             CreatedAt = now,
             CreatedBy = "Verified Supplier Applicant",
-            CreatedById = actor,
+            CreatedById = access.Id,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(session);
@@ -381,7 +512,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         await RecordSystemEventAsync(
             access,
             token,
-            "ApplicantSessionStarted",
+            action,
             ProcurementControlEventResult.Allowed,
             new
             {
@@ -392,7 +523,152 @@ public sealed class ProcurementSupplierApplicantAccessService :
             "A restricted applicant-only session was started.",
             correlation,
             cancellationToken);
-        return MapSession(session, actor, access, token);
+        return MapSession(session, access, token);
+    }
+
+    public async Task<SupplierApplicantTokenDeliveryDto> DeliverApplicationTokenAsync(
+        Guid tokenId,
+        string plaintextToken,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(plaintextToken))
+            throw Error(
+                "SUPPLIER_APPLICANT_TOKEN_SECRET_REQUIRED",
+                "An application-token secret is required for delivery.",
+                400);
+
+        var access = await Accesses.GetQueryable(item =>
+                item.TokenId == tokenId && !item.IsDeleted)
+            .Include(item => item.Registration)
+            .Include(item => item.Token)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (access is null)
+        {
+            return new SupplierApplicantTokenDeliveryDto
+            {
+                ApplicantAccessFound = false,
+                Delivered = false,
+                Status = "NotApplicable"
+            };
+        }
+
+        if (access.TerminalAtUtc.HasValue ||
+            access.Token.Status != ProcurementSupplierOnboardingTokenStatus.Active)
+        {
+            throw Error(
+                "SUPPLIER_APPLICANT_TOKEN_NOT_ACTIVE",
+                "The application token can be delivered only after activation and before application completion.");
+        }
+        if (!MatchesSha256Secret(plaintextToken, access.Token.TokenHashSha256))
+        {
+            throw Error(
+                "SUPPLIER_APPLICANT_TOKEN_SECRET_INVALID",
+                "The application-token secret does not match the active token.",
+                400);
+        }
+
+        var correlation = NormalizeCorrelation(correlationId);
+        var now = DateTime.UtcNow;
+        try
+        {
+            var message =
+                $"Supplier application {access.Registration.RegistrationNumber}. " +
+                $"Application token: {plaintextToken}. " +
+                "Keep this token secure; it remains valid until the application is approved or rejected.";
+            if (access.VerifiedChannel ==
+                ProcurementSupplierApplicantVerificationChannel.Email)
+            {
+                await _notifications.SendEmailAsync(
+                    access.VerifiedContact,
+                    "Your supplier application token",
+                    $"<p>{System.Net.WebUtility.HtmlEncode(message)}</p>",
+                    isHtml: true);
+            }
+            else
+            {
+                await _notifications.SendSmsAsync(access.VerifiedContact, message);
+            }
+
+            access.NotificationAttemptCount++;
+            access.LastNotificationAtUtc = now;
+            access.LastNotificationStatus = "ApplicationTokenSent";
+            access.LastNotificationFailure = null;
+            Touch(access);
+            Capture(access);
+            await Accesses.UpdateAsync(access);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordApplicationTokenDeliveryEventAsync(
+                access,
+                "ApplicationTokenDelivered",
+                ProcurementControlEventResult.Succeeded,
+                "The application token was delivered through the verified channel.",
+                correlation,
+                cancellationToken);
+            return new SupplierApplicantTokenDeliveryDto
+            {
+                ApplicantAccessFound = true,
+                Delivered = true,
+                Status = "Sent"
+            };
+        }
+        catch (Exception exception)
+        {
+            access.NotificationAttemptCount++;
+            access.LastNotificationAtUtc = DateTime.UtcNow;
+            access.LastNotificationStatus = "ApplicationTokenDeliveryFailed";
+            access.LastNotificationFailure = Trim(exception.Message, 1000);
+            Touch(access);
+            Capture(access);
+            await Accesses.UpdateAsync(access);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordApplicationTokenDeliveryEventAsync(
+                access,
+                "ApplicationTokenDeliveryFailed",
+                ProcurementControlEventResult.Failed,
+                "Application-token delivery failed; no token value was logged.",
+                correlation,
+                cancellationToken);
+            _logger.LogWarning(
+                "Supplier application-token delivery failed for applicant access {AccessId}",
+                access.Id);
+            return new SupplierApplicantTokenDeliveryDto
+            {
+                ApplicantAccessFound = true,
+                Delivered = false,
+                Status = "Failed",
+                FailureMessage =
+                    "Token delivery failed. An authorized operator can reissue it to retry delivery."
+            };
+        }
+    }
+
+    private async Task RecordApplicationTokenDeliveryEventAsync(
+        ProcurementSupplierApplicantAccess access,
+        string action,
+        ProcurementControlEventResult result,
+        string reason,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var after = new
+        {
+            Channel = access.VerifiedChannel.ToString(),
+            access.VerifiedContactMasked,
+            access.NotificationAttemptCount,
+            access.LastNotificationStatus
+        };
+        if (_currentUser.IsAuthenticated && !_currentUser.IsExternalUser)
+        {
+            await RecordUserEventAsync(
+                access, access.Token, action, result, after, reason,
+                correlationId, cancellationToken);
+            return;
+        }
+
+        await RecordSystemEventAsync(
+            access, access.Token, action, result, after, reason,
+            correlationId, cancellationToken);
     }
 
     public async Task<SupplierApplicantSessionDto> ValidateSessionAsync(
@@ -442,7 +718,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return MapSession(
             session,
-            session.CreatedById ?? Guid.Empty,
             session.ApplicantAccess,
             MapToken(session.ApplicantAccess.Token));
     }
@@ -503,7 +778,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 Phone = request.Phone?.Trim(),
                 RegistrationData = request.RegistrationData
             },
-            session.SystemActorUserId);
+            session.ApplicantActorId);
         var token = await _tokenService.GetForRegistrationAsync(
             session.RegistrationId, cancellationToken)
             ?? throw Error("SUPPLIER_APPLICANT_TOKEN_NOT_FOUND",
@@ -532,7 +807,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "Payment or an approved exemption is required before submission.", 409);
         await _registrationService.SubmitForReviewAsync(
             session.RegistrationId,
-            session.SystemActorUserId);
+            session.ApplicantActorId);
         var detail = await _registrationService.GetByIdAsync(session.RegistrationId)
             ?? throw Error("SUPPLIER_APPLICANT_REGISTRATION_NOT_FOUND",
                 "The supplier application was not found.", 404);
@@ -960,10 +1235,12 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 access.VerifiedContact,
                 StringComparison.OrdinalIgnoreCase)
             : string.Equals(
-                NormalizeContact(
+                SupplierApplicantContactNormalizer.Normalize(
                     ProcurementSupplierApplicantVerificationChannel.Sms,
                     user.PhoneNumber ?? string.Empty),
-                access.VerifiedContact,
+                SupplierApplicantContactNormalizer.Normalize(
+                    ProcurementSupplierApplicantVerificationChannel.Sms,
+                    access.VerifiedContact),
                 StringComparison.Ordinal);
         if (!contactMatches)
             return false;
@@ -1290,29 +1567,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "The verified applicant access record was not found.", 404);
     }
 
-    private async Task<Guid> ResolveSystemActorAsync(
-        Guid tenantId,
-        CancellationToken cancellationToken)
-    {
-        var userId = await UserTenants.GetQueryable(item =>
-                item.TenantId == tenantId && !item.IsDeleted &&
-                item.Status == UserTenantStatus.Active &&
-                (item.ExpiresAt == null || item.ExpiresAt > DateTime.UtcNow) &&
-                item.User.IsActive)
-            .OrderByDescending(item => item.User.UserRoles.Any(role =>
-                role.Role.Name == "SuperAdmin"))
-            .ThenByDescending(item => item.User.UserRoles.Any(role =>
-                role.Role.Name == "TenantAdmin"))
-            .ThenBy(item => item.User.UserName)
-            .Select(item => item.UserId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (userId == Guid.Empty)
-            throw Error("SUPPLIER_APPLICANT_SYSTEM_ACTOR_UNAVAILABLE",
-                "Supplier applications require one active tenant administrator for audit lineage.",
-                503);
-        return userId;
-    }
-
     private async Task EnsureApprovalPermissionAsync(
         Guid registrationId,
         string correlationId,
@@ -1452,13 +1706,13 @@ public sealed class ProcurementSupplierApplicantAccessService :
 
     private static SupplierApplicantSessionDto MapSession(
         ProcurementSupplierApplicantSession session,
-        Guid actor,
         ProcurementSupplierApplicantAccess access,
         ProcurementSupplierOnboardingTokenDto token) =>
         new()
         {
+            SessionId = session.Id,
             SessionReference = session.SessionReference,
-            SystemActorUserId = actor,
+            ApplicantActorId = access.Id,
             TenantId = session.TenantId,
             RegistrationId = access.RegistrationId,
             TokenId = access.TokenId,
@@ -1562,8 +1816,10 @@ public sealed class ProcurementSupplierApplicantAccessService :
             : request.Phone;
         if (string.IsNullOrWhiteSpace(candidate) ||
             !string.Equals(
-                NormalizeContact(access.VerifiedChannel, candidate),
-                access.VerifiedContact,
+                SupplierApplicantContactNormalizer.Normalize(
+                    access.VerifiedChannel, candidate),
+                SupplierApplicantContactNormalizer.Normalize(
+                    access.VerifiedChannel, access.VerifiedContact),
                 StringComparison.OrdinalIgnoreCase))
             throw Error("SUPPLIER_APPLICANT_VERIFIED_CONTACT_IMMUTABLE",
                 "The verified application contact cannot be removed or changed.", 409);
@@ -1574,22 +1830,6 @@ public sealed class ProcurementSupplierApplicantAccessService :
         access.VerifiedChannel == ProcurementSupplierApplicantVerificationChannel.Email
             ? access.VerifiedContact
             : $"{access.VerifiedContact}.{access.TenantId.ToString("N")[..8]}";
-
-    private static string NormalizeContact(
-        ProcurementSupplierApplicantVerificationChannel channel,
-        string contact)
-    {
-        var value = (contact ?? string.Empty).Trim();
-        if (channel == ProcurementSupplierApplicantVerificationChannel.Email)
-            return value.ToLowerInvariant();
-        var builder = new StringBuilder();
-        foreach (var character in value)
-        {
-            if (character == '+' && builder.Length == 0) builder.Append(character);
-            else if (char.IsDigit(character)) builder.Append(character);
-        }
-        return builder.ToString();
-    }
 
     private static void ValidateContact(
         ProcurementSupplierApplicantVerificationChannel channel,
@@ -1603,9 +1843,10 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     "Enter a valid email address.", 400);
             return;
         }
-        if (contact.Count(char.IsDigit) < 8)
+        var phoneDigits = contact.Count(char.IsDigit);
+        if (!contact.StartsWith('+') || phoneDigits is < 8 or > 15)
             throw Error("SUPPLIER_APPLICANT_PHONE_INVALID",
-                "Enter a valid phone number.", 400);
+                "Enter a valid phone number in Ghana national or E.164 format.", 400);
     }
 
     private static string MaskContact(
@@ -1694,6 +1935,23 @@ public sealed class ProcurementSupplierApplicantAccessService :
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
             .ToLowerInvariant();
+
+    private static bool MatchesSha256Secret(string plaintext, string storedHash)
+    {
+        byte[] storedBytes;
+        try
+        {
+            storedBytes = Convert.FromHexString(storedHash);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        var suppliedBytes = SHA256.HashData(Encoding.UTF8.GetBytes(plaintext));
+        return storedBytes.Length == suppliedBytes.Length &&
+            CryptographicOperations.FixedTimeEquals(suppliedBytes, storedBytes);
+    }
 
     private static string NormalizeCorrelation(string value)
     {

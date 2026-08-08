@@ -8,16 +8,17 @@ import { authService } from '../../services/auth';
 
 interface DashboardLayoutProps {
   children: ReactNode;
+  defaultSidebarCollapsed?: boolean;
 }
 
-export function DashboardLayout({ children }: DashboardLayoutProps) {
+export function DashboardLayout({ children, defaultSidebarCollapsed = false }: DashboardLayoutProps) {
   const isAuthenticated = typeof window !== 'undefined' ? authService.isAuthenticated() : false;
   
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-[#101010] dark:via-[#151515] dark:to-[#181818]">
       <div className="flex h-screen">
         {/* Sidebar */}
-        <Sidebar />
+        <Sidebar defaultCollapsed={defaultSidebarCollapsed} />
 
         {/* Main Content */}
         <div className="flex flex-1 flex-col overflow-hidden">

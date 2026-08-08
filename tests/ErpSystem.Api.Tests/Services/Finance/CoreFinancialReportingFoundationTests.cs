@@ -85,6 +85,103 @@ public sealed class CoreFinancialReportingFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-Reporting")]
     [Trait("Category", "Reporting")]
+    public async Task BalanceSheet_ShouldAttachSelectedLayoutAndRetainCompatibilityTotals()
+    {
+        var tenantId = Guid.NewGuid();
+        var bookId = Guid.NewGuid();
+        var layoutId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var cash = SeedAccount(
+            db,
+            tenantId,
+            AccountType.Asset,
+            "1000",
+            "Cash");
+        var equity = SeedAccount(
+            db,
+            tenantId,
+            AccountType.Equity,
+            "3000",
+            "Retained Earnings");
+        SeedJournal(
+            db,
+            tenantId,
+            period.Id,
+            "JE-POSTED",
+            "Posted",
+            (cash.Id, 100m, 0m),
+            (equity.Id, 0m, 100m));
+        await db.SaveChangesAsync();
+
+        var layoutResult = new FinancialStatementLayoutExecutionDto
+        {
+            LayoutId = layoutId,
+            LayoutCode = "BS_BOARD",
+            LayoutName = "Board Balance Sheet",
+            VersionId = Guid.NewGuid(),
+            VersionNumber = 2,
+            StatementType = FinancialStatementType.BalanceSheet,
+            AccountingBookId = bookId,
+            Rows = new List<FinancialStatementLayoutExecutionRowDto>
+            {
+                new()
+                {
+                    RowId = Guid.NewGuid(),
+                    RowCode = "CASH",
+                    Label = "Cash and cash equivalents",
+                    RowType = FinancialStatementRowType.Account,
+                    Sequence = 1,
+                    Amount = 100m,
+                    IsDisplayed = true
+                }
+            }
+        };
+        var execution = new Mock<IFinancialStatementLayoutExecutionService>();
+        execution.Setup(service => service.ExecutePublishedAsync(
+                It.Is<FinancialStatementLayoutExecutionRequestDto>(request =>
+                    request.LayoutId == layoutId &&
+                    request.StatementType == FinancialStatementType.BalanceSheet &&
+                    request.AccountingBookId == bookId),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(layoutResult);
+        var accountingBooks = new Mock<IAccountingBookService>();
+        accountingBooks.Setup(service => service.GetBooksAsync(
+                false,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AccountingBookDto>
+            {
+                new()
+                {
+                    Id = bookId,
+                    Code = "IFRS",
+                    Name = "IFRS",
+                    IsActive = true
+                }
+            });
+        var service = CreateGeneralLedgerService(
+            db,
+            tenantId,
+            accountingBooks.Object,
+            execution.Object);
+
+        var report = await service.GenerateBalanceSheetAsync(
+            new BalanceSheetRequestDto
+            {
+                AsAtDate = new DateTime(2026, 7, 31),
+                LayoutId = layoutId
+            });
+
+        report.LayoutExecution.Should().BeSameAs(layoutResult);
+        report.TotalAssets.Should().Be(100m);
+        report.TotalEquity.Should().Be(100m);
+        execution.VerifyAll();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-Reporting")]
+    [Trait("Category", "Reporting")]
     public async Task IncomeStatement_ShouldDeriveFromPostedGlAndExcludeDraftJournals()
     {
         var tenantId = Guid.NewGuid();
@@ -442,7 +539,11 @@ public sealed class CoreFinancialReportingFoundationTests
         return new ApplicationDbContext(options);
     }
 
-    private static GeneralLedgerService CreateGeneralLedgerService(ApplicationDbContext db, Guid tenantId)
+    private static GeneralLedgerService CreateGeneralLedgerService(
+        ApplicationDbContext db,
+        Guid tenantId,
+        IAccountingBookService? accountingBookService = null,
+        IFinancialStatementLayoutExecutionService? layoutExecutionService = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var tenantSettings = new Mock<ITenantSettingsService>();
@@ -460,8 +561,9 @@ public sealed class CoreFinancialReportingFoundationTests
             tenantSettings.Object,
             Mock.Of<IFiscalPeriodService>(),
             Mock.Of<IDocumentNumberingService>(),
-            Mock.Of<IAccountingBookService>(),
-            Mock.Of<IFinancePostingEngine>());
+            accountingBookService ?? Mock.Of<IAccountingBookService>(),
+            Mock.Of<IFinancePostingEngine>(),
+            layoutExecutionService);
     }
 
     private static ApReportsService CreateApReportsService(ApplicationDbContext db, Guid tenantId)

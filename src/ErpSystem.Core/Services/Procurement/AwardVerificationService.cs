@@ -476,7 +476,10 @@ public class AwardVerificationService : IAwardVerificationService
 
     #region Document Management
 
-    public async Task<TenderAwardVerificationItemDocumentDto> UploadDocumentAsync(Guid itemResultId, UploadVerificationDocumentDto dto)
+    public async Task<TenderAwardVerificationItemDocumentDto> UploadDocumentAsync(Guid itemResultId,
+        UploadVerificationDocumentDto dto, string fileName, string logicalFileReference,
+        string? contentType, long fileSize, Guid fileUploadRecordId,
+        Guid centralDocumentRecordId, Guid centralDocumentVersionId)
     {
         var itemResult = await _resultRepository.GetByIdAsync(itemResultId);
         if (itemResult == null)
@@ -485,14 +488,17 @@ public class AwardVerificationService : IAwardVerificationService
         var document = new TenderAwardVerificationItemDocument
         {
             ItemResultId = itemResultId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
-            FileSize = dto.FileSize,
-            ContentType = dto.ContentType,
+            FileName = fileName,
+            FilePath = logicalFileReference,
+            FileSize = fileSize,
+            ContentType = contentType,
             DocumentType = dto.DocumentType,
             Description = dto.Description,
             UploadedDate = DateTime.UtcNow,
             UploadedById = _currentUserProvider.UserId,
+            FileUploadRecordId = fileUploadRecordId,
+            CentralDocumentRecordId = centralDocumentRecordId,
+            CentralDocumentVersionId = centralDocumentVersionId,
             TenantId = _currentUserProvider.TenantId,
             CreatedById = _currentUserProvider.UserId,
             CreatedAt = DateTime.UtcNow
@@ -646,7 +652,10 @@ public class AwardVerificationService : IAwardVerificationService
             DocumentType = document.DocumentType,
             Description = document.Description,
             UploadedDate = document.UploadedDate,
-            UploadedByName = document.UploadedBy?.FullName
+            UploadedByName = document.UploadedBy?.FullName,
+            FileUploadRecordId = document.FileUploadRecordId,
+            CentralDocumentRecordId = document.CentralDocumentRecordId,
+            CentralDocumentVersionId = document.CentralDocumentVersionId
         };
     }
 

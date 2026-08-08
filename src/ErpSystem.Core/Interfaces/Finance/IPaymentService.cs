@@ -17,6 +17,9 @@ public interface IPaymentService
     /// </summary>
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Returns source, operational-subledger, ledger, reversal, and audit evidence.</summary>
+    Task<CustomerPaymentTraceDto?> GetTraceAsync(Guid id, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Retrieves a payment by payment number.
     /// </summary>
@@ -40,6 +43,15 @@ public interface IPaymentService
     /// Posts an approved or postable customer receipt to the General Ledger through the central finance posting engine.
     /// </summary>
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reverses a posted receipt through linked compensating Finance postings and operational
+    /// records. The original receipt and allocations remain immutable audit evidence.
+    /// </summary>
+    Task<CustomerPaymentDto> ReversePaymentAsync(
+        Guid id,
+        ReverseCustomerPaymentDto dto,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Updates an existing payment (only if status is Pending).

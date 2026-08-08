@@ -13,7 +13,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { TrendingUp, Plus, Edit, Upload, Filter, LineChart, Download, AlertCircle, FileText, Loader2 } from 'lucide-react';
 import { financeService } from '@/services/finance.service';
 import { buildExchangeRateTemplateCsv, formatImportFileSize, parseExchangeRateImportFile } from '@/lib/finance/exchange-rate-import';
-import type { ExchangeRate, ExchangeRateType } from '@/types/finance';
+import type { ExchangeRate, ExchangeRateQuoteSide, ExchangeRateType } from '@/types/finance';
 import Link from 'next/link';
 
 
@@ -27,6 +27,7 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         rate: 12.5,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
+        quoteSide: 'Mid',
         rateSource: 'Bank of Ghana',
         isActive: true,
         createdAt: '2024-03-15T08:00:00Z',
@@ -39,6 +40,7 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         rate: 15.8,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
+        quoteSide: 'Mid',
         rateSource: 'Bank of Ghana',
         isActive: true,
         createdAt: '2024-03-15T08:00:00Z',
@@ -51,6 +53,7 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         rate: 13.6,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Daily',
+        quoteSide: 'Mid',
         rateSource: 'Bank of Ghana',
         isActive: true,
         createdAt: '2024-03-15T08:00:00Z',
@@ -63,6 +66,7 @@ const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         rate: 12.8,
         effectiveDate: '2024-03-15T00:00:00Z',
         rateType: 'Spot',
+        quoteSide: 'Selling',
         rateSource: 'Forex Bureau',
         isActive: true,
         createdAt: '2024-03-15T09:00:00Z',
@@ -80,6 +84,11 @@ const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string
     { value: 'Budget', label: 'Budget' },
     { value: 'Fixed', label: 'Fixed' },
     { value: 'Spot', label: 'Spot' },
+];
+const QUOTE_SIDE_OPTIONS: Array<{ value: ExchangeRateQuoteSide; label: string }> = [
+    { value: 'Mid', label: 'Mid / Reference' },
+    { value: 'Buying', label: 'Buying (bank buys foreign currency)' },
+    { value: 'Selling', label: 'Selling (bank sells foreign currency)' },
 ];
 
 const formatRateType = (rateType: ExchangeRateType | string) =>
@@ -100,12 +109,14 @@ export default function ExchangeRatesPage() {
         fromCurrency: 'all',
         toCurrency: 'all',
         rateType: 'all',
+        quoteSide: 'all',
     });
     const [formData, setFormData] = useState({
         baseCurrencyCode: 'GHS',
         targetCurrencyCode: 'USD',
         rate: '',
         rateType: 'Daily' as ExchangeRateType,
+        quoteSide: 'Mid' as ExchangeRateQuoteSide,
         effectiveDate: new Date().toISOString().split('T')[0],
         rateSource: '',
     });
@@ -133,45 +144,49 @@ export default function ExchangeRatesPage() {
         if (filters.fromCurrency !== 'all' && rate.baseCurrencyCode !== filters.fromCurrency) return false;
         if (filters.toCurrency !== 'all' && rate.targetCurrencyCode !== filters.toCurrency) return false;
         if (filters.rateType !== 'all' && rate.rateType !== filters.rateType) return false;
+        if (filters.quoteSide !== 'all' && rate.quoteSide !== filters.quoteSide) return false;
         return true;
     });
 
-    const handleCreate = () => {
-        const newRate: ExchangeRate = {
-            id: Math.random().toString(36).substr(2, 9),
+    const handleCreate = async () => {
+        try {
+            const newRate = await financeService.createExchangeRate({
             baseCurrencyCode: formData.baseCurrencyCode,
             targetCurrencyCode: formData.targetCurrencyCode,
             rate: parseFloat(formData.rate),
             effectiveDate: new Date(formData.effectiveDate).toISOString(),
             rateType: formData.rateType,
+            quoteSide: formData.quoteSide,
             rateSource: formData.rateSource,
             isActive: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        };
-        setRates([...rates, newRate]);
-        setIsCreateDialogOpen(false);
-        resetForm();
+            });
+            setRates(current => [newRate, ...current]);
+            setIsCreateDialogOpen(false);
+            resetForm();
+        } catch (error) {
+            toast({ title: 'Unable to create rate', description: error instanceof Error ? error.message : 'Please review the rate details.', variant: 'destructive' });
+        }
     };
 
-    const handleUpdate = () => {
+    const handleUpdate = async () => {
         if (!editingRate) return;
-        setRates(
-            rates.map((r) =>
-                r.id === editingRate.id
-                    ? {
-                        ...r,
-                        rate: parseFloat(formData.rate),
-                        effectiveDate: new Date(formData.effectiveDate).toISOString(),
-                        rateType: formData.rateType,
-                        rateSource: formData.rateSource || r.rateSource,
-                        updatedAt: new Date().toISOString(),
-                    }
-                    : r
-            )
-        );
-        setEditingRate(null);
-        resetForm();
+        try {
+            const updated = await financeService.updateExchangeRate(editingRate.id, {
+                baseCurrencyCode: formData.baseCurrencyCode,
+                targetCurrencyCode: formData.targetCurrencyCode,
+                rate: parseFloat(formData.rate),
+                effectiveDate: new Date(formData.effectiveDate).toISOString(),
+                rateType: formData.rateType,
+                quoteSide: formData.quoteSide,
+                rateSource: formData.rateSource || editingRate.rateSource,
+                isActive: editingRate.isActive,
+            });
+            setRates(current => current.map(rate => rate.id === updated.id ? updated : rate));
+            setEditingRate(null);
+            resetForm();
+        } catch (error) {
+            toast({ title: 'Unable to update rate', description: error instanceof Error ? error.message : 'Please review the rate details.', variant: 'destructive' });
+        }
     };
 
     const resetForm = () => {
@@ -181,6 +196,7 @@ export default function ExchangeRatesPage() {
             rate: '',
             effectiveDate: new Date().toISOString().split('T')[0],
             rateType: 'Daily',
+            quoteSide: 'Mid',
             rateSource: '',
         });
     };
@@ -193,6 +209,7 @@ export default function ExchangeRatesPage() {
             rate: rate.rate.toString(),
             effectiveDate: rate.effectiveDate.split('T')[0],
             rateType: rate.rateType,
+            quoteSide: rate.quoteSide || 'Mid',
             rateSource: rate.rateSource || '',
         });
     };
@@ -548,6 +565,21 @@ export default function ExchangeRatesPage() {
                                     </Select>
                                 </div>
                                 <div className="space-y-2">
+                                    <Label htmlFor="quoteSide">Quote Side</Label>
+                                    <Select
+                                        value={formData.quoteSide}
+                                        onValueChange={(value: ExchangeRateQuoteSide) => setFormData({ ...formData, quoteSide: value })}
+                                    >
+                                        <SelectTrigger id="quoteSide"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {QUOTE_SIDE_OPTIONS.map(option => (
+                                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">Buying and selling are defined from the bank/provider perspective.</p>
+                                </div>
+                                <div className="space-y-2">
                                     <Label htmlFor="rateSource">Source</Label>
                                     <Input
                                         id="rateSource"
@@ -594,7 +626,7 @@ export default function ExchangeRatesPage() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                         <div className="space-y-2">
                             <Label htmlFor="filterFrom">Base Currency</Label>
                             <Select
@@ -608,6 +640,21 @@ export default function ExchangeRatesPage() {
                                     <SelectItem value="all">All Currencies</SelectItem>
                                     {MOCK_CURRENCIES.map((curr) => (
                                         <SelectItem key={curr} value={curr}>{curr}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="filterQuoteSide">Quote Side</Label>
+                            <Select
+                                value={filters.quoteSide}
+                                onValueChange={(value) => setFilters({ ...filters, quoteSide: value })}
+                            >
+                                <SelectTrigger id="filterQuoteSide"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Quote Sides</SelectItem>
+                                    {QUOTE_SIDE_OPTIONS.map(option => (
+                                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -669,6 +716,7 @@ export default function ExchangeRatesPage() {
                                     <th className="p-4 text-right font-medium">Rate</th>
                                     <th className="p-4 text-left font-medium">Effective Date</th>
                                     <th className="p-4 text-left font-medium">Type</th>
+                                    <th className="p-4 text-left font-medium">Quote Side</th>
                                     <th className="p-4 text-left font-medium">Source</th>
                                     <th className="p-4 text-right font-medium">Actions</th>
                                 </tr>
@@ -683,6 +731,9 @@ export default function ExchangeRatesPage() {
                                             <Badge variant={rate.rateType === 'Daily' ? 'default' : 'secondary'}>
                                                 {formatRateType(rate.rateType)}
                                             </Badge>
+                                        </td>
+                                        <td className="p-4">
+                                            <Badge variant="outline">{rate.quoteSide || 'Mid'}</Badge>
                                         </td>
                                         <td className="p-4 text-sm text-muted-foreground">{rate.rateSource}</td>
                                         <td className="p-4 text-right">
@@ -747,6 +798,20 @@ export default function ExchangeRatesPage() {
                                                                         <SelectItem key={option.value} value={option.value}>
                                                                             {option.label}
                                                                         </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="edit-quoteSide">Quote Side</Label>
+                                                            <Select
+                                                                value={formData.quoteSide}
+                                                                onValueChange={(value: ExchangeRateQuoteSide) => setFormData({ ...formData, quoteSide: value })}
+                                                            >
+                                                                <SelectTrigger id="edit-quoteSide"><SelectValue /></SelectTrigger>
+                                                                <SelectContent>
+                                                                    {QUOTE_SIDE_OPTIONS.map(option => (
+                                                                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                                                                     ))}
                                                                 </SelectContent>
                                                             </Select>

@@ -570,7 +570,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 RevaluationRequired = dto.RevaluationRequired,
                 RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency),
                 TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily"),
+                TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide),
                 RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End"),
+                RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide),
                 Notes = dto.Notes,
                 IsActive = dto.IsActive,
                 EffectiveDate = dto.OpeningBalanceDate?.Date ?? now,
@@ -674,6 +676,46 @@ namespace ErpSystem.Api.Services.Finance.GL
             return MapCurrencyLinkToDto(currencyLink, account);
         }
 
+        public async Task<CurrencyLinkDto> UpdateCurrencyLinkRatePolicyAsync(
+            Guid accountId,
+            string currencyCode,
+            UpdateCurrencyLinkRatePolicyDto dto)
+        {
+            var normalizedCurrencyCode = NormalizeCurrencyCode(currencyCode);
+            var account = await _unitOfWork.Accounts
+                .GetQueryable(a => a.TenantId == TenantId && a.Id == accountId)
+                .Include(a => a.CurrencyLinks)
+                .FirstOrDefaultAsync();
+
+            if (account == null)
+                throw new ArgumentException($"Account {accountId} not found");
+
+            var link = account.CurrencyLinks.FirstOrDefault(c =>
+                string.Equals(NormalizeCurrencyCode(c.LinkedCurrencyCode), normalizedCurrencyCode, StringComparison.OrdinalIgnoreCase));
+
+            if (link == null)
+                throw new ArgumentException($"Currency {normalizedCurrencyCode} not linked");
+
+            if (!link.IsActive)
+                throw new InvalidOperationException("Inactive currency-link policies are locked. Reactivate the link before changing its rate policy.");
+
+            link.RevaluationRequired = dto.RevaluationRequired;
+            link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
+            link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
+            link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
+            link.RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide);
+            link.Notes = dto.Notes?.Trim();
+            link.UpdatedAt = DateTime.UtcNow;
+            link.UpdatedBy = UserName;
+            link.LastModifiedById = TryGetCurrentUserId();
+            link.ModifiedByUserId = link.LastModifiedById;
+            link.ModifiedDate = link.UpdatedAt;
+
+            await _unitOfWork.SaveChangesAsync();
+            return MapCurrencyLinkToDto(link, account);
+        }
+
         public async Task<List<CurrencyLinkDto>> GetAccountCurrencyLinksAsync(Guid accountId, bool includeInactive = false)
         {
             var account = await _unitOfWork.Accounts
@@ -725,7 +767,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 RevaluationRequired = link.RevaluationRequired,
                 RevaluationFrequency = link.RevaluationFrequency.ToString(),
                 TransactionRateType = link.TransactionRateType,
+                TransactionQuoteSide = link.TransactionQuoteSide.ToString(),
                 RevaluationRateType = link.RevaluationRateType,
+                RevaluationQuoteSide = link.RevaluationQuoteSide.ToString(),
                 LastRevaluationDate = link.LastRevaluationDate,
                 LastRevaluationRate = currentExchangeRate,
                 LastRevaluationAdjustment = link.LastRevaluationAdjustment,
@@ -775,6 +819,16 @@ namespace ErpSystem.Api.Services.Finance.GL
                 : RevaluationFrequency.Monthly;
         }
 
+        private static ExchangeRateQuoteSide ParseQuoteSide(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return ExchangeRateQuoteSide.Mid;
+
+            return Enum.TryParse<ExchangeRateQuoteSide>(value.Trim(), ignoreCase: true, out var quoteSide)
+                ? quoteSide
+                : throw new InvalidOperationException("Exchange-rate quote side must be Mid, Buying, or Selling.");
+        }
+
         private static decimal RoundMoney(decimal amount)
             => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
@@ -795,7 +849,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
             link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
             link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
+            link.RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide);
             link.Notes = dto.Notes;
             link.UpdatedAt = now;
             link.UpdatedBy = UserName;

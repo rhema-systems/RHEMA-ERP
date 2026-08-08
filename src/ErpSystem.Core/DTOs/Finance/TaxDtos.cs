@@ -29,6 +29,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime CreatedAt { get; set; }
         public string? UpdatedBy { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        public bool IsLocked => !IsActive;
     }
 
     /// <summary>
@@ -68,6 +69,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? TaxReceivableAccountId { get; set; }
         public bool ClearTaxPayableAccount { get; set; }
         public bool ClearTaxReceivableAccount { get; set; }
+        public string? ChangeReason { get; set; }
     }
 
     #endregion
@@ -320,6 +322,35 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? Notes { get; set; }
         public string? CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    /// <summary>
+    /// A read-only complete tax configuration version. Current and superseded
+    /// versions share this shape so the detail UI can display one timeline.
+    /// </summary>
+    public class TaxConfigurationVersionDto
+    {
+        public Guid Id { get; set; }
+        public Guid TaxId { get; set; }
+        public int VersionNumber { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public decimal Rate { get; set; }
+        public DateTime EffectiveFrom { get; set; }
+        public TaxApplicability Applicability { get; set; }
+        public TaxCategory Category { get; set; }
+        public bool IsActive { get; set; }
+        public bool IsInputTaxDeductible { get; set; }
+        public decimal? ThresholdAmount { get; set; }
+        public Guid? TaxPayableAccountId { get; set; }
+        public Guid? TaxReceivableAccountId { get; set; }
+        public DateTime ValidFrom { get; set; }
+        public DateTime? ValidTo { get; set; }
+        public string? ChangeReason { get; set; }
+        public string? ChangedBy { get; set; }
+        public bool IsCurrent { get; set; }
+        public bool IsLocked => !IsCurrent || !IsActive;
     }
 
     #endregion

@@ -73,7 +73,7 @@ namespace ErpSystem.Core.Services
             return reports;
         }
 
-        public async Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId)
+        public async Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId, Guid userId, bool isAdminUser = false)
         {
             await Task.Delay(50);
             var reports = await GetReportsAsync(tenantId, Guid.NewGuid());
@@ -101,7 +101,7 @@ namespace ErpSystem.Core.Services
         public async Task<ReportDefinitionDto?> UpdateReportAsync(Guid reportId, UpdateReportDto updateReportDto, Guid tenantId, Guid userId, bool isAdminUser = false)
         {
             await Task.Delay(150);
-            return await GetReportAsync(reportId, tenantId);
+            return await GetReportAsync(reportId, tenantId, userId, isAdminUser);
         }
 
         public async Task<bool> DeleteReportAsync(Guid reportId, Guid tenantId, Guid userId)

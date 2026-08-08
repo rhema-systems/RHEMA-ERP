@@ -37,7 +37,9 @@ import { Calendar } from '@/components/ui/calendar';
 import { arService } from '@/services/ar-service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeService } from '@/services/finance.service';
+import { taxDataService } from '@/services/finance/tax-data.service';
 import { PaymentMethodType } from '@/types/cash-management';
+import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
@@ -46,18 +48,50 @@ import { format } from 'date-fns';
 
 const paymentSchema = z.object({
     customerId: z.string().min(1, 'Customer is required'),
-    bankAccountId: z.string().min(1, 'Bank account is required'),
+    bankAccountId: z.string().optional(),
+    liquidityAccountId: z.string().optional(),
     paymentDate: z.date(),
     totalAmount: z.coerce.number().min(0.01, 'Amount must be positive'),
     paymentMethod: z.string().min(1, 'Payment method is required'),
     paymentMethodId: z.string().optional(),
     referenceNumber: z.string().optional(),
+    checkNumber: z.string().optional(),
+    chequeDrawerBank: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
+    withholdingTaxId: z.string().optional(),
+    withholdingTaxAccountId: z.string().optional(),
+    withholdingTaxAmount: z.coerce.number().min(0).default(0),
+    vatWithholdingTaxId: z.string().optional(),
+    vatWithholdingAccountId: z.string().optional(),
+    vatWithholdingAmount: z.coerce.number().min(0).default(0),
+    withholdingCertificateNumber: z.string().optional(),
+    withholdingCertificateDate: z.string().optional(),
     notes: z.string().optional(),
 });
 
 type PaymentFormValues = z.infer<typeof paymentSchema>;
+
+const directBankMethodTypes = new Set<PaymentMethodType>([
+    PaymentMethodType.BankTransfer,
+    PaymentMethodType.EFT,
+    PaymentMethodType.DirectDebit,
+    PaymentMethodType.StandingOrder,
+]);
+
+const liquidityTypeForPaymentMethod = (type?: PaymentMethodType) => {
+    switch (type) {
+        case PaymentMethodType.Cheque:
+            return 'ChequesAwaitingDeposit';
+        case PaymentMethodType.Card:
+            return 'CardSettlementClearing';
+        case PaymentMethodType.MobileMoney:
+            return 'MobileMoneyClearing';
+        case PaymentMethodType.Cash:
+        default:
+            return 'UndepositedCash';
+    }
+};
 
 const toCustomerPaymentMethod = (type?: PaymentMethodType): string => {
     switch (type) {
@@ -87,6 +121,7 @@ export default function NewReceiptPage() {
     const searchParams = useSearchParams();
     const preselectedCustomerId = searchParams.get('customerId');
     const preselectedInvoiceId = searchParams.get('invoiceId');
+    const existingAdvancePaymentId = searchParams.get('paymentId');
     const preselectedBankAccountId = searchParams.get('bankAccountId') || '';
     const preselectedPaymentMethodId = searchParams.get('paymentMethodId') || '';
     const preselectedAmountParam = searchParams.get('amount');
@@ -101,8 +136,16 @@ export default function NewReceiptPage() {
     const preselectedDescription = searchParams.get('description') || '';
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Keep invoice reduction and receipt consumption distinct. They are equal for the common
+    // same-currency path but represent different legal amounts for FIN-LIM-0022 settlements.
     const [allocations, setAllocations] = useState<Record<string, number>>({});
+    const [paymentCurrencyAllocations, setPaymentCurrencyAllocations] = useState<Record<string, number>>({});
     const [discountAllocations, setDiscountAllocations] = useState<Record<string, number>>({});
+    // Statutory deductions belong to the invoice allocation, not the receipt header. This is
+    // essential when one receipt settles invoices in different currencies because each row must
+    // retain its own native amount and approved functional conversion.
+    const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
+    const [vatWithholdingAllocations, setVatWithholdingAllocations] = useState<Record<string, number>>({});
 
     // Fetch customers
     const { data: customersData } = useQuery({
@@ -120,11 +163,36 @@ export default function NewReceiptPage() {
         queryFn: () => cashManagementDataService.getActivePaymentMethods(),
     });
 
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+    // TDC currently operates in GHS, while the shared Finance module remains tenant-aware. Use
+    // the configured functional currency for rate behavior and labels rather than baking GHS into
+    // a cross-currency workflow that is specifically intended to support other deployments.
+    const functionalCurrencyCode = (financeSettings?.baseCurrency || 'GHS').toUpperCase();
+
+    const { data: liquidityAccounts } = useQuery({
+        queryKey: ['liquidity-accounts', 'active'],
+        queryFn: () => cashManagementDataService.getLiquidityAccounts(true),
+    });
+
+    const { data: withholdingTaxes } = useQuery({
+        queryKey: ['taxes', 'ar-withholding', 'active'],
+        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+    });
+
+    const { data: vatWithholdingTaxes } = useQuery({
+        queryKey: ['taxes', 'ar-vat-withholding', 'active'],
+        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.VatWithholding }),
+    });
+
     const form = useForm<PaymentFormValues>({
         resolver: zodResolver(paymentSchema) as any,
         defaultValues: {
             customerId: preselectedCustomerId || '',
             bankAccountId: preselectedBankAccountId,
+            liquidityAccountId: undefined,
             paymentDate: preselectedPaymentDate,
             totalAmount: preselectedAmount,
             paymentMethod: 'Bank Transfer',
@@ -132,15 +200,69 @@ export default function NewReceiptPage() {
             referenceNumber: preselectedReferenceNumber,
             currencyCode: 'GHS',
             exchangeRate: 1,
+            withholdingTaxId: undefined,
+            withholdingTaxAccountId: undefined,
+            withholdingTaxAmount: 0,
+            vatWithholdingTaxId: undefined,
+            vatWithholdingAccountId: undefined,
+            vatWithholdingAmount: 0,
+            withholdingCertificateNumber: undefined,
+            withholdingCertificateDate: undefined,
             notes: preselectedDescription,
         },
     });
 
-    const selectedCustomerId = form.watch('customerId');
-    const selectedBankAccountId = form.watch('bankAccountId');
-    const selectedPaymentMethodId = form.watch('paymentMethodId');
+    const { data: existingAdvancePayment, isLoading: isLoadingAdvancePayment } = useQuery({
+        queryKey: ['customer-payment', existingAdvancePaymentId],
+        queryFn: () => {
+            if (!existingAdvancePaymentId) throw new Error('Customer advance payment id is required.');
+            return arService.getPayment(existingAdvancePaymentId);
+        },
+        enabled: !!existingAdvancePaymentId,
+    });
 
     useEffect(() => {
+        if (!existingAdvancePaymentId || !existingAdvancePayment) return;
+
+        // The posted receipt is the immutable customer-advance lot. Freeze its origin evidence in
+        // this workspace; only invoice applications are new. Changing header currency/rate here
+        // would destroy the historical carrying value used to calculate realized FX.
+        const remainingAdvance = Math.round((
+            Number(existingAdvancePayment.totalAmount) - Number(existingAdvancePayment.allocatedAmount || 0)
+        ) * 100) / 100;
+        form.setValue('customerId', existingAdvancePayment.customerId);
+        form.setValue('bankAccountId', existingAdvancePayment.bankAccountId || undefined);
+        form.setValue('liquidityAccountId', existingAdvancePayment.liquidityAccountId || undefined);
+        form.setValue('paymentDate', new Date(existingAdvancePayment.paymentDate));
+        form.setValue('totalAmount', remainingAdvance);
+        form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
+        form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('referenceNumber', existingAdvancePayment.paymentNumber);
+    }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
+
+    const selectedCustomerId = form.watch('customerId');
+    const selectedBankAccountId = form.watch('bankAccountId');
+    const selectedLiquidityAccountId = form.watch('liquidityAccountId');
+    const selectedPaymentMethodId = form.watch('paymentMethodId');
+    const selectedPaymentMethod = paymentMethods?.find((method) => method.id === selectedPaymentMethodId);
+    const selectedWithholdingTaxId = form.watch('withholdingTaxId');
+    const selectedVatWithholdingTaxId = form.watch('vatWithholdingTaxId');
+    const selectedWithholdingTax = withholdingTaxes?.find((tax: Tax) => tax.id === selectedWithholdingTaxId);
+    const selectedVatWithholdingTax = vatWithholdingTaxes?.find((tax: Tax) => tax.id === selectedVatWithholdingTaxId);
+    const salesWithholdingTaxes = (withholdingTaxes ?? []).filter((tax: Tax) =>
+        tax.applicability === TaxApplicability.Sales || tax.applicability === TaxApplicability.Both);
+    const salesVatWithholdingTaxes = (vatWithholdingTaxes ?? []).filter((tax: Tax) =>
+        tax.applicability === TaxApplicability.Sales || tax.applicability === TaxApplicability.Both);
+    const isDirectBankReceipt = selectedPaymentMethod
+        ? directBankMethodTypes.has(selectedPaymentMethod.type)
+        : true;
+    const expectedLiquidityType = liquidityTypeForPaymentMethod(selectedPaymentMethod?.type);
+    const eligibleLiquidityAccounts = liquidityAccounts?.filter(account =>
+        account.accountType === expectedLiquidityType && account.isActive,
+    ) ?? [];
+
+    useEffect(() => {
+        if (existingAdvancePaymentId) return;
         if (!paymentMethods?.length) return;
 
         if (selectedPaymentMethodId) {
@@ -158,10 +280,11 @@ export default function NewReceiptPage() {
 
         form.setValue('paymentMethodId', preferredMethod.id);
         form.setValue('paymentMethod', toCustomerPaymentMethod(preferredMethod.type));
-    }, [paymentMethods, selectedPaymentMethodId, form]);
+    }, [paymentMethods, selectedPaymentMethodId, form, existingAdvancePaymentId]);
 
     useEffect(() => {
-        if (!selectedBankAccountId || !bankAccounts) return;
+        if (existingAdvancePaymentId) return;
+        if (!isDirectBankReceipt || !selectedBankAccountId || !bankAccounts) return;
 
         const account = bankAccounts.find((item) => item.id === selectedBankAccountId);
         if (!account) return;
@@ -175,7 +298,49 @@ export default function NewReceiptPage() {
         void financeService.getCurrentExchangeRate(account.currency)
             .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
             .catch(() => form.setValue('exchangeRate', 1));
-    }, [selectedBankAccountId, bankAccounts, form]);
+    }, [selectedBankAccountId, bankAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
+
+    useEffect(() => {
+        if (existingAdvancePaymentId) return;
+        if (isDirectBankReceipt || !selectedLiquidityAccountId || !liquidityAccounts) return;
+
+        const account = liquidityAccounts.find((item) => item.id === selectedLiquidityAccountId);
+        if (!account) return;
+
+        form.setValue('currencyCode', account.currency);
+        if (account.currency === 'GHS') {
+            form.setValue('exchangeRate', 1);
+            return;
+        }
+
+        void financeService.getCurrentExchangeRate(account.currency)
+            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
+            .catch(() => form.setValue('exchangeRate', 1));
+    }, [selectedLiquidityAccountId, liquidityAccounts, form, isDirectBankReceipt, existingAdvancePaymentId]);
+
+    useEffect(() => {
+        if (existingAdvancePaymentId) return;
+        if (isDirectBankReceipt) return;
+        const selectionIsEligible = eligibleLiquidityAccounts.some(account => account.id === selectedLiquidityAccountId);
+        if (selectionIsEligible) return;
+        form.setValue('liquidityAccountId', eligibleLiquidityAccounts[0]?.id);
+    }, [eligibleLiquidityAccounts, form, isDirectBankReceipt, selectedLiquidityAccountId, existingAdvancePaymentId]);
+
+    useEffect(() => {
+        form.setValue('withholdingTaxAccountId', selectedWithholdingTax?.taxReceivableAccountId ?? undefined);
+        if (!selectedWithholdingTax) {
+            form.setValue('withholdingTaxAmount', 0);
+            setWithholdingAllocations({});
+        }
+    }, [form, selectedWithholdingTax]);
+
+    useEffect(() => {
+        form.setValue('vatWithholdingAccountId', selectedVatWithholdingTax?.taxReceivableAccountId ?? undefined);
+        if (!selectedVatWithholdingTax) {
+            form.setValue('vatWithholdingAmount', 0);
+            setVatWithholdingAllocations({});
+        }
+    }, [form, selectedVatWithholdingTax]);
 
     // Fetch outstanding invoices for selected customer
     const { data: outstandingInvoices, isLoading: isLoadingInvoices } = useQuery({
@@ -201,47 +366,127 @@ export default function NewReceiptPage() {
     const onSubmit = async (data: PaymentFormValues) => {
         setIsSubmitting(true);
         try {
-            const selectedPaymentMethod = paymentMethods?.find((method) => method.id === data.paymentMethodId);
-            if (data.paymentMethodId && !selectedPaymentMethod) {
+            const method = paymentMethods?.find((item) => item.id === data.paymentMethodId);
+            if (!existingAdvancePaymentId && data.paymentMethodId && !method) {
                 form.setError('paymentMethodId', { type: 'manual', message: 'Selected payment method is not available' });
                 return;
             }
 
-            if (selectedPaymentMethod?.requiresBankAccount && !data.bankAccountId) {
-                form.setError('bankAccountId', { type: 'manual', message: `${selectedPaymentMethod.name} requires a bank account` });
+            const directBankReceipt = method ? directBankMethodTypes.has(method.type) : true;
+            if (!existingAdvancePaymentId && directBankReceipt && !data.bankAccountId) {
+                form.setError('bankAccountId', { type: 'manual', message: `${method?.name ?? 'This method'} requires a bank account` });
                 return;
             }
 
-            if (selectedPaymentMethod?.requiresReference && !data.referenceNumber?.trim()) {
-                form.setError('referenceNumber', { type: 'manual', message: `${selectedPaymentMethod.name} requires a reference number` });
+            if (!existingAdvancePaymentId && !directBankReceipt && !data.liquidityAccountId) {
+                form.setError('liquidityAccountId', { type: 'manual', message: `Select the ${expectedLiquidityType} holding account` });
+                return;
+            }
+
+            if (!existingAdvancePaymentId && method?.requiresReference && !data.referenceNumber?.trim()) {
+                form.setError('referenceNumber', { type: 'manual', message: `${method.name} requires a reference number` });
+                return;
+            }
+
+            if (!existingAdvancePaymentId && method?.type === PaymentMethodType.Cheque && !data.checkNumber?.trim()) {
+                form.setError('checkNumber', { type: 'manual', message: 'Cheque number is required' });
                 return;
             }
 
             const invoiceIds = new Set([
                 ...Object.keys(allocations),
                 ...Object.keys(discountAllocations),
+                ...Object.keys(withholdingAllocations),
+                ...Object.keys(vatWithholdingAllocations),
             ]);
 
             const allocationRows = Array.from(invoiceIds)
-                .map(invoiceId => ({
-                    invoiceId,
-                    allocatedAmount: Number(allocations[invoiceId]) || 0,
-                    discountAmount: Number(discountAllocations[invoiceId]) || 0,
-                }))
-                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0);
+                .map(invoiceId => {
+                    const invoice = outstandingInvoices?.find(item => item.id === invoiceId);
+                    const invoiceAmount = Number(allocations[invoiceId]) || 0;
+                    const isCrossCurrency = invoice?.currencyCode !== data.currencyCode;
+                    return {
+                        invoiceId,
+                        // allocatedAmount is always the invoice-currency cash reduction.
+                        allocatedAmount: invoiceAmount,
+                        // Cross-currency receipts must state the cash consumed from the receipt.
+                        paymentCurrencyAmount: isCrossCurrency
+                            ? Number(paymentCurrencyAllocations[invoiceId]) || 0
+                            : invoiceAmount,
+                        discountAmount: Number(discountAllocations[invoiceId]) || 0,
+                        withholdingTaxAmount: Number(withholdingAllocations[invoiceId]) || 0,
+                        vatWithholdingAmount: Number(vatWithholdingAllocations[invoiceId]) || 0,
+                    };
+                })
+                .filter(row => row.allocatedAmount > 0 || row.discountAmount > 0 ||
+                    row.withholdingTaxAmount > 0 || row.vatWithholdingAmount > 0);
 
-            const totalAllocated = allocationRows.reduce((sum, row) => sum + row.allocatedAmount, 0);
-            if (totalAllocated > data.totalAmount) {
+            const incompleteCrossCurrencyAllocation = allocationRows.find(row =>
+                row.allocatedAmount > 0 && (row.paymentCurrencyAmount ?? 0) <= 0);
+            if (incompleteCrossCurrencyAllocation) {
                 toast({
-                    title: 'Allocation exceeds receipt',
-                    description: 'Allocated invoice amounts cannot exceed the receipt amount.',
+                    title: 'Receipt-currency amount required',
+                    description: 'Enter both the invoice amount settled and the amount consumed from the selected receipt currency.',
                     variant: 'destructive',
                 });
                 return;
             }
 
+            const hasWithholding = allocationRows.some(row => row.withholdingTaxAmount > 0);
+            const hasVatWithholding = allocationRows.some(row => row.vatWithholdingAmount > 0);
+            if (hasWithholding && !data.withholdingTaxId) {
+                toast({ title: 'WHT tax required', description: 'Select the configured WHT receivable tax.', variant: 'destructive' });
+                return;
+            }
+            if (hasVatWithholding && !data.vatWithholdingTaxId) {
+                toast({ title: 'VAT withholding tax required', description: 'Select the configured VAT withholding receivable tax.', variant: 'destructive' });
+                return;
+            }
+            if ((hasWithholding || hasVatWithholding) && !data.withholdingCertificateNumber?.trim()) {
+                toast({ title: 'Certificate reference required', description: 'Record the customer withholding certificate/reference number.', variant: 'destructive' });
+                return;
+            }
+
+            const totalAllocated = allocationRows.reduce((sum, row) => sum + (row.paymentCurrencyAmount ?? row.allocatedAmount), 0);
+            if (totalAllocated > data.totalAmount) {
+                toast({
+                    title: 'Allocation exceeds receipt',
+                    description: 'Receipt-currency cash allocations cannot exceed the cash received.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (existingAdvancePaymentId && allocationRows.some(row =>
+                row.discountAmount > 0 || row.withholdingTaxAmount > 0 || row.vatWithholdingAmount > 0)) {
+                toast({
+                    title: 'Advance application supports cash only',
+                    description: 'Apply the advance amount here, then use the dedicated adjustment workflow for discounts or withholding.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (existingAdvancePaymentId) {
+                if (allocationRows.length === 0) {
+                    toast({ title: 'Allocation required', description: 'Select at least one outstanding customer invoice.', variant: 'destructive' });
+                    return;
+                }
+                await arService.allocatePayment({
+                    customerPaymentId: existingAdvancePaymentId,
+                    allocations: allocationRows,
+                });
+                toast({ title: 'Advance applied', description: 'The customer advance and any realized FX were posted successfully.' });
+                router.push(`/finance/ar/payments/${existingAdvancePaymentId}`);
+                return;
+            }
+
             await arService.createPayment({
                 ...data,
+                // The API derives functional header totals from the per-invoice evidence below.
+                // Sending zero prevents mixed native currencies from being added at the header.
+                withholdingTaxAmount: 0,
+                vatWithholdingAmount: 0,
                 paymentDate: data.paymentDate.toISOString(),
                 transactionReference: data.referenceNumber,
                 allocations: allocationRows.length > 0 ? allocationRows : undefined,
@@ -262,18 +507,32 @@ export default function NewReceiptPage() {
 
     const currentAmount = form.watch('totalAmount');
     const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
-    const totalAllocated = Object.values(allocations).reduce((acc, curr) => acc + curr, 0);
+    // Remaining receipt cash is a payment-currency figure, never a sum of mixed invoice values.
+    const totalAllocated = outstandingInvoices?.reduce((sum, invoice) => {
+        const invoiceAmount = Number(allocations[invoice.id]) || 0;
+        return sum + (invoice.currencyCode === currentCurrencyCode
+            ? invoiceAmount
+            : Number(paymentCurrencyAllocations[invoice.id]) || 0);
+    }, 0) ?? 0;
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
+    const hasLineWithholding = Object.values(withholdingAllocations).some(amount => amount > 0);
+    const hasLineVatWithholding = Object.values(vatWithholdingAllocations).some(amount => amount > 0);
     const remainingAmount = currentAmount - totalAllocated;
 
     const handleAutoAllocate = () => {
         if (!outstandingInvoices) return;
+        // Auto-allocation distributes cash only. Statutory deductions require explicit invoice
+        // attribution and therefore remain a maker-entered decision.
         let remaining = currentAmount;
         const newAllocations: Record<string, number> = {};
         const newDiscountAllocations: Record<string, number> = {};
 
         // Allocate to oldest invoices first
-        const sortedInvoices = [...outstandingInvoices].sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
+        // Cross-currency rows require an explicit, user-confirmed pair of amounts. Auto allocation
+        // therefore remains deterministic by considering only invoices in the receipt currency.
+        const sortedInvoices = outstandingInvoices
+            .filter(invoice => invoice.currencyCode === currentCurrencyCode)
+            .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
 
         for (const inv of sortedInvoices) {
             if (remaining <= 0) break;
@@ -287,6 +546,7 @@ export default function NewReceiptPage() {
             remaining -= allocateAmount;
         }
         setAllocations(newAllocations);
+        setPaymentCurrencyAllocations({});
         setDiscountAllocations(newDiscountAllocations);
     };
 
@@ -297,9 +557,13 @@ export default function NewReceiptPage() {
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Record Customer Receipt</h1>
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {existingAdvancePaymentId ? 'Apply Customer Advance' : 'Record Customer Receipt'}
+                    </h1>
                     <p className="text-muted-foreground">
-                        Record a receipt from a customer and allocate it to outstanding invoices.
+                        {existingAdvancePaymentId
+                            ? 'Consume the posted receipt currency lot against outstanding customer invoices.'
+                            : 'Record a receipt from a customer and allocate it to outstanding invoices.'}
                     </p>
                 </div>
             </div>
@@ -308,7 +572,7 @@ export default function NewReceiptPage() {
                 {/* Customer receipt details; the API persists receipts as AR payments. */}
                 <Card className="md:col-span-1 h-fit">
                     <CardHeader>
-                        <CardTitle>Receipt Details</CardTitle>
+                        <CardTitle>{existingAdvancePaymentId ? 'Advance Lot' : 'Receipt Details'}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <form id="payment-form" onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -317,7 +581,7 @@ export default function NewReceiptPage() {
                                 <Select
                                     onValueChange={(val) => form.setValue('customerId', val)}
                                     value={form.watch('customerId') || undefined}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select customer" />
@@ -335,28 +599,55 @@ export default function NewReceiptPage() {
                                 )}
                             </div>
 
-                            <div className="space-y-2">
-                                <Label htmlFor="bankAccount">Deposit To Bank Account</Label>
-                                <Select
-                                    onValueChange={(val) => form.setValue('bankAccountId', val)}
-                                    value={form.watch('bankAccountId') || undefined}
-                                    disabled={isSubmitting}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select bank account..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {bankAccounts?.map((account) => (
-                                            <SelectItem key={account.id} value={account.id}>
-                                                {account.accountName} ({account.currency}) - {account.bankName}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {form.formState.errors.bankAccountId && (
-                                    <p className="text-sm text-red-500">{form.formState.errors.bankAccountId.message}</p>
-                                )}
-                            </div>
+                            {isDirectBankReceipt ? (
+                                <div className="space-y-2">
+                                    <Label htmlFor="bankAccount">Deposit To Bank Account</Label>
+                                    <Select
+                                        onValueChange={(val) => form.setValue('bankAccountId', val)}
+                                        value={form.watch('bankAccountId') || undefined}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select bank account..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {bankAccounts?.map((account) => (
+                                                <SelectItem key={account.id} value={account.id}>
+                                                    {account.accountName} ({account.currency}) - {account.bankName}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {form.formState.errors.bankAccountId && (
+                                        <p className="text-sm text-red-500">{form.formState.errors.bankAccountId.message}</p>
+                                    )}
+                                    <p className="text-xs text-muted-foreground">Direct bank methods bypass the banking queue.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <Label htmlFor="liquidityAccount">Receive Into Holding Account</Label>
+                                    <Select
+                                        onValueChange={(val) => form.setValue('liquidityAccountId', val)}
+                                        value={form.watch('liquidityAccountId') || undefined}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={`Select ${expectedLiquidityType} account...`} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {eligibleLiquidityAccounts.map((account) => (
+                                                <SelectItem key={account.id} value={account.id}>
+                                                    {account.name} ({account.currency}) - {account.glAccountNumber}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    {form.formState.errors.liquidityAccountId && (
+                                        <p className="text-sm text-red-500">{form.formState.errors.liquidityAccountId.message}</p>
+                                    )}
+                                    <p className="text-xs text-muted-foreground">This receipt will enter the banking queue after posting.</p>
+                                </div>
+                            )}
 
                             <div className="space-y-2">
                                 <Label>Payment Date</Label>
@@ -372,7 +663,7 @@ export default function NewReceiptPage() {
                                                         "w-full justify-start text-left font-normal",
                                                         !field.value && "text-muted-foreground"
                                                     )}
-                                                    disabled={isSubmitting}
+                                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
                                                     {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
@@ -401,7 +692,7 @@ export default function NewReceiptPage() {
                                         className="pl-14"
                                         step="0.01"
                                         {...form.register('totalAmount')}
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || !!existingAdvancePaymentId}
                                     />
                                 </div>
                                 {form.formState.errors.totalAmount && (
@@ -416,15 +707,84 @@ export default function NewReceiptPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || currentCurrencyCode === 'GHS'}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} GHS
+                                    1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
                                 )}
                             </div>
+
+                            <div className="space-y-3 rounded-md border p-3">
+                                <div>
+                                    <Label>WHT suffered</Label>
+                                    <p className="text-xs text-muted-foreground">Tax withheld by the customer and debited to TDC&apos;s configured tax receivable account.</p>
+                                </div>
+                                <Select
+                                    value={selectedWithholdingTaxId || 'none'}
+                                    onValueChange={(value) => form.setValue('withholdingTaxId', value === 'none' ? undefined : value)}
+                                    disabled={isSubmitting}
+                                >
+                                    <SelectTrigger><SelectValue placeholder="No WHT" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No WHT</SelectItem>
+                                        {salesWithholdingTaxes.map((tax) => (
+                                            <SelectItem key={tax.id} value={tax.id}>{tax.code} - {tax.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                    Select the tax here, then enter the invoice-currency WHT on each allocation row below.
+                                </p>
+                                {selectedWithholdingTax && !selectedWithholdingTax.taxReceivableAccountId && (
+                                    <p className="text-xs text-red-600">Receivable account is not configured for this tax.</p>
+                                )}
+                            </div>
+
+                            <div className="space-y-3 rounded-md border p-3">
+                                <div>
+                                    <Label>VAT withholding suffered</Label>
+                                    <p className="text-xs text-muted-foreground">Use only when the customer is an appointed VAT withholding agent.</p>
+                                </div>
+                                <Select
+                                    value={selectedVatWithholdingTaxId || 'none'}
+                                    onValueChange={(value) => form.setValue('vatWithholdingTaxId', value === 'none' ? undefined : value)}
+                                    disabled={isSubmitting}
+                                >
+                                    <SelectTrigger><SelectValue placeholder="No VAT withholding" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No VAT withholding</SelectItem>
+                                        {salesVatWithholdingTaxes.map((tax) => (
+                                            <SelectItem key={tax.id} value={tax.id}>{tax.code} - {tax.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="rounded bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                    Select the tax here, then attribute VAT-WHT to the relevant invoice row below.
+                                </p>
+                                {selectedVatWithholdingTax && !selectedVatWithholdingTax.taxReceivableAccountId && (
+                                    <p className="text-xs text-red-600">Receivable account is not configured for this tax.</p>
+                                )}
+                            </div>
+
+                            {(hasLineWithholding || hasLineVatWithholding) && (
+                                <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+                                    <Label htmlFor="withholdingCertificateNumber">Customer certificate/reference</Label>
+                                    <Input
+                                        id="withholdingCertificateNumber"
+                                        placeholder="Certificate or credit reference"
+                                        {...form.register('withholdingCertificateNumber')}
+                                        disabled={isSubmitting}
+                                    />
+                                    <Input
+                                        type="date"
+                                        {...form.register('withholdingCertificateDate')}
+                                        disabled={isSubmitting}
+                                    />
+                                </div>
+                            )}
 
                             <div className="space-y-2">
                                 <Label htmlFor="paymentMethod">Payment Method</Label>
@@ -461,6 +821,22 @@ export default function NewReceiptPage() {
                                 )}
                             </div>
 
+                            {selectedPaymentMethod?.type === PaymentMethodType.Cheque && (
+                                <>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="checkNumber">Cheque Number</Label>
+                                        <Input id="checkNumber" {...form.register('checkNumber')} disabled={isSubmitting} />
+                                        {form.formState.errors.checkNumber && (
+                                            <p className="text-sm text-red-500">{form.formState.errors.checkNumber.message}</p>
+                                        )}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="chequeDrawerBank">Drawer Bank</Label>
+                                        <Input id="chequeDrawerBank" {...form.register('chequeDrawerBank')} disabled={isSubmitting} />
+                                    </div>
+                                </>
+                            )}
+
                             <div className="space-y-2">
                                 <Label htmlFor="notes">Notes</Label>
                                 <Textarea id="notes" {...form.register('notes')} disabled={isSubmitting} />
@@ -468,9 +844,16 @@ export default function NewReceiptPage() {
                         </form>
                     </CardContent>
                     <CardFooter>
-                        <Button type="submit" form="payment-form" className="w-full" disabled={isSubmitting}>
+                        <Button
+                            type="submit"
+                            form="payment-form"
+                            className="w-full"
+                            // Existing advances are immutable currency lots. Wait for that source
+                            // record before permitting any invoice application to be submitted.
+                            disabled={isSubmitting || (!!existingAdvancePaymentId && !existingAdvancePayment)}
+                        >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Record Receipt
+                            {isLoadingAdvancePayment ? 'Loading Advance...' : existingAdvancePaymentId ? 'Apply Advance' : 'Record Receipt'}
                         </Button>
                     </CardFooter>
                 </Card>
@@ -502,10 +885,15 @@ export default function NewReceiptPage() {
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center bg-muted/50 p-4 rounded-lg font-medium">
                                     <div>
-                                        <div>Remaining Cash to Allocate:</div>
+                                        <div>Remaining Receipt Settlement:</div>
                                         {totalDiscounts > 0 && (
                                             <div className="text-xs text-muted-foreground">
                                                 Discounts allowed: {formatCurrency(totalDiscounts, currentCurrencyCode)}
+                                            </div>
+                                        )}
+                                        {(hasLineWithholding || hasLineVatWithholding) && (
+                                            <div className="text-xs text-muted-foreground">
+                                                Withholding suffered is attributed per invoice currency below; Finance calculates the functional total.
                                             </div>
                                         )}
                                     </div>
@@ -521,14 +909,19 @@ export default function NewReceiptPage() {
                                                 <th className="p-3 text-left">Invoice</th>
                                                 <th className="p-3 text-left">Date</th>
                                                 <th className="p-3 text-right">Balance Due</th>
-                                                <th className="p-3 text-right w-[150px]">Allocate</th>
+                                                <th className="p-3 text-right w-[150px]">Invoice Cash</th>
+                                                <th className="p-3 text-right w-[150px]">Receipt Cash</th>
                                                 <th className="p-3 text-right w-[150px]">Discount</th>
+                                                <th className="p-3 text-right w-[140px]">WHT</th>
+                                                <th className="p-3 text-right w-[140px]">VAT-WHT</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {outstandingInvoices.map((inv) => {
                                                 const availableDiscount = Number(inv.discountAmount) || 0;
                                                 const maxCashAllocation = Math.max(inv.balanceAmount - availableDiscount, 0);
+                                                const currentCashAllocation = Number(allocations[inv.id]) || 0;
+                                                const isCrossCurrency = inv.currencyCode !== currentCurrencyCode;
 
                                                 return (
                                                     <tr key={inv.id} className="border-t">
@@ -536,7 +929,7 @@ export default function NewReceiptPage() {
                                                             <div>{inv.invoiceNumber}</div>
                                                             {availableDiscount > 0 && (
                                                                 <div className="text-xs text-emerald-700">
-                                                                    Discount available: {formatCurrency(availableDiscount, currentCurrencyCode)}
+                                                                    Discount available: {formatCurrency(availableDiscount, inv.currencyCode)}
                                                                 </div>
                                                             )}
                                                         </td>
@@ -546,7 +939,7 @@ export default function NewReceiptPage() {
                                                                 <span className="ml-2 text-xs text-red-500 font-bold">Overdue</span>
                                                             )}
                                                         </td>
-                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, currentCurrencyCode)}</td>
+                                                        <td className="p-3 text-right">{formatCurrency(inv.balanceAmount, inv.currencyCode)}</td>
                                                         <td className="p-3">
                                                             <Input
                                                                 type="number"
@@ -565,6 +958,34 @@ export default function NewReceiptPage() {
                                                             />
                                                         </td>
                                                         <td className="p-3">
+                                                            {isCrossCurrency ? (
+                                                                <Input
+                                                                    type="number"
+                                                                    className="text-right h-8"
+                                                                    min={0}
+                                                                    value={paymentCurrencyAllocations[inv.id] || ''}
+                                                                    onChange={(e) => {
+                                                                        const val = Number(e.target.value);
+                                                                        setPaymentCurrencyAllocations(prev => ({
+                                                                            ...prev,
+                                                                            [inv.id]: val,
+                                                                        }));
+                                                                    }}
+                                                                    disabled={isSubmitting}
+                                                                    aria-label={`Receipt amount in ${currentCurrencyCode}`}
+                                                                />
+                                                            ) : (
+                                                                <div className="text-right text-muted-foreground">
+                                                                    {formatCurrency(currentCashAllocation, currentCurrencyCode)}
+                                                                </div>
+                                                            )}
+                                                            {isCrossCurrency && (
+                                                                <div className="mt-1 text-right text-xs text-muted-foreground">
+                                                                    {currentCurrencyCode} received for {inv.currencyCode} balance
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-3">
                                                             <Input
                                                                 type="number"
                                                                 className="text-right h-8"
@@ -579,6 +1000,34 @@ export default function NewReceiptPage() {
                                                                     }));
                                                                 }}
                                                                 disabled={isSubmitting || availableDiscount <= 0}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                value={withholdingAllocations[inv.id] || ''}
+                                                                onChange={(e) => setWithholdingAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: Number(e.target.value),
+                                                                }))}
+                                                                disabled={isSubmitting || !selectedWithholdingTax}
+                                                                aria-label={`WHT in ${inv.currencyCode} for ${inv.invoiceNumber}`}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <Input
+                                                                type="number"
+                                                                className="text-right h-8"
+                                                                min={0}
+                                                                value={vatWithholdingAllocations[inv.id] || ''}
+                                                                onChange={(e) => setVatWithholdingAllocations(prev => ({
+                                                                    ...prev,
+                                                                    [inv.id]: Number(e.target.value),
+                                                                }))}
+                                                                disabled={isSubmitting || !selectedVatWithholdingTax}
+                                                                aria-label={`VAT withholding in ${inv.currencyCode} for ${inv.invoiceNumber}`}
                                                             />
                                                         </td>
                                                     </tr>

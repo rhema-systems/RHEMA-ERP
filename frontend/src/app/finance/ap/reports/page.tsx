@@ -42,8 +42,12 @@ import {
     TableRow,
 } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useAuth } from '@/hooks/use-auth';
+import { Badge } from '@/components/ui/badge';
+import type { VendorInvoiceMatchExceptionStatus } from '@/types/ap';
+import { ProcurementFinanceReconciliation } from '@/components/finance/ProcurementFinanceReconciliation';
 
-const REPORT_TABS = ['aging', 'cash', 'statements'] as const;
+const REPORT_TABS = ['aging', 'cash', 'statements', 'match-exceptions', 'procurement-reconciliation'] as const;
 const supplierPartnerTypes = new Set(['supplier', 'contractor', 'both']);
 
 const isSupplierPartner = (partner: BusinessPartnerDto) =>
@@ -81,11 +85,13 @@ export default function ApReportsPage() {
                 </p>
             </div>
 
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'aging' | 'cash' | 'statements')} className="space-y-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="aging">AP Aging Analysis</TabsTrigger>
                     <TabsTrigger value="cash">Cash Requirements</TabsTrigger>
                     <TabsTrigger value="statements">Supplier Statements</TabsTrigger>
+                    <TabsTrigger value="match-exceptions">Match Exceptions</TabsTrigger>
+                    <TabsTrigger value="procurement-reconciliation">Procurement Reconciliation</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="aging">
@@ -99,9 +105,128 @@ export default function ApReportsPage() {
                 <TabsContent value="statements">
                     <SupplierStatementsView />
                 </TabsContent>
+
+                <TabsContent value="match-exceptions">
+                    <MatchExceptionReportView />
+                </TabsContent>
+
+                <TabsContent value="procurement-reconciliation">
+                    <ProcurementFinanceReconciliation />
+                </TabsContent>
             </Tabs>
         </div>
     );
+}
+
+function MatchExceptionReportView() {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const thirtyDaysAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
+    const [fromDate, setFromDate] = useState(thirtyDaysAgo);
+    const [toDate, setToDate] = useState(today);
+    const [status, setStatus] = useState<VendorInvoiceMatchExceptionStatus | ''>('');
+    const [downloading, setDownloading] = useState(false);
+    const query = useQuery({
+        queryKey: ['ap-match-exception-report', fromDate, toDate, status],
+        queryFn: () => accountsPayableService.getThreeWayMatchExceptionReport({
+            fromDate,
+            toDate,
+            status: status || undefined,
+        }),
+    });
+
+    const download = async () => {
+        setDownloading(true);
+        try {
+            const blob = await accountsPayableService.downloadThreeWayMatchExceptionReport({
+                fromDate,
+                toDate,
+                status: status || undefined,
+            });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `ap-match-exceptions-${today}.csv`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+        } finally {
+            setDownloading(false);
+        }
+    };
+
+    return (
+        <Card>
+            <CardHeader>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <CardTitle>Three-way-match exception register</CardTitle>
+                        <CardDescription>AP-006 approvals, expiry, evidence lineage, and corrective-action follow-up.</CardDescription>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <input aria-label="Match exception from date" className="h-10 rounded-md border bg-background px-3 text-sm" type="date" value={fromDate} onChange={event => setFromDate(event.target.value)} />
+                        <input aria-label="Match exception to date" className="h-10 rounded-md border bg-background px-3 text-sm" type="date" value={toDate} onChange={event => setToDate(event.target.value)} />
+                        <select aria-label="Match exception status" className="h-10 rounded-md border bg-background px-3 text-sm" value={status} onChange={event => setStatus(event.target.value as VendorInvoiceMatchExceptionStatus | '')}>
+                            <option value="">All statuses</option>
+                            <option value="PendingApproval">Pending approval</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Rejected">Rejected</option>
+                            <option value="Cancelled">Cancelled</option>
+                            <option value="Expired">Expired</option>
+                        </select>
+                        <Button variant="outline" disabled={downloading || query.isLoading} onClick={download}>
+                            <Download className="mr-2 h-4 w-4" /> {downloading ? 'Exporting…' : 'Export CSV'}
+                        </Button>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+                {query.isLoading ? (
+                    <Skeleton className="h-64 w-full" />
+                ) : query.isError ? (
+                    <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Unable to load AP-006 register</AlertTitle>
+                        <AlertDescription>{getReportErrorMessage(query.error)}</AlertDescription>
+                    </Alert>
+                ) : query.data && (
+                    <>
+                        <div className="grid gap-3 md:grid-cols-4">
+                            <Metric label="Total exceptions" value={query.data.totalCount} />
+                            <Metric label="Currently approved" value={query.data.approvedCount} />
+                            <Metric label="Expired" value={query.data.expiredCount} />
+                            <Metric label="Open corrective actions" value={query.data.openCorrectiveActionCount} />
+                        </div>
+                        <div className="overflow-x-auto rounded-md border">
+                            <Table>
+                                <TableHeader><TableRow>
+                                    <TableHead>Invoice / supplier</TableHead><TableHead>PO</TableHead><TableHead>Status</TableHead>
+                                    <TableHead>Variance</TableHead><TableHead>Root cause</TableHead><TableHead>Corrective action</TableHead>
+                                    <TableHead>Evidence</TableHead>
+                                </TableRow></TableHeader>
+                                <TableBody>
+                                    {query.data.rows.map(row => (
+                                        <TableRow key={row.exceptionId}>
+                                            <TableCell><div className="font-medium">{row.invoiceNumber}</div><div className="text-xs text-muted-foreground">{row.supplierName}</div></TableCell>
+                                            <TableCell>{row.purchaseOrderNumber}</TableCell>
+                                            <TableCell><Badge variant="outline">{row.status}</Badge></TableCell>
+                                            <TableCell>{row.varianceType}<div className="text-xs text-muted-foreground">{row.maximumVariancePercentage}% max</div></TableCell>
+                                            <TableCell>{row.rootCauseCategory}<div className="max-w-72 text-xs text-muted-foreground">{row.rootCauseDescription}</div></TableCell>
+                                            <TableCell>{row.correctiveActionOwnerName}<div className="text-xs text-muted-foreground">{row.correctiveActionStatus} · due {format(new Date(row.correctiveActionDueAtUtc), 'PP')}</div></TableCell>
+                                            <TableCell>{row.evidenceCount}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                    {query.data.rows.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No AP-006 exceptions in this period.</TableCell></TableRow>}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+    return <div className="rounded-md border p-4"><div className="text-xs text-muted-foreground">{label}</div><div className="text-2xl font-bold">{value}</div></div>;
 }
 
 function ApAgingReportView() {
@@ -361,6 +486,8 @@ function CashRequirementsView() {
 }
 
 function SupplierStatementsView() {
+    const { hasPermission } = useAuth();
+    const canExport = hasPermission('Finance.Reports.Export');
     const [partners, setPartners] = useState<LedgerPartnerOption[]>([]);
     const [partnersLoading, setPartnersLoading] = useState(true);
 
@@ -445,6 +572,21 @@ function SupplierStatementsView() {
                 supplierIds: params.partnerIds,
                 showSupplierCurrency: params.showPartnerCurrency,
             })}
+            downloadPdf={(params) => accountsPayableService.downloadSupplierStatementDocument({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
+                format: 'pdf',
+            })}
+            downloadXlsx={(params) => accountsPayableService.downloadSupplierStatementDocument({
+                fromDate: params.fromDate,
+                toDate: params.toDate,
+                supplierIds: params.partnerIds,
+                showSupplierCurrency: params.showPartnerCurrency,
+                format: 'xlsx',
+            })}
+            canExport={canExport}
         />
     )
 }

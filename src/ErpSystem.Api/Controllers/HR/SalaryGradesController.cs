@@ -8,30 +8,43 @@ using Microsoft.AspNetCore.Mvc;
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Salary Grades API (tenant-aware).
-/// Manages SalaryGrade and provides hierarchy read access (levels + notches).
+/// Salary Grades API (tenant-aware), read-only.
+///
+/// The salary structure is defined in Payroll (Administration → HR → Payroll → Grades Setup). These HR
+/// tables are a mirror of it, kept current by <see cref="ISalaryStructureProjectionService"/>, and exist
+/// so the many HR foreign keys have rows to point at. Writing to them here would be overwritten by the
+/// next projection pass, so every mutating endpoint returns 409 and points the caller at payroll.
 /// </summary>
 [ApiController]
 [Route("api/hr/salary-grades")]
 [Authorize]
 public class SalaryGradesController : ControllerBase
 {
+    private const string ReadOnlyMessage =
+        "Salary grades are defined in Payroll and mirrored into HR. Edit them in Payroll " +
+        "(Administration → HR → Payroll → Grades Setup); changes appear here automatically.";
+
     private readonly ISalaryGradeService _salaryGradeService;
     private readonly ISalaryLevelService _salaryLevelService;
+    private readonly ISalaryStructureProjectionService _projectionService;
     private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<SalaryGradesController> _logger;
 
     public SalaryGradesController(
         ISalaryGradeService salaryGradeService,
         ISalaryLevelService salaryLevelService,
+        ISalaryStructureProjectionService projectionService,
         ICurrentUserService currentUserService,
         ILogger<SalaryGradesController> logger)
     {
         _salaryGradeService = salaryGradeService;
         _salaryLevelService = salaryLevelService;
+        _projectionService = projectionService;
         _currentUserService = currentUserService;
         _logger = logger;
     }
+
+    private ObjectResult MirrorIsReadOnly() => Conflict(new { message = ReadOnlyMessage });
 
     /// <summary>
     /// Retrieves all salary grades for the current tenant.
@@ -154,208 +167,67 @@ public class SalaryGradesController : ControllerBase
     }
 
     /// <summary>
-    /// Re-sequences levels within a salary grade using the provided ordered level identifiers.
+    /// Re-runs the projection from the payroll-defined salary structure.
+    ///
+    /// Reads already reconcile automatically; this exists for an explicit "refresh from payroll" action
+    /// and for backfilling a tenant whose mirror has never been built.
+    /// </summary>
+    [HttpPost("sync")]
+    [ProducesResponseType(typeof(SalaryStructureProjectionResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<SalaryStructureProjectionResult>> SyncFromPayroll(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tenantId = GetTenantIdOrThrow();
+            var result = await _projectionService.ReconcileAsync(tenantId, cancellationToken);
+            return Ok(result);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error syncing the salary structure from payroll");
+            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while syncing the salary structure from payroll");
+        }
+    }
+
+    /// <summary>
+    /// Not supported — level order follows the payroll grade structure.
     /// </summary>
     [HttpPut("{gradeId:guid}/levels/resequence")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> ResequenceLevels(Guid gradeId, [FromBody] ResequenceSalaryLevelsDto dto, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            if (gradeId != dto.SalaryGradeId)
-            {
-                return BadRequest(new { message = "ID mismatch" });
-            }
-
-            var tenantId = GetTenantIdOrThrow();
-            dto.TenantId = tenantId;
-
-            await _salaryLevelService.ResequenceLevelsAsync(tenantId, gradeId, dto.OrderedLevelIds, cancellationToken);
-            return NoContent();
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error resequencing salary levels for GradeId {GradeId}", gradeId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while resequencing salary levels");
-        }
-    }
+    public IActionResult ResequenceLevels(Guid gradeId, [FromBody] ResequenceSalaryLevelsDto dto) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Creates a new salary grade.
+    /// Not supported — create the grade in Payroll instead.
     /// </summary>
     [HttpPost]
-    [ProducesResponseType(typeof(SalaryGradeDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<SalaryGradeDto>> Create([FromBody] CreateSalaryGradeDto dto, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            var tenantId = GetTenantIdOrThrow();
-            dto.TenantId = tenantId;
-
-            var created = await _salaryGradeService.CreateGradeAsync(tenantId, dto, cancellationToken);
-            return CreatedAtAction(nameof(GetById), new { gradeId = created.Id }, created);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating salary grade");
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while creating the salary grade");
-        }
-    }
+    public IActionResult Create([FromBody] CreateSalaryGradeDto dto) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Updates an existing salary grade.
+    /// Not supported — edit the grade in Payroll instead.
     /// </summary>
     [HttpPut("{gradeId:guid}")]
-    [ProducesResponseType(typeof(SalaryGradeDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<SalaryGradeDto>> Update(Guid gradeId, [FromBody] UpdateSalaryGradeDto dto, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (gradeId != dto.Id)
-            {
-                return BadRequest(new { message = "ID mismatch" });
-            }
-
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            var tenantId = GetTenantIdOrThrow();
-            dto.TenantId = tenantId;
-
-            var updated = await _salaryGradeService.UpdateGradeAsync(tenantId, dto, cancellationToken);
-            return Ok(updated);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating salary grade with ID {GradeId}", gradeId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while updating the salary grade");
-        }
-    }
+    public IActionResult Update(Guid gradeId, [FromBody] UpdateSalaryGradeDto dto) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Activates or deactivates a salary grade.
+    /// Not supported — a grade's active state follows its payroll definition.
     /// </summary>
     [HttpPut("{gradeId:guid}/active")]
-    [ProducesResponseType(typeof(SalaryGradeDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<SalaryGradeDto>> SetActive(Guid gradeId, [FromQuery] bool isActive, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var tenantId = GetTenantIdOrThrow();
-            var updated = await _salaryGradeService.SetGradeActiveAsync(tenantId, gradeId, isActive, cancellationToken);
-            return Ok(updated);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating salary grade active status for {GradeId}", gradeId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while updating the salary grade");
-        }
-    }
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public IActionResult SetActive(Guid gradeId, [FromQuery] bool isActive) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Deletes a salary grade (soft delete).
-    /// Deletion is prevented if the grade has any salary levels.
+    /// Not supported — remove the grade in Payroll; the mirror deactivates it on the next sync.
     /// </summary>
     [HttpDelete("{gradeId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Delete(Guid gradeId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var tenantId = GetTenantIdOrThrow();
-            await _salaryGradeService.DeleteGradeAsync(tenantId, gradeId, cancellationToken);
-            return NoContent();
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting salary grade with ID {GradeId}", gradeId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while deleting the salary grade");
-        }
-    }
+    public IActionResult Delete(Guid gradeId) => MirrorIsReadOnly();
 
     private Guid GetTenantIdOrThrow()
         => _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");

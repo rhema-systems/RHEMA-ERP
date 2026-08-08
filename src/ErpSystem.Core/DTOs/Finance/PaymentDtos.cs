@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.Documents;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -79,9 +80,14 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? PaymentMethodName { get; set; }
         public string CurrencyCode { get; set; } = string.Empty;
         public decimal ExchangeRate { get; set; }
+        public Guid? ExchangeRateId { get; set; }
         public Guid? BankAccountId { get; set; }
         public string? BankAccountName { get; set; }
+        public Guid? LiquidityAccountId { get; set; }
+        public string? LiquidityAccountName { get; set; }
+        public Guid? LiquidityAccountEntryId { get; set; }
         public string? CheckNumber { get; set; }
+        public string? ChequeDrawerBank { get; set; }
         public string? TransactionReference { get; set; }
         public Guid? WithholdingTaxId { get; set; }
         public Guid? WithholdingTaxAccountId { get; set; }
@@ -96,8 +102,38 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? ClearedDate { get; set; }
         public bool IsCreditNote { get; set; }
         public Guid? JournalEntryId { get; set; }
+        public Guid? ReversalJournalEntryId { get; set; }
+        public Guid? ReversalPostingEventId { get; set; }
+        public Guid? ReversalCashTransactionId { get; set; }
+        public Guid? ReversalLiquidityAccountEntryId { get; set; }
+        public DateTime? ReversalDate { get; set; }
+        public DateTime? ReversedAt { get; set; }
+        public Guid? ReversedById { get; set; }
+        public string? ReversalReason { get; set; }
+        public ControlledDocumentIssueSummaryDto? ReceiptIssuance { get; set; }
         public List<PaymentAllocationDto> Allocations { get; set; } = new();
         public DateTime CreatedAt { get; set; }
+    }
+
+    /// <summary>
+    /// Command for correcting a posted customer receipt. The common Finance policy remains
+    /// authoritative for both the required narrative and accepted reversal date.
+    /// </summary>
+    public sealed class ReverseCustomerPaymentDto
+    {
+        [Required]
+        [MaxLength(1000)]
+        public string Reason { get; set; } = string.Empty;
+
+        public DateTime? ReversalDate { get; set; }
+    }
+
+    public sealed class CustomerPaymentTraceDto
+    {
+        public CustomerPaymentDto Payment { get; set; } = new();
+        public List<FinancePostingTraceDto> Postings { get; set; } = new();
+        public List<FinanceOperationalTraceDto> OperationalEntries { get; set; } = new();
+        public List<FinanceAuditTraceDto> AuditEvents { get; set; } = new();
     }
 
     public class PaymentAllocationDto
@@ -108,9 +144,25 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid InvoiceId { get; set; }
         public string InvoiceNumber { get; set; } = string.Empty;
         public decimal AllocatedAmount { get; set; }
+        public decimal PaymentCurrencyAmount { get; set; }
+        public string InvoiceCurrencyCode { get; set; } = string.Empty;
+        public string PaymentCurrencyCode { get; set; } = string.Empty;
+        public bool IsCrossCurrency { get; set; }
+        public Guid? InvoiceSettlementExchangeRateId { get; set; }
+        public decimal InvoiceSettlementExchangeRate { get; set; }
+        public Guid? PaymentExchangeRateId { get; set; }
+        public decimal PaymentExchangeRate { get; set; }
+        public decimal PaymentFunctionalAmount { get; set; }
+        public decimal SettlementFunctionalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
+        public decimal DiscountFunctionalAmount { get; set; }
+        public decimal WithholdingTaxAmount { get; set; }
+        public decimal WithholdingTaxFunctionalAmount { get; set; }
+        public decimal VatWithholdingAmount { get; set; }
+        public decimal VatWithholdingFunctionalAmount { get; set; }
         public DateTime AllocationDate { get; set; }
         public string? Notes { get; set; }
         public bool IsReversal { get; set; }
+        public Guid? OriginalAllocationId { get; set; }
     }
 }

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,15 +14,18 @@ namespace ErpSystem.Api.Controllers
     public class ReportsController : ControllerBase
     {
         private readonly IReportsService _reportsService;
+        private readonly IReportTemplateLifecycleService _reportTemplateLifecycle;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<ReportsController> _logger;
 
         public ReportsController(
             IReportsService reportsService,
+            IReportTemplateLifecycleService reportTemplateLifecycle,
             ICurrentUserService currentUserService,
             ILogger<ReportsController> logger)
         {
             _reportsService = reportsService;
+            _reportTemplateLifecycle = reportTemplateLifecycle;
             _currentUserService = currentUserService;
             _logger = logger;
         }
@@ -49,7 +53,13 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest("UserId not found in token");
                 }
 
-                var reports = await _reportsService.GetReportsAsync(tenantId.Value, userId.Value, type, status, favoriteOnly);
+                var reports = await _reportsService.GetReportsAsync(
+                    tenantId.Value,
+                    userId.Value,
+                    type,
+                    status,
+                    favoriteOnly,
+                    bypassRoleFiltering: IsReportAdministrator());
                 return Ok(reports);
             }
             catch (Exception ex)
@@ -63,6 +73,7 @@ namespace ErpSystem.Api.Controllers
         /// Get all reports for admin/management purposes (bypasses role filtering)
         /// </summary>
         [HttpGet("admin")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
         public async Task<ActionResult<List<ReportDefinitionDto>>> GetReportsForAdmin(
             [FromQuery] string? type = null,
             [FromQuery] string? status = null)
@@ -106,13 +117,29 @@ namespace ErpSystem.Api.Controllers
                     return BadRequest("TenantId not found in token");
                 }
 
-                var report = await _reportsService.GetReportAsync(reportId, tenantId.Value);
+                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
+                if (!userId.HasValue)
+                {
+                    return BadRequest("UserId not found in token");
+                }
+
+                var report = await _reportsService.GetReportAsync(reportId, tenantId.Value, userId.Value, IsReportAdministrator());
                 if (report == null)
                 {
                     return NotFound();
                 }
 
                 return Ok(report);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized access to report {ReportId}", reportId);
+                return StatusCode(403, ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid report definition {ReportId}", reportId);
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -145,6 +172,11 @@ namespace ErpSystem.Api.Controllers
 
                 return CreatedAtAction(nameof(GetReport), new { reportId = report.Id }, report);
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected report creation for a reserved system identifier");
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating report");
@@ -173,7 +205,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
-                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                var isAdminUser = IsReportAdministrator();
 
                 var report = await _reportsService.UpdateReportAsync(reportId, updateReportDto, tenantId.Value, userId.Value, isAdminUser);
 
@@ -183,6 +215,11 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 return Ok(report);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected mutation of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
             }
             catch (Exception ex)
             {
@@ -220,6 +257,11 @@ namespace ErpSystem.Api.Controllers
 
                 return NoContent();
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected deletion of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting report {ReportId}", reportId);
@@ -248,7 +290,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
-                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                var isAdminUser = IsReportAdministrator();
 
                 var result = await _reportsService.ExecuteReportAsync(reportId, executeReportDto, tenantId.Value, userId.Value, isAdminUser);
 
@@ -292,7 +334,7 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 // Check if user is admin (SuperAdmin role bypasses role/module filtering)
-                var isAdminUser = _currentUserService.IsInRole("SuperAdmin");
+                var isAdminUser = IsReportAdministrator();
 
                 var exportResult = await _reportsService.ExportReportAsync(reportId, exportReportDto, tenantId.Value, userId.Value, isAdminUser);
 
@@ -300,6 +342,16 @@ namespace ErpSystem.Api.Controllers
                     exportResult.Data,
                     exportResult.ContentType,
                     exportResult.FileName);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning(ex, "Unauthorized export of report {ReportId}", reportId);
+                return StatusCode(403, ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid export request for report {ReportId}", reportId);
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {
@@ -368,69 +420,131 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
-        /// <summary>
-        /// Get report templates
-        /// </summary>
         [HttpGet("templates")]
-        public async Task<ActionResult<List<ReportTemplateDto>>> GetReportTemplates(
-            [FromQuery] string? category = null)
+        public async Task<ActionResult<IReadOnlyList<ReportTemplateDto>>> GetReportTemplates(
+            [FromQuery] string? audience = null,
+            [FromQuery] string? cadence = null,
+            [FromQuery] string? status = null,
+            CancellationToken cancellationToken = default)
         {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
             try
             {
-                var tenantId = _currentUserService.TenantId;
-                if (!tenantId.HasValue)
-                {
-                    return BadRequest("TenantId not found in token");
-                }
-
-                var templates = await _reportsService.GetReportTemplatesAsync(tenantId.Value, category);
-                return Ok(templates);
+                return Ok(await _reportTemplateLifecycle.GetAsync(
+                    tenantId, userId, IsReportAdministrator(), audience, cadence, status, cancellationToken));
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving report templates");
-                return StatusCode(500, "An error occurred while retrieving report templates");
-            }
+            catch (Exception exception) { return TemplateFailure(exception, "list"); }
         }
 
-        /// <summary>
-        /// Create a new report template
-        /// </summary>
-        [HttpPost("templates")]
-        public async Task<ActionResult<ReportTemplateDto>> CreateReportTemplate(CreateReportTemplateDto createTemplateDto)
+        [HttpGet("templates/{templateId:guid}")]
+        public async Task<ActionResult<ReportTemplateDto>> GetReportTemplate(
+            Guid templateId, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("🏁 CreateReportTemplate API endpoint called with data: {@CreateTemplateDto}", createTemplateDto);
-
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
             try
             {
-                var tenantId = _currentUserService.TenantId;
-                if (!tenantId.HasValue)
-                {
-                    _logger.LogWarning("⚠️ TenantId not found in token");
-                    return BadRequest("TenantId not found in token");
-                }
-
-                var userId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-                if (!userId.HasValue)
-                {
-                    _logger.LogWarning("⚠️ UserId not found in token");
-                    return BadRequest("UserId not found in token");
-                }
-
-                _logger.LogInformation("🔑 Authenticated user: TenantId={TenantId}, UserId={UserId}", tenantId.Value, userId.Value);
-                _logger.LogInformation("🔄 Calling reports service CreateReportTemplateAsync...");
-
-                var template = await _reportsService.CreateReportTemplateAsync(createTemplateDto, tenantId.Value, userId.Value);
-
-                _logger.LogInformation("✅ Report template created successfully: {@Template}", template);
-
-                return CreatedAtAction(nameof(GetReportTemplates), new { category = template.Category }, template);
+                var template = await _reportTemplateLifecycle.GetByIdAsync(
+                    templateId, tenantId, userId, IsReportAdministrator(), cancellationToken);
+                return template is null ? NotFound() : Ok(template);
             }
-            catch (Exception ex)
+            catch (Exception exception) { return TemplateFailure(exception, "read"); }
+        }
+
+        [HttpPost("templates")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<ReportTemplateDto>> CreateReportTemplate(
+            CreateReportTemplateDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
             {
-                _logger.LogError(ex, "❌ Error creating report template: {ErrorMessage}", ex.Message);
-                return StatusCode(500, "An error occurred while creating the report template");
+                var template = await _reportTemplateLifecycle.CreateAsync(
+                    request, tenantId, userId, IsReportAdministrator(), cancellationToken);
+                return CreatedAtAction(nameof(GetReportTemplate), new { templateId = template.Id }, template);
             }
+            catch (Exception exception) { return TemplateFailure(exception, "create"); }
+        }
+
+        [HttpPut("templates/{templateId:guid}")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<ReportTemplateDto>> UpdateReportTemplate(
+            Guid templateId, UpdateReportTemplateDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
+            {
+                return Ok(await _reportTemplateLifecycle.UpdateAsync(
+                    templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken));
+            }
+            catch (Exception exception) { return TemplateFailure(exception, "update"); }
+        }
+
+        [HttpPost("templates/{templateId:guid}/publish")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<ReportTemplateDto>> PublishReportTemplate(
+            Guid templateId, ReportTemplateLifecycleActionDto request, CancellationToken cancellationToken) =>
+            await MutateTemplate(templateId, request, "publish", cancellationToken);
+
+        [HttpPost("templates/{templateId:guid}/archive")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<ReportTemplateDto>> ArchiveReportTemplate(
+            Guid templateId, ReportTemplateLifecycleActionDto request, CancellationToken cancellationToken) =>
+            await MutateTemplate(templateId, request, "archive", cancellationToken);
+
+        [HttpPost("templates/{templateId:guid}/clone")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<ActionResult<ReportTemplateDto>> CloneReportTemplate(
+            Guid templateId, CloneReportTemplateDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
+            {
+                return Ok(await _reportTemplateLifecycle.CloneAsync(
+                    templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken));
+            }
+            catch (Exception exception) { return TemplateFailure(exception, "clone"); }
+        }
+
+        [HttpDelete("templates/{templateId:guid}")]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+        public async Task<IActionResult> DeleteReportTemplate(
+            Guid templateId, [FromBody] ReportTemplateLifecycleActionDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
+            {
+                await _reportTemplateLifecycle.DeleteAsync(
+                    templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken);
+                return NoContent();
+            }
+            catch (Exception exception) { return TemplateFailure(exception, "delete"); }
+        }
+
+        [HttpPost("templates/{templateId:guid}/execute")]
+        public async Task<ActionResult<ReportResultDto>> ExecuteReportTemplate(
+            Guid templateId, GenerateReportTemplateDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
+            {
+                return Ok(await _reportTemplateLifecycle.ExecuteAsync(
+                    templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken));
+            }
+            catch (Exception exception) { return TemplateFailure(exception, "execute"); }
+        }
+
+        [HttpPost("templates/{templateId:guid}/export")]
+        public async Task<IActionResult> ExportReportTemplate(
+            Guid templateId, GenerateReportTemplateDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
+            {
+                var export = await _reportTemplateLifecycle.ExportAsync(
+                    templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken);
+                return File(export.Data, export.ContentType, export.FileName);
+            }
+            catch (Exception exception) { return TemplateFailure(exception, "export"); }
         }
 
         /// <summary>
@@ -547,6 +661,11 @@ namespace ErpSystem.Api.Controllers
 
                 return Ok(new { reportId, unpublishedAt = result });
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected unpublish of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error unpublishing report {ReportId}", reportId);
@@ -577,6 +696,11 @@ namespace ErpSystem.Api.Controllers
                 var result = await _reportsService.AssignReportToModuleAsync(reportId, assignModuleDto.ModuleId, tenantId.Value, userId.Value);
 
                 return Ok(new { reportId, moduleId = assignModuleDto.ModuleId, assignedAt = result });
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected module reassignment of system report {ReportId}", reportId);
+                return Conflict(ex.Message);
             }
             catch (Exception ex)
             {
@@ -609,11 +733,78 @@ namespace ErpSystem.Api.Controllers
 
                 return Ok(new { reportId, unassignedAt = result });
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Rejected module removal from system report {ReportId}", reportId);
+                return Conflict(ex.Message);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error unassigning report {ReportId} from module", reportId);
                 return StatusCode(500, "An error occurred while unassigning the report from module");
             }
         }
+
+        private async Task<ActionResult<ReportTemplateDto>> MutateTemplate(
+            Guid templateId,
+            ReportTemplateLifecycleActionDto request,
+            string action,
+            CancellationToken cancellationToken)
+        {
+            if (!TryGetActor(out var tenantId, out var userId, out var error)) return error!;
+            try
+            {
+                var result = action == "publish"
+                    ? await _reportTemplateLifecycle.PublishAsync(
+                        templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken)
+                    : await _reportTemplateLifecycle.ArchiveAsync(
+                        templateId, request, tenantId, userId, IsReportAdministrator(), cancellationToken);
+                return Ok(result);
+            }
+            catch (Exception exception) { return TemplateFailure(exception, action); }
+        }
+
+        private bool TryGetActor(out Guid tenantId, out Guid userId, out ActionResult? error)
+        {
+            tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            if (tenantId == Guid.Empty)
+            {
+                userId = Guid.Empty;
+                error = BadRequest(new { code = "REPORT_TEMPLATE_TENANT_REQUIRED", message = "TenantId not found in token." });
+                return false;
+            }
+
+            if (!Guid.TryParse(_currentUserService.UserId, out userId))
+            {
+                error = BadRequest(new { code = "REPORT_TEMPLATE_USER_REQUIRED", message = "UserId not found in token." });
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        private ObjectResult TemplateFailure(Exception exception, string action)
+        {
+            _logger.LogWarning(exception, "Report-template {Action} failed", action);
+            var (status, code) = exception switch
+            {
+                KeyNotFoundException => (StatusCodes.Status404NotFound, "REPORT_TEMPLATE_NOT_FOUND"),
+                UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "REPORT_TEMPLATE_FORBIDDEN"),
+                InvalidOperationException => (StatusCodes.Status409Conflict, "REPORT_TEMPLATE_CONFLICT"),
+                _ => (StatusCodes.Status500InternalServerError, "REPORT_TEMPLATE_FAILURE")
+            };
+            return StatusCode(status, new
+            {
+                code,
+                message = status == StatusCodes.Status500InternalServerError
+                    ? "The report-template operation failed."
+                    : exception.Message
+            });
+        }
+
+        private bool IsReportAdministrator() =>
+            _currentUserService.IsInRole(Constants.Roles.SuperAdmin) ||
+            _currentUserService.IsInRole(Constants.Roles.TenantAdmin);
     }
 }

@@ -38,10 +38,14 @@ import { toast } from 'sonner';
 import {
   purchasingService,
   PurchaseOrderDetailDto,
+  ProcurementPurchaseOrderSodReadinessDto,
+  ProcurementReceiptSourceReadinessDto,
   ReceivePurchaseOrderDto,
   ReceivePurchaseOrderItemDto
 } from '@/services/purchasingService';
 import { inventoryManagementService, WarehouseDto, WarehouseLocationDto } from '@/services/inventoryManagementService';
+import { ReceiptSourceControlCard } from '@/components/procurement/ReceiptSourceControlCard';
+import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 import { format } from 'date-fns';
 
 interface ReceiptItemFormData extends ReceivePurchaseOrderItemDto {
@@ -72,6 +76,17 @@ export default function ReceivePurchaseOrderPage() {
   const [order, setOrder] = useState<PurchaseOrderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [receiptSourceReadiness, setReceiptSourceReadiness] =
+    useState<ProcurementReceiptSourceReadinessDto | null>(null);
+  const [sodReadiness, setSodReadiness] =
+    useState<ProcurementPurchaseOrderSodReadinessDto | null>(null);
+  const [receiptSourceLoading, setReceiptSourceLoading] = useState(true);
+  const [receiptSourceError, setReceiptSourceError] = useState<string | null>(null);
+  const [idempotencyKey] = useState(() =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `receipt-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
   
   // Receipt form data
   const [receiptDate, setReceiptDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -130,22 +145,56 @@ export default function ReceivePurchaseOrderPage() {
     return normalizeGuid(item.warehouseId || item.poWarehouseId || order?.deliveryWarehouseId || getFallbackWarehouseId());
   };
 
+  const loadReceiptSourceReadiness = async (
+    purchaseOrderId = id
+  ): Promise<ProcurementReceiptSourceReadinessDto | null> => {
+    if (!purchaseOrderId) return null;
+    try {
+      setReceiptSourceLoading(true);
+      setReceiptSourceError(null);
+      const readiness =
+        await purchasingService.getReceiptSourceReadiness(purchaseOrderId);
+      setReceiptSourceReadiness(readiness);
+      return readiness;
+    } catch (error: any) {
+      const message =
+        error?.message ||
+        'Receipt source could not be verified. Receiving is blocked until the control can be revalidated.';
+      setReceiptSourceReadiness(null);
+      setReceiptSourceError(message);
+      return null;
+    } finally {
+      setReceiptSourceLoading(false);
+    }
+  };
+
   const fetchOrder = async () => {
     try {
       setLoading(true);
       const data = await purchasingService.getPurchaseOrderById(id);
       setOrder(data);
+      const sourceReadiness = await loadReceiptSourceReadiness(data.id);
+      const sourceLines = new Map(
+        (sourceReadiness?.lines ?? []).map(line => [
+          normalizeGuid(line.purchaseOrderItemId),
+          line,
+        ])
+      );
       
       // Initialize receipt items from PO items
       const items: ReceiptItemFormData[] = data.items
-        .filter(item => item.remainingQuantity > 0) // Only items with remaining quantity
-        .map(item => ({
+        .map(item => {
+          const governedLine = sourceLines.get(normalizeGuid(item.id));
+          const remainingQuantity =
+            governedLine?.remainingQuantity ?? item.remainingQuantity;
+          return {
           purchaseOrderItemId: item.id,
           itemCode: item.itemCode,
           itemName: item.itemName,
           orderedQuantity: item.orderedQuantity,
-          previouslyReceived: item.receivedQuantity,
-          remainingQuantity: item.remainingQuantity,
+          previouslyReceived:
+            governedLine?.previouslyReceiptedQuantity ?? item.receivedQuantity,
+          remainingQuantity,
           unitOfMeasure: item.unitOfMeasure,
           itemUnitOfMeasureId: item.itemUnitOfMeasureId,
           // Do not auto-populate receipt quantities; user will enter what was actually received.
@@ -163,7 +212,9 @@ export default function ReceivePurchaseOrderPage() {
           rejectionReason: '',
           qualityStatus: 'Passed',
           qualityNotes: ''
-        }));
+          };
+        })
+        .filter(item => item.remainingQuantity > 0);
       
       setReceiptItems(items);
       
@@ -371,6 +422,21 @@ export default function ReceivePurchaseOrderPage() {
   };
 
   const handleCreateReceipt = async () => {
+    if (
+      receiptSourceLoading ||
+      receiptSourceError ||
+      receiptSourceReadiness?.canReceive !== true ||
+      sodReadiness?.canReceive !== true
+    ) {
+      toast.error(
+        receiptSourceError ||
+        sodReadiness?.message ||
+        receiptSourceReadiness?.message ||
+        'The governed receipt source and independent receiver controls are not ready.'
+      );
+      return;
+    }
+
     // Validation
     const itemsToReceive = receiptItems.filter(item => item.receivedQuantity > 0);
     
@@ -416,6 +482,7 @@ export default function ReceivePurchaseOrderPage() {
         inspectedById: requiresInspection ? receivedById : undefined,
         notes: receiptNotes || undefined,
         requiresInspection,
+        idempotencyKey,
         items: itemsToReceive.map(item => ({
           purchaseOrderItemId: item.purchaseOrderItemId,
           receivedQuantity: item.receivedQuantity,
@@ -519,6 +586,22 @@ export default function ReceivePurchaseOrderPage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
+
+      <ReceiptSourceControlCard
+        readiness={receiptSourceReadiness}
+        loading={receiptSourceLoading}
+        error={receiptSourceError}
+        onRetry={() => {
+          void loadReceiptSourceReadiness();
+        }}
+      />
+
+      <PurchaseOrderSodControl
+        purchaseOrderId={id}
+        status={order.status}
+        scope="receipt"
+        onReadinessChange={setSodReadiness}
+      />
 
       {/* PO Summary */}
       <Card>
@@ -931,7 +1014,15 @@ export default function ReceivePurchaseOrderPage() {
         </Button>
         <Button
           onClick={handleCreateReceipt}
-          disabled={saving || receiptItems.length === 0 || totalReceiving === 0}
+          disabled={
+            saving ||
+            receiptSourceLoading ||
+            receiptSourceError !== null ||
+            receiptSourceReadiness?.canReceive !== true ||
+            sodReadiness?.canReceive !== true ||
+            receiptItems.length === 0 ||
+            totalReceiving === 0
+          }
         >
           {saving ? (
             <>

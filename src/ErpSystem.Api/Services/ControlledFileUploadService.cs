@@ -313,6 +313,19 @@ public sealed class ControlledFileUploadService : IControlledFileUploadService
                 "The file cannot be deleted while it is referenced by an active central DMS version.",
                 409);
 
+        var isFinanceCloseEvidence = await _db.FinanceCloseEvidenceAttachments
+            .IgnoreQueryFilters()
+            .AnyAsync(item =>
+                    item.TenantId == tenantId &&
+                    !item.IsDeleted &&
+                    item.FileUploadRecordId == fileUploadRecordId,
+                cancellationToken);
+        if (isFinanceCloseEvidence)
+            throw Failure(
+                "FILE_RECORD_REFERENCED_BY_FINANCE_CLOSE_EVIDENCE",
+                "The file cannot be deleted while it is referenced by active Finance close evidence.",
+                409);
+
         if (record.IsDeleted)
         {
             if (!record.StorageDeletedAtUtc.HasValue &&

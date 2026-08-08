@@ -40,7 +40,7 @@ const define = (
 ): ProcurementDecisionFormDefinition => ({
   decisionKey,
   fields: [...fields, ...effectiveFields],
-  defaults: { ...defaults, effectiveFrom: '', effectiveTo: '' },
+  defaults: { ...defaults, effectiveFrom: '' },
 });
 
 export const procurementDecisionFormRegistry: Record<string, ProcurementDecisionFormDefinition> = {
@@ -106,15 +106,22 @@ export const procurementDecisionFormRegistry: Record<string, ProcurementDecision
     { key: 'amount', label: 'Amount', type: 'number', min: 0, step: 0.01, required: true },
     { key: 'currencyCode', label: 'Currency', type: 'select', options: currencies, required: true },
     { key: 'taxPercent', label: 'Tax percent', type: 'number', min: 0, max: 100, step: 0.01, required: true },
-    { key: 'paymentChannels', label: 'Allowed payment-method codes', type: 'textList' },
-    { key: 'revenueAccountId', label: 'Fee revenue account ID', type: 'text' },
-    { key: 'taxAccountId', label: 'Tax liability account ID', type: 'text' },
-    { key: 'exemptionWorkflowDefinitionId', label: 'Exemption workflow definition ID', type: 'text' },
-    { key: 'receiptNumberFormat', label: 'Receipt number format', type: 'text', required: true },
+    { key: 'paymentChannels', label: 'Allowed payment methods', type: 'textList' },
+    { key: 'revenueAccountId', label: 'Fee revenue account', type: 'text' },
+    { key: 'taxAccountId', label: 'Tax liability account', type: 'text' },
+    { key: 'exemptionWorkflowDefinitionId', label: 'Exemption workflow definition', type: 'text' },
+    { key: 'receiptNumberFormat', label: 'Receipt number format', type: 'text', required: true, placeholder: 'SUP-REC-{YYYY}-{######}' },
     { key: 'exemptionRule', label: 'Exemption rule', type: 'textarea', required: true },
     { key: 'refundRule', label: 'Refund rule', type: 'textarea', required: true },
     { key: 'renewalRule', label: 'Renewal rule', type: 'textarea', required: true },
-  ], { mode: 'paid', amount: 0, currencyCode: 'GHS', taxPercent: 0, paymentChannels: [] }),
+  ], {
+    mode: 'paid',
+    amount: 0,
+    currencyCode: 'GHS',
+    taxPercent: 0,
+    paymentChannels: [],
+    receiptNumberFormat: 'SUP-REC-{YYYY}-{######}',
+  }),
   'DEC-008': define('DEC-008', [
     { key: 'documentType', label: 'Document type', type: 'text', required: true },
     { key: 'signatureMode', label: 'Signature mode', type: 'select', options: [{ value: 'electronic', label: 'Electronic' }, { value: 'uploadedManualEvidence', label: 'Uploaded manual evidence' }, { value: 'electronicOrManualEvidence', label: 'Electronic or manual evidence' }], required: true },
@@ -185,11 +192,23 @@ export const procurementDecisionFormRegistry: Record<string, ProcurementDecision
     { key: 'documentType', label: 'Receipt document type', type: 'select', options: [{ value: 'grn', label: 'GRN' }, { value: 'mrn', label: 'MRN' }, { value: 'grnAndMrn', label: 'GRN and MRN' }], required: true },
     { key: 'applicabilityRule', label: 'Applicability rule', type: 'textarea', required: true },
     { key: 'coexistenceRule', label: 'Coexistence rule', type: 'select', options: [{ value: 'mutuallyExclusive', label: 'Mutually exclusive' }, { value: 'bothFromSingleReceipt', label: 'Both from one receipt' }, { value: 'sequentialDocuments', label: 'Sequential documents' }], required: true },
-    { key: 'numberFormat', label: 'Number format', type: 'text', required: true },
-    { key: 'templateReference', label: 'Template reference', type: 'text', required: true },
+    { key: 'numberFormat', label: 'Shared number format', type: 'text', required: true, placeholder: '{TYPE}-{YYYY}-{######}' },
+    { key: 'grnNumberFormat', label: 'GRN number format override', type: 'text', placeholder: 'GRN-{YYYY}-{######}' },
+    { key: 'mrnNumberFormat', label: 'MRN number format override', type: 'text', placeholder: 'MRN-{YYYY}-{######}' },
+    { key: 'templateReference', label: 'Shared central DMS template', type: 'text', required: true, placeholder: 'TDC-{TYPE}' },
+    { key: 'grnTemplateReference', label: 'GRN DMS template override', type: 'text', placeholder: 'TDC-GRN' },
+    { key: 'mrnTemplateReference', label: 'MRN DMS template override', type: 'text', placeholder: 'TDC-MRN' },
     { key: 'signatureRequirements', label: 'Signature requirements', type: 'textList', required: true },
     { key: 'evidenceRequirements', label: 'Evidence requirements', type: 'textList', required: true },
-  ], { documentType: 'grn', coexistenceRule: 'mutuallyExclusive', signatureRequirements: [], evidenceRequirements: [] }),
+  ], {
+    documentType: 'grn',
+    applicabilityRule: 'All governed goods receipts',
+    coexistenceRule: 'mutuallyExclusive',
+    numberFormat: '{TYPE}-{YYYY}-{######}',
+    templateReference: 'TDC-{TYPE}',
+    signatureRequirements: [],
+    evidenceRequirements: [],
+  }),
   'DEC-014': define('DEC-014', [
     { key: 'workloadScenario', label: 'Workload scenario', type: 'textarea', required: true },
     { key: 'availabilityTargetPercent', label: 'Availability target percent', type: 'number', min: 0, max: 100, step: 0.01, required: true },
@@ -241,4 +260,21 @@ export function displayDecisionFormField(value: unknown, type: ProcurementDecisi
   if (type === 'textList') return Array.isArray(value) ? value.join(', ') : '';
   if (value === undefined || value === null) return '';
   return String(value);
+}
+
+export function normalizeDecisionFormValue(
+  decisionKey: string,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const definition = procurementDecisionFormRegistry[decisionKey];
+  if (!definition) throw new Error(`Unknown procurement decision key ${decisionKey}`);
+
+  const normalized = { ...value };
+  for (const field of definition.fields) {
+    if (field.type === 'date' && !field.required && (normalized[field.key] === '' || normalized[field.key] === null)) {
+      delete normalized[field.key];
+    }
+  }
+
+  return normalized;
 }

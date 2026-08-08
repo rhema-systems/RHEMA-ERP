@@ -1,4 +1,5 @@
 export type ProcurementWarehouseScopeMode = 'None' | 'All' | 'Restricted';
+export type ProcurementLocationScopeMode = 'None' | 'All' | 'Restricted';
 export type ProcurementCommitteeStatus = 'Draft' | 'Active' | 'Retired';
 export type ProcurementCommitteeMemberKind = 'Chair' | 'VotingMember' | 'NonVotingMember' | 'Observer' | 'Secretary';
 
@@ -19,17 +20,20 @@ export interface ProcurementAccessPermission {
   code: string; name: string; description: string; isMutation: boolean; isWarehouseScoped: boolean; isConfigured: boolean;
 }
 
-export interface ProcurementAccessUser { userId: string; username: string; displayName: string; isActive: boolean; }
+export interface ProcurementAccessUser { userId: string; username: string; displayName: string; isActive: boolean; roleNames: string[]; }
 export interface ProcurementAccessWarehouse { warehouseId: string; code: string; name: string; isActive: boolean; }
+export interface ProcurementAccessLocation { locationId: string; warehouseId: string; warehouseCode: string; code: string; name: string; isActive: boolean; }
 
 export interface ProcurementResponsibilityAssignment {
   id: string; userId: string; username: string; userDisplayName: string; roleId: string; roleName: string; roleDisplayName: string;
   warehouseScopeMode: ProcurementWarehouseScopeMode; warehouses: ProcurementAccessWarehouse[];
+  locationScopeMode: ProcurementLocationScopeMode; locations: ProcurementAccessLocation[];
   effectiveFrom: string; effectiveTo?: string; isActive: boolean; reason: string; rowVersion: string;
 }
 
 export interface SaveProcurementResponsibilityAssignment {
   userId: string; roleName: string; warehouseScopeMode: ProcurementWarehouseScopeMode; warehouseIds: string[];
+  locationScopeMode: ProcurementLocationScopeMode; locationIds: string[];
   effectiveFrom: string; effectiveTo?: string; isActive: boolean; reason: string; rowVersion?: string;
 }
 
@@ -60,12 +64,12 @@ export interface ProcurementAccessWorkflow {
 }
 
 export interface ProcurementAccessCapabilityRequest {
-  permissionCode: string; warehouseId?: string; committeeCode?: string; sourceType: string; sourceReference: string;
+  permissionCode: string; warehouseId?: string; locationId?: string; requireLocationScope?: boolean; committeeCode?: string; sourceType: string; sourceReference: string;
 }
 
 export interface ProcurementAccessCapabilityDecision {
   allowed: boolean; code: string; message: string; actorUserId: string; tenantId: string; permissionCode: string;
-  warehouseId?: string; committeeCode?: string; matchedAssignmentIds: string[]; matchedRoles: string[];
+  warehouseId?: string; locationId?: string; committeeCode?: string; matchedAssignmentIds: string[]; matchedRoles: string[];
   correlationId: string; evaluatedAtUtc: string;
 }
 

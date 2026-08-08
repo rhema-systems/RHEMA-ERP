@@ -1017,6 +1017,12 @@ public class LandAcquisitionsController : ControllerBase
                 .ToList(),
             // Reaching asset creation proves the Survey Verification workflow stage was approved.
             // The removed verification checkboxes must not remain a hidden prerequisite for Land Bank use.
+            // CadastralMatch: true after Survey Verification is approved.
+            CadastralMatch = acquisition.StageOrder > (int)AcquisitionProcedure.SurveyVerification,
+            // OverlapCleared: true after Survey Verification is approved.
+            OverlapCleared = acquisition.StageOrder > (int)AcquisitionProcedure.SurveyVerification,
+            // BoundaryConfirmed: true after Survey Verification is approved.
+            BoundaryConfirmed = acquisition.StageOrder > (int)AcquisitionProcedure.SurveyVerification,
             BoundaryVerified = acquisition.StageOrder > (int)AcquisitionProcedure.SurveyVerification,
             IsReadyForProjectManagement = false,
             Notes = "Land asset published from land acquisition into Estate Land Bank for demarcation and project-readiness review."

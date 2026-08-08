@@ -3,7 +3,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Services.Ehc.Sla;
 using ErpSystem.Shared;
-using OfficeOpenXml;
+using ClosedXML.Excel;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -1169,9 +1169,8 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var rows = await BuildAgentPerformanceAsync(tenantId, days, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var ws = package.Workbook.Worksheets.Add("Agent Performance");
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("Agent Performance");
 
         var headers = new[]
         {
@@ -1187,27 +1186,27 @@ public sealed class EhcInternalReportsController : ControllerBase
 
         for (var c = 0; c < headers.Length; c++)
         {
-            ws.Cells[1, c + 1].Value = headers[c];
-            ws.Cells[1, c + 1].Style.Font.Bold = true;
+            ws.Cell(1, c + 1).Value = headers[c];
+            ws.Cell(1, c + 1).Style.Font.Bold = true;
         }
 
         var r = 2;
         foreach (var row in rows)
         {
-            ws.Cells[r, 1].Value = row.AgentName;
-            ws.Cells[r, 2].Value = row.TotalAssigned;
-            ws.Cells[r, 3].Value = row.OpenAssigned;
-            ws.Cells[r, 4].Value = row.ResolvedAssigned;
-            ws.Cells[r, 5].Value = row.FirstResponseBreaches;
-            ws.Cells[r, 6].Value = row.ResolutionBreaches;
-            ws.Cells[r, 7].Value = row.AvgFirstResponseMinutes;
-            ws.Cells[r, 8].Value = row.AvgResolutionMinutes;
+            ws.Cell(r, 1).Value = row.AgentName;
+            ws.Cell(r, 2).Value = row.TotalAssigned;
+            ws.Cell(r, 3).Value = row.OpenAssigned;
+            ws.Cell(r, 4).Value = row.ResolvedAssigned;
+            ws.Cell(r, 5).Value = row.FirstResponseBreaches;
+            ws.Cell(r, 6).Value = row.ResolutionBreaches;
+            SetExcelValue(ws.Cell(r, 7), row.AvgFirstResponseMinutes);
+            SetExcelValue(ws.Cell(r, 8), row.AvgResolutionMinutes);
             r++;
         }
 
-        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        ws.ColumnsUsed().AdjustToContents();
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-agent-performance-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1218,9 +1217,8 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var points = await BuildSlaComplianceAsync(tenantId, days, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var ws = package.Workbook.Worksheets.Add("SLA Compliance");
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("SLA Compliance");
 
         var headers = new[]
         {
@@ -1236,27 +1234,27 @@ public sealed class EhcInternalReportsController : ControllerBase
 
         for (var c = 0; c < headers.Length; c++)
         {
-            ws.Cells[1, c + 1].Value = headers[c];
-            ws.Cells[1, c + 1].Style.Font.Bold = true;
+            ws.Cell(1, c + 1).Value = headers[c];
+            ws.Cell(1, c + 1).Style.Font.Bold = true;
         }
 
         var r = 2;
         foreach (var p in points)
         {
-            ws.Cells[r, 1].Value = p.Date;
-            ws.Cells[r, 2].Value = p.TotalTickets;
-            ws.Cells[r, 3].Value = p.FirstResponseMet;
-            ws.Cells[r, 4].Value = p.FirstResponseBreached;
-            ws.Cells[r, 5].Value = p.FirstResponseCompliancePercent;
-            ws.Cells[r, 6].Value = p.ResolutionMet;
-            ws.Cells[r, 7].Value = p.ResolutionBreached;
-            ws.Cells[r, 8].Value = p.ResolutionCompliancePercent;
+            ws.Cell(r, 1).Value = p.Date;
+            ws.Cell(r, 2).Value = p.TotalTickets;
+            ws.Cell(r, 3).Value = p.FirstResponseMet;
+            ws.Cell(r, 4).Value = p.FirstResponseBreached;
+            SetExcelValue(ws.Cell(r, 5), p.FirstResponseCompliancePercent);
+            ws.Cell(r, 6).Value = p.ResolutionMet;
+            ws.Cell(r, 7).Value = p.ResolutionBreached;
+            SetExcelValue(ws.Cell(r, 8), p.ResolutionCompliancePercent);
             r++;
         }
 
-        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        ws.ColumnsUsed().AdjustToContents();
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-sla-compliance-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1267,30 +1265,29 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var rows = await BuildEscalationsAsync(tenantId, days, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var ws = package.Workbook.Worksheets.Add("Escalations");
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("Escalations");
 
         var headers = new[] { "Policy", "Trigger", "Level", "Count" };
         for (var c = 0; c < headers.Length; c++)
         {
-            ws.Cells[1, c + 1].Value = headers[c];
-            ws.Cells[1, c + 1].Style.Font.Bold = true;
+            ws.Cell(1, c + 1).Value = headers[c];
+            ws.Cell(1, c + 1).Style.Font.Bold = true;
         }
 
         var r = 2;
         foreach (var row in rows)
         {
-            ws.Cells[r, 1].Value = row.PolicyName;
-            ws.Cells[r, 2].Value = row.Trigger;
-            ws.Cells[r, 3].Value = row.Level;
-            ws.Cells[r, 4].Value = row.Count;
+            ws.Cell(r, 1).Value = row.PolicyName;
+            ws.Cell(r, 2).Value = row.Trigger;
+            ws.Cell(r, 3).Value = row.Level;
+            ws.Cell(r, 4).Value = row.Count;
             r++;
         }
 
-        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        ws.ColumnsUsed().AdjustToContents();
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-escalations-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1301,36 +1298,35 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var summary = await BuildFeedbackSummaryAsync(tenantId, days, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var ws = package.Workbook.Worksheets.Add("Feedback Summary");
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("Feedback Summary");
 
-        ws.Cells[1, 1].Value = "Days";
-        ws.Cells[1, 2].Value = days;
-        ws.Cells[2, 1].Value = "Feedback Count";
-        ws.Cells[2, 2].Value = summary.FeedbackCount;
-        ws.Cells[3, 1].Value = "Average Rating";
-        ws.Cells[3, 2].Value = summary.AvgRating;
-        ws.Cells[4, 1].Value = "Resolved/Closed Tickets";
-        ws.Cells[4, 2].Value = summary.ResolvedOrClosedTickets;
-        ws.Cells[5, 1].Value = "Response Rate (%)";
-        ws.Cells[5, 2].Value = summary.ResponseRatePercent;
+        ws.Cell(1, 1).Value = "Days";
+        ws.Cell(1, 2).Value = days;
+        ws.Cell(2, 1).Value = "Feedback Count";
+        ws.Cell(2, 2).Value = summary.FeedbackCount;
+        ws.Cell(3, 1).Value = "Average Rating";
+        SetExcelValue(ws.Cell(3, 2), summary.AvgRating);
+        ws.Cell(4, 1).Value = "Resolved/Closed Tickets";
+        ws.Cell(4, 2).Value = summary.ResolvedOrClosedTickets;
+        ws.Cell(5, 1).Value = "Response Rate (%)";
+        SetExcelValue(ws.Cell(5, 2), summary.ResponseRatePercent);
 
-        ws.Cells[7, 1].Value = "Rating";
-        ws.Cells[7, 2].Value = "Count";
-        ws.Cells[7, 1, 7, 2].Style.Font.Bold = true;
+        ws.Cell(7, 1).Value = "Rating";
+        ws.Cell(7, 2).Value = "Count";
+        ws.Range(7, 1, 7, 2).Style.Font.Bold = true;
 
         var r = 8;
         foreach (var kv in summary.RatingDistribution.OrderBy(x => x.Key))
         {
-            ws.Cells[r, 1].Value = kv.Key;
-            ws.Cells[r, 2].Value = kv.Value;
+            ws.Cell(r, 1).Value = kv.Key;
+            ws.Cell(r, 2).Value = kv.Value;
             r++;
         }
 
-        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        ws.ColumnsUsed().AdjustToContents();
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-feedback-summary-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1341,29 +1337,28 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var rows = await BuildFeedbackByAgentAsync(tenantId, days, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var ws = package.Workbook.Worksheets.Add("Feedback By Agent");
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("Feedback By Agent");
 
         var headers = new[] { "Agent", "Feedback Count", "Avg Rating" };
         for (var c = 0; c < headers.Length; c++)
         {
-            ws.Cells[1, c + 1].Value = headers[c];
-            ws.Cells[1, c + 1].Style.Font.Bold = true;
+            ws.Cell(1, c + 1).Value = headers[c];
+            ws.Cell(1, c + 1).Style.Font.Bold = true;
         }
 
         var r = 2;
         foreach (var row in rows)
         {
-            ws.Cells[r, 1].Value = row.AgentName;
-            ws.Cells[r, 2].Value = row.FeedbackCount;
-            ws.Cells[r, 3].Value = row.AvgRating;
+            ws.Cell(r, 1).Value = row.AgentName;
+            ws.Cell(r, 2).Value = row.FeedbackCount;
+            SetExcelValue(ws.Cell(r, 3), row.AvgRating);
             r++;
         }
 
-        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        ws.ColumnsUsed().AdjustToContents();
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-feedback-by-agent-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1374,29 +1369,28 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var rows = await BuildFeedbackByDepartmentAsync(tenantId, days, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
-        var ws = package.Workbook.Worksheets.Add("Feedback By Department");
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("Feedback By Department");
 
         var headers = new[] { "Department", "Feedback Count", "Avg Rating" };
         for (var c = 0; c < headers.Length; c++)
         {
-            ws.Cells[1, c + 1].Value = headers[c];
-            ws.Cells[1, c + 1].Style.Font.Bold = true;
+            ws.Cell(1, c + 1).Value = headers[c];
+            ws.Cell(1, c + 1).Style.Font.Bold = true;
         }
 
         var r = 2;
         foreach (var row in rows)
         {
-            ws.Cells[r, 1].Value = row.DepartmentName;
-            ws.Cells[r, 2].Value = row.FeedbackCount;
-            ws.Cells[r, 3].Value = row.AvgRating;
+            ws.Cell(r, 1).Value = row.DepartmentName;
+            ws.Cell(r, 2).Value = row.FeedbackCount;
+            SetExcelValue(ws.Cell(r, 3), row.AvgRating);
             r++;
         }
 
-        ws.Cells[ws.Dimension.Address].AutoFitColumns();
+        ws.ColumnsUsed().AdjustToContents();
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-feedback-by-department-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1706,18 +1700,17 @@ public sealed class EhcInternalReportsController : ControllerBase
         var tenantId = GetTenantIdOrEmpty();
         var summary = await BuildSummaryAsync(tenantId, cancellationToken);
 
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        using var package = new ExcelPackage();
+        using var workbook = new XLWorkbook();
 
-        var totals = package.Workbook.Worksheets.Add("Totals");
-        totals.Cells[1, 1].Value = "Metric";
-        totals.Cells[1, 2].Value = "Value";
-        totals.Cells[1, 1, 1, 2].Style.Font.Bold = true;
+        var totals = workbook.Worksheets.Add("Totals");
+        totals.Cell(1, 1).Value = "Metric";
+        totals.Cell(1, 2).Value = "Value";
+        totals.Range(1, 1, 1, 2).Style.Font.Bold = true;
         var r = 2;
         void Row(string key, object? value)
         {
-            totals.Cells[r, 1].Value = key;
-            totals.Cells[r, 2].Value = value?.ToString() ?? "—";
+            totals.Cell(r, 1).Value = key;
+            totals.Cell(r, 2).Value = value?.ToString() ?? "—";
             r++;
         }
 
@@ -1727,24 +1720,24 @@ public sealed class EhcInternalReportsController : ControllerBase
         Row("Resolution breaches", summary.Totals.ResolutionBreaches);
         Row("Avg first response (min)", summary.Totals.AvgFirstResponseMinutes);
         Row("Avg resolution (min)", summary.Totals.AvgResolutionMinutes);
-        totals.Cells[totals.Dimension.Address].AutoFitColumns();
+        totals.ColumnsUsed().AdjustToContents();
 
         void AddCountSheet<T>(string sheetName, string leftHeader, IEnumerable<T> rows, Func<T, string> leftValue, Func<T, int> countValue)
         {
-            var ws = package.Workbook.Worksheets.Add(sheetName);
-            ws.Cells[1, 1].Value = leftHeader;
-            ws.Cells[1, 2].Value = "Count";
-            ws.Cells[1, 1, 1, 2].Style.Font.Bold = true;
+            var ws = workbook.Worksheets.Add(sheetName);
+            ws.Cell(1, 1).Value = leftHeader;
+            ws.Cell(1, 2).Value = "Count";
+            ws.Range(1, 1, 1, 2).Style.Font.Bold = true;
 
             var rr = 2;
             foreach (var row in rows)
             {
-                ws.Cells[rr, 1].Value = leftValue(row);
-                ws.Cells[rr, 2].Value = countValue(row);
+                ws.Cell(rr, 1).Value = leftValue(row);
+                ws.Cell(rr, 2).Value = countValue(row);
                 rr++;
             }
 
-            ws.Cells[ws.Dimension.Address].AutoFitColumns();
+            ws.ColumnsUsed().AdjustToContents();
         }
 
         AddCountSheet("By Status", "Status", summary.ByStatus, x => x.Status.ToString(), x => x.Count);
@@ -1754,7 +1747,7 @@ public sealed class EhcInternalReportsController : ControllerBase
         AddCountSheet("Top Categories", "Category", summary.ByCategory, x => x.CategoryName, x => x.Count);
         AddCountSheet("Top Root Causes", "Root Cause", summary.ByRootCause, x => x.RootCauseName, x => x.Count);
 
-        var bytes = await package.GetAsByteArrayAsync(cancellationToken);
+        var bytes = ToByteArray(workbook);
         var fileName = $"ehc-summary-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
@@ -1936,6 +1929,34 @@ public sealed class EhcInternalReportsController : ControllerBase
         {
             _logger.LogError(ex, "Failed to export EHC escalations PDF");
             return StatusCode(500, new { success = false, message = "Failed to export PDF" });
+        }
+    }
+
+    private static byte[] ToByteArray(XLWorkbook workbook)
+    {
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
+
+    private static void SetExcelValue(IXLCell cell, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                return;
+            case int number:
+                cell.Value = number;
+                return;
+            case double number:
+                cell.Value = number;
+                return;
+            case decimal number:
+                cell.Value = number;
+                return;
+            default:
+                cell.Value = value.ToString() ?? string.Empty;
+                return;
         }
     }
 }

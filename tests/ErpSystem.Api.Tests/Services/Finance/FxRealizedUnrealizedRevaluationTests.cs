@@ -337,23 +337,120 @@ public sealed class FxRealizedUnrealizedRevaluationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
     [Trait("Category", "FX")]
-    public async Task FunctionalOrThirdCurrencySettlementOfForeignInvoiceIsRejected()
+    public async Task FunctionalOrThirdCurrencySettlementUsesFrozenPaymentSideEvidence()
     {
         await using var fixture = await FxFixture.CreateAsync();
         var apScenario = await fixture.PostApSettlementAsync(invoiceRate: 10m, paymentRate: 12m, settledForeignAmount: 100m);
         apScenario.ApPayment!.CurrencyCode = "GHS";
+        var apAllocation = apScenario.ApPayment.Allocations.Single();
+        apAllocation.PaymentCurrencyCode = "GHS";
+        apAllocation.PaymentCurrencyAmount = 1_200m;
+        apAllocation.PaymentExchangeRate = 1m;
+        apAllocation.SettlementFunctionalAmount = 1_200m;
+        apAllocation.IsCrossCurrency = true;
+
         var arScenario = await fixture.PostArSettlementAsync(invoiceRate: 10m, receiptRate: 12m, settledForeignAmount: 100m);
         arScenario.ArReceipt!.CurrencyCode = "EUR";
+        var arAllocation = arScenario.ArReceipt.Allocations.Single();
+        arAllocation.PaymentCurrencyCode = "EUR";
+        arAllocation.PaymentCurrencyAmount = 80m;
+        arAllocation.PaymentExchangeRate = 15m;
+        arAllocation.SettlementFunctionalAmount = 1_200m;
+        arAllocation.IsCrossCurrency = true;
         await fixture.Db.SaveChangesAsync();
 
-        await fixture.Service.Invoking(s => s.PostRealizedFxForApPaymentAsync(apScenario.ApPayment.Id))
-            .Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Cross-currency AP settlements are not supported*");
-        await fixture.Service.Invoking(s => s.PostRealizedFxForArReceiptAsync(arScenario.ArReceipt.Id))
-            .Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Cross-currency AR settlements are not supported*");
+        var apSettlements = await fixture.Service.PostRealizedFxForApPaymentAsync(apScenario.ApPayment.Id);
+        var arSettlements = await fixture.Service.PostRealizedFxForArReceiptAsync(arScenario.ArReceipt.Id);
+
+        apSettlements.Should().ContainSingle();
+        apSettlements[0].PaymentCurrencyCode.Should().Be("GHS");
+        apSettlements[0].PaymentCurrencyAmount.Should().Be(1_200m);
+        apSettlements[0].GainLossAmount.Should().Be(200m);
+        arSettlements.Should().ContainSingle();
+        arSettlements[0].PaymentCurrencyCode.Should().Be("EUR");
+        arSettlements[0].PaymentCurrencyAmount.Should().Be(80m);
+        arSettlements[0].GainLossAmount.Should().Be(200m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task ForeignApPaymentSettlingFunctionalInvoiceUsesRateOneHistoricalBasis()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        var scenario = await fixture.PostApSettlementAsync(
+            invoiceRate: 1m,
+            paymentRate: 11m,
+            settledForeignAmount: 100m,
+            invoiceForeignAmount: 1_200m);
+        var invoice = scenario.ApInvoice!;
+        var payment = scenario.ApPayment!;
+        var allocation = payment.Allocations.Single();
+
+        // Recast the helper's invoice/control lines as a genuine functional GHS exposure. A
+        // functional line correctly has no ExchangeRate metadata; the regression is that the FX
+        // service must use historical rate one rather than reject that missing foreign snapshot.
+        invoice.CurrencyCode = "GHS";
+        invoice.ExchangeRate = 1m;
+        allocation.AllocatedAmount = 1_200m;
+        allocation.InvoiceCurrencyCode = "GHS";
+        allocation.PaymentCurrencyCode = "USD";
+        allocation.PaymentCurrencyAmount = 100m;
+        allocation.PaymentExchangeRate = 11m;
+        allocation.PaymentFunctionalAmount = 1_100m;
+        allocation.SettlementFunctionalAmount = 1_100m;
+        allocation.InvoiceSettlementExchangeRate = 1m;
+        allocation.IsCrossCurrency = true;
+        await fixture.MakeControlLinesFunctionalAsync(invoice.JournalEntryId!.Value, payment.JournalEntryId!.Value, fixture.ApControl.Id);
+
+        var result = (await fixture.Service.PostRealizedFxForApPaymentAsync(payment.Id)).Single();
+
+        result.TransactionCurrency.Should().Be("GHS");
+        result.HistoricalExchangeRate.Should().Be(1m);
+        result.HistoricalExchangeRateId.Should().BeNull();
+        result.HistoricalFunctionalAmount.Should().Be(1_200m);
+        result.SettlementFunctionalAmount.Should().Be(1_100m);
+        result.GainLossType.Should().Be("Gain");
+        result.GainLossAmount.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FX")]
+    public async Task ForeignArReceiptSettlingFunctionalInvoiceUsesRateOneHistoricalBasis()
+    {
+        await using var fixture = await FxFixture.CreateAsync();
+        var scenario = await fixture.PostArSettlementAsync(
+            invoiceRate: 1m,
+            receiptRate: 11m,
+            settledForeignAmount: 100m,
+            invoiceForeignAmount: 1_200m);
+        var invoice = scenario.ArInvoice!;
+        var receipt = scenario.ArReceipt!;
+        var allocation = receipt.Allocations.Single();
+
+        invoice.CurrencyCode = "GHS";
+        invoice.ExchangeRate = 1m;
+        allocation.AllocatedAmount = 1_200m;
+        allocation.InvoiceCurrencyCode = "GHS";
+        allocation.PaymentCurrencyCode = "USD";
+        allocation.PaymentCurrencyAmount = 100m;
+        allocation.PaymentExchangeRate = 11m;
+        allocation.PaymentFunctionalAmount = 1_100m;
+        allocation.SettlementFunctionalAmount = 1_100m;
+        allocation.InvoiceSettlementExchangeRate = 1m;
+        allocation.IsCrossCurrency = true;
+        await fixture.MakeControlLinesFunctionalAsync(invoice.JournalEntryId!.Value, receipt.JournalEntryId!.Value, fixture.ArControl.Id);
+
+        var result = (await fixture.Service.PostRealizedFxForArReceiptAsync(receipt.Id)).Single();
+
+        result.TransactionCurrency.Should().Be("GHS");
+        result.HistoricalExchangeRate.Should().Be(1m);
+        result.HistoricalExchangeRateId.Should().BeNull();
+        result.HistoricalFunctionalAmount.Should().Be(1_200m);
+        result.SettlementFunctionalAmount.Should().Be(1_100m);
+        result.GainLossType.Should().Be("Loss");
+        result.GainLossAmount.Should().Be(100m);
     }
 
     [Fact]
@@ -752,6 +849,26 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             var unrealizedGain = SeedAccount(db, tenantId, "7100", AccountType.Revenue);
             var unrealizedLoss = SeedAccount(db, tenantId, "7110", AccountType.Expense);
             var settings = SeedFinanceSettings(db, tenantId, ap.Id, ar.Id, realizedGain.Id, realizedLoss.Id, unrealizedGain.Id, unrealizedLoss.Id);
+            foreach (var account in new[] { ap, ar, bank, expense, revenue })
+            {
+                // The posting engine now enforces account/currency authorization before accepting
+                // a foreign line. Seed the fixture's intended USD capability explicitly so these
+                // FX tests exercise settlement accounting rather than fail at setup validation.
+                db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    AccountId = account.Id,
+                    LinkedCurrencyCode = "USD",
+                    IsActive = true,
+                    EffectiveDate = new DateTime(2026, 1, 1),
+                    RevaluationRequired = account.Id == ap.Id || account.Id == ar.Id || account.Id == bank.Id,
+                    TransactionRateType = "Daily",
+                    RevaluationRateType = "Month-End",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "Tests"
+                });
+            }
             db.BankAccounts.Add(new BankAccount
             {
                 Id = Guid.NewGuid(),
@@ -804,6 +921,31 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             };
             Db.ExchangeRates.Add(exchangeRate);
             return exchangeRate;
+        }
+
+        public async Task MakeControlLinesFunctionalAsync(
+            Guid invoiceJournalEntryId,
+            Guid settlementJournalEntryId,
+            Guid controlAccountId)
+        {
+            var journalIds = new[] { invoiceJournalEntryId, settlementJournalEntryId };
+            var controlLines = await Db.AccountTransactions
+                .Where(line => journalIds.Contains(line.JournalEntryId) && line.AccountId == controlAccountId)
+                .ToListAsync();
+            foreach (var line in controlLines)
+            {
+                // Functional lines carry functional transaction amounts and deliberately omit
+                // foreign-rate evidence. This matches the production posting-engine contract.
+                line.TransactionCurrency = "GHS";
+                line.TransactionDebitAmount = line.DebitAmount;
+                line.TransactionCreditAmount = line.CreditAmount;
+                line.ForeignCurrencyAmount = null;
+                line.ExchangeRate = null;
+                line.ExchangeRateId = null;
+                line.ExchangeRateSource = null;
+                line.ExchangeRateDate = null;
+            }
+            await Db.SaveChangesAsync();
         }
 
         public async Task<FxScenario> PostApSettlementAsync(

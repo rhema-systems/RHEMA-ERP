@@ -1,7 +1,9 @@
+using System.Reflection;
 using ErpSystem.Api.Controllers;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -86,6 +88,15 @@ public sealed class ControlledFileUploadServiceTests
     [Theory]
     [InlineData(ControlledFileUploadCategories.DocumentManagement)]
     [InlineData(ControlledFileUploadCategories.SupplierRegistrationEvidence)]
+    [InlineData(ControlledFileUploadCategories.HrCandidateCv)]
+    [InlineData(ControlledFileUploadCategories.HrCandidateDocuments)]
+    [InlineData(ControlledFileUploadCategories.HrCandidatePhotos)]
+    [InlineData(ControlledFileUploadCategories.HrLeaveAttachments)]
+    [InlineData(ControlledFileUploadCategories.HrPipAttachments)]
+    [InlineData(ControlledFileUploadCategories.HrDisciplineDocuments)]
+    [InlineData(ControlledFileUploadCategories.HrStaffMovementAttachments)]
+    [InlineData(ControlledFileUploadCategories.HrOfferLetters)]
+    [InlineData(ControlledFileUploadCategories.HrMedicalExamDocuments)]
     public async Task SensitiveCategoriesAreStoredOutsideThePublicWebRoot(
         string category)
     {
@@ -134,6 +145,31 @@ public sealed class ControlledFileUploadServiceTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    /// <summary>
+    /// Every declared HR category must be scan-mandatory. GetEffectivePolicyAsync
+    /// defaults RequireVirusScan to false, so a category missing from
+    /// SystemCleanScanRequired is silently never scanned — and because
+    /// CentralDocumentRepositoryFileService.RegisterAsync rejects Skipped exactly as
+    /// firmly as Infected, it would also fail DMS registration after the bytes were
+    /// already stored. Reflection rather than a hard-coded list so a category added
+    /// later without registering it fails here instead of in production.
+    /// </summary>
+    [Fact]
+    public void EveryHrCategoryRequiresACleanScan()
+    {
+        var hrCategories = typeof(ControlledFileUploadCategories)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+            .Select(field => (string)field.GetRawConstantValue()!)
+            .Where(value => value.StartsWith("hr-", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        hrCategories.Should().NotBeEmpty();
+        hrCategories.Should().OnlyContain(
+            category => ControlledFileUploadCategories
+                .SystemCleanScanRequired.Contains(category));
     }
 
     [Fact]
@@ -520,6 +556,36 @@ public sealed class ControlledFileUploadServiceTests
             .IsDeleted.Should().BeFalse();
         storage.Verify(item => item.DeleteFileAsync(
             It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteRejectsFileReferencedByActiveFinanceCloseEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = Database();
+        var record = FileRecord(tenantId);
+        record.Category = ControlledFileUploadCategories.FinanceCloseEvidence;
+        db.FileUploadRecords.Add(record);
+        db.FinanceCloseEvidenceAttachments.Add(new FinanceCloseEvidenceAttachment
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FinanceCloseCycleId = Guid.NewGuid(),
+            FinanceCloseTaskId = Guid.NewGuid(),
+            FileUploadRecordId = record.Id,
+            EvidenceType = FinanceCloseEvidenceTypes.SupportingDocument
+        });
+        await db.SaveChangesAsync();
+        var storage = Storage(result: Stored(tenantId));
+        var service = Service(db, storage.Object, Mock.Of<IFileVirusScanService>());
+
+        var act = () => service.DeleteAsync(tenantId, record.Id, actorId);
+
+        (await act.Should().ThrowAsync<ControlledFileUploadException>())
+            .Which.Code.Should().Be("FILE_RECORD_REFERENCED_BY_FINANCE_CLOSE_EVIDENCE");
+        (await db.FileUploadRecords.IgnoreQueryFilters().SingleAsync()).IsDeleted.Should().BeFalse();
+        storage.Verify(item => item.DeleteFileAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

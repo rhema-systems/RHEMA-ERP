@@ -52,12 +52,32 @@ public class CustomerPayment : BusinessEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1.0m;
 
+    /// <summary>
+    /// Approved receipt-currency rate snapshot source. The value remains duplicated in
+    /// ExchangeRate intentionally: the id supplies audit lineage while the value guarantees
+    /// deterministic posting if rate-master data is later corrected.
+    /// </summary>
+    public Guid? ExchangeRateId { get; set; }
+
     // Bank/Payment Details
     public Guid? BankAccountId { get; set; }
     public virtual BankAccount? BankAccount { get; set; }
 
+    /// <summary>
+    /// Holding/settlement account used for cash, cheque, mobile-money, and card receipts.
+    /// Direct bank transfers use BankAccountId instead.
+    /// </summary>
+    public Guid? LiquidityAccountId { get; set; }
+    public virtual LiquidityAccount? LiquidityAccount { get; set; }
+
+    public Guid? LiquidityAccountEntryId { get; set; }
+    public virtual LiquidityAccountEntry? LiquidityAccountEntry { get; set; }
+
     [MaxLength(100)]
     public string? CheckNumber { get; set; }
+
+    [MaxLength(150)]
+    public string? ChequeDrawerBank { get; set; }
 
     [MaxLength(100)]
     public string? TransactionReference { get; set; }
@@ -68,6 +88,10 @@ public class CustomerPayment : BusinessEntity
     public Guid? WithholdingTaxAccountId { get; set; }
     public virtual Account? WithholdingTaxAccount { get; set; }
 
+    /// <summary>
+    /// Functional/statutory WHT roll-up derived from the active invoice allocations. The native
+    /// invoice-currency evidence is retained on PaymentAllocation for posting and audit trace.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
 
@@ -77,6 +101,9 @@ public class CustomerPayment : BusinessEntity
     public Guid? VatWithholdingAccountId { get; set; }
     public virtual Account? VatWithholdingAccount { get; set; }
 
+    /// <summary>
+    /// Functional/statutory VAT-WHT roll-up derived from the active invoice allocations.
+    /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal VatWithholdingAmount { get; set; }
 
@@ -100,6 +127,22 @@ public class CustomerPayment : BusinessEntity
 
     // GL Posting
     public Guid? JournalEntryId { get; set; }
+
+    /// <summary>
+    /// Durable lineage for a controlled posted-receipt reversal. The original receipt, journal,
+    /// cash/liquidity entry, and allocations remain in history; these links identify the immutable
+    /// compensating records created to remove their financial and operational effect.
+    /// </summary>
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? ReversalCashTransactionId { get; set; }
+    public Guid? ReversalLiquidityAccountEntryId { get; set; }
+    public DateTime? ReversalDate { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    public Guid? ReversedById { get; set; }
+
+    [MaxLength(1000)]
+    public string? ReversalReason { get; set; }
 
     // Multi-tenant
 

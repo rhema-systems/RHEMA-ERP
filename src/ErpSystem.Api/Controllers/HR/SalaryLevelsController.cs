@@ -7,14 +7,20 @@ using Microsoft.AspNetCore.Mvc;
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Salary Levels API (tenant-aware).
-/// Manages SalaryLevel and provides hierarchy access (notches).
+/// Salary Levels API (tenant-aware), read-only.
+///
+/// Levels are synthesized by the projection from the payroll-defined salary structure (payroll is
+/// 2-tier, HR is 3-tier), so they cannot be edited here. See <see cref="SalaryGradesController"/>.
 /// </summary>
 [ApiController]
 [Route("api/hr/salary-levels")]
 [Authorize]
 public class SalaryLevelsController : ControllerBase
 {
+    private const string ReadOnlyMessage =
+        "Salary levels are derived from the payroll-defined salary structure and cannot be edited in HR. " +
+        "Edit the grade in Payroll (Administration → HR → Payroll → Grades Setup).";
+
     private readonly ISalaryLevelService _salaryLevelService;
     private readonly ISalaryNotchService _salaryNotchService;
     private readonly ICurrentUserService _currentUserService;
@@ -93,161 +99,34 @@ public class SalaryLevelsController : ControllerBase
     }
 
     /// <summary>
-    /// Creates a new salary level.
+    /// Not supported — levels are derived from the payroll grade structure.
     /// </summary>
     [HttpPost]
-    [ProducesResponseType(typeof(SalaryLevelDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<SalaryLevelDto>> Create([FromBody] CreateSalaryLevelDto dto, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            var tenantId = GetTenantIdOrThrow();
-            dto.TenantId = tenantId;
-
-            var created = await _salaryLevelService.CreateLevelAsync(tenantId, dto, cancellationToken);
-            return CreatedAtAction(nameof(GetById), new { levelId = created.Id }, created);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating salary level");
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while creating the salary level");
-        }
-    }
+    public IActionResult Create([FromBody] CreateSalaryLevelDto dto) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Updates an existing salary level.
+    /// Not supported — levels are derived from the payroll grade structure.
     /// </summary>
     [HttpPut("{levelId:guid}")]
-    [ProducesResponseType(typeof(SalaryLevelDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<SalaryLevelDto>> Update(Guid levelId, [FromBody] UpdateSalaryLevelDto dto, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (levelId != dto.Id)
-            {
-                return BadRequest(new { message = "ID mismatch" });
-            }
-
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            var tenantId = GetTenantIdOrThrow();
-            dto.TenantId = tenantId;
-
-            var updated = await _salaryLevelService.UpdateLevelAsync(tenantId, dto, cancellationToken);
-            return Ok(updated);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating salary level with ID {LevelId}", levelId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while updating the salary level");
-        }
-    }
+    public IActionResult Update(Guid levelId, [FromBody] UpdateSalaryLevelDto dto) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Activates or deactivates a salary level.
+    /// Not supported — a level's active state follows its payroll grade.
     /// </summary>
     [HttpPut("{levelId:guid}/active")]
-    [ProducesResponseType(typeof(SalaryLevelDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<SalaryLevelDto>> SetActive(Guid levelId, [FromQuery] bool isActive, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var tenantId = GetTenantIdOrThrow();
-            var updated = await _salaryLevelService.SetLevelActiveAsync(tenantId, levelId, isActive, cancellationToken);
-            return Ok(updated);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating salary level active status for {LevelId}", levelId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while updating the salary level");
-        }
-    }
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public IActionResult SetActive(Guid levelId, [FromQuery] bool isActive) => MirrorIsReadOnly();
 
     /// <summary>
-    /// Deletes a salary level (soft delete).
-    /// Deletion is prevented if the level has any salary notches.
+    /// Not supported — remove the grade in Payroll; the mirror deactivates it on the next sync.
     /// </summary>
     [HttpDelete("{levelId:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Delete(Guid levelId, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var tenantId = GetTenantIdOrThrow();
-            await _salaryLevelService.DeleteLevelAsync(tenantId, levelId, cancellationToken);
-            return NoContent();
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Unauthorized(new { message = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting salary level with ID {LevelId}", levelId);
-            return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while deleting the salary level");
-        }
-    }
+    public IActionResult Delete(Guid levelId) => MirrorIsReadOnly();
+
+    private ObjectResult MirrorIsReadOnly() => Conflict(new { message = ReadOnlyMessage });
 
     private Guid GetTenantIdOrThrow()
         => _currentUserService.TenantId ?? throw new UnauthorizedAccessException("Invalid tenant context");

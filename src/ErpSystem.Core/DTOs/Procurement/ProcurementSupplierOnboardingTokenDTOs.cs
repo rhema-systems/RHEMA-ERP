@@ -84,6 +84,8 @@ public sealed class ProcurementSupplierOnboardingTokenDto :
 public sealed class ProcurementSupplierOnboardingPaymentDto
 {
     public Guid Id { get; set; }
+    public Guid? SubmittedByApplicantSessionId { get; set; }
+    public bool SubmittedByApplicant => SubmittedByApplicantSessionId.HasValue;
     public Guid PaymentMethodId { get; set; }
     public string PaymentMethodCode { get; set; } = string.Empty;
     public string PaymentMethodName { get; set; } = string.Empty;
@@ -139,6 +141,12 @@ public sealed class IssueProcurementSupplierOnboardingTokenRequest
 {
     [Required]
     public Guid RegistrationId { get; set; }
+
+    /// <summary>
+    /// Retained for wire compatibility only. Token issue always resolves the
+    /// policy effective at the trusted server time; callers cannot backdate or
+    /// future-date fee-policy selection.
+    /// </summary>
     public DateTime? EffectiveAtUtc { get; set; }
 }
 
@@ -159,8 +167,8 @@ public sealed class ReconcileProcurementSupplierOnboardingPaymentRequest
     [Required, StringLength(200)]
     public string ReconciliationReference { get; set; } = string.Empty;
 
-    [Required, StringLength(1000)]
-    public string Notes { get; set; } = string.Empty;
+    [StringLength(1000)]
+    public string? Notes { get; set; }
 
     [Required]
     public string RowVersion { get; set; } = string.Empty;

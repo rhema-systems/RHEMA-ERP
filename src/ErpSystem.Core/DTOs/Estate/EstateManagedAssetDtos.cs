@@ -290,6 +290,9 @@ public class LandAcquisitionEstateHandoffDto
     public DateTime? SurveyDate { get; set; }
     public int? BeaconCount { get; set; }
     public List<ExistingLandOwnerDto> OwnershipHistory { get; set; } = [];
+    public bool CadastralMatch { get; set; }
+    public bool OverlapCleared { get; set; }
+    public bool BoundaryConfirmed { get; set; }
     public bool BoundaryVerified { get; set; }
     public bool IsReadyForProjectManagement { get; set; }
     public string? Notes { get; set; }

@@ -226,6 +226,30 @@ public class GoodsReceiptNote : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    // Governed source/capacity snapshot (TDC-0501)
+    [MaxLength(100)]
+    public string? IdempotencyKey { get; set; }
+
+    [MaxLength(64)]
+    public string? IdempotencyRequestHash { get; set; }
+
+    [MaxLength(100)]
+    public string? CorrelationId { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal ReceiptTolerancePercent { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ReceiptSourceSnapshotJson { get; set; }
+
+    [MaxLength(64)]
+    public string? ReceiptSourceIntegrityHash { get; set; }
+
+    public DateTime? ReceiptSourceValidatedAtUtc { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public bool StockUpdated { get; set; } = false;
     public DateTime? StockUpdatedAt { get; set; }
 
@@ -263,6 +287,21 @@ public class GoodsReceiptNoteItem : TenantEntity
     public decimal ReceivedQuantity { get; set; } = 0;
 
     [Column(TypeName = "decimal(18,4)")]
+    public decimal PreviouslyReceiptedQuantitySnapshot { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal ToleranceQuantitySnapshot { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal MaximumReceivableQuantitySnapshot { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal RemainingQuantityBeforeReceiptSnapshot { get; set; }
+
+    [MaxLength(64)]
+    public string? ReceiptLineIntegrityHash { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
     public decimal AcceptedQuantity { get; set; } = 0;
 
     [Column(TypeName = "decimal(18,4)")]
@@ -292,6 +331,8 @@ public class GoodsReceiptNoteItem : TenantEntity
 
     public DateTime? ManufactureDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
+    [Column(TypeName = "nvarchar(max)")] public string? ScanTrackingLinesJson { get; set; }
 
     // Inspection
     public InspectionResult InspectionResult { get; set; } = InspectionResult.Pending;
@@ -348,6 +389,9 @@ public class InventoryTransfer : TenantEntity
     public DateTime? ShippedDate { get; set; }
     public DateTime? ReceivedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
+    public Guid? ClosedById { get; set; }
+    public bool HasOpenDiscrepancy { get; set; }
+    [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     // Status
     public TransferStatus Status { get; set; } = TransferStatus.Draft;
@@ -433,6 +477,8 @@ public class InventoryTransfer : TenantEntity
     public virtual ApplicationUser? ShippedBy { get; set; }
     public virtual ApplicationUser? ReceivedBy { get; set; }
     public virtual ICollection<InventoryTransferItem> Items { get; set; } = new List<InventoryTransferItem>();
+    public virtual ICollection<InventoryTransferAction> Actions { get; set; } = new List<InventoryTransferAction>();
+    public virtual ICollection<InventoryTransferDiscrepancy> Discrepancies { get; set; } = new List<InventoryTransferDiscrepancy>();
 }
 
 /// <summary>
@@ -463,6 +509,9 @@ public class InventoryTransferItem : TenantEntity
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal DamagedQuantity { get; set; } = 0;
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal ShortageQuantity { get; set; } = 0;
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal UnitCost { get; set; } = 0;
@@ -507,6 +556,13 @@ public class InventoryTransferItem : TenantEntity
     [MaxLength(100)]
     public string? BatchNumber { get; set; }
 
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
+    [Column(TypeName = "nvarchar(max)")] public string? ShipmentScanTrackingLinesJson { get; set; }
+    [Column(TypeName = "nvarchar(max)")] public string? ReceiptScanTrackingLinesJson { get; set; }
+    public int TrackingSequence { get; set; }
+
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
@@ -545,12 +601,21 @@ public class PhysicalCount : TenantEntity
 
     public Guid? CategoryId { get; set; } // Optional: specific category for cycle count
 
+    public Guid? CycleCountScheduleId { get; set; }
+    public Guid? CalendarOccurrenceId { get; set; }
+    public Guid? CutoffOccurrenceId { get; set; }
+    [MaxLength(1)] public string? ABCClass { get; set; }
+    public DateTime? ScheduledForUtc { get; set; }
+    public DateTime? CutoffAtUtc { get; set; }
+
     // Dates
     public DateTime CountDate { get; set; } = DateTime.UtcNow;
     public DateTime? StartedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public DateTime? PostedDate { get; set; }
+    public DateTime? FreezeStartedAtUtc { get; set; }
+    public DateTime? FreezeReleasedAtUtc { get; set; }
 
     // Status: Draft, InProgress, PendingApproval, Approved, Posted, Cancelled
     [MaxLength(50)]
@@ -566,6 +631,13 @@ public class PhysicalCount : TenantEntity
     public Guid? CountedById { get; set; }
     public Guid? ApprovedById { get; set; }
     public Guid? PostedById { get; set; }
+    public Guid? StoresApprovedById { get; set; }
+    public DateTime? StoresApprovedAtUtc { get; set; }
+    public Guid? FinanceApprovedById { get; set; }
+    public DateTime? FinanceApprovedAtUtc { get; set; }
+    public Guid? AuditAttestedById { get; set; }
+    public DateTime? AuditAttestedAtUtc { get; set; }
+    public Guid? StockAdjustmentId { get; set; }
 
     // Summary
     public int TotalItems { get; set; } = 0;
@@ -590,6 +662,12 @@ public class PhysicalCount : TenantEntity
     [MaxLength(500)]
     public string? CancellationReason { get; set; }
 
+    [MaxLength(2000)]
+    public string? InvestigationSummary { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     // Navigation Properties
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
@@ -598,7 +676,12 @@ public class PhysicalCount : TenantEntity
     public virtual ApplicationUser? CountedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ApplicationUser? PostedBy { get; set; }
+    public virtual ApplicationUser? StoresApprovedBy { get; set; }
+    public virtual ApplicationUser? FinanceApprovedBy { get; set; }
+    public virtual ApplicationUser? AuditAttestedBy { get; set; }
+    public virtual StockAdjustment? StockAdjustment { get; set; }
     public virtual ICollection<PhysicalCountItem> Items { get; set; } = new List<PhysicalCountItem>();
+    public virtual ICollection<PhysicalCountAction> Actions { get; set; } = new List<PhysicalCountAction>();
 }
 
 /// <summary>
@@ -649,6 +732,18 @@ public class PhysicalCountItem : TenantEntity
     public int CountAttempts { get; set; } = 0;
     public bool RequiresRecount { get; set; } = false;
 
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? FirstCountQuantity { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? RecountedQuantity { get; set; }
+
+    public DateTime? RecountedAtUtc { get; set; }
+    public Guid? RecountedById { get; set; }
+
+    [MaxLength(2000)]
+    public string? InvestigationNotes { get; set; }
+
     // Tracking (if lot/serial tracked)
     [MaxLength(100)]
     public string? LotNumber { get; set; }
@@ -662,11 +757,15 @@ public class PhysicalCountItem : TenantEntity
     [MaxLength(500)]
     public string? VarianceReason { get; set; }
 
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     // Navigation Properties
     public virtual PhysicalCount PhysicalCount { get; set; } = null!;
     public virtual InventoryItem InventoryItem { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
     public virtual ApplicationUser? CountedBy { get; set; }
+    public virtual ApplicationUser? RecountedBy { get; set; }
 }
 
 #endregion
@@ -1164,6 +1263,9 @@ public class InventoryRequisition : TenantEntity
     [MaxLength(500)]
     public string? CancellationReason { get; set; }
 
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     // Navigation Properties
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
@@ -1220,6 +1322,11 @@ public class InventoryRequisitionItem : TenantEntity
 
     [MaxLength(100)]
     public string? BatchNumber { get; set; }
+
+    public DateTime? ManufactureDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public Guid? InventoryTrackingExceptionId { get; set; }
+    public int TrackingSequence { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }

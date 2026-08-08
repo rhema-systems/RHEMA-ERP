@@ -16,8 +16,8 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
         return await _dbSet
             .Include(lr => lr.Employee)
             .Include(lr => lr.LeaveType)
+            .Include(lr => lr.LeaveSubType)
             .Include(lr => lr.RelieverEmployee)
-            .Include(lr => lr.ApprovedByEmployee)
             .FirstOrDefaultAsync(la => la.RequestNumber == requestNumber);
     }
 
@@ -25,6 +25,7 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
     {
         return await _dbSet
             .Include(lr => lr.LeaveType)
+            .Include(lr => lr.LeaveSubType)
             .Where(lr => lr.EmployeeId == employeeId && lr.StartDate.Year == year)
             .OrderByDescending(lr => lr.StartDate)
             .ToListAsync();
@@ -32,7 +33,6 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
 
     public async Task<IEnumerable<LeaveRequest>> GetPendingApprovalsForManagerAsync(Guid managerId)
     {
-        // Get employees reporting to this manager
         var reportingEmployeeIds = await _context.Employees
             .Where(e => e.ManagerId == managerId)
             .Select(e => e.Id)
@@ -41,13 +41,14 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
         return await _dbSet
             .Include(lr => lr.Employee)
             .Include(lr => lr.LeaveType)
+            .Include(lr => lr.LeaveSubType)
             .Include(lr => lr.RelieverEmployee)
             .Where(lr => reportingEmployeeIds.Contains(lr.EmployeeId) && lr.Status == LeaveStatus.Pending)
             .OrderBy(la => la.RequestDate)
             .ToListAsync();
     }
 
-    public async Task<bool> HasConflictingLeaveAsync(Guid employeeId, DateTime startDate, DateTime endDate,
+    public async Task<bool> HasConflictingLeaveAsync(Guid employeeId, DateOnly startDate, DateOnly endDate,
         Guid? excludeRequestId = null)
     {
         var query = _dbSet
@@ -63,9 +64,8 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
         return await query.AnyAsync();
     }
 
-    public async Task<bool> RelieverHasConflictAsync(Guid relieverId, DateTime startDate, DateTime endDate)
+    public async Task<bool> RelieverHasConflictAsync(Guid relieverId, DateOnly startDate, DateOnly endDate)
     {
-        // Check if reliever is on leave during this period
         var relieverOnLeave = await _dbSet
             .AnyAsync(la => la.EmployeeId == relieverId &&
                            la.Status == LeaveStatus.Approved &&
@@ -75,7 +75,6 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
         if (relieverOnLeave)
             return true;
 
-        // Check if reliever is already assigned as a reliever during this period
         var relieverAlreadyAssigned = await _dbSet
             .AnyAsync(la => la.RelieverEmployeeId == relieverId &&
                            la.Status == LeaveStatus.Approved &&
@@ -85,9 +84,9 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
         return relieverAlreadyAssigned;
     }
 
-    public async Task<IEnumerable<LeaveRequest>> GetActiveLeaveRequestsAsync(DateTime? asOfDate = null)
+    public async Task<IEnumerable<LeaveRequest>> GetActiveLeaveRequestsAsync(DateOnly? asOfDate = null)
     {
-        var targetDate = asOfDate ?? DateTime.Today;
+        var targetDate = asOfDate ?? DateOnly.FromDateTime(DateTime.Today);
 
         return await _dbSet.Include(la => la.Employee)
                            .Include(la => la.LeaveType)
@@ -95,4 +94,93 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
                                     && la.EndDate >= targetDate)
                            .ToListAsync();
     }
+}
+
+public class LeaveTypeRepository : GenericRepository<LeaveType>, ILeaveTypeRepository
+{
+    public LeaveTypeRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<LeaveType?> GetByCodeAsync(string code)
+        => await _dbSet.FirstOrDefaultAsync(lt => lt.Code == code);
+
+    public async Task<LeaveType?> GetWithSubTypesAsync(Guid id)
+        => await _dbSet
+            .Include(lt => lt.LeaveSubTypes)
+            .FirstOrDefaultAsync(lt => lt.Id == id);
+
+    public async Task<LeaveType?> GetWithPoliciesAsync(Guid id)
+        => await _dbSet
+            .Include(lt => lt.EligibilityRules)
+            .Include(lt => lt.AccrualPolicies)
+            .Include(lt => lt.LeaveCategoryAllocations).ThenInclude(a => a.StaffLevel)
+            .FirstOrDefaultAsync(lt => lt.Id == id);
+
+    public async Task<IEnumerable<LeaveType>> GetActiveLeaveTypesAsync()
+        => await _dbSet.Where(lt => lt.IsActive).OrderBy(lt => lt.Name).ToListAsync();
+}
+
+public class LeavePlanRepository : GenericRepository<LeavePlan>, ILeavePlanRepository
+{
+    public LeavePlanRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<IEnumerable<LeavePlan>> GetByEmployeeAndYearAsync(Guid employeeId, int year)
+        => await _dbSet
+            .Include(p => p.Employee)
+            .Include(p => p.LeaveType)
+            .Include(p => p.LeaveSubType)
+            .Include(p => p.RelieverEmployee)
+            .Include(p => p.PlannedByEmployee)
+            .Where(p => p.EmployeeId == employeeId && p.Year == year)
+            .OrderBy(p => p.StartDate)
+            .ToListAsync();
+
+    public async Task<IEnumerable<LeavePlan>> GetByYearAsync(int year)
+        => await _dbSet
+            .Include(p => p.Employee)
+            .Include(p => p.LeaveType)
+            .Include(p => p.LeaveSubType)
+            .Include(p => p.RelieverEmployee)
+            .Include(p => p.PlannedByEmployee)
+            .Include(p => p.OrganizationUnit)
+            .Where(p => p.Year == year)
+            .OrderBy(p => p.StartDate)
+            .ToListAsync();
+
+    public async Task<bool> HasConflictingPlanAsync(Guid employeeId, DateOnly startDate, DateOnly endDate, Guid? excludePlanId = null)
+    {
+        var query = _dbSet.Where(p =>
+            p.EmployeeId == employeeId &&
+            p.Status != LeavePlanStatus.Cancelled &&
+            p.Status != LeavePlanStatus.Rejected &&
+            p.StartDate <= endDate &&
+            p.EndDate >= startDate);
+
+        if (excludePlanId.HasValue)
+            query = query.Where(p => p.Id != excludePlanId.Value);
+
+        return await query.AnyAsync();
+    }
+}
+
+public class LeaveBalanceRepository : GenericRepository<LeaveBalance>, ILeaveBalanceRepository
+{
+    public LeaveBalanceRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<LeaveBalance?> GetBalanceAsync(Guid employeeId, Guid leaveTypeId, Guid? leaveSubTypeId, int year)
+        => await _dbSet
+            .Include(b => b.LeaveType)
+            .Include(b => b.LeaveSubType)
+            .FirstOrDefaultAsync(b =>
+                b.EmployeeId == employeeId &&
+                b.LeaveTypeId == leaveTypeId &&
+                b.LeaveSubTypeId == leaveSubTypeId &&
+                b.Year == year);
+
+    public async Task<IEnumerable<LeaveBalance>> GetEmployeeBalancesAsync(Guid employeeId, int year)
+        => await _dbSet
+            .Include(b => b.LeaveType)
+            .Include(b => b.LeaveSubType)
+            .Where(b => b.EmployeeId == employeeId && b.Year == year)
+            .OrderBy(b => b.LeaveType.Name)
+            .ToListAsync();
 }

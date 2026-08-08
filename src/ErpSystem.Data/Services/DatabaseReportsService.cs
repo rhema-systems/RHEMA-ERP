@@ -1,5 +1,7 @@
 using System.Data;
 using System.Text.Json;
+using System.Globalization;
+using ClosedXML.Excel;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
@@ -12,7 +14,6 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using OfficeOpenXml;
 
 namespace ErpSystem.Data.Services;
 
@@ -28,6 +29,7 @@ public class DatabaseReportsService : IReportsService
     private readonly ILogger<DatabaseReportsService> _logger;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IConfiguration _configuration;
+    private readonly IReadOnlyList<ISystemReportProvider> _systemReportProviders;
 
     public DatabaseReportsService(
         IReportRepository reportRepository,
@@ -39,7 +41,8 @@ public class DatabaseReportsService : IReportsService
         IReportRoleAssignmentRepository roleAssignmentRepository,
         ILogger<DatabaseReportsService> logger,
         IUnitOfWork unitOfWork,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IEnumerable<ISystemReportProvider> systemReportProviders)
     {
         _reportRepository = reportRepository;
         _scheduleRepository = scheduleRepository;
@@ -51,6 +54,7 @@ public class DatabaseReportsService : IReportsService
         _logger = logger;
         _unitOfWork = unitOfWork;
         _configuration = configuration;
+        _systemReportProviders = systemReportProviders.ToList();
     }
 
     public async Task<List<ReportDefinitionDto>> GetReportsAsync(Guid tenantId, Guid userId, string? type = null, string? status = null, bool? favoriteOnly = null, bool bypassRoleFiltering = false)
@@ -68,16 +72,22 @@ public class DatabaseReportsService : IReportsService
                 reports = await _reportRepository.GetReportsByTenantAsync(tenantId, type, status);
             }
 
-            // Apply role-based filtering only if not bypassed
+            // System-owned reports use their module provider's responsibility/permission model.
+            // Custom reports retain the report-role assignment model.
             if (!bypassRoleFiltering)
             {
+                var reportList = reports.ToList();
+                var systemReports = reportList.Where(r => ProviderFor(r.Query) is not null).ToList();
+                // A provider-owned prefix is reserved even when the suffix is unknown.
+                // Do not let a tampered catalogue row fall back to the custom SQL path.
+                IEnumerable<Report> customReports = reportList.Where(report => !IsSystemIdentifier(report.Query));
                 // Get accessible report IDs based on user's role assignments
                 var accessibleReportIds = await _roleAssignmentRepository.GetAccessibleReportIdsForUserAsync(userId, tenantId);
 
                 // Filter reports based on role assignments (if any assignments exist)
                 if (accessibleReportIds.Any())
                 {
-                    reports = reports.Where(r => accessibleReportIds.Contains(r.Id));
+                    customReports = customReports.Where(r => accessibleReportIds.Contains(r.Id));
                 }
                 // If no role assignments exist for this tenant, show all reports (fallback behavior)
                 else
@@ -87,9 +97,17 @@ public class DatabaseReportsService : IReportsService
                     if (hasAnyRoleAssignments)
                     {
                         // If role assignments exist but user has no access, return empty list
-                        reports = new List<Report>();
+                        customReports = new List<Report>();
                     }
                 }
+
+                var authorizedSystemReports = new List<Report>();
+                foreach (var providerGroup in systemReports.GroupBy(report => ProviderFor(report.Query)!))
+                {
+                    if (await providerGroup.Key.CanReadAsync(false))
+                        authorizedSystemReports.AddRange(providerGroup);
+                }
+                reports = customReports.Concat(authorizedSystemReports);
             }
 
             var reportDtos = new List<ReportDefinitionDto>();
@@ -114,7 +132,7 @@ public class DatabaseReportsService : IReportsService
         }
     }
 
-    public async Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId)
+    public async Task<ReportDefinitionDto?> GetReportAsync(Guid reportId, Guid tenantId, Guid userId, bool isAdminUser = false)
     {
         try
         {
@@ -122,6 +140,21 @@ public class DatabaseReportsService : IReportsService
             if (report == null)
             {
                 return null;
+            }
+
+            var provider = ProviderFor(report.Query);
+            if (provider is not null)
+            {
+                if (!await provider.CanReadAsync(isAdminUser))
+                    throw new UnauthorizedAccessException("Access denied: system report read permission is required.");
+            }
+            else if (IsSystemIdentifier(report.Query))
+            {
+                throw new InvalidOperationException("The system report identifier is not registered by its owning provider.");
+            }
+            else if (!isAdminUser && !await ValidateReportAccessAsync(reportId, userId, tenantId, "read"))
+            {
+                throw new UnauthorizedAccessException("Access denied: you do not have permission to read this report.");
             }
 
             // Get assigned role names for this report
@@ -141,6 +174,8 @@ public class DatabaseReportsService : IReportsService
     {
         try
         {
+            if (_systemReportProviders.Any(provider => provider.OwnsIdentifier(createReportDto.Query)))
+                throw new InvalidOperationException("System report identifiers cannot be created through the custom report builder.");
             var report = new Report
             {
                 Name = createReportDto.Name,
@@ -181,6 +216,9 @@ public class DatabaseReportsService : IReportsService
             {
                 return null;
             }
+
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined reports cannot be edited.");
 
             // Check if user has permission to edit this report (admins bypass role/module filtering)
             if (!isAdminUser)
@@ -262,6 +300,9 @@ public class DatabaseReportsService : IReportsService
                 return false;
             }
 
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined reports cannot be deleted.");
+
             report.IsDeleted = true;
             report.DeletedAt = DateTime.UtcNow;
             report.DeletedBy = userId.ToString();
@@ -286,23 +327,19 @@ public class DatabaseReportsService : IReportsService
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new InvalidOperationException("Report not found");
 
-            // Check if user has permission to execute this report (admins bypass role/module filtering)
-            if (!isAdminUser)
+            var systemProvider = ProviderFor(report.Query);
+            if (systemProvider is null && IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("The system report identifier is not registered by its owning provider.");
+            var isSystemReport = systemProvider is not null;
+            // Custom reports retain report-role authorization. The provider enforces the
+            // tenant-scoped procurement permission for system reports.
+            if (!isAdminUser && !isSystemReport)
             {
                 var hasExecutePermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "execute");
                 if (!hasExecutePermission)
                 {
                     throw new UnauthorizedAccessException("Access denied: You do not have the required role permissions to execute this report. Please contact your administrator to request access or ensure you have the appropriate role assigned.");
                 }
-            }
-
-            // Execute the query directly without complex tracking to avoid concurrency issues
-
-            // Get the connection string from configuration (user secrets)
-            var connectionString = _configuration.GetConnectionString("DefaultConnection");
-            if (string.IsNullOrEmpty(connectionString))
-            {
-                throw new InvalidOperationException("Database connection string not configured");
             }
 
             // Check if the report has a query
@@ -326,8 +363,13 @@ public class DatabaseReportsService : IReportsService
                     ExecutionTime = sampleExecutionTime,
                     TotalRows = sampleResult.TotalRows,
                     Status = "success",
-                    Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
-                    ResultMetadata = JsonSerializer.Serialize(new { ResultHash = Guid.NewGuid().ToString(), IsSampleData = true }),
+                    Parameters = SerializeExecutionParameters(executeReportDto),
+                    ResultMetadata = JsonSerializer.Serialize(new
+                    {
+                        ResultHash = Guid.NewGuid().ToString(),
+                        IsSampleData = true,
+                        Template = executeReportDto.TemplateContext
+                    }),
                     CreatedBy = userId.ToString()
                 };
 
@@ -340,8 +382,18 @@ public class DatabaseReportsService : IReportsService
 
             _logger.LogInformation("Executing report {ReportId} with query: {Query}", reportId, report.Query);
 
-            // Execute the SQL query
-            var result = await ExecuteSqlQueryAsync(report, executeReportDto, connectionString);
+            ReportResultDto result;
+            if (systemProvider is not null)
+            {
+                result = await systemProvider.ExecuteAsync(report.Query!, executeReportDto, isAdminUser);
+            }
+            else
+            {
+                var connectionString = _configuration.GetConnectionString("DefaultConnection");
+                if (string.IsNullOrEmpty(connectionString))
+                    throw new InvalidOperationException("Database connection string not configured");
+                result = await ExecuteSqlQueryAsync(report, executeReportDto, connectionString);
+            }
             var endTime = DateTime.UtcNow;
             var executionTime = endTime - startTime;
 
@@ -350,6 +402,11 @@ public class DatabaseReportsService : IReportsService
             result.ReportName = report.Name;
             result.ExecutedAt = endTime;
             result.ExecutionTime = executionTime;
+            if (executeReportDto.TemplateContext is not null)
+            {
+                result.Metadata ??= new ReportMetadataDto();
+                result.Metadata.TemplateGeneration = executeReportDto.TemplateContext;
+            }
 
             // Simple execution logging - create a single record after successful execution
             var executionLog = new ReportExecution
@@ -361,8 +418,15 @@ public class DatabaseReportsService : IReportsService
                 ExecutionTime = executionTime,
                 TotalRows = result.TotalRows,
                 Status = "success",
-                Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
-                ResultMetadata = JsonSerializer.Serialize(new { ResultHash = Guid.NewGuid().ToString() }),
+                Parameters = SerializeExecutionParameters(executeReportDto),
+                ResultMetadata = JsonSerializer.Serialize(new
+                {
+                    ResultHash = Guid.NewGuid().ToString(),
+                    SystemReportCode = systemProvider?.ResolveCode(report.Query),
+                    result.Metadata?.DataAsOf,
+                    result.Metadata?.Parameters,
+                    Template = executeReportDto.TemplateContext
+                }),
                 CreatedBy = userId.ToString()
             };
 
@@ -389,7 +453,10 @@ public class DatabaseReportsService : IReportsService
                     TotalRows = 0,
                     Status = "failed",
                     ErrorMessage = ex.Message,
-                    Parameters = executeReportDto.Parameters != null ? JsonSerializer.Serialize(executeReportDto.Parameters) : null,
+                    Parameters = SerializeExecutionParameters(executeReportDto),
+                    ResultMetadata = executeReportDto.TemplateContext is null
+                        ? null
+                        : JsonSerializer.Serialize(new { Template = executeReportDto.TemplateContext }),
                     CreatedBy = userId.ToString()
                 };
 
@@ -415,8 +482,14 @@ public class DatabaseReportsService : IReportsService
                 throw new InvalidOperationException("Report not found");
             }
 
-            // Check if user has permission to export this report (admins bypass role/module filtering)
-            if (!isAdminUser)
+            var systemProvider = ProviderFor(report.Query);
+            if (systemProvider is null && IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("The system report identifier is not registered by its owning provider.");
+            if (systemProvider is not null)
+            {
+                await systemProvider.AuthorizeExportAsync(report.Query!, isAdminUser);
+            }
+            else if (!isAdminUser)
             {
                 var hasExportPermission = await ValidateReportAccessAsync(reportId, userId, tenantId, "export");
                 if (!hasExportPermission)
@@ -429,14 +502,29 @@ public class DatabaseReportsService : IReportsService
             var executeDto = new ExecuteReportDto
             {
                 Parameters = exportReportDto.Parameters,
-                IncludeMetadata = false
+                IncludeMetadata = false,
+                Page = 1,
+                PageSize = 1000,
+                MaxRows = 1000,
+                TemplateContext = exportReportDto.TemplateContext
             };
 
             var reportResult = await ExecuteReportAsync(reportId, executeDto, tenantId, userId, isAdminUser);
+            var exportRows = new List<Dictionary<string, object>>(reportResult.Data);
+            while (reportResult.HasNextPage)
+            {
+                executeDto.Page++;
+                var nextPage = await ExecuteReportAsync(reportId, executeDto, tenantId, userId, isAdminUser);
+                exportRows.AddRange(nextPage.Data);
+                reportResult.HasNextPage = nextPage.HasNextPage;
+            }
+            reportResult.Data = exportRows;
 
-            // Generate export content based on format
-            var content = GenerateExportContent(reportResult, exportReportDto.Format);
-            var fileName = $"{report.Name}_{DateTime.Now:yyyyMMdd_HHmmss}.{exportReportDto.Format.ToLower()}";
+            // Normalize the requested format once so the generated payload, audit record,
+            // content type, and download name can never disagree.
+            var normalizedFormat = exportReportDto.Format.Trim().ToLowerInvariant();
+            var content = GenerateExportContent(reportResult, normalizedFormat);
+            var fileName = $"{SanitizeExportFileName(report.Name)}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{normalizedFormat}";
 
             // Log the export
             var export = new ReportExport
@@ -444,12 +532,12 @@ public class DatabaseReportsService : IReportsService
                 ReportId = reportId,
                 UserId = userId,
                 TenantId = tenantId,
-                Format = exportReportDto.Format,
+                Format = normalizedFormat,
                 FileName = fileName,
                 FileSize = content.Length,
                 ExportedAt = DateTime.UtcNow,
                 Status = "completed",
-                Parameters = exportReportDto.Parameters != null ? JsonSerializer.Serialize(exportReportDto.Parameters) : null,
+                Parameters = SerializeExportParameters(exportReportDto),
                 CreatedBy = userId.ToString()
             };
 
@@ -458,8 +546,11 @@ public class DatabaseReportsService : IReportsService
 
             return new ReportExportResultDto
             {
+                ReportId = reportId,
+                Status = "completed",
+                ExportedAt = export.ExportedAt,
                 Data = content,
-                ContentType = GetContentType(exportReportDto.Format),
+                ContentType = GetContentType(normalizedFormat),
                 FileName = fileName,
                 FileSize = content.Length
             };
@@ -639,10 +730,20 @@ public class DatabaseReportsService : IReportsService
 
             var template = new ReportTemplate
             {
+                ReportId = createTemplateDto.ReportId,
+                TemplateKey = createTemplateDto.TemplateKey.Trim().ToUpperInvariant(),
+                Version = 1,
                 Name = createTemplateDto.Name,
                 Description = createTemplateDto.Description,
                 Category = createTemplateDto.Category,
                 Type = createTemplateDto.Type,
+                Audience = createTemplateDto.Audience,
+                Cadence = createTemplateDto.Cadence,
+                Status = "Draft",
+                DefaultOutputFormat = createTemplateDto.DefaultOutputFormat,
+                OutputFormats = JsonSerializer.Serialize(createTemplateDto.OutputFormats),
+                SavedFilters = createTemplateDto.SavedFilters != null ? JsonSerializer.Serialize(createTemplateDto.SavedFilters) : null,
+                GenerationMetadata = createTemplateDto.GenerationMetadata != null ? JsonSerializer.Serialize(createTemplateDto.GenerationMetadata) : null,
                 ChartType = createTemplateDto.ChartType,
                 IsCustom = createTemplateDto.IsCustom,
                 Tags = createTemplateDto.Tags != null ? JsonSerializer.Serialize(createTemplateDto.Tags) : null,
@@ -745,10 +846,27 @@ public class DatabaseReportsService : IReportsService
         return new ReportTemplateDto
         {
             Id = template.Id,
+            ReportId = template.ReportId,
+            ReportName = template.Report?.Name,
+            TemplateKey = template.TemplateKey,
+            Version = template.Version,
             Name = template.Name,
             Description = template.Description,
             Category = template.Category,
             Type = template.Type,
+            Audience = template.Audience,
+            Cadence = template.Cadence,
+            Status = template.Status,
+            DefaultOutputFormat = template.DefaultOutputFormat,
+            OutputFormats = !string.IsNullOrEmpty(template.OutputFormats)
+                ? JsonSerializer.Deserialize<List<string>>(template.OutputFormats) ?? []
+                : [],
+            SavedFilters = !string.IsNullOrEmpty(template.SavedFilters)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(template.SavedFilters)
+                : null,
+            GenerationMetadata = !string.IsNullOrEmpty(template.GenerationMetadata)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(template.GenerationMetadata)
+                : null,
             ChartType = template.ChartType,
             IsCustom = template.IsCustom,
             CreatedBy = template.CreatedBy ?? "Unknown",
@@ -761,7 +879,11 @@ public class DatabaseReportsService : IReportsService
             PreviewImage = template.PreviewImage,
             Configuration = !string.IsNullOrEmpty(template.Configuration)
                 ? JsonSerializer.Deserialize<Dictionary<string, object>>(template.Configuration)
-                : null
+                : null,
+            LastGeneratedAt = template.LastGeneratedAt,
+            LastGeneratedBy = template.LastGeneratedBy,
+            LastGenerationFormat = template.LastGenerationFormat,
+            RowVersion = Convert.ToBase64String(template.RowVersion)
         };
     }
 
@@ -818,18 +940,16 @@ public class DatabaseReportsService : IReportsService
 
     private static byte[] GenerateExcelContent(ReportResultDto reportResult)
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-        using var package = new ExcelPackage();
-        var worksheet = package.Workbook.Worksheets.Add("Report Data");
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("Report Data");
 
         var visibleColumns = reportResult.Columns.Where(c => c.IsVisible).OrderBy(c => c.Order).ToList();
 
         // Add headers
         for (int i = 0; i < visibleColumns.Count; i++)
         {
-            worksheet.Cells[1, i + 1].Value = visibleColumns[i].DisplayName ?? visibleColumns[i].Name;
-            worksheet.Cells[1, i + 1].Style.Font.Bold = true;
+            worksheet.Cell(1, i + 1).Value = visibleColumns[i].DisplayName ?? visibleColumns[i].Name;
+            worksheet.Cell(1, i + 1).Style.Font.Bold = true;
         }
 
         // Add data rows
@@ -840,14 +960,41 @@ public class DatabaseReportsService : IReportsService
             {
                 var column = visibleColumns[col];
                 var value = dataRow.TryGetValue(column.Name, out var tempValue) ? tempValue : null;
-                worksheet.Cells[row + 2, col + 1].Value = value;
+                SetExcelCellValue(worksheet.Cell(row + 2, col + 1), value);
             }
         }
 
-        // Auto-fit columns
-        worksheet.Cells.AutoFitColumns();
+        worksheet.ColumnsUsed().AdjustToContents();
 
-        return package.GetAsByteArray();
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
+
+    private static void SetExcelCellValue(IXLCell cell, object? value)
+    {
+        if (value == null)
+        {
+            cell.Clear(XLClearOptions.Contents);
+            return;
+        }
+
+        cell.Value = value switch
+        {
+            DateTime dateTime => dateTime,
+            DateTimeOffset dateTimeOffset => dateTimeOffset.DateTime,
+            bool boolean => boolean,
+            byte number => number,
+            short number => number,
+            int number => number,
+            long number => number,
+            float number => number,
+            double number => number,
+            decimal number => number,
+            Guid guid => guid.ToString(),
+            string text => text,
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+        };
     }
 
     private static byte[] GenerateJsonContent(ReportResultDto reportResult)
@@ -926,6 +1073,46 @@ public class DatabaseReportsService : IReportsService
             "pdf" => "application/pdf",
             _ => "application/octet-stream"
         };
+    }
+
+    private static string? SerializeExecutionParameters(ExecuteReportDto request) =>
+        request.TemplateContext is null
+            ? request.Parameters is null ? null : JsonSerializer.Serialize(request.Parameters)
+            : JsonSerializer.Serialize(new
+            {
+                Filters = request.Parameters,
+                Template = request.TemplateContext
+            });
+
+    private static string? SerializeExportParameters(ExportReportDto request) =>
+        request.TemplateContext is null
+            ? request.Parameters is null ? null : JsonSerializer.Serialize(request.Parameters)
+            : JsonSerializer.Serialize(new
+            {
+                Filters = request.Parameters,
+                Template = request.TemplateContext,
+                request.IncludeCharts,
+                request.IncludeHeaders
+            });
+
+    private static string SanitizeExportFileName(string reportName)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var sanitizedCharacters = reportName
+            .Trim()
+            .Select(character =>
+                char.IsControl(character) || Array.IndexOf(invalidCharacters, character) >= 0
+                    ? '_'
+                    : character)
+            .ToArray();
+        var sanitizedName = string.Join(
+            " ",
+            new string(sanitizedCharacters).Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Trim('.', ' ');
+
+        return string.IsNullOrWhiteSpace(sanitizedName) ? "Report" : sanitizedName;
     }
 
     private static List<ReportUsageStatsDto> GenerateUsageStats(IEnumerable<ReportExecution> executions)
@@ -1218,6 +1405,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                return report.UpdatedAt ?? report.CreatedAt;
             report.Status = "published";
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1241,6 +1430,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined reports cannot be unpublished.");
             report.Status = "draft";
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1264,6 +1455,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined report module assignments are controlled by the catalogue.");
 
             // Verify module exists and belongs to the same tenant
             // You might want to add a module repository check here
@@ -1293,6 +1486,8 @@ public class DatabaseReportsService : IReportsService
         try
         {
             var report = await _reportRepository.GetReportWithDetailsAsync(reportId, tenantId) ?? throw new ArgumentException("Report not found", nameof(reportId));
+            if (IsSystemIdentifier(report.Query))
+                throw new InvalidOperationException("System-defined report module assignments are controlled by the catalogue.");
             report.ModuleId = null;
             report.UpdatedAt = DateTime.UtcNow;
             report.UpdatedBy = userId.ToString();
@@ -1312,4 +1507,10 @@ public class DatabaseReportsService : IReportsService
             throw;
         }
     }
+
+    private ISystemReportProvider? ProviderFor(string? reportQuery) =>
+        _systemReportProviders.FirstOrDefault(provider => provider.CanHandle(reportQuery));
+
+    private bool IsSystemIdentifier(string? reportQuery) =>
+        _systemReportProviders.Any(provider => provider.OwnsIdentifier(reportQuery));
 }

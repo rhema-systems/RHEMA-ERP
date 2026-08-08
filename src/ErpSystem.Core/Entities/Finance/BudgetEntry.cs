@@ -55,4 +55,7 @@ public class BudgetEntry : TenantEntity
 
     [MaxLength(500)]
     public string? Notes { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }

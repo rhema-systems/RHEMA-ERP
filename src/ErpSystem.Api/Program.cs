@@ -17,6 +17,29 @@ using Serilog;
 using Serilog.Events;
 using Syncfusion.Licensing;
 
+// Apply pending migrations without starting the web host or running seeders.
+// This is the controlled test/deployment database update entry point.
+if (args.Length > 0 && args[0] == "apply-migrations")
+{
+    // Migration-only deployments must keep ASP.NET Core's Production default
+    // when ASPNETCORE_ENVIRONMENT is absent. Development is a convenience for
+    // explicit seed commands only and could select the wrong database here.
+    var tempBuilder = WebApplication.CreateBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider
+            .GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+    }
+
+    Console.WriteLine("Database migrations completed successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
@@ -121,6 +144,37 @@ if (args.Length > 0 && args[0] == "seed-db")
     return;
 }
 
+// Check for HR module seeding command.
+// Seeds HR reference data plus the TDC organisation structure and locations into the DEFAULT tenant.
+// Idempotent: every step is skipped when its data is already present, so re-running is always safe.
+// Prerequisites: 'rebuild-db' (schema) and 'seed' (DEFAULT tenant + admin user).
+if (args.Length > 0 && args[0] == "seed-hr-all")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+        var orchestrator = new ErpSystem.Data.Seeders.HrSeedOrchestrator(context, loggerFactory);
+
+        if (!await orchestrator.SeedAsync())
+        {
+            Console.WriteLine("❌ HR seeding did not complete — see the log above.");
+            Environment.ExitCode = 1;
+            return;
+        }
+    }
+
+    Console.WriteLine("✅ HR seeding completed!");
+    return;
+}
+
 // Check for workflow-only seeding command.
 if (args.Length > 0 && args[0] == "seed-workflows")
 {
@@ -136,13 +190,43 @@ if (args.Length > 0 && args[0] == "seed-workflows")
     using (var scope = tempApp.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.MigrateAsync();
+        var skipMigrations = args.Any(argument =>
+            string.Equals(argument, "--skip-migrations", StringComparison.OrdinalIgnoreCase));
+        if (!skipMigrations)
+        {
+            await db.Database.MigrateAsync();
+        }
 
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
         await seedingService.SeedWorkflowDefinitionsAsync();
     }
 
     Console.WriteLine("Workflow definition seeding completed!");
+    return;
+}
+
+// Seed only the prerequisites needed to exercise supplier onboarding end to end.
+// This never creates an applicant, token, payment, registration, or supplier record.
+if (args.Length > 0 && args[0] == "seed-supplier-onboarding-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.MigrateAsync();
+
+        var seeder = scope.ServiceProvider.GetRequiredService<ProcurementSupplierOnboardingTestSeeder>();
+        await seeder.SeedAsync();
+    }
+
+    Console.WriteLine("Supplier-onboarding E2E prerequisites seeded successfully.");
     return;
 }
 
@@ -207,7 +291,7 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -267,6 +351,32 @@ builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
 builder.Services.AddErpSystemRateLimiting(builder.Environment);
+
+// Forwarded headers so the app sees the REAL client IP behind a proxy/load balancer — used by rate
+// limiting (per-caller partitions) and audit logging. SECURE DEFAULT: trust NO proxies, so the
+// X-Forwarded-* headers are ignored (no client-IP spoofing) until an operator lists their proxy
+// IPs/networks in config: ForwardedHeaders:KnownProxies (["10.0.0.5", ...]) and/or
+// ForwardedHeaders:KnownNetworks (["10.0.0.0/8", ...]). Inert with empty config.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+        | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = builder.Configuration.GetValue<int?>("ForwardedHeaders:ForwardLimit") ?? 1;
+    // Start from a clean, trust-nothing baseline.
+    options.KnownProxies.Clear();
+    options.KnownNetworks.Clear();
+    foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+    {
+        if (System.Net.IPAddress.TryParse(proxy, out var ip))
+            options.KnownProxies.Add(ip);
+    }
+    foreach (var network in builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? Array.Empty<string>())
+    {
+        var parts = network.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 2 && System.Net.IPAddress.TryParse(parts[0], out var prefix) && int.TryParse(parts[1], out var prefixLength))
+            options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, prefixLength));
+    }
+});
 builder.Services.AddErpSystemFileUpload(builder.Configuration);
 builder.Services.AddErpSystemSignalR();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.IDistributedLockService, ErpSystem.Api.Services.DistributedLockService>();
@@ -280,6 +390,8 @@ builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
 
 // Add Purchase Receipt (PO GRN) PDF service
 builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptDocumentService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>());
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();
@@ -292,6 +404,10 @@ var app = builder.Build();
 Console.WriteLine("🔧 App built successfully - configuring middleware...");
 
 // Configure the HTTP request pipeline
+
+// Apply forwarded headers FIRST so every downstream component (rate limiter, logging, audit) sees
+// the real client IP. No-op unless trusted proxies/networks are configured (see registration above).
+app.UseForwardedHeaders();
 
 // Add global exception handling first
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
@@ -306,11 +422,7 @@ if (app.Configuration.GetValue("HttpRequestResponseLogging:Enabled", false))
 // Add security headers
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage();
-}
-else
+if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
@@ -370,13 +482,41 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseResponseCaching();
 
-// Legacy supplier evidence may still exist under the historical public upload
-// tree. Never let static-file middleware bypass DMS/application authorization.
+// Personal-data trees that may still exist under the historical public upload root.
+// Static files are served BEFORE UseAuthentication/UseAuthorization below, so nothing
+// downstream can gate them — this middleware is the only place that can. Every folder
+// listed here now has an authorizing download endpoint; the legacy files themselves are
+// relocated by the HR legacy-file migration utility.
+string[] blockedLegacyUploadPaths =
+[
+    "/uploads/supplier-registration-evidence",
+    "/uploads/cv-uploads",
+    "/uploads/candidate-documents",
+    "/uploads/candidate-photos",
+    "/uploads/leave-attachments",
+    "/uploads/pip-attachments",
+    "/uploads/staff-discipline",
+    "/uploads/movements",
+    "/uploads/offers",
+];
+
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments(
-            "/uploads/supplier-registration-evidence",
-            StringComparison.OrdinalIgnoreCase))
+    var path = context.Request.Path;
+
+    foreach (var blocked in blockedLegacyUploadPaths)
+    {
+        if (path.StartsWithSegments(blocked, StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+    }
+
+    // Belt and braces for every hr-* category, in case the private storage root is ever
+    // misconfigured onto the web root. StartsWithSegments compares whole path segments,
+    // so a bare prefix like "hr-" needs the raw string check.
+    if ((path.Value ?? string.Empty).StartsWith("/uploads/hr-", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;
@@ -399,6 +539,7 @@ app.UseMiddleware<ProcurementGhanepsProblemDetailsMiddleware>();
 
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
+app.UseMiddleware<HrIdentityAccessMiddleware>();
 
 // Rate limiting depends on authenticated user claims for ERP/external users.
 // Auth endpoints remain anonymous here, so login/password-reset throttling still applies by IP.
@@ -497,6 +638,27 @@ if (!skipStartupInitialization)
         catch (Exception ex)
         {
             app.Logger.LogError(ex, "Baseline payment-term seeding failed");
+            if (failFastOnDatabaseInitializationError)
+            {
+                throw;
+            }
+        }
+    }
+
+    if (databaseInitializationSucceeded)
+    {
+        app.Logger.LogInformation("Starting baseline Finance close-template seeding...");
+        try
+        {
+            // Close templates are tenant-owned configuration, so migrations cannot cover tenants
+            // created later. Startup reconciliation is a missing-only safety net; provisioning is
+            // still the primary installation path and custom active templates are preserved.
+            await SeedFinanceCloseTemplateBaselineAsync(app);
+            app.Logger.LogInformation("Baseline Finance close-template seeding completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Baseline Finance close-template seeding failed");
             if (failFastOnDatabaseInitializationError)
             {
                 throw;
@@ -632,6 +794,13 @@ async Task SeedPaymentTermBaselineAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<PaymentTermBaselineSeeder>();
+    await seeder.SeedAllActiveTenantsAsync();
+}
+
+async Task SeedFinanceCloseTemplateBaselineAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<FinanceCloseTemplateBaselineSeeder>();
     await seeder.SeedAllActiveTenantsAsync();
 }
 

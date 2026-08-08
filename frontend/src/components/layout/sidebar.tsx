@@ -23,6 +23,10 @@ import {
   Scale,
   Banknote,
   Globe,
+  GraduationCap,
+  IdCard,
+  Tags,
+  CalendarDays,
   Globe2,
   ListTree,
   Mail,
@@ -60,6 +64,7 @@ import {
   MessageSquare,
   Smartphone,
   RotateCcw,
+  RefreshCw,
   CalendarClock,
   Phone,
   Swords,
@@ -71,13 +76,24 @@ import {
   Repeat2,
   KeyRound,
   PackageCheck,
+  CalendarCheck,
+  ScrollText,
+  Timer,
+  BellRing,
+  Upload,
+  Fingerprint,
+  Receipt,
+  Coins,
+  ShieldPlus,
+  ScanLine,
+  WalletCards,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { useAuth } from '../../hooks/use-auth';
 
-interface NavItem {
+export interface NavItem {
   title: string;
   href: string;
   icon: React.ComponentType<any>;
@@ -85,11 +101,12 @@ interface NavItem {
   roles?: string[];
   permissions?: string[];
   accessMode?: 'all' | 'any';
+  navigationSurface?: 'operations' | 'settings';
 }
 
 const ADMINISTRATION_ROLES = ['admin', 'SuperAdmin', 'TenantAdmin'];
 
-const navigationItems: NavItem[] = [
+export const navigationItems: NavItem[] = [
   {
     title: 'Dashboard',
     href: '/dashboard',
@@ -105,22 +122,56 @@ const navigationItems: NavItem[] = [
         title: 'Approval Workbench',
         href: '/finance/approvals',
         icon: ShieldCheck,
-        roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'],
+        roles: [
+          'SuperAdmin',
+          'TenantAdmin',
+          'Manager',
+          'Accounts Officer',
+          'Senior Accountant',
+          'Finance Manager',
+          'Financial Controller',
+        ],
       },
       {
         title: 'General Ledger',
         href: '/finance/general-ledger',
         icon: FileText,
         children: [
-          { title: 'Chart of Accounts', href: '/finance/accounts', icon: CreditCard },
-          { title: 'Journal Entries', href: '/finance/journal-entries', icon: FileText },
-          { title: 'Recurring Journals', href: '/finance/recurring-journals', icon: Repeat2 },
-          { title: 'Opening Balances', href: '/finance/opening-balances', icon: Database },
+          {
+            title: 'Chart of Accounts',
+            href: '/finance/accounts',
+            icon: CreditCard,
+            navigationSurface: 'settings',
+          },
+          {
+            title: 'Journal Entries',
+            href: '/finance/journal-entries',
+            icon: FileText,
+          },
+          {
+            title: 'Recurring Journals',
+            href: '/finance/recurring-journals',
+            icon: Repeat2,
+          },
+          {
+            title: 'Opening Balances',
+            href: '/finance/opening-balances',
+            icon: Database,
+            navigationSurface: 'settings',
+          },
           {
             title: 'Journal Approval Queue',
             href: '/finance/journal-entries/approvals',
             icon: ShieldCheck,
-            roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'],
+            roles: [
+              'SuperAdmin',
+              'TenantAdmin',
+              'Manager',
+              'Accounts Officer',
+              'Senior Accountant',
+              'Finance Manager',
+              'Financial Controller',
+            ],
           },
         ],
       },
@@ -128,9 +179,18 @@ const navigationItems: NavItem[] = [
         title: 'Fiscal Management',
         href: '/finance/fiscal',
         icon: Calendar,
+        navigationSurface: 'settings',
         children: [
-          { title: 'Fiscal Years', href: '/finance/fiscal-years', icon: Calendar },
-          { title: 'Fiscal Periods', href: '/finance/fiscal-periods', icon: Calendar },
+          {
+            title: 'Fiscal Years',
+            href: '/finance/fiscal-years',
+            icon: Calendar,
+          },
+          {
+            title: 'Fiscal Periods',
+            href: '/finance/fiscal-periods',
+            icon: Calendar,
+          },
         ],
       },
       {
@@ -138,26 +198,82 @@ const navigationItems: NavItem[] = [
         href: '/finance/fixed-assets',
         icon: Package,
         children: [
-          { title: 'Dashboard', href: '/finance/fixed-assets/dashboard', icon: LayoutDashboard },
-          { title: 'Asset Register', href: '/finance/fixed-assets/register', icon: FileText },
-          { title: 'Depreciation', href: '/finance/fixed-assets/depreciation', icon: TrendingUp },
-          { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: BarChart3 },
-          { title: 'Transfers', href: '/finance/fixed-assets/transfers', icon: Activity },
-          { title: 'Disposals', href: '/finance/fixed-assets/disposals', icon: FileText },
-          { title: 'Verification', href: '/finance/fixed-assets/verification', icon: ClipboardCheck },
+          {
+            title: 'Dashboard',
+            href: '/finance/fixed-assets/dashboard',
+            icon: LayoutDashboard,
+          },
+          {
+            title: 'Asset Register',
+            href: '/finance/fixed-assets/register',
+            icon: FileText,
+          },
+          {
+            title: 'Depreciation',
+            href: '/finance/fixed-assets/depreciation',
+            icon: TrendingUp,
+          },
+          {
+            title: 'Valuations',
+            href: '/finance/fixed-assets/valuations',
+            icon: BarChart3,
+          },
+          {
+            title: 'Transfers',
+            href: '/finance/fixed-assets/transfers',
+            icon: Activity,
+          },
+          {
+            title: 'Disposals',
+            href: '/finance/fixed-assets/disposals',
+            icon: FileText,
+          },
+          {
+            title: 'Verification',
+            href: '/finance/fixed-assets/verification',
+            icon: ClipboardCheck,
+          },
           // { title: 'Valuations', href: '/finance/fixed-assets/valuations', icon: TrendingUp },
-          { title: 'Capital Projects', href: '/finance/fixed-assets/capital-projects', icon: Briefcase },
-          { title: 'Leases (IFRS 16)', href: '/finance/fixed-assets/leases', icon: FileText },
-          { title: 'Import', href: '/finance/fixed-assets/import', icon: FileText },
+          {
+            title: 'Capital Projects',
+            href: '/finance/fixed-assets/capital-projects',
+            icon: Briefcase,
+          },
+          {
+            title: 'Leases (IFRS 16)',
+            href: '/finance/fixed-assets/leases',
+            icon: FileText,
+          },
+          {
+            title: 'Import',
+            href: '/finance/fixed-assets/import',
+            icon: FileText,
+          },
           {
             title: 'Reports',
             href: '/finance/fixed-assets/reports',
             icon: BarChart3,
             children: [
-              { title: 'Reports Overview', href: '/finance/fixed-assets/reports', icon: LayoutDashboard },
-              { title: 'Asset Register', href: '/finance/fixed-assets/reports?report=asset-register', icon: FileText },
-              { title: 'Disposal Activity', href: '/finance/fixed-assets/reports?report=disposal-activity', icon: RotateCcw },
-              { title: 'Transfer History', href: '/finance/fixed-assets/reports?report=transfer-history', icon: Activity },
+              {
+                title: 'Reports Overview',
+                href: '/finance/fixed-assets/reports',
+                icon: LayoutDashboard,
+              },
+              {
+                title: 'Asset Register',
+                href: '/finance/fixed-assets/reports?report=asset-register',
+                icon: FileText,
+              },
+              {
+                title: 'Disposal Activity',
+                href: '/finance/fixed-assets/reports?report=disposal-activity',
+                icon: RotateCcw,
+              },
+              {
+                title: 'Transfer History',
+                href: '/finance/fixed-assets/reports?report=transfer-history',
+                icon: Activity,
+              },
             ],
           },
         ],
@@ -167,26 +283,100 @@ const navigationItems: NavItem[] = [
         href: '/finance/ap',
         icon: FileText,
         children: [
-          { title: 'Dashboard', href: '/finance/ap/dashboard', icon: LayoutDashboard },
-          { title: 'Suppliers', href: '/procurement/business-partners?partnerType=Supplier', icon: Users },
-          { title: 'Purchase Orders', href: '/finance/ap/purchase-orders', icon: ShoppingCart },
-          { title: 'PO Approval Queue', href: '/finance/ap/purchase-orders/approvals', icon: ShieldCheck, roles: ['SuperAdmin', 'TenantAdmin', 'Manager', 'Accounts Officer', 'Senior Accountant', 'Finance Manager', 'Financial Controller'] },
-          { title: 'Goods Receipts', href: '/finance/ap/receipts', icon: Package },
+          {
+            title: 'Dashboard',
+            href: '/finance/ap/dashboard',
+            icon: LayoutDashboard,
+          },
+          {
+            title: 'Suppliers',
+            href: '/procurement/business-partners?partnerType=Supplier',
+            icon: Users,
+            permissions: [
+              'Finance.Read',
+              'Finance.Admin',
+              'procurement.records.read',
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Purchase Orders',
+            href: '/finance/ap/purchase-orders',
+            icon: ShoppingCart,
+          },
+          {
+            title: 'PO Approval Queue',
+            href: '/finance/ap/purchase-orders/approvals',
+            icon: ShieldCheck,
+            roles: [
+              'SuperAdmin',
+              'TenantAdmin',
+              'Manager',
+              'Accounts Officer',
+              'Senior Accountant',
+              'Finance Manager',
+              'Financial Controller',
+            ],
+          },
+          {
+            title: 'Goods Receipts',
+            href: '/finance/ap/receipts',
+            icon: Package,
+          },
           { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
-          { title: 'Supplier Returns', href: '/finance/ap/returns', icon: RotateCcw },
+          {
+            title: 'Supplier Returns',
+            href: '/finance/ap/returns',
+            icon: RotateCcw,
+          },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
-          { title: 'Adjustment Journal', href: '/finance/subledger-adjustments/new?module=AP', icon: FileText },
-          { title: 'Journals', href: '/finance/journal-entries?sourceModule=AP', icon: FileText },
+          {
+            title: 'Adjustment Journal',
+            href: '/finance/subledger-adjustments/new?module=AP',
+            icon: FileText,
+          },
+          {
+            title: 'Journals',
+            href: '/finance/journal-entries?sourceModule=AP',
+            icon: FileText,
+          },
           {
             title: 'Reports',
             href: '/finance/ap/reports',
             icon: BarChart3,
             children: [
-              { title: 'Reports Overview', href: '/finance/ap/reports', icon: LayoutDashboard },
-              { title: 'AP Aging Analysis', href: '/finance/ap/reports?tab=aging', icon: CalendarClock },
-              { title: 'Cash Requirements', href: '/finance/ap/reports?tab=cash', icon: Banknote },
-              { title: 'Supplier Statements', href: '/finance/ap/reports?tab=statements', icon: FileText },
-              { title: 'Supplier Detailed Ledger', href: '/finance/ap/reports/supplier-detailed-ledger', icon: FileText },
+              {
+                title: 'Reports Overview',
+                href: '/finance/ap/reports',
+                icon: LayoutDashboard,
+              },
+              {
+                title: 'AP Aging Analysis',
+                href: '/finance/ap/reports?tab=aging',
+                icon: CalendarClock,
+              },
+              {
+                title: 'Cash Requirements',
+                href: '/finance/ap/reports?tab=cash',
+                icon: Banknote,
+              },
+              {
+                title: 'Supplier Statements',
+                href: '/finance/ap/reports?tab=statements',
+                icon: FileText,
+              },
+              {
+                title: 'Supplier Detailed Ledger',
+                href: '/finance/ap/reports/supplier-detailed-ledger',
+                icon: FileText,
+              },
+              {
+                title: 'Procurement Reconciliation',
+                href: '/finance/ap/reports?tab=procurement-reconciliation',
+                icon: FileText,
+              },
             ],
           },
         ],
@@ -196,28 +386,84 @@ const navigationItems: NavItem[] = [
         href: '/finance/ar',
         icon: Users,
         children: [
-          { title: 'Dashboard', href: '/finance/ar/dashboard', icon: LayoutDashboard },
-          { title: 'Customer Partners', href: '/procurement/business-partners?partnerType=Customer', icon: Users },
+          {
+            title: 'Dashboard',
+            href: '/finance/ar/dashboard',
+            icon: LayoutDashboard,
+          },
+          {
+            title: 'Customer Partners',
+            href: '/procurement/business-partners?partnerType=Customer',
+            icon: Users,
+            permissions: [
+              'Finance.Read',
+              'Finance.AR.Invoices.Manage',
+              'Finance.Admin',
+            ],
+            accessMode: 'any',
+          },
           { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
           { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
           { title: 'Deliveries', href: '/sales/deliveries', icon: Truck },
-          { title: 'Customers', href: '/finance/ar/customers', icon: Users },
+          {
+            title: 'Customers',
+            href: '/finance/ar/customers',
+            icon: Users,
+            permissions: [
+              'Finance.Read',
+              'Finance.AR.Invoices.Manage',
+              'Finance.Admin',
+            ],
+            accessMode: 'any',
+          },
           { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
-          { title: 'Customer Returns', href: '/sales/return-orders', icon: RotateCcw },
-          { title: 'Credit Notes', href: '/sales/credit-notes', icon: CreditCard },
+          {
+            title: 'Customer Returns',
+            href: '/sales/return-orders',
+            icon: RotateCcw,
+          },
+          {
+            title: 'Credit Notes',
+            href: '/sales/credit-notes',
+            icon: CreditCard,
+          },
           { title: 'Receipts', href: '/finance/ar/receipts', icon: CreditCard },
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
-          { title: 'Adjustment Journal', href: '/finance/subledger-adjustments/new?module=AR', icon: FileText },
-          { title: 'Journals', href: '/finance/journal-entries?sourceModule=AR', icon: FileText },
+          {
+            title: 'Adjustment Journal',
+            href: '/finance/subledger-adjustments/new?module=AR',
+            icon: FileText,
+          },
+          {
+            title: 'Journals',
+            href: '/finance/journal-entries?sourceModule=AR',
+            icon: FileText,
+          },
           {
             title: 'Reports',
             href: '/finance/ar/reports',
             icon: BarChart3,
             children: [
-              { title: 'Reports Overview', href: '/finance/ar/reports', icon: LayoutDashboard },
-              { title: 'AR Aging Analysis', href: '/finance/ar/reports?tab=aging', icon: CalendarClock },
-              { title: 'Customer Statements', href: '/finance/ar/reports?tab=statements', icon: FileText },
-              { title: 'Customer Detailed Ledger', href: '/finance/ar/reports/customer-detailed-ledger', icon: FileText },
+              {
+                title: 'Reports Overview',
+                href: '/finance/ar/reports',
+                icon: LayoutDashboard,
+              },
+              {
+                title: 'AR Aging Analysis',
+                href: '/finance/ar/reports?tab=aging',
+                icon: CalendarClock,
+              },
+              {
+                title: 'Customer Statements',
+                href: '/finance/ar/reports?tab=statements',
+                icon: FileText,
+              },
+              {
+                title: 'Customer Detailed Ledger',
+                href: '/finance/ar/reports/customer-detailed-ledger',
+                icon: FileText,
+              },
             ],
           },
         ],
@@ -228,17 +474,49 @@ const navigationItems: NavItem[] = [
         href: '/finance/cash',
         icon: CreditCard,
         children: [
-          { title: 'Bank Accounts', href: '/finance/cash/accounts', icon: Building },
-          { title: 'Cash Transactions', href: '/finance/cash/transactions', icon: Activity },
-          { title: 'Bank Reconciliation', href: '/finance/cash/reconciliation', icon: ClipboardCheck },
+          {
+            title: 'Bank Accounts',
+            href: '/finance/cash/accounts',
+            icon: Building,
+            navigationSurface: 'settings',
+          },
+          // Till sessions are a live custody workspace, not a report. Keep the operational link
+          // in Finance while all analytical/report entry points remain under the shared Reports menu.
+          {
+            title: 'Cashier Till Sessions',
+            href: '/finance/cash/till-sessions',
+            icon: WalletCards,
+          },
+          {
+            title: 'Cash Transactions',
+            href: '/finance/cash/transactions',
+            icon: Activity,
+          },
+          {
+            title: 'Bank Reconciliation',
+            href: '/finance/cash/reconciliation',
+            icon: ClipboardCheck,
+          },
           {
             title: 'Cash Reports',
             href: '/finance/cash/reports',
             icon: BarChart3,
             children: [
-              { title: 'Reports Overview', href: '/finance/cash/reports', icon: LayoutDashboard },
-              { title: 'Cash Position', href: '/finance/cash/reports/cash-position', icon: Banknote },
-              { title: 'Cash Flow Statement', href: '/finance/reports/cash-flow', icon: TrendingUp },
+              {
+                title: 'Reports Overview',
+                href: '/finance/cash/reports',
+                icon: LayoutDashboard,
+              },
+              {
+                title: 'Cash Position',
+                href: '/finance/cash/reports/cash-position',
+                icon: Banknote,
+              },
+              {
+                title: 'Cash Flow Statement',
+                href: '/finance/reports/cash-flow',
+                icon: TrendingUp,
+              },
             ],
           },
         ],
@@ -248,8 +526,16 @@ const navigationItems: NavItem[] = [
         href: '/finance/budgeting',
         icon: BarChart3,
         children: [
-          { title: 'Scenarios', href: '/finance/budgeting/scenarios', icon: BarChart3 },
-          { title: 'My Returns', href: '/finance/budgeting/my-returns', icon: FileText },
+          {
+            title: 'Scenarios',
+            href: '/finance/budgeting/scenarios',
+            icon: BarChart3,
+          },
+          {
+            title: 'My Returns',
+            href: '/finance/budgeting/my-returns',
+            icon: FileText,
+          },
         ],
       },
       {
@@ -257,10 +543,27 @@ const navigationItems: NavItem[] = [
         href: '/finance/unit-accounting',
         icon: BarChart3,
         children: [
-          { title: 'Unit Accounts', href: '/finance/unit-accounts', icon: BarChart3 },
-          { title: 'Unit Journal Entries', href: '/finance/unit-journal-entries', icon: FileText },
-          { title: 'Unit Budgets', href: '/finance/unit-budgets', icon: BarChart3 },
-          { title: 'Allocations', href: '/finance/allocations', icon: BarChart3 },
+          {
+            title: 'Unit Accounts',
+            href: '/finance/unit-accounts',
+            icon: BarChart3,
+            navigationSurface: 'settings',
+          },
+          {
+            title: 'Unit Journal Entries',
+            href: '/finance/unit-journal-entries',
+            icon: FileText,
+          },
+          {
+            title: 'Unit Budgets',
+            href: '/finance/unit-budgets',
+            icon: BarChart3,
+          },
+          {
+            title: 'Allocations',
+            href: '/finance/allocations',
+            icon: BarChart3,
+          },
         ],
       },
       {
@@ -268,9 +571,27 @@ const navigationItems: NavItem[] = [
         href: '/finance/multi-currency',
         icon: CreditCard,
         children: [
-          { title: 'Exchange Rates', href: '/finance/exchange-rates', icon: BarChart3 },
-          { title: 'Rate Trends', href: '/finance/exchange-rates/trends', icon: TrendingUp },
-          { title: 'Revaluation', href: '/finance/revaluation', icon: BarChart3 },
+          {
+            title: 'Exchange Rates',
+            href: '/finance/exchange-rates',
+            icon: BarChart3,
+            permissions: [
+              'Finance.Read',
+              'Finance.FX.Rates.Manage',
+              'Finance.Admin',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Rate Trends',
+            href: '/finance/exchange-rates/trends',
+            icon: TrendingUp,
+          },
+          {
+            title: 'Revaluation',
+            href: '/finance/revaluation',
+            icon: BarChart3,
+          },
         ],
       },
       {
@@ -278,18 +599,46 @@ const navigationItems: NavItem[] = [
         href: '/finance/tax',
         icon: BarChart3,
         children: [
-          { title: 'Tax Calculator', href: '/finance/tax/calculator', icon: BarChart3 },
+          {
+            title: 'Tax Calculator',
+            href: '/finance/tax/calculator',
+            icon: BarChart3,
+          },
           {
             title: 'Tax Reports',
             href: '/finance/tax/reports',
             icon: FileText,
             children: [
-              { title: 'Reports Overview', href: '/finance/tax/reports', icon: LayoutDashboard },
-              { title: 'Input VAT Register', href: '/finance/tax/reports/input-vat', icon: FileText },
-              { title: 'Output VAT Register', href: '/finance/tax/reports/output-vat', icon: TrendingUp },
-              { title: 'VAT Reconciliation', href: '/finance/tax/reports/vat-reconciliation', icon: Scale },
-              { title: 'WHT Summary', href: '/finance/tax/reports/withholding-tax', icon: FileCheck },
-              { title: 'WHT Certificates', href: '/finance/tax/reports/wht-certificates', icon: FileText },
+              {
+                title: 'Reports Overview',
+                href: '/finance/tax/reports',
+                icon: LayoutDashboard,
+              },
+              {
+                title: 'Input VAT Register',
+                href: '/finance/tax/reports/input-vat',
+                icon: FileText,
+              },
+              {
+                title: 'Output VAT Register',
+                href: '/finance/tax/reports/output-vat',
+                icon: TrendingUp,
+              },
+              {
+                title: 'VAT Reconciliation',
+                href: '/finance/tax/reports/vat-reconciliation',
+                icon: Scale,
+              },
+              {
+                title: 'WHT Summary',
+                href: '/finance/tax/reports/withholding-tax',
+                icon: FileCheck,
+              },
+              {
+                title: 'WHT Certificates',
+                href: '/finance/tax/reports/wht-certificates',
+                icon: FileText,
+              },
             ],
           },
         ],
@@ -299,13 +648,41 @@ const navigationItems: NavItem[] = [
         href: '/finance/reports',
         icon: BarChart3,
         children: [
-          { title: 'Reports Overview', href: '/finance/reports', icon: LayoutDashboard },
-          { title: 'Trial Balance', href: '/finance/reports/trial-balance', icon: FileText },
-          { title: 'Income Statement', href: '/finance/reports/income-statement', icon: TrendingUp },
-          { title: 'Balance Sheet', href: '/finance/reports/balance-sheet', icon: Scale },
-          { title: 'Cash Flow Statement', href: '/finance/reports/cash-flow', icon: Banknote },
-          { title: 'Multi-Currency Detail', href: '/finance/reports/multi-currency', icon: Globe },
-          { title: 'Detailed Ledger', href: '/finance/reports/detailed-ledger', icon: ListTree },
+          {
+            title: 'Reports Overview',
+            href: '/finance/reports',
+            icon: LayoutDashboard,
+          },
+          {
+            title: 'Trial Balance',
+            href: '/finance/reports/trial-balance',
+            icon: FileText,
+          },
+          {
+            title: 'Income Statement',
+            href: '/finance/reports/income-statement',
+            icon: TrendingUp,
+          },
+          {
+            title: 'Balance Sheet',
+            href: '/finance/reports/balance-sheet',
+            icon: Scale,
+          },
+          {
+            title: 'Cash Flow Statement',
+            href: '/finance/reports/cash-flow',
+            icon: Banknote,
+          },
+          {
+            title: 'Multi-Currency Detail',
+            href: '/finance/reports/multi-currency',
+            icon: Globe,
+          },
+          {
+            title: 'Detailed Ledger',
+            href: '/finance/reports/detailed-ledger',
+            icon: ListTree,
+          },
         ],
       },
     ],
@@ -322,46 +699,239 @@ const navigationItems: NavItem[] = [
         icon: CreditCard,
         children: [
           { title: 'Run Desk', href: '/hr/payroll#runs', icon: CalendarClock },
-          { title: 'Employee Profiles', href: '/hr/payroll/employee-profiles', icon: Users },
-          { title: 'Bonus Exceptions', href: '/hr/payroll/bonus-exceptions', icon: Award },
-          { title: 'Salary Advance', href: '/hr/payroll/salary-advance', icon: DollarSign },
-          { title: 'Loan Transaction', href: '/hr/payroll/loan-transaction', icon: CreditCard },
-          { title: 'Loan Transaction Amendment', href: '/hr/payroll/loan-transaction-amendment', icon: RotateCcw },
-          { title: 'Loan Repayment', href: '/hr/payroll/loan-repayment', icon: FileCheck },
+          {
+            title: 'Employee Profiles',
+            href: '/hr/payroll/employee-profiles',
+            icon: Users,
+          },
+          {
+            title: 'Bonus Exceptions',
+            href: '/hr/payroll/bonus-exceptions',
+            icon: Award,
+          },
+          {
+            title: 'Salary Advance',
+            href: '/hr/payroll/salary-advance',
+            icon: DollarSign,
+          },
+          {
+            title: 'Loan Transaction',
+            href: '/hr/payroll/loan-transaction',
+            icon: CreditCard,
+          },
+          {
+            title: 'Loan Transaction Amendment',
+            href: '/hr/payroll/loan-transaction-amendment',
+            icon: RotateCcw,
+          },
+          {
+            title: 'Loan Repayment',
+            href: '/hr/payroll/loan-repayment',
+            icon: FileCheck,
+          },
           { title: 'Tax Relief', href: '/hr/payroll/tax-relief', icon: Tag },
-          { title: 'Allowances & Ded Exception', href: '/hr/payroll/allowances-deductions-exception', icon: CheckSquare },
-          { title: 'Promotion Arrears', href: '/hr/payroll/promotion-arrears', icon: TrendingUp },
-          { title: 'Overtime Summary', href: '/hr/payroll/overtime-summary', icon: Clock },
-          { title: 'Opening Balance', href: '/hr/payroll/opening-balance', icon: Database },
-          { title: 'Contributions', href: '/hr/payroll/contributions', icon: CreditCard },
+          {
+            title: 'Allowances & Ded Exception',
+            href: '/hr/payroll/allowances-deductions-exception',
+            icon: CheckSquare,
+          },
+          {
+            title: 'Promotion Arrears',
+            href: '/hr/payroll/promotion-arrears',
+            icon: TrendingUp,
+          },
+          {
+            title: 'Overtime Summary',
+            href: '/hr/payroll/overtime-summary',
+            icon: Clock,
+          },
+          {
+            title: 'Opening Balance',
+            href: '/hr/payroll/opening-balance',
+            icon: Database,
+          },
+          {
+            title: 'Contributions',
+            href: '/hr/payroll/contributions',
+            icon: CreditCard,
+          },
         ],
       },
-      { title: 'Attendance', href: '/hr/attendance', icon: UserCheck },
-      { title: 'Leave Management', href: '/hr/leave', icon: UserCheck },
-      { title: 'Performance', href: '/hr/performance', icon: BarChart3 },
+      {
+        title: 'Leave Management',
+        href: '/hr/leave',
+        icon: CalendarDays,
+        children: [
+          { title: 'Requests', href: '/hr/leave/requests', icon: CalendarDays },
+          {
+            title: 'Approvals',
+            href: '/hr/leave/approvals',
+            icon: CheckSquare,
+          },
+          { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock },
+          { title: 'Balances', href: '/hr/leave/balances', icon: Database },
+          {
+            title: 'Adjustments',
+            href: '/hr/leave/adjustments',
+            icon: RotateCcw,
+          },
+          {
+            title: 'Encashments',
+            href: '/hr/leave/encashments',
+            icon: DollarSign,
+          },
+          {
+            title: 'Compliance',
+            href: '/hr/leave/compliance',
+            icon: FileCheck,
+          },
+          {
+            title: 'Year-End',
+            href: '/hr/leave/year-end',
+            icon: CalendarClock,
+          },
+        ],
+      },
+      {
+        title: 'Emoluments',
+        href: '/hr/emoluments',
+        icon: Coins,
+      },
+      {
+        title: 'Benefits',
+        href: '/hr/benefits',
+        icon: ShieldPlus,
+      },
+      {
+        title: 'Attendance & Time',
+        href: '/hr/attendance',
+        icon: Clock,
+        children: [
+          {
+            title: 'Daily Attendance',
+            href: '/hr/attendance/daily',
+            icon: CalendarCheck,
+          },
+          {
+            title: 'Attendance Records',
+            href: '/hr/attendance/records',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Punch Logs',
+            href: '/hr/attendance/logs',
+            icon: ScrollText,
+          },
+          {
+            title: 'Regularizations',
+            href: '/hr/attendance/regularizations',
+            icon: FileCheck,
+          },
+          {
+            title: 'Overtime Requests',
+            href: '/hr/attendance/overtime',
+            icon: Timer,
+          },
+          {
+            title: 'Remote Work',
+            href: '/hr/attendance/remote-work',
+            icon: Home,
+          },
+          {
+            title: 'Monthly Summaries',
+            href: '/hr/attendance/summaries',
+            icon: Database,
+          },
+          { title: 'Alerts', href: '/hr/attendance/alerts', icon: BellRing },
+          {
+            title: 'Bulk Imports',
+            href: '/hr/attendance/imports',
+            icon: Upload,
+          },
+          {
+            title: 'Payroll Exports',
+            href: '/hr/attendance/payroll-exports',
+            icon: DollarSign,
+          },
+          {
+            title: 'Biometrics',
+            href: '/hr/attendance/biometrics',
+            icon: Fingerprint,
+          },
+        ],
+      },
+      {
+        title: 'Consulting',
+        href: '/hr/consulting',
+        icon: Briefcase,
+        children: [
+          { title: 'Clients', href: '/hr/consulting/clients', icon: Building2 },
+          {
+            title: 'Engagements',
+            href: '/hr/consulting/engagements',
+            icon: FileCheck,
+          },
+          {
+            title: 'Timesheets',
+            href: '/hr/consulting/timesheets',
+            icon: Clock,
+          },
+          { title: 'Invoices', href: '/hr/consulting/invoices', icon: Receipt },
+        ],
+      },
+      // Performance is re-added with its area — linking to routes that do not exist yet
+      // only produces 404s.
     ],
   },
   {
-    title: 'Maintenance Mngt',
+    title: 'Maintenance',
     href: '/maintenance',
     icon: Wrench,
     permissions: ['maintenance.access'],
     children: [
-      { title: 'Dashboard', href: '/maintenance/dashboard', icon: LayoutDashboard },
+      {
+        title: 'Dashboard',
+        href: '/maintenance/dashboard',
+        icon: LayoutDashboard,
+      },
       { title: 'Job Cards', href: '/maintenance/job-cards', icon: FileText },
-      { title: 'Work Orders', href: '/maintenance/work-orders', icon: FileText },
+      {
+        title: 'Work Orders',
+        href: '/maintenance/work-orders',
+        icon: FileText,
+      },
       { title: 'Assets', href: '/maintenance/assets', icon: Package },
       { title: 'Sites', href: '/maintenance/sites', icon: MapPin },
-      { title: 'Asset Admission', href: '/maintenance/asset-admission', icon: ClipboardCheck },
+      {
+        title: 'Asset Admission',
+        href: '/maintenance/asset-admission',
+        icon: ClipboardCheck,
+      },
       { title: 'Technicians', href: '/maintenance/technicians', icon: Users },
-      { title: 'Quality Control', href: '/maintenance/quality-control', icon: ClipboardCheck },
-      { title: 'Scheduled Maintenance', href: '/maintenance/scheduled', icon: Calendar },
-      { title: 'Condition Monitoring', href: '/maintenance/condition-monitoring', icon: Activity },
+      {
+        title: 'Quality Control',
+        href: '/maintenance/quality-control',
+        icon: ClipboardCheck,
+      },
+      {
+        title: 'Scheduled Maintenance',
+        href: '/maintenance/scheduled',
+        icon: Calendar,
+      },
+      {
+        title: 'Condition Monitoring',
+        href: '/maintenance/condition-monitoring',
+        icon: Activity,
+      },
       // Emergency Maintenance temporarily hidden
       // { title: 'Emergency Maintenance', href: '/maintenance/emergency', icon: AlertTriangle },
       // Inspections temporarily hidden
       // { title: 'Inspections', href: '/maintenance/inspections', icon: ClipboardCheck },
-      { title: 'Maintenance History', href: '/maintenance/history', icon: Clock },
+      {
+        title: 'Maintenance History',
+        href: '/maintenance/history',
+        icon: Clock,
+      },
       { title: 'Tool Management', href: '/maintenance/tools', icon: Wrench },
       { title: 'Reports', href: '/maintenance/reports', icon: BarChart3 },
       // Asset Analytics temporarily hidden
@@ -369,28 +939,56 @@ const navigationItems: NavItem[] = [
     ],
   },
   {
-    title: 'Fleet Management',
+    title: 'Fleet',
     href: '/maintenance/fleet',
     icon: Truck,
     permissions: ['fleet.access'],
     children: [
-      { title: 'Dashboard', href: '/maintenance/fleet/dashboard', icon: LayoutDashboard },
+      {
+        title: 'Dashboard',
+        href: '/maintenance/fleet/dashboard',
+        icon: LayoutDashboard,
+      },
       { title: 'Fleets', href: '/maintenance/fleet/vehicles', icon: Truck },
       { title: 'Drivers', href: '/maintenance/fleet/drivers', icon: UserCheck },
       { title: 'Trips', href: '/maintenance/fleet/trips', icon: MapPin },
-      { title: 'Compliance', href: '/maintenance/fleet/compliance', icon: ShieldCheck },
-      { title: 'Fuel (Reports)', href: '/maintenance/fleet/fuel', icon: Droplet },
-      { title: 'Defects', href: '/maintenance/fleet/defects', icon: AlertTriangle },
-      { title: 'Incidents', href: '/maintenance/fleet/incidents', icon: AlertTriangle },
+      {
+        title: 'Compliance',
+        href: '/maintenance/fleet/compliance',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Fuel (Reports)',
+        href: '/maintenance/fleet/fuel',
+        icon: Droplet,
+      },
+      {
+        title: 'Defects',
+        href: '/maintenance/fleet/defects',
+        icon: AlertTriangle,
+      },
+      {
+        title: 'Incidents',
+        href: '/maintenance/fleet/incidents',
+        icon: AlertTriangle,
+      },
       { title: 'Tyres', href: '/maintenance/fleet/tyres', icon: Package },
-      { title: 'Batteries', href: '/maintenance/fleet/batteries', icon: Package },
-      { title: 'External Repairs', href: '/maintenance/fleet/external-repairs', icon: Wrench },
+      {
+        title: 'Batteries',
+        href: '/maintenance/fleet/batteries',
+        icon: Package,
+      },
+      {
+        title: 'External Repairs',
+        href: '/maintenance/fleet/external-repairs',
+        icon: Wrench,
+      },
       { title: 'Costs', href: '/maintenance/fleet/costs', icon: DollarSign },
       { title: 'PM Plans', href: '/maintenance/fleet/pm', icon: Calendar },
     ],
   },
   {
-    title: 'Project Mngt',
+    title: 'Projects',
     href: '/development/projects',
     icon: Briefcase,
     permissions: ['project.access'],
@@ -408,16 +1006,52 @@ const navigationItems: NavItem[] = [
           { title: 'Reports', href: '/reports?module=planning', icon: FileCheck },
         ],
       },
-      { title: 'Operations', href: '/development/project-operations', icon: Activity },
-      { title: 'Portfolios', href: '/development/portfolios', icon: FolderTree },
+      {
+        title: 'Operations',
+        href: '/development/project-operations',
+        icon: Activity,
+      },
+      {
+        title: 'Portfolios',
+        href: '/development/portfolios',
+        icon: FolderTree,
+      },
       { title: 'Programs', href: '/development/programs', icon: Target },
-      { title: 'Dependencies', href: '/development/project-dependencies', icon: AlertCircle },
-      { title: 'Analytics', href: '/development/project-analytics', icon: TrendingUp },
-      { title: 'Reports', href: '/development/project-reports', icon: FileCheck },
-      { title: 'Approvals', href: '/development/project-approvals', icon: ClipboardCheck },
-      { title: 'Billing', href: '/development/project-billing', icon: DollarSign },
-      { title: 'Materials', href: '/development/project-materials', icon: Package },
-      { title: 'Mobile', href: '/development/project-mobile', icon: Smartphone },
+      {
+        title: 'Dependencies',
+        href: '/development/project-dependencies',
+        icon: AlertCircle,
+      },
+      {
+        title: 'Analytics',
+        href: '/development/project-analytics',
+        icon: TrendingUp,
+      },
+      {
+        title: 'Reports',
+        href: '/development/project-reports',
+        icon: FileCheck,
+      },
+      {
+        title: 'Approvals',
+        href: '/development/project-approvals',
+        icon: ClipboardCheck,
+      },
+      {
+        title: 'Billing',
+        href: '/development/project-billing',
+        icon: DollarSign,
+      },
+      {
+        title: 'Materials',
+        href: '/development/project-materials',
+        icon: Package,
+      },
+      {
+        title: 'Mobile',
+        href: '/development/project-mobile',
+        icon: Smartphone,
+      },
       { title: 'Tasks', href: '/development/tasks', icon: FileText },
       { title: 'Timesheets', href: '/development/timesheets', icon: Clock },
       { title: 'Expenses', href: '/development/expenses', icon: DollarSign },
@@ -430,24 +1064,175 @@ const navigationItems: NavItem[] = [
     href: '/procurement',
     icon: Briefcase,
     children: [
-      { title: 'Registrations', href: '/administration/procurement/registrations', icon: FileText },
-      { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
+      {
+        title: 'Supplier Management',
+        href: '/procurement/suppliers',
+        icon: Users,
+        children: [
+          {
+            title: 'Supplier Application Portal',
+            href: '/supplier-application',
+            icon: Globe2,
+          },
+          {
+            title: 'Business Partners',
+            href: '/procurement/business-partners',
+            icon: Users,
+            permissions: [
+              'procurement.records.read',
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Registrations',
+            href: '/administration/procurement/registrations',
+            icon: FileText,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Pending Partners',
+            href: '/administration/procurement/business-partners/pending',
+            icon: Users,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Onboarding Tokens',
+            href: '/administration/procurement/supplier-onboarding-tokens',
+            icon: KeyRound,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.payment.verify',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Applicant Access',
+            href: '/administration/procurement/supplier-applicant-access',
+            icon: ShieldCheck,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Evidence Packs',
+            href: '/administration/procurement/supplier-evidence-packs',
+            icon: FileCheck,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Eligibility',
+            href: '/administration/procurement/supplier-eligibility',
+            icon: ClipboardCheck,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Due Diligence',
+            href: '/administration/procurement/supplier-due-diligence',
+            icon: ShieldCheck,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Approved Vendor List',
+            href: '/administration/procurement/supplier-avl',
+            icon: ListTree,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Risk & Concentration',
+            href: '/administration/procurement/supplier-risk',
+            icon: TrendingUp,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Performance',
+            href: '/administration/procurement/supplier-performance',
+            icon: Activity,
+            permissions: [
+              'procurement.supplier.manage',
+              'procurement.supplier.review',
+              'procurement.supplier.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Supplier Master Changes',
+            href: '/administration/procurement/supplier-master-changes',
+            icon: Building2,
+            permissions: ['procurement.supplier.manage'],
+          },
+        ],
+      },
       {
         title: 'Purchasing',
         href: '/procurement/purchasing',
-          icon: ShoppingCart,
-          children: [
-            { title: 'Purchase Requests', href: '/procurement/purchase-requisitions', icon: FileText },
-            {
-              title: 'Sourcing Cases',
-              href: '/procurement/sourcing-cases',
-              icon: FileCheck,
-              permissions: ['procurement.records.read'],
-            },
-            { title: 'RFQs', href: '/procurement/rfqs', icon: FileText },
-          { title: 'Purchase Orders', href: '/procurement/purchase-orders', icon: ShoppingCart },
-          { title: 'Purchase Receipts', href: '/procurement/purchase-receipts', icon: ClipboardList },
-          { title: 'Supplier Comparison', href: '/procurement/supplier-comparison', icon: BarChart3 },
+        icon: ShoppingCart,
+        children: [
+          {
+            title: 'Purchase Requests',
+            href: '/procurement/purchase-requisitions',
+            icon: FileText,
+          },
+          {
+            title: 'Sourcing Cases',
+            href: '/procurement/sourcing-cases',
+            icon: FileCheck,
+            permissions: ['procurement.records.read'],
+          },
+          { title: 'RFQs', href: '/procurement/rfqs', icon: FileText },
+          {
+            title: 'Purchase Orders',
+            href: '/procurement/purchase-orders',
+            icon: ShoppingCart,
+          },
+          {
+            title: 'Purchase Receipts',
+            href: '/procurement/purchase-receipts',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Supplier Comparison',
+            href: '/procurement/supplier-comparison',
+            icon: BarChart3,
+          },
         ],
       },
       {
@@ -468,11 +1253,23 @@ const navigationItems: NavItem[] = [
             icon: ShieldCheck,
             permissions: ['procurement.records.read'],
           },
-          { title: 'My Assigned Tenders', href: '/procurement/my-assigned-tenders', icon: FileText },
+          {
+            title: 'My Assigned Tenders',
+            href: '/procurement/my-assigned-tenders',
+            icon: FileText,
+          },
           { title: 'Bids', href: '/procurement/bids', icon: FileText },
-          { title: 'Evaluations', href: '/procurement/evaluations', icon: Star },
+          {
+            title: 'Evaluations',
+            href: '/procurement/evaluations',
+            icon: Star,
+          },
           { title: 'Awards', href: '/procurement/awards', icon: Award },
-          { title: 'Contracts', href: '/procurement/contracts', icon: FileText },
+          {
+            title: 'Contracts',
+            href: '/procurement/contracts',
+            icon: FileText,
+          },
           {
             title: 'Contract Operations',
             href: '/procurement/contract-operations',
@@ -510,21 +1307,95 @@ const navigationItems: NavItem[] = [
         href: '/procurement/planning',
         icon: Target,
         children: [
-          { title: 'Overview', href: '/procurement/planning', icon: LayoutDashboard },
-          { title: 'Procurement Plans', href: '/procurement/planning/plans', icon: Target },
-          { title: 'APP Submissions', href: '/procurement/planning/app-submissions', icon: FileCheck },
-          { title: 'Specification Templates', href: '/procurement/planning/specification-templates', icon: BookTemplate },
-          { title: 'Budgets', href: '/procurement/planning/budgets', icon: DollarSign },
-          { title: 'Schedules', href: '/procurement/planning/schedules', icon: Calendar },
-          { title: 'Annual Calendar', href: '/procurement/planning/calendar', icon: CalendarClock },
-          { title: 'Market Analysis', href: '/procurement/planning/market-analysis', icon: TrendingUp },
-          { title: 'Supplier Consolidation', href: '/procurement/planning/supplier-consolidation', icon: Users },
-          { title: 'Emergency Plans', href: '/procurement/planning/emergency-plans', icon: AlertCircle },
-          { title: 'Reports', href: '/procurement/planning/reports', icon: FileText },
+          {
+            title: 'Overview',
+            href: '/procurement/planning',
+            icon: LayoutDashboard,
+          },
+          {
+            title: 'Procurement Plans',
+            href: '/procurement/planning/plans',
+            icon: Target,
+          },
+          {
+            title: 'APP Submissions',
+            href: '/procurement/planning/app-submissions',
+            icon: FileCheck,
+          },
+          {
+            title: 'Specification Templates',
+            href: '/procurement/planning/specification-templates',
+            icon: BookTemplate,
+            navigationSurface: 'settings',
+          },
+          {
+            title: 'Budgets',
+            href: '/procurement/planning/budgets',
+            icon: DollarSign,
+          },
+          {
+            title: 'Schedules',
+            href: '/procurement/planning/schedules',
+            icon: Calendar,
+          },
+          {
+            title: 'Annual Calendar',
+            href: '/procurement/planning/calendar',
+            icon: CalendarClock,
+          },
+          {
+            title: 'Market Analysis',
+            href: '/procurement/planning/market-analysis',
+            icon: TrendingUp,
+          },
+          {
+            title: 'Supplier Consolidation',
+            href: '/procurement/planning/supplier-consolidation',
+            icon: Users,
+          },
+          {
+            title: 'Emergency Plans',
+            href: '/procurement/planning/emergency-plans',
+            icon: AlertCircle,
+          },
+          {
+            title: 'Reports',
+            href: '/procurement/planning/reports',
+            icon: FileText,
+          },
         ],
       },
-      // { title: 'Suppliers', href: '/procurement/suppliers', icon: Briefcase },
-      // { title: 'Vendor Management', href: '/procurement/vendors', icon: Users },
+      {
+        title: 'Procurement Documents',
+        href: '/procurement/documents',
+        icon: FileText,
+        permissions: [
+          'procurement.records.read',
+          'procurement.inventory.read',
+          'Finance.Read',
+        ],
+        accessMode: 'any',
+      },
+      {
+        title: 'Governance & Controls',
+        href: '/administration/procurement/master-data-changes',
+        icon: ShieldCheck,
+        children: [
+          {
+            title: 'Master Data Changes',
+            href: '/administration/procurement/master-data-changes',
+            icon: FileCheck,
+            permissions: ['procurement.access.manage'],
+          },
+          {
+            title: 'Control Events',
+            href: '/administration/procurement/control-events',
+            icon: Activity,
+            permissions: ['procurement.audit.read', 'audit.read'],
+            accessMode: 'any',
+          },
+        ],
+      },
     ],
   },
   {
@@ -533,14 +1404,36 @@ const navigationItems: NavItem[] = [
     icon: Package,
     children: [
       {
-        title: 'Cards',
+        title: 'Items & Catalogue',
         href: '/inventory/cards',
         icon: Package,
+        permissions: [
+          'procurement.inventory.read',
+          'procurement.inventory.master-data.manage',
+        ],
+        accessMode: 'any',
         children: [
           { title: 'Inventory Items', href: '/inventory/items', icon: Package },
-          { title: 'Warehouse Items', href: '/inventory/warehouse-items', icon: Building2 },
-          { title: 'Item Suppliers', href: '/inventory/item-suppliers', icon: Users },
-          { title: 'Price Lists', href: '/inventory/price-lists', icon: DollarSign },
+          {
+            title: 'Warehouse Items',
+            href: '/inventory/warehouse-items',
+            icon: Building2,
+          },
+          {
+            title: 'Item Identifiers',
+            href: '/inventory/item-identifiers',
+            icon: ScanLine,
+          },
+          {
+            title: 'Item Suppliers',
+            href: '/inventory/item-suppliers',
+            icon: Users,
+          },
+          {
+            title: 'Price Lists',
+            href: '/inventory/price-lists',
+            icon: DollarSign,
+          },
         ],
       },
       {
@@ -548,13 +1441,111 @@ const navigationItems: NavItem[] = [
         href: '/inventory/transactions',
         icon: Activity,
         children: [
-          { title: 'Stock Movements', href: '/inventory/stock-movements', icon: Activity },
-          { title: 'Inventory Requisitions', href: '/inventory/requisitions', icon: ClipboardList },
-          { title: 'Inventory Receipts', href: '/inventory/adjustments', icon: Package },
-          { title: 'Inventory Transfers', href: '/inventory/transfers', icon: Package },
-          { title: 'Bin Stock', href: '/inventory/bin-stock', icon: FolderTree },
-          { title: 'Physical Counts', href: '/inventory/physical-counts', icon: ClipboardCheck },
-          { title: 'Valuation', href: '/inventory/valuation', icon: DollarSign },
+          {
+            title: 'Stock Movements',
+            href: '/inventory/stock-movements',
+            icon: Activity,
+          },
+          {
+            title: 'Inventory Requisitions',
+            href: '/inventory/requisitions',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Inventory Receipts',
+            href: '/inventory/adjustments',
+            icon: Package,
+          },
+          {
+            title: 'Inventory Transfers',
+            href: '/inventory/transfers',
+            icon: Package,
+          },
+          {
+            title: 'Bin Stock',
+            href: '/inventory/bin-stock',
+            icon: FolderTree,
+          },
+          {
+            title: 'Physical Counts',
+            href: '/inventory/physical-counts',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'Labels & Mobile Scanning',
+            href: '/inventory/mobile-scanning',
+            icon: ScanLine,
+            permissions: [
+              'procurement.inventory.receive',
+              'procurement.inventory.issue',
+              'procurement.inventory.transfer',
+              'procurement.inventory.count',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Tracking Controls',
+            href: '/inventory/tracking-controls',
+            icon: ShieldCheck,
+            permissions: ['procurement.inventory.read'],
+          },
+          {
+            title: 'Negative Stock Controls',
+            href: '/inventory/negative-stock-controls',
+            icon: ShieldCheck,
+            permissions: ['procurement.inventory.read'],
+          },
+          {
+            title: 'Project Reservations',
+            href: '/inventory/project-reservations',
+            icon: ShieldCheck,
+            permissions: ['procurement.inventory.read'],
+          },
+          {
+            title: 'Replenishment',
+            href: '/inventory/replenishment',
+            icon: BellRing,
+            permissions: ['procurement.inventory.read'],
+          },
+          {
+            title: 'Valuation Reconciliation',
+            href: '/inventory/valuation-reconciliation',
+            icon: Scale,
+            permissions: ['Finance.Read'],
+          },
+          {
+            title: 'Ageing & Action Analytics',
+            href: '/inventory/analytics',
+            icon: BarChart3,
+            permissions: ['procurement.inventory.read'],
+          },
+          {
+            title: 'Inventory Disposal',
+            href: '/inventory/disposals',
+            icon: Gavel,
+            permissions: [
+              'procurement.inventory.read',
+              'procurement.inventory.disposal.request',
+              'procurement.inventory.disposal.approve',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Directed Operations',
+            href: '/inventory/directed-operations',
+            icon: GitBranch,
+            permissions: [
+              'procurement.inventory.receive',
+              'procurement.inventory.issue',
+              'procurement.inventory.transfer',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Valuation',
+            href: '/inventory/valuation',
+            icon: DollarSign,
+          },
         ],
       },
     ],
@@ -601,9 +1592,17 @@ const navigationItems: NavItem[] = [
         icon: Users,
         children: [
           { title: 'Leads', href: '/sales/crm/leads', icon: Users },
-          { title: 'Opportunities', href: '/sales/crm/opportunities', icon: Target },
+          {
+            title: 'Opportunities',
+            href: '/sales/crm/opportunities',
+            icon: Target,
+          },
           { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
-          { title: 'Activities', href: '/sales/crm/activities', icon: Activity },
+          {
+            title: 'Activities',
+            href: '/sales/crm/activities',
+            icon: Activity,
+          },
         ],
       },
       { title: 'Return Orders', href: '/sales/return-orders', icon: RotateCcw },
@@ -615,28 +1614,61 @@ const navigationItems: NavItem[] = [
         icon: Phone,
         children: [
           { title: 'Activities', href: '/sales/collections', icon: Phone },
-          { title: 'Payment Plans', href: '/sales/collections/plans', icon: CalendarClock },
+          {
+            title: 'Payment Plans',
+            href: '/sales/collections/plans',
+            icon: CalendarClock,
+          },
         ],
       },
       { title: 'Commissions', href: '/sales/commissions', icon: Award },
       { title: 'Forecasts', href: '/sales/forecasts', icon: TrendingUp },
       { title: 'Competitors', href: '/sales/competitors', icon: Swords },
       { title: 'Reports', href: '/sales/reports', icon: BarChart3 },
-      { title: 'Journal Templates', href: '/sales/journal-templates', icon: BookTemplate },
+      {
+        title: 'Journal Templates',
+        href: '/sales/journal-templates',
+        icon: BookTemplate,
+        navigationSurface: 'settings',
+      },
     ],
   },
   {
     // Estate/DMS integration: keep Central DMS visible as a shared workspace, not nested inside another module owner.
-    title: 'Document Mngt',
+    title: 'Documents',
     href: '/document-management',
     icon: BookTemplate,
     children: [
-      { title: 'Dashboard', href: '/document-management', icon: LayoutDashboard },
-      { title: 'Document Register', href: '/document-management/records', icon: FileText },
-      { title: 'Metadata Templates', href: '/document-management/CentralDocumentMetadataTemplate', icon: BookTemplate },
-      { title: 'Version Control', href: '/document-management/CentralDocumentVersion', icon: Workflow },
-      { title: 'Access / Retention', href: '/document-management/CentralDocumentGovernance', icon: ShieldCheck },
-      { title: 'Module Queue', href: '/document-management/CentralDocumentIntegrationQueue', icon: Workflow },
+      {
+        title: 'Dashboard',
+        href: '/document-management',
+        icon: LayoutDashboard,
+      },
+      {
+        title: 'Document Register',
+        href: '/document-management/records',
+        icon: FileText,
+      },
+      {
+        title: 'Metadata Templates',
+        href: '/document-management/CentralDocumentMetadataTemplate',
+        icon: BookTemplate,
+      },
+      {
+        title: 'Version Control',
+        href: '/document-management/CentralDocumentVersion',
+        icon: Workflow,
+      },
+      {
+        title: 'Access / Retention',
+        href: '/document-management/CentralDocumentGovernance',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Module Queue',
+        href: '/document-management/CentralDocumentIntegrationQueue',
+        icon: Workflow,
+      },
     ],
   },
   {
@@ -646,42 +1678,142 @@ const navigationItems: NavItem[] = [
     icon: Home,
     children: [
       { title: 'Overview', href: '/estate', icon: ClipboardList },
-      { title: 'Property Dashboard', href: '/estate/property-management/dashboard', icon: BarChart3 },
+      {
+        title: 'Property Dashboard',
+        href: '/estate/property-management/dashboard',
+        icon: BarChart3,
+      },
       {
         title: 'Facilities Dashboard',
         href: '/estate/facilities/dashboard',
         icon: BarChart3,
       },
-      { title: 'Land Acquisition', href: '/estate/land-acquisition', icon: Landmark },
-      { title: 'Land Management', href: '/estate/land-management', icon: MapPin },
+      {
+        title: 'Land Acquisition',
+        href: '/estate/land-acquisition',
+        icon: Landmark,
+      },
+      {
+        title: 'Land Management',
+        href: '/estate/land-management',
+        icon: MapPin,
+      },
       { title: 'GIS Integration', href: '/estate/gis', icon: Globe2 },
       {
-        title: 'Estate Casework & Registers',
+        title: 'Core Operations',
         href: '/estate',
         icon: ClipboardList,
         children: [
-          { title: 'Registry', href: '/estate/EstateRegistrySecretariat', icon: ClipboardList },
-          { title: 'Records', href: '/estate/EstateRecordsManagement', icon: Database },
-          { title: 'Inspections', href: '/estate/EstateInspection', icon: MapPin },
-          { title: 'Searches', href: '/estate/EstateSearchApplication', icon: Search },
-          { title: 'Record Amendments', href: '/estate/EstateRecordAmendment', icon: FileCheck },
-          { title: 'Certified Copies', href: '/estate/EstateCertifiedTrueCopy', icon: FileCheck },
-          { title: 'Joint Ownership', href: '/estate/EstateJointOwnership', icon: Users },
-          { title: 'Transfers', href: '/estate/EstateTransfer', icon: ArrowRightLeft },
-          { title: 'Assignments', href: '/estate/EstateAssignment', icon: FileText },
-          { title: 'Mortgage Consent', href: '/estate/EstateMortgageConsent', icon: FileCheck },
-          { title: 'Lease Preparation', href: '/estate/EstateLeasePreparation', icon: FileText },
-          { title: 'Additional Land', href: '/estate/EstateAdditionalLand', icon: Landmark },
-          { title: 'Layout Revision', href: '/estate/EstateLayoutRevision', icon: MapPin },
-          { title: 'Change of Use', href: '/estate/EstateChangeOfUse', icon: FileCheck },
-          { title: 'Reminders / Rate Revision', href: '/estate/EstateReminderRateRevision', icon: ClipboardList },
-          { title: 'Lease Renewal', href: '/estate/EstateLeaseRenewal', icon: RotateCcw },
-          { title: 'Serviced Plots / HOS', href: '/estate/EstateServicedPlotAllocation', icon: Landmark },
-          { title: 'Partially Serviced', href: '/estate/EstateLandsPartiallyServiced', icon: Home },
-          { title: 'Housing / HOS', href: '/estate/EstateHousingHomeOwnership', icon: Building2 },
-          { title: 'Traditional Lands', href: '/estate/EstateTraditionalLands', icon: Landmark },
-          { title: 'Regularisation', href: '/estate/EstateTenancyRegularisation', icon: Award },
-          { title: 'Reports', href: '/reports?module=estate', icon: BarChart3 },
+          {
+            title: 'Registry',
+            href: '/estate/EstateRegistrySecretariat',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Records',
+            href: '/estate/EstateRecordsManagement',
+            icon: Database,
+          },
+          {
+            title: 'Inspections',
+            href: '/estate/EstateInspection',
+            icon: MapPin,
+          },
+          {
+            title: 'Searches',
+            href: '/estate/EstateSearchApplication',
+            icon: Search,
+          },
+          {
+            title: 'Record Amendments',
+            href: '/estate/EstateRecordAmendment',
+            icon: FileCheck,
+          },
+          {
+            title: 'Certified Copies',
+            href: '/estate/EstateCertifiedTrueCopy',
+            icon: FileCheck,
+          },
+          {
+            title: 'Joint Ownership',
+            href: '/estate/EstateJointOwnership',
+            icon: Users,
+          },
+          {
+            title: 'Transfers',
+            href: '/estate/EstateTransfer',
+            icon: ArrowRightLeft,
+          },
+          {
+            title: 'Assignments',
+            href: '/estate/EstateAssignment',
+            icon: FileText,
+          },
+          {
+            title: 'Mortgage Consent',
+            href: '/estate/EstateMortgageConsent',
+            icon: FileCheck,
+          },
+          {
+            title: 'Lease Preparation',
+            href: '/estate/EstateLeasePreparation',
+            icon: FileText,
+          },
+          {
+            title: 'Additional Land',
+            href: '/estate/EstateAdditionalLand',
+            icon: Landmark,
+          },
+          {
+            title: 'Layout Revision',
+            href: '/estate/EstateLayoutRevision',
+            icon: MapPin,
+          },
+          {
+            title: 'Change of Use',
+            href: '/estate/EstateChangeOfUse',
+            icon: FileCheck,
+          },
+          {
+            title: 'Reminders / Rate Revision',
+            href: '/estate/EstateReminderRateRevision',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Lease Renewal',
+            href: '/estate/EstateLeaseRenewal',
+            icon: RotateCcw,
+          },
+          {
+            title: 'Serviced Plots / HOS',
+            href: '/estate/EstateServicedPlotAllocation',
+            icon: Landmark,
+          },
+          {
+            title: 'Partially Serviced',
+            href: '/estate/EstateLandsPartiallyServiced',
+            icon: Home,
+          },
+          {
+            title: 'Housing / HOS',
+            href: '/estate/EstateHousingHomeOwnership',
+            icon: Building2,
+          },
+          {
+            title: 'Traditional Lands',
+            href: '/estate/EstateTraditionalLands',
+            icon: Landmark,
+          },
+          {
+            title: 'Regularisation',
+            href: '/estate/EstateTenancyRegularisation',
+            icon: Award,
+          },
+          {
+            title: 'Reports',
+            href: '/reports?module=estate',
+            icon: BarChart3,
+          },
         ],
       },
       {
@@ -689,17 +1821,61 @@ const navigationItems: NavItem[] = [
         href: '/estate/property-management',
         icon: Home,
         children: [
-          { title: 'Dashboard', href: '/estate/property-management/dashboard', icon: BarChart3 },
-          { title: 'Property & Units', href: '/estate/property-management/EstatePropertyManagementPropertyUnit', icon: Building2 },
-          { title: 'Portal Listings', href: '/estate/property-management/listings', icon: MapPin },
-          { title: 'Property Requests', href: '/estate/property-management/EstatePropertyManagementListingApplication', icon: ClipboardList },
-          { title: 'Lease Management', href: '/estate/property-management/EstatePropertyManagementLease', icon: FileCheck },
-          { title: 'Tenants / Occupants', href: '/estate/property-management/EstatePropertyManagementTenantOccupant', icon: Users },
-          { title: 'Billing / Service Charge', href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge', icon: CreditCard },
-          { title: 'Ground Rent', href: '/estate/property-management/EstatePropertyManagementGroundRent', icon: Banknote },
-          { title: 'Occupancy / Availability', href: '/estate/property-management/EstatePropertyManagementOccupancyAvailability', icon: Home },
-          { title: 'Move-in / Handover', href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover', icon: ClipboardCheck },
-          { title: 'Records Index', href: '/estate/property-management/EstatePropertyManagementDocumentRecordIndex', icon: FileText },
+          {
+            title: 'Dashboard',
+            href: '/estate/property-management/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'Property & Units',
+            href: '/estate/property-management/EstatePropertyManagementPropertyUnit',
+            icon: Building2,
+          },
+          {
+            title: 'Portal Listings',
+            href: '/estate/property-management/listings',
+            icon: MapPin,
+          },
+          {
+            title: 'Property Requests',
+            href: '/estate/property-management/EstatePropertyManagementListingApplication',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Lease Management',
+            href: '/estate/property-management/EstatePropertyManagementLease',
+            icon: FileCheck,
+          },
+          {
+            title: 'Tenants / Occupants',
+            href: '/estate/property-management/EstatePropertyManagementTenantOccupant',
+            icon: Users,
+          },
+          {
+            title: 'Billing / Service Charge',
+            href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
+            icon: CreditCard,
+          },
+          {
+            title: 'Ground Rent',
+            href: '/estate/property-management/EstatePropertyManagementGroundRent',
+            icon: Banknote,
+          },
+          {
+            title: 'Occupancy / Availability',
+            href: '/estate/property-management/EstatePropertyManagementOccupancyAvailability',
+            icon: Home,
+          },
+          {
+            title: 'Move-in / Handover',
+            href: '/estate/property-management/EstatePropertyManagementMoveInMoveOutHandover',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'Records Index',
+            href: '/estate/property-management/EstatePropertyManagementDocumentRecordIndex',
+            icon: FileText,
+          },
         ],
       },
       {
@@ -769,22 +1945,65 @@ const navigationItems: NavItem[] = [
     children: [
       { title: 'Dashboard', href: '/legal/dashboard', icon: BarChart3 },
       { title: 'Procedures', href: '/legal', icon: ClipboardList },
-      { title: 'Procedure Manual', href: '/legal/LegalProcedure', icon: BookOpen },
-      { title: 'Legal Opinions / Advisory', href: '/legal/LegalOpinionAdvisory', icon: MessageSquare },
-      { title: 'External Counsel', href: '/legal/LegalExternalCounsel', icon: Briefcase },
+      {
+        title: 'Procedure Manual',
+        href: '/legal/LegalProcedure',
+        icon: BookOpen,
+      },
+      {
+        title: 'Legal Opinions / Advisory',
+        href: '/legal/LegalOpinionAdvisory',
+        icon: MessageSquare,
+      },
+      {
+        title: 'External Counsel',
+        href: '/legal/LegalExternalCounsel',
+        icon: Briefcase,
+      },
       { title: 'Mortgages', href: '/legal/LegalMortgage', icon: FileCheck },
-      { title: 'Mortgage In Principle', href: '/legal/LegalMortgageInPrinciple', icon: FileCheck },
-      { title: 'Court Processes', href: '/legal/LegalCourtProcess', icon: Gavel },
-      { title: 'Other Court Processes', href: '/legal/LegalOtherCourtProcess', icon: Scale },
-      { title: 'Termination / Recognition', href: '/legal/LegalTerminationRecognition', icon: ShieldCheck },
-      { title: 'Assignment / Sublease / Vesting', href: '/legal/LegalAssignmentSubleaseVesting', icon: Landmark },
-      { title: 'Leases / Variation / Renewal', href: '/legal/LegalLeaseVariationRenewalSublease', icon: FileText },
+      {
+        title: 'Mortgage In Principle',
+        href: '/legal/LegalMortgageInPrinciple',
+        icon: FileCheck,
+      },
+      {
+        title: 'Court Processes',
+        href: '/legal/LegalCourtProcess',
+        icon: Gavel,
+      },
+      {
+        title: 'Other Court Processes',
+        href: '/legal/LegalOtherCourtProcess',
+        icon: Scale,
+      },
+      {
+        title: 'Termination / Recognition',
+        href: '/legal/LegalTerminationRecognition',
+        icon: ShieldCheck,
+      },
+      {
+        title: 'Assignment / Sublease / Vesting',
+        href: '/legal/LegalAssignmentSubleaseVesting',
+        icon: Landmark,
+      },
+      {
+        title: 'Leases / Variation / Renewal',
+        href: '/legal/LegalLeaseVariationRenewalSublease',
+        icon: FileText,
+      },
       { title: 'Transfers', href: '/legal/LegalTransfer', icon: GitBranch },
       {
         title: 'Workflow Setup',
         href: '/administration/workflow?q=Legal',
         icon: Workflow,
-        roles: ['admin', 'SystemAdmin', 'SuperAdmin', 'TenantAdmin', 'WorkflowAdmin'],
+        navigationSurface: 'settings',
+        roles: [
+          'admin',
+          'SystemAdmin',
+          'SuperAdmin',
+          'TenantAdmin',
+          'WorkflowAdmin',
+        ],
       },
     ],
   },
@@ -799,13 +2018,41 @@ const navigationItems: NavItem[] = [
         icon: Building,
         permissions: ['enquiry.internal.access'],
         children: [
-          { title: 'Dashboard', href: '/helpdesk/enquiry/internal/dashboard', icon: BarChart3 },
-          { title: 'Enquiries', href: '/helpdesk/enquiry/internal', icon: FileText },
-          { title: 'Queue', href: '/helpdesk/enquiry/internal/queue', icon: ClipboardList },
-          { title: 'New Enquiry', href: '/helpdesk/enquiry/internal/new', icon: MessageSquare },
-          { title: 'Problems', href: '/helpdesk/enquiry/internal/problems', icon: AlertCircle },
-          { title: 'Knowledge Base', href: '/helpdesk/enquiry/internal/knowledge-base', icon: FileText },
-          { title: 'FAQs', href: '/helpdesk/enquiry/internal/faq', icon: HelpCircle },
+          {
+            title: 'Dashboard',
+            href: '/helpdesk/enquiry/internal/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'Enquiries',
+            href: '/helpdesk/enquiry/internal',
+            icon: FileText,
+          },
+          {
+            title: 'Queue',
+            href: '/helpdesk/enquiry/internal/queue',
+            icon: ClipboardList,
+          },
+          {
+            title: 'New Enquiry',
+            href: '/helpdesk/enquiry/internal/new',
+            icon: MessageSquare,
+          },
+          {
+            title: 'Problems',
+            href: '/helpdesk/enquiry/internal/problems',
+            icon: AlertCircle,
+          },
+          {
+            title: 'Knowledge Base',
+            href: '/helpdesk/enquiry/internal/knowledge-base',
+            icon: FileText,
+          },
+          {
+            title: 'FAQs',
+            href: '/helpdesk/enquiry/internal/faq',
+            icon: HelpCircle,
+          },
         ],
       },
       {
@@ -814,19 +2061,47 @@ const navigationItems: NavItem[] = [
         icon: Users,
         permissions: ['enquiry.external.access'],
         children: [
-          { title: 'Dashboard', href: '/helpdesk/enquiry/external/dashboard', icon: BarChart3 },
-          { title: 'Enquiries', href: '/helpdesk/enquiry/external', icon: FileText },
-          { title: 'Queue', href: '/helpdesk/enquiry/external/queue', icon: ClipboardList },
-          { title: 'New Enquiry', href: '/helpdesk/enquiry/external/new', icon: MessageSquare },
-          { title: 'Problems', href: '/helpdesk/enquiry/external/problems', icon: AlertCircle },
-          { title: 'Knowledge Base', href: '/helpdesk/enquiry/external/knowledge-base', icon: FileText },
-          { title: 'FAQs', href: '/helpdesk/enquiry/external/faq', icon: HelpCircle },
+          {
+            title: 'Dashboard',
+            href: '/helpdesk/enquiry/external/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'Enquiries',
+            href: '/helpdesk/enquiry/external',
+            icon: FileText,
+          },
+          {
+            title: 'Queue',
+            href: '/helpdesk/enquiry/external/queue',
+            icon: ClipboardList,
+          },
+          {
+            title: 'New Enquiry',
+            href: '/helpdesk/enquiry/external/new',
+            icon: MessageSquare,
+          },
+          {
+            title: 'Problems',
+            href: '/helpdesk/enquiry/external/problems',
+            icon: AlertCircle,
+          },
+          {
+            title: 'Knowledge Base',
+            href: '/helpdesk/enquiry/external/knowledge-base',
+            icon: FileText,
+          },
+          {
+            title: 'FAQs',
+            href: '/helpdesk/enquiry/external/faq',
+            icon: HelpCircle,
+          },
         ],
       },
     ],
   },
   {
-    title: 'Helpdesk & Complaints',
+    title: 'Helpdesk',
     href: '/helpdesk/helpdesk-complaints',
     icon: HelpCircle,
     children: [
@@ -836,15 +2111,51 @@ const navigationItems: NavItem[] = [
         icon: Building,
         permissions: ['support.internal.access'],
         children: [
-          { title: 'Dashboard', href: '/helpdesk/helpdesk-complaints/internal/dashboard', icon: BarChart3 },
-          { title: 'Tickets', href: '/helpdesk/helpdesk-complaints/internal', icon: FileText },
-          { title: 'Queue', href: '/helpdesk/helpdesk-complaints/internal/queue', icon: ClipboardList },
-          { title: 'New Ticket', href: '/helpdesk/helpdesk-complaints/internal/new', icon: FileText },
-          { title: 'Approvals', href: '/helpdesk/helpdesk-complaints/internal/approvals', icon: Workflow },
-          { title: 'Service Requests', href: '/helpdesk/helpdesk-complaints/internal/requests', icon: ClipboardList },
-          { title: 'Problems', href: '/helpdesk/helpdesk-complaints/internal/problems', icon: AlertCircle },
-          { title: 'Knowledge Base', href: '/helpdesk/helpdesk-complaints/internal/knowledge-base', icon: FileText },
-          { title: 'FAQs', href: '/helpdesk/helpdesk-complaints/internal/faq', icon: HelpCircle },
+          {
+            title: 'Dashboard',
+            href: '/helpdesk/helpdesk-complaints/internal/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'Tickets',
+            href: '/helpdesk/helpdesk-complaints/internal',
+            icon: FileText,
+          },
+          {
+            title: 'Queue',
+            href: '/helpdesk/helpdesk-complaints/internal/queue',
+            icon: ClipboardList,
+          },
+          {
+            title: 'New Ticket',
+            href: '/helpdesk/helpdesk-complaints/internal/new',
+            icon: FileText,
+          },
+          {
+            title: 'Approvals',
+            href: '/helpdesk/helpdesk-complaints/internal/approvals',
+            icon: Workflow,
+          },
+          {
+            title: 'Service Requests',
+            href: '/helpdesk/helpdesk-complaints/internal/requests',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Problems',
+            href: '/helpdesk/helpdesk-complaints/internal/problems',
+            icon: AlertCircle,
+          },
+          {
+            title: 'Knowledge Base',
+            href: '/helpdesk/helpdesk-complaints/internal/knowledge-base',
+            icon: FileText,
+          },
+          {
+            title: 'FAQs',
+            href: '/helpdesk/helpdesk-complaints/internal/faq',
+            icon: HelpCircle,
+          },
         ],
       },
       {
@@ -853,14 +2164,46 @@ const navigationItems: NavItem[] = [
         icon: Users,
         permissions: ['support.external.access'],
         children: [
-          { title: 'Dashboard', href: '/helpdesk/helpdesk-complaints/external/dashboard', icon: BarChart3 },
-          { title: 'Tickets', href: '/helpdesk/helpdesk-complaints/external', icon: FileText },
-          { title: 'Queue', href: '/helpdesk/helpdesk-complaints/external/queue', icon: ClipboardList },
-          { title: 'New Ticket', href: '/helpdesk/helpdesk-complaints/external/new', icon: FileText },
-          { title: 'Customer Support', href: '/helpdesk/helpdesk-complaints/external/support', icon: Users },
-          { title: 'Problems', href: '/helpdesk/helpdesk-complaints/external/problems', icon: AlertCircle },
-          { title: 'Knowledge Base', href: '/helpdesk/helpdesk-complaints/external/knowledge-base', icon: FileText },
-          { title: 'FAQs', href: '/helpdesk/helpdesk-complaints/external/faq', icon: HelpCircle },
+          {
+            title: 'Dashboard',
+            href: '/helpdesk/helpdesk-complaints/external/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'Tickets',
+            href: '/helpdesk/helpdesk-complaints/external',
+            icon: FileText,
+          },
+          {
+            title: 'Queue',
+            href: '/helpdesk/helpdesk-complaints/external/queue',
+            icon: ClipboardList,
+          },
+          {
+            title: 'New Ticket',
+            href: '/helpdesk/helpdesk-complaints/external/new',
+            icon: FileText,
+          },
+          {
+            title: 'Customer Support',
+            href: '/helpdesk/helpdesk-complaints/external/support',
+            icon: Users,
+          },
+          {
+            title: 'Problems',
+            href: '/helpdesk/helpdesk-complaints/external/problems',
+            icon: AlertCircle,
+          },
+          {
+            title: 'Knowledge Base',
+            href: '/helpdesk/helpdesk-complaints/external/knowledge-base',
+            icon: FileText,
+          },
+          {
+            title: 'FAQs',
+            href: '/helpdesk/helpdesk-complaints/external/faq',
+            icon: HelpCircle,
+          },
         ],
       },
     ],
@@ -870,25 +2213,77 @@ const navigationItems: NavItem[] = [
     href: '/reports',
     icon: BarChart3,
     children: [
-      { title: 'Financial Reports', href: '/reports?module=financial', icon: CreditCard },
-      { title: 'Sales Reports', href: '/reports?module=sales', icon: ShoppingCart },
-      { title: 'HR Reports', href: '/reports/hr', icon: UserCheck },
-      { title: 'Inventory Reports', href: '/reports?module=inventory', icon: Package },
-      { title: 'Estate Reports', href: '/reports?module=estate', icon: Home },
-      { title: 'Property Management Reports', href: '/reports?module=property-management', icon: Building2 },
-      { title: 'Facilities Reports', href: '/reports?module=facilities', icon: Building },
-      { title: 'Legal Reports', href: '/reports?module=legal', icon: Gavel },
-      { title: 'DMS Reports', href: '/reports?module=dms', icon: BookTemplate },
-      { title: 'Development Reports', href: '/reports?module=development', icon: Code },
-      { title: 'Operations Reports', href: '/reports?module=operations', icon: BarChart3 },
+      {
+        title: 'Financial Reports',
+        href: '/reports/financial',
+        icon: CreditCard,
+      },
+      {
+        title: 'Procurement Reports',
+        href: '/reports/purchasing',
+        icon: ShoppingCart,
+      },
+      { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
+      {
+        title: 'Audit & Compliance Reports',
+        href: '/reports/audit-compliance',
+        icon: ShieldCheck,
+      },
+      { title: 'Sales Reports', href: '/reports/sales', icon: ShoppingCart },
+      {
+        title: 'HR Reports',
+        href: '/reports/human-resources',
+        icon: UserCheck,
+      },
+      { title: 'Estate Reports', href: '/reports/estate', icon: Home },
+      {
+        title: 'Development Reports',
+        href: '/reports/development',
+        icon: Code,
+      },
+      {
+        title: 'Operations Reports',
+        href: '/reports/operations',
+        icon: BarChart3,
+      },
+      {
+        title: 'Property Management Reports',
+        href: '/reports?module=property-management',
+        icon: Building2,
+      },
+      {
+        title: 'Facilities Reports',
+        href: '/reports?module=facilities',
+        icon: Building,
+      },
+      {
+        title: 'Legal Reports',
+        href: '/reports?module=legal',
+        icon: Gavel,
+      },
+      {
+        title: 'DMS Reports',
+        href: '/reports?module=dms',
+        icon: BookTemplate,
+      },
+      {
+        title: 'Planning Reports',
+        href: '/reports?module=planning',
+        icon: MapPin,
+      },
     ],
   },
   {
     title: 'Notifications',
     href: '/notifications',
     icon: Bell,
+    navigationSurface: 'settings',
     children: [
-      { title: 'Notification Center', href: '/notifications#center', icon: Bell },
+      {
+        title: 'Notification Center',
+        href: '/notifications#center',
+        icon: Bell,
+      },
       { title: 'Email Campaigns', href: '/notifications#email', icon: Mail },
       { title: 'Templates', href: '/notifications#templates', icon: FileText },
       { title: 'Settings', href: '/notifications#settings', icon: Settings },
@@ -898,12 +2293,23 @@ const navigationItems: NavItem[] = [
     title: 'Administration',
     href: '/administration',
     icon: Settings,
+    navigationSurface: 'settings',
     roles: ADMINISTRATION_ROLES,
     permissions: ['Finance.Admin'],
     accessMode: 'any',
     children: [
-      { title: 'Message Queue', href: '/administration/notifications', icon: Bell, roles: ADMINISTRATION_ROLES },
-      { title: 'System Logs', href: '/administration/system-exception-logs', icon: AlertTriangle, roles: ADMINISTRATION_ROLES },
+      {
+        title: 'Message Queue',
+        href: '/administration/notifications',
+        icon: Bell,
+        roles: ADMINISTRATION_ROLES,
+      },
+      {
+        title: 'System Logs',
+        href: '/administration/system-exception-logs',
+        icon: AlertTriangle,
+        roles: ADMINISTRATION_ROLES,
+      },
       {
         title: 'Finance',
         href: '/administration/finance',
@@ -915,11 +2321,42 @@ const navigationItems: NavItem[] = [
             href: '/administration/finance/settings',
             icon: Settings,
             children: [
-              { title: 'Finance Settings', href: '/administration/finance/settings', icon: Settings },
-              { title: 'Chart of Accounts Setup', href: '/administration/finance/accounts', icon: CreditCard },
-              { title: 'Account Segments', href: '/administration/finance/account-segments', icon: FolderTree },
-              { title: 'Account Generator', href: '/administration/finance/account-generator', icon: FileText },
-              { title: 'Fiscal Calendar Setup', href: '/administration/finance/fiscal-calendar', icon: Calendar },
+              {
+                title: 'Finance Settings',
+                href: '/administration/finance/settings',
+                icon: Settings,
+              },
+              {
+                title: 'Finance Access Scopes',
+                href: '/administration/finance/access-scopes',
+                icon: ShieldCheck,
+                permissions: ['Finance.AccessScopes.Manage'],
+              },
+              {
+                title: 'Chart of Accounts Setup',
+                href: '/administration/finance/accounts',
+                icon: CreditCard,
+              },
+              {
+                title: 'Account Segments',
+                href: '/administration/finance/account-segments',
+                icon: FolderTree,
+              },
+              {
+                title: 'Account Generator',
+                href: '/administration/finance/account-generator',
+                icon: FileText,
+              },
+              {
+                title: 'Fiscal Calendar Setup',
+                href: '/administration/finance/fiscal-calendar',
+                icon: Calendar,
+              },
+              {
+                title: 'Close Templates',
+                href: '/administration/finance/close-templates',
+                icon: ClipboardList,
+              },
             ],
           },
           {
@@ -927,8 +2364,16 @@ const navigationItems: NavItem[] = [
             href: '/administration/finance/tax',
             icon: Globe,
             children: [
-              { title: 'Tax Configuration', href: '/administration/finance/tax', icon: Settings },
-              { title: 'Currencies', href: '/administration/finance/currencies', icon: DollarSign },
+              {
+                title: 'Tax Configuration',
+                href: '/administration/finance/tax',
+                icon: Settings,
+              },
+              {
+                title: 'Currencies',
+                href: '/administration/finance/currencies',
+                icon: DollarSign,
+              },
             ],
           },
           {
@@ -936,9 +2381,21 @@ const navigationItems: NavItem[] = [
             href: '/administration/finance/payment-terms',
             icon: FileText,
             children: [
-              { title: 'Payment Terms', href: '/administration/finance/payment-terms', icon: CreditCard },
-              { title: 'Payment Methods', href: '/administration/finance/payment-methods', icon: CreditCard },
-              { title: 'Document Numbering', href: '/administration/finance/document-numbering', icon: FileText },
+              {
+                title: 'Payment Terms',
+                href: '/administration/finance/payment-terms',
+                icon: CreditCard,
+              },
+              {
+                title: 'Payment Methods',
+                href: '/administration/finance/payment-methods',
+                icon: CreditCard,
+              },
+              {
+                title: 'Document Numbering',
+                href: '/administration/finance/document-numbering',
+                icon: FileText,
+              },
             ],
           },
           {
@@ -946,9 +2403,21 @@ const navigationItems: NavItem[] = [
             href: '/administration/finance/fixed-asset-categories',
             icon: FolderTree,
             children: [
-              { title: 'Fixed Asset Categories', href: '/administration/finance/fixed-asset-categories', icon: FolderTree },
-              { title: 'Unit Types', href: '/administration/finance/unit-types', icon: FileText },
-              { title: 'Ratio Definitions', href: '/administration/finance/ratio-definitions', icon: BarChart3 },
+              {
+                title: 'Fixed Asset Categories',
+                href: '/administration/finance/fixed-asset-categories',
+                icon: FolderTree,
+              },
+              {
+                title: 'Unit Types',
+                href: '/administration/finance/unit-types',
+                icon: FileText,
+              },
+              {
+                title: 'Ratio Definitions',
+                href: '/administration/finance/ratio-definitions',
+                icon: BarChart3,
+              },
             ],
           },
         ],
@@ -959,10 +2428,161 @@ const navigationItems: NavItem[] = [
         icon: UserCheck,
         roles: ADMINISTRATION_ROLES,
         children: [
-          { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
-          { title: 'Departments', href: '/administration/hr/departments', icon: Building },
-          { title: 'Employee Categories', href: '/administration/hr/categories', icon: Users },
-          { title: 'Leave Types', href: '/administration/hr/leave-types', icon: UserCheck },
+          {
+            title: 'Organization',
+            href: '/administration/hr/organization',
+            icon: Building2,
+            children: [
+              {
+                title: 'Structures',
+                href: '/administration/hr/organization/structures',
+                icon: Building2,
+              },
+              {
+                title: 'Levels',
+                href: '/administration/hr/organization/levels',
+                icon: ListTree,
+              },
+              {
+                title: 'Units',
+                href: '/administration/hr/organization/units',
+                icon: FolderTree,
+              },
+            ],
+          },
+          {
+            title: 'Location',
+            href: '/administration/hr/location',
+            icon: MapPin,
+            children: [
+              {
+                title: 'Structures',
+                href: '/administration/hr/location/structures',
+                icon: MapPin,
+              },
+              {
+                title: 'Levels',
+                href: '/administration/hr/location/levels',
+                icon: ListTree,
+              },
+              {
+                title: 'Locations',
+                href: '/administration/hr/location/locations',
+                icon: MapPin,
+              },
+            ],
+          },
+          {
+            title: 'Job Positions',
+            href: '/administration/hr/positions',
+            icon: Users,
+          },
+          {
+            title: 'Staff Levels',
+            href: '/administration/hr/staff-levels',
+            icon: ListTree,
+          },
+          { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
+          {
+            title: 'Qualifications',
+            href: '/administration/hr/qualifications',
+            icon: GraduationCap,
+          },
+          {
+            title: 'Identification Types',
+            href: '/administration/hr/identification-types',
+            icon: IdCard,
+          },
+          {
+            title: 'Reason Codes',
+            href: '/administration/hr/reason-codes',
+            icon: Tags,
+          },
+          {
+            title: 'Countries',
+            href: '/administration/hr/countries',
+            icon: Globe,
+          },
+          {
+            title: 'Departments',
+            href: '/administration/hr/departments',
+            icon: Building,
+          },
+          {
+            title: 'Leave Types',
+            href: '/administration/hr/leave-types',
+            icon: CalendarDays,
+          },
+          {
+            title: 'Compensation & Benefits',
+            href: '/administration/hr/compensation',
+            icon: Coins,
+            children: [
+              {
+                title: 'Pay Components',
+                href: '/administration/hr/compensation/pay-components',
+                icon: Coins,
+              },
+              {
+                title: 'Position Emoluments',
+                href: '/administration/hr/compensation/position-emoluments',
+                icon: Briefcase,
+              },
+              {
+                title: 'Benefit Policies',
+                href: '/administration/hr/compensation/benefit-policies',
+                icon: ShieldPlus,
+              },
+            ],
+          },
+          {
+            title: 'Attendance & Time',
+            href: '/administration/hr/attendance',
+            icon: Clock,
+            children: [
+              {
+                title: 'Work Schedules',
+                href: '/administration/hr/attendance/work-schedules',
+                icon: CalendarClock,
+              },
+              {
+                title: 'Shift Rotations',
+                href: '/administration/hr/attendance/shift-rotations',
+                icon: Repeat2,
+              },
+              {
+                title: 'Holiday Calendars',
+                href: '/administration/hr/attendance/holiday-calendars',
+                icon: CalendarDays,
+              },
+              {
+                title: 'Pay Periods',
+                href: '/administration/hr/attendance/pay-periods',
+                icon: DollarSign,
+              },
+              {
+                title: 'Geofence Zones',
+                href: '/administration/hr/attendance/geofence-zones',
+                icon: MapPin,
+              },
+              {
+                title: 'Devices',
+                href: '/administration/hr/attendance/devices',
+                icon: Fingerprint,
+              },
+              {
+                title: 'Alert Rules',
+                href: '/administration/hr/attendance/alert-rules',
+                icon: BellRing,
+              },
+              {
+                title: 'Overtime Policies',
+                href: '/administration/hr/attendance/overtime-policies',
+                icon: Timer,
+              },
+            ],
+          },
+          // Employee Categories has no backing controller at all, so it stays dropped.
           {
             title: 'Payroll',
             href: '/administration/hr/payroll',
@@ -978,37 +2598,80 @@ const navigationItems: NavItem[] = [
         children: [
           // Procurement governance routes come from the target branch; retain them alongside
           // the existing partner/setup routes and the Finance branch's administration role gate.
-          { title: 'Policy Profiles', href: '/administration/procurement/policy-profiles', icon: ShieldCheck },
-          { title: 'Executable Policies', href: '/administration/procurement/policy-sets', icon: ShieldCheck },
-          { title: 'Policy Simulator', href: '/administration/procurement/compliance-simulator', icon: ClipboardCheck },
-          { title: 'SOD Controls', href: '/administration/procurement/sod-controls', icon: Swords },
-          { title: 'Access & Committees', href: '/administration/procurement/access-controls', icon: Users },
-          { title: 'Master Data Changes', href: '/administration/procurement/master-data-changes', icon: FileCheck },
-          { title: 'Supplier Master Changes', href: '/administration/procurement/supplier-master-changes', icon: Building2 },
-          { title: 'Supplier Evidence Packs', href: '/administration/procurement/supplier-evidence-packs', icon: FileCheck },
-          { title: 'Supplier Onboarding Tokens', href: '/administration/procurement/supplier-onboarding-tokens', icon: KeyRound },
-          { title: 'Supplier Applicant Access', href: '/administration/procurement/supplier-applicant-access', icon: ShieldCheck },
-          { title: 'Supplier Eligibility', href: '/administration/procurement/supplier-eligibility', icon: ClipboardCheck },
-          { title: 'Supplier Due Diligence', href: '/administration/procurement/supplier-due-diligence', icon: ShieldCheck },
-          { title: 'Approved Vendor List', href: '/administration/procurement/supplier-avl', icon: ListTree },
-          { title: 'Supplier Risk & Concentration', href: '/administration/procurement/supplier-risk', icon: TrendingUp },
-          { title: 'Supplier Performance', href: '/administration/procurement/supplier-performance', icon: Activity },
-          { title: 'Control Events', href: '/administration/procurement/control-events', icon: Activity },
-          { title: 'Pending Partners', href: '/administration/procurement/business-partners/pending', icon: Users },
-          { title: 'Business Partners', href: '/procurement/business-partners', icon: Users },
-          { title: 'Purchase Order Settings', href: '/administration/procurement/purchase-order-settings', icon: Settings },
-          { title: 'Partner Categories', href: '/administration/procurement/partner-categories', icon: FolderTree },
-          { title: 'Contractor Specializations', href: '/administration/procurement/contractor-specializations', icon: Wrench },
-          { title: 'License Types', href: '/administration/procurement/license-types', icon: FileCheck },
-          { title: 'Approval Workflows', href: '/administration/procurement/approval-workflows', icon: Workflow },
+          {
+            title: 'Policy Profiles',
+            href: '/administration/procurement/policy-profiles',
+            icon: ShieldCheck,
+          },
+          {
+            title: 'Executable Policies',
+            href: '/administration/procurement/policy-sets',
+            icon: ShieldCheck,
+          },
+          {
+            title: 'Policy Simulator',
+            href: '/administration/procurement/compliance-simulator',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'SOD Controls',
+            href: '/administration/procurement/sod-controls',
+            icon: Swords,
+          },
+          {
+            title: 'Scopes & Committees',
+            href: '/administration/procurement/access-controls',
+            icon: Users,
+          },
+          {
+            title: 'Purchase Order Settings',
+            href: '/administration/procurement/purchase-order-settings',
+            icon: Settings,
+          },
+          {
+            title: 'Partner Categories',
+            href: '/administration/procurement/partner-categories',
+            icon: FolderTree,
+          },
+          {
+            title: 'Contractor Specializations',
+            href: '/administration/procurement/contractor-specializations',
+            icon: Wrench,
+          },
+          {
+            title: 'License Types',
+            href: '/administration/procurement/license-types',
+            icon: FileCheck,
+          },
+          {
+            title: 'Approval Workflows',
+            href: '/administration/procurement/approval-workflows',
+            icon: Workflow,
+          },
           // { title: 'Supplier Categories', href: '/administration/procurement/supplier-categories', icon: Briefcase },
           // { title: 'Purchase Categories', href: '/administration/procurement/purchase-categories', icon: Package },
           // { title: 'Terms & Conditions', href: '/administration/procurement/terms', icon: FileText },
           // { title: 'Tender Templates', href: '/administration/procurement/tender-templates', icon: Gavel },
-          { title: 'Evaluation Criteria', href: '/administration/procurement/evaluation-criteria', icon: Star },
-          { title: 'Evaluation Templates', href: '/administration/procurement/evaluation-templates', icon: FileText },
-          { title: 'Document Types', href: '/administration/procurement/document-types', icon: FileText },
-          { title: 'Award Verification Checklists', href: '/administration/procurement/award-verification-checklists', icon: ClipboardCheck },
+          {
+            title: 'Evaluation Criteria',
+            href: '/administration/procurement/evaluation-criteria',
+            icon: Star,
+          },
+          {
+            title: 'Evaluation Templates',
+            href: '/administration/procurement/evaluation-templates',
+            icon: FileText,
+          },
+          {
+            title: 'Document Types',
+            href: '/administration/procurement/document-types',
+            icon: FileText,
+          },
+          {
+            title: 'Award Verification Checklists',
+            href: '/administration/procurement/award-verification-checklists',
+            icon: ClipboardCheck,
+          },
         ],
       },
       {
@@ -1017,9 +2680,21 @@ const navigationItems: NavItem[] = [
         icon: Package,
         roles: ADMINISTRATION_ROLES,
         children: [
-          { title: 'Units of Measure', href: '/administration/inventory/units-of-measure', icon: Package },
-          { title: 'UoM Schedules', href: '/administration/inventory/uom-schedules', icon: Package },
-          { title: 'Warehouses & Locations', href: '/administration/inventory/warehouses', icon: Building2 },
+          {
+            title: 'Units of Measure',
+            href: '/administration/inventory/units-of-measure',
+            icon: Package,
+          },
+          {
+            title: 'UoM Schedules',
+            href: '/administration/inventory/uom-schedules',
+            icon: Package,
+          },
+          {
+            title: 'Warehouses & Locations',
+            href: '/administration/inventory/warehouses',
+            icon: Building2,
+          },
         ],
       },
       {
@@ -1028,12 +2703,36 @@ const navigationItems: NavItem[] = [
         icon: ShoppingCart,
         roles: ADMINISTRATION_ROLES,
         children: [
-          { title: 'Sales Setup', href: '/administration/sales', icon: Settings },
-          { title: 'Customer Categories', href: '/administration/sales/customer-categories', icon: Users },
-          { title: 'Sales Territories', href: '/administration/sales/territories', icon: Building },
-          { title: 'Price Lists', href: '/administration/sales/price-lists', icon: CreditCard },
-          { title: 'Sales Channels', href: '/administration/sales/channels', icon: ShoppingCart },
-          { title: 'Commission Rules', href: '/administration/sales/commission', icon: CreditCard },
+          {
+            title: 'Sales Setup',
+            href: '/administration/sales',
+            icon: Settings,
+          },
+          {
+            title: 'Customer Categories',
+            href: '/administration/sales/customer-categories',
+            icon: Users,
+          },
+          {
+            title: 'Sales Territories',
+            href: '/administration/sales/territories',
+            icon: Building,
+          },
+          {
+            title: 'Price Lists',
+            href: '/administration/sales/price-lists',
+            icon: CreditCard,
+          },
+          {
+            title: 'Sales Channels',
+            href: '/administration/sales/channels',
+            icon: ShoppingCart,
+          },
+          {
+            title: 'Commission Rules',
+            href: '/administration/sales/commission',
+            icon: CreditCard,
+          },
         ],
       },
       {
@@ -1042,10 +2741,26 @@ const navigationItems: NavItem[] = [
         icon: Megaphone,
         roles: ADMINISTRATION_ROLES,
         children: [
-          { title: 'Campaign Templates', href: '/administration/marketing/templates', icon: Megaphone },
-          { title: 'Lead Sources', href: '/administration/marketing/lead-sources', icon: Users },
-          { title: 'Market Segments', href: '/administration/marketing/segments', icon: Users },
-          { title: 'Marketing Channels', href: '/administration/marketing/channels', icon: Megaphone },
+          {
+            title: 'Campaign Templates',
+            href: '/administration/marketing/templates',
+            icon: Megaphone,
+          },
+          {
+            title: 'Lead Sources',
+            href: '/administration/marketing/lead-sources',
+            icon: Users,
+          },
+          {
+            title: 'Market Segments',
+            href: '/administration/marketing/segments',
+            icon: Users,
+          },
+          {
+            title: 'Marketing Channels',
+            href: '/administration/marketing/channels',
+            icon: Megaphone,
+          },
         ],
       },
       {
@@ -1054,42 +2769,122 @@ const navigationItems: NavItem[] = [
         icon: Home,
         roles: ADMINISTRATION_ROLES,
         children: [
-          { title: 'Property Types', href: '/administration/estate/property-types', icon: Home },
-          { title: 'Lease Templates', href: '/administration/estate/lease-templates', icon: FileText },
-          { title: 'Maintenance Categories', href: '/administration/estate/maintenance-categories', icon: Wrench },
-          { title: 'Tenant Categories', href: '/administration/estate/tenant-categories', icon: Users },
+          {
+            title: 'Property Types',
+            href: '/administration/estate/property-types',
+            icon: Home,
+          },
+          {
+            title: 'Lease Templates',
+            href: '/administration/estate/lease-templates',
+            icon: FileText,
+          },
+          {
+            title: 'Maintenance Categories',
+            href: '/administration/estate/maintenance-categories',
+            icon: Wrench,
+          },
+          {
+            title: 'Tenant Categories',
+            href: '/administration/estate/tenant-categories',
+            icon: Users,
+          },
         ],
       },
       {
-        title: 'Project Mngt',
+        title: 'Projects',
         href: '/administration/project-management',
         icon: Briefcase,
         permissions: ['admin.project-management'],
         children: [
-          { title: 'Overview', href: '/administration/project-management', icon: Briefcase },
-          { title: 'Project Types', href: '/administration/project-management/types', icon: FileText },
-          { title: 'Priorities', href: '/administration/project-management/priorities', icon: BarChart3 },
-          { title: 'BOQ Item Types', href: '/administration/project-management/item-types', icon: Package },
-          { title: 'Templates', href: '/administration/project-management/templates', icon: Users },
-          { title: 'Unit Types', href: '/administration/project-management/unit-types', icon: Building2 },
-          { title: 'Settings', href: '/administration/project-management/settings', icon: Settings },
+          {
+            title: 'Overview',
+            href: '/administration/project-management',
+            icon: Briefcase,
+          },
+          {
+            title: 'Project Types',
+            href: '/administration/project-management/types',
+            icon: FileText,
+          },
+          {
+            title: 'Priorities',
+            href: '/administration/project-management/priorities',
+            icon: BarChart3,
+          },
+          {
+            title: 'BOQ Item Types',
+            href: '/administration/project-management/item-types',
+            icon: Package,
+          },
+          {
+            title: 'Templates',
+            href: '/administration/project-management/templates',
+            icon: Users,
+          },
+          {
+            title: 'Unit Types',
+            href: '/administration/project-management/unit-types',
+            icon: Building2,
+          },
+          {
+            title: 'Settings',
+            href: '/administration/project-management/settings',
+            icon: Settings,
+          },
         ],
       },
       {
-        title: 'Maintenance Mngt',
+        title: 'Maintenance',
         href: '/administration/maintenance',
         icon: Wrench,
         permissions: ['admin.maintenance'],
         children: [
-          { title: 'Maintenance Settings', href: '/administration/maintenance/maintenance-settings', icon: Settings },
-          { title: 'Asset Categories', href: '/administration/maintenance/asset-categories', icon: Package },
-          { title: 'Work Order Types', href: '/administration/maintenance/work-order-types', icon: FileText },
-          { title: 'Maintenance Types', href: '/administration/maintenance/maintenance-types', icon: Wrench },
-          { title: 'Priority Levels', href: '/administration/maintenance/priorities', icon: AlertTriangle },
-          { title: 'Task Templates', href: '/administration/maintenance/task-templates', icon: FileText },
-          { title: 'Quality Checklists', href: '/administration/maintenance/quality-checklists', icon: CheckSquare },
-          { title: 'Admission Checklists', href: '/administration/maintenance/admission-checklists', icon: ClipboardCheck },
-          { title: 'Inspection Templates', href: '/administration/maintenance/inspection-templates', icon: ClipboardCheck },
+          {
+            title: 'Maintenance Settings',
+            href: '/administration/maintenance/maintenance-settings',
+            icon: Settings,
+          },
+          {
+            title: 'Asset Categories',
+            href: '/administration/maintenance/asset-categories',
+            icon: Package,
+          },
+          {
+            title: 'Work Order Types',
+            href: '/administration/maintenance/work-order-types',
+            icon: FileText,
+          },
+          {
+            title: 'Maintenance Types',
+            href: '/administration/maintenance/maintenance-types',
+            icon: Wrench,
+          },
+          {
+            title: 'Priority Levels',
+            href: '/administration/maintenance/priorities',
+            icon: AlertTriangle,
+          },
+          {
+            title: 'Task Templates',
+            href: '/administration/maintenance/task-templates',
+            icon: FileText,
+          },
+          {
+            title: 'Quality Checklists',
+            href: '/administration/maintenance/quality-checklists',
+            icon: CheckSquare,
+          },
+          {
+            title: 'Admission Checklists',
+            href: '/administration/maintenance/admission-checklists',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'Inspection Templates',
+            href: '/administration/maintenance/inspection-templates',
+            icon: ClipboardCheck,
+          },
           // { title: 'Inspectors', href: '/administration/maintenance/inspectors', icon: Users },
           // { title: 'Maintenance Schedules', href: '/administration/maintenance/schedules', icon: Calendar },
           // { title: 'Technician Skills', href: '/administration/maintenance/skills', icon: Users },
@@ -1097,36 +2892,96 @@ const navigationItems: NavItem[] = [
         ],
       },
       {
-        title: 'Fleet Management',
+        title: 'Fleet',
         href: '/administration/fleet-management',
         icon: Truck,
         permissions: ['admin.fleet-management'],
         children: [
-          { title: 'Fleet Settings', href: '/administration/fleet-management/settings', icon: Settings },
-          { title: 'Trip Destinations', href: '/administration/fleet-management/trip-destinations', icon: MapPin },
-          { title: 'Compliance Templates', href: '/administration/fleet-management/compliance-templates', icon: ClipboardList },
+          {
+            title: 'Fleet Settings',
+            href: '/administration/fleet-management/settings',
+            icon: Settings,
+          },
+          {
+            title: 'Trip Destinations',
+            href: '/administration/fleet-management/trip-destinations',
+            icon: MapPin,
+          },
+          {
+            title: 'Compliance Templates',
+            href: '/administration/fleet-management/compliance-templates',
+            icon: ClipboardList,
+          },
         ],
       },
+      {
+        title: 'Helpdesk',
+        href: '/administration/helpdesk',
+        icon: HelpCircle,
+        roles: ADMINISTRATION_ROLES,
+        children: [
           {
-            title: 'Helpdesk',
-            href: '/administration/helpdesk',
-            icon: HelpCircle,
-            roles: ADMINISTRATION_ROLES,
-            children: [
-              { title: 'Ticket Categories', href: '/administration/helpdesk/categories', icon: FileText },
-              { title: 'Root Causes', href: '/administration/helpdesk/root-causes', icon: Target },
-              { title: 'Canned Responses', href: '/administration/helpdesk/canned-responses', icon: MessageSquare },
-              { title: 'Knowledge Base', href: '/administration/helpdesk/knowledge-base', icon: BookOpen },
-              { title: 'FAQs', href: '/administration/helpdesk/faqs', icon: HelpCircle },
-              { title: 'Priority Levels', href: '/administration/helpdesk/priorities', icon: BarChart3 },
-              { title: 'SLA Templates', href: '/administration/helpdesk/sla', icon: FileText },
-              { title: 'Escalations', href: '/administration/helpdesk/escalations', icon: AlertTriangle },
-              { title: 'Compliance', href: '/administration/helpdesk/compliance', icon: Shield },
-              { title: 'Workflow Routing', href: '/administration/helpdesk/workflows', icon: Workflow },
-              { title: 'Service Catalog', href: '/administration/helpdesk/service-catalog', icon: ClipboardList },
-              { title: 'Support Channels', href: '/administration/helpdesk/channels', icon: HelpCircle },
-            ],
+            title: 'Ticket Categories',
+            href: '/administration/helpdesk/categories',
+            icon: FileText,
           },
+          {
+            title: 'Root Causes',
+            href: '/administration/helpdesk/root-causes',
+            icon: Target,
+          },
+          {
+            title: 'Canned Responses',
+            href: '/administration/helpdesk/canned-responses',
+            icon: MessageSquare,
+          },
+          {
+            title: 'Knowledge Base',
+            href: '/administration/helpdesk/knowledge-base',
+            icon: BookOpen,
+          },
+          {
+            title: 'FAQs',
+            href: '/administration/helpdesk/faqs',
+            icon: HelpCircle,
+          },
+          {
+            title: 'Priority Levels',
+            href: '/administration/helpdesk/priorities',
+            icon: BarChart3,
+          },
+          {
+            title: 'SLA Templates',
+            href: '/administration/helpdesk/sla',
+            icon: FileText,
+          },
+          {
+            title: 'Escalations',
+            href: '/administration/helpdesk/escalations',
+            icon: AlertTriangle,
+          },
+          {
+            title: 'Compliance',
+            href: '/administration/helpdesk/compliance',
+            icon: Shield,
+          },
+          {
+            title: 'Workflow Routing',
+            href: '/administration/helpdesk/workflows',
+            icon: Workflow,
+          },
+          {
+            title: 'Service Catalog',
+            href: '/administration/helpdesk/service-catalog',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Support Channels',
+            href: '/administration/helpdesk/channels',
+            icon: HelpCircle,
+          },
+        ],
+      },
       {
         title: 'Workflow',
         href: '/administration/workflow',
@@ -1149,18 +3004,71 @@ const navigationItems: NavItem[] = [
             href: '/administration/reports',
             icon: BarChart3,
           },
-          { title: 'User Management', href: '/administration/identity-management/users', icon: Users },
-          { title: 'Role Management', href: '/administration/identity-management/roles', icon: Shield },
-          { title: 'User-Employee Links', href: '/administration/user-employee-links', icon: UserCheck },
-          { title: 'Tenant Management', href: '/administration/tenant-management', icon: Building },
-          { title: 'Email Settings', href: '/administration/settings/email', icon: Mail },
-          { title: 'SMS Settings', href: '/administration/settings/sms', icon: MessageSquare },
-          { title: 'File Uploads', href: '/administration/settings/file-uploads', icon: FileCheck },
-          { title: 'Field Labels', href: '/administration/settings/field-labels', icon: Tag },
-          { title: 'User-Tenant Mapping', href: '/administration/user-tenant-mapping', icon: Users },
-          { title: 'Security Logs', href: '/administration/identity-management/security-logs', icon: FileText },
-          { title: 'Audit Logs', href: '/administration/audit-logs', icon: FileText },
-          { title: 'Data Retention', href: '/administration/security/retention', icon: Clock },
+          {
+            title: 'User Management',
+            href: '/administration/identity-management/users',
+            icon: Users,
+          },
+          {
+            title: 'Role Management',
+            href: '/administration/identity-management/roles',
+            icon: Shield,
+          },
+          {
+            title: 'User-Employee Links',
+            href: '/administration/user-employee-links',
+            icon: UserCheck,
+          },
+          {
+            title: 'HR & Identity Reconciliation',
+            href: '/administration/identity-management/hr-reconciliation',
+            icon: RefreshCw,
+          },
+          {
+            title: 'Tenant Management',
+            href: '/administration/tenant-management',
+            icon: Building,
+          },
+          {
+            title: 'Email Settings',
+            href: '/administration/settings/email',
+            icon: Mail,
+          },
+          {
+            title: 'SMS Settings',
+            href: '/administration/settings/sms',
+            icon: MessageSquare,
+          },
+          {
+            title: 'File Uploads',
+            href: '/administration/settings/file-uploads',
+            icon: FileCheck,
+          },
+          {
+            title: 'Field Labels',
+            href: '/administration/settings/field-labels',
+            icon: Tag,
+          },
+          {
+            title: 'User-Tenant Mapping',
+            href: '/administration/user-tenant-mapping',
+            icon: Users,
+          },
+          {
+            title: 'Security Logs',
+            href: '/administration/identity-management/security-logs',
+            icon: FileText,
+          },
+          {
+            title: 'Audit Logs',
+            href: '/administration/audit-logs',
+            icon: FileText,
+          },
+          {
+            title: 'Data Retention',
+            href: '/administration/security/retention',
+            icon: Clock,
+          },
           { title: 'Data Sources', href: '/data-sources', icon: Database },
         ],
       },
@@ -1168,24 +3076,65 @@ const navigationItems: NavItem[] = [
   },
 ];
 
-interface SidebarProps {
-  className?: string;
+export function selectNavigationSurface(
+  items: NavItem[],
+  surface: 'operations' | 'settings',
+  inheritedSurface: 'operations' | 'settings' = 'operations'
+): NavItem[] {
+  return items.reduce<NavItem[]>((selected, item) => {
+    const itemSurface = item.navigationSurface ?? inheritedSurface;
+    const children = item.children
+      ? selectNavigationSurface(item.children, surface, itemSurface)
+      : undefined;
+
+    if (itemSurface !== surface && (!children || children.length === 0)) {
+      return selected;
+    }
+
+    selected.push({
+      ...item,
+      children,
+    });
+    return selected;
+  }, []);
 }
 
-export function Sidebar({ className }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+export const sidebarNavigationItems = selectNavigationSurface(
+  navigationItems,
+  'operations'
+);
+export const settingsNavigationItems = selectNavigationSurface(
+  navigationItems,
+  'settings'
+);
+
+interface SidebarProps {
+  className?: string;
+  defaultCollapsed?: boolean;
+}
+
+export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [hoverExpanded, setHoverExpanded] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set()
+  );
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [hoveredChild, setHoveredChild] = useState<string | null>(null);
-  const [hoveredGrandChild, setHoveredGrandChild] = useState<string | null>(null);
-  const [menuPositions, setMenuPositions] = useState<{ [key: string]: { x: number; y: number; height: number } }>({});
+  const [hoveredGrandChild, setHoveredGrandChild] = useState<string | null>(
+    null
+  );
+  const [menuPositions, setMenuPositions] = useState<{
+    [key: string]: { x: number; y: number; height: number };
+  }>({});
   const [activeMenuPath, setActiveMenuPath] = useState<string[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const openTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pathname = usePathname() ?? '';
   const { hasAnyRole, hasAnyPermission } = useAuth();
+  const sidebarIsCollapsed = collapsed && !hoverExpanded;
 
   useEffect(() => {
     setMounted(true);
@@ -1196,7 +3145,10 @@ export function Sidebar({ className }: SidebarProps) {
         return;
       }
 
-      if (sidebarRef.current?.contains(target) || target.closest('[data-sidebar-flyout="true"]')) {
+      if (
+        sidebarRef.current?.contains(target) ||
+        target.closest('[data-sidebar-flyout="true"]')
+      ) {
         return;
       }
 
@@ -1249,6 +3201,7 @@ export function Sidebar({ className }: SidebarProps) {
     cancelPendingClose();
     closeTimeoutRef.current = setTimeout(() => {
       clearMenus();
+      setHoverExpanded(false);
     }, delay);
   };
 
@@ -1260,29 +3213,36 @@ export function Sidebar({ className }: SidebarProps) {
     }, delay);
   };
 
-  const calculateMenuPosition = (rect: DOMRect, menuKey: string, estimatedHeight: number = 400) => {
+  const calculateMenuPosition = (
+    rect: DOMRect,
+    menuKey: string,
+    estimatedHeight: number = 400
+  ) => {
     const viewportHeight = window.innerHeight;
     const viewportWidth = window.innerWidth;
     const menuWidth = 240; // Approximate menu width
     const padding = 20; // Padding from viewport edges
-    
+
     let x = rect.right + 8;
     let y = rect.top;
-    
+
     // Adjust horizontal position if menu would go off-screen
     if (x + menuWidth > viewportWidth - padding) {
       x = Math.max(padding, rect.left - menuWidth - 8); // Position to the left instead
     }
-    
+
     // Adjust vertical position if menu would go off-screen
-    const maxMenuHeight = viewportHeight - (2 * padding);
+    const maxMenuHeight = viewportHeight - 2 * padding;
     const actualMenuHeight = Math.min(estimatedHeight, maxMenuHeight);
-    
+
     if (y + actualMenuHeight > viewportHeight - padding) {
       const availableSpaceBelow = viewportHeight - y - padding;
       const availableSpaceAbove = rect.top - padding;
-      
-      if (availableSpaceAbove > availableSpaceBelow && availableSpaceAbove >= 150) {
+
+      if (
+        availableSpaceAbove > availableSpaceBelow &&
+        availableSpaceAbove >= 150
+      ) {
         // Position above if there's more space and at least 150px available
         y = Math.max(padding, rect.bottom - actualMenuHeight);
       } else {
@@ -1290,22 +3250,24 @@ export function Sidebar({ className }: SidebarProps) {
         y = Math.max(padding, viewportHeight - actualMenuHeight - padding);
       }
     }
-    
+
     // Ensure minimum top position
     y = Math.max(padding, y);
-    
+
     return { x, y };
   };
 
   const openMainItemMenu = (itemTitle: string, event: React.MouseEvent) => {
     if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    
+
     // Estimate menu height based on number of children
-    const menuItem = filterNavItems(navigationItems).find(item => item.title === itemTitle);
+    const menuItem = filterNavItems(sidebarNavigationItems).find(
+      (item) => item.title === itemTitle
+    );
     const childCount = menuItem?.children?.length || 0;
-    const estimatedHeight = Math.min(600, (childCount * 40) + 16); // 40px per item + padding
-    
+    const estimatedHeight = Math.min(600, childCount * 40 + 16); // 40px per item + padding
+
     const position = calculateMenuPosition(rect, itemTitle, estimatedHeight);
     setMenuPositions({
       [itemTitle]: {
@@ -1327,20 +3289,28 @@ export function Sidebar({ className }: SidebarProps) {
     scheduleMenuOpen(() => openMainItemMenu(itemTitle, event));
   };
 
-  const openChildItemMenu = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
+  const openChildItemMenu = (
+    parentTitle: string,
+    childTitle: string,
+    event: React.MouseEvent
+  ) => {
     if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}`;
-    
+
     // Estimate menu height based on number of grandchildren
-    const parentItem = filterNavItems(navigationItems).find(item => item.title === parentTitle);
-    const childItem = parentItem?.children?.find(child => child.title === childTitle);
+    const parentItem = filterNavItems(sidebarNavigationItems).find(
+      (item) => item.title === parentTitle
+    );
+    const childItem = parentItem?.children?.find(
+      (child) => child.title === childTitle
+    );
     const grandChildCount = childItem?.children?.length || 0;
-    const estimatedHeight = Math.min(600, (grandChildCount * 40) + 16); // 40px per item + padding
-    
+    const estimatedHeight = Math.min(600, grandChildCount * 40 + 16); // 40px per item + padding
+
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
-    setMenuPositions(prev => ({ 
-      ...prev, 
+    setMenuPositions((prev) => ({
+      ...prev,
       [menuKey]: {
         ...position,
         height: estimatedHeight,
@@ -1351,29 +3321,51 @@ export function Sidebar({ className }: SidebarProps) {
     setActiveMenuPath([parentTitle, childTitle]);
   };
 
-  const handleChildItemHover = (parentTitle: string, childTitle: string, event: React.MouseEvent) => {
+  const handleChildItemHover = (
+    parentTitle: string,
+    childTitle: string,
+    event: React.MouseEvent
+  ) => {
     cancelPendingClose();
-    if (hoveredChild === childTitle && hoveredItem === parentTitle && !hoveredGrandChild) {
+    if (
+      hoveredChild === childTitle &&
+      hoveredItem === parentTitle &&
+      !hoveredGrandChild
+    ) {
       return;
     }
-    scheduleMenuOpen(() => openChildItemMenu(parentTitle, childTitle, event), 75);
+    scheduleMenuOpen(
+      () => openChildItemMenu(parentTitle, childTitle, event),
+      75
+    );
   };
 
-  const openGrandChildItemMenu = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
+  const openGrandChildItemMenu = (
+    parentTitle: string,
+    childTitle: string,
+    grandChildTitle: string,
+    event: React.MouseEvent
+  ) => {
     if (!event.currentTarget) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const menuKey = `${parentTitle}-${childTitle}-${grandChildTitle}`;
-    
+
     // Estimate menu height based on number of great-grandchildren (if any)
-    const parentItem = filterNavItems(navigationItems).find(item => item.title === parentTitle);
-    const childItem = parentItem?.children?.find(child => child.title === childTitle);
-    const grandChildItem = childItem?.children?.find(grandChild => grandChild.title === grandChildTitle);
+    const parentItem = filterNavItems(sidebarNavigationItems).find(
+      (item) => item.title === parentTitle
+    );
+    const childItem = parentItem?.children?.find(
+      (child) => child.title === childTitle
+    );
+    const grandChildItem = childItem?.children?.find(
+      (grandChild) => grandChild.title === grandChildTitle
+    );
     const greatGrandChildCount = grandChildItem?.children?.length || 0;
-    const estimatedHeight = Math.min(600, (greatGrandChildCount * 40) + 16); // 40px per item + padding
-    
+    const estimatedHeight = Math.min(600, greatGrandChildCount * 40 + 16); // 40px per item + padding
+
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
-    setMenuPositions(prev => ({ 
-      ...prev, 
+    setMenuPositions((prev) => ({
+      ...prev,
       [menuKey]: {
         ...position,
         height: estimatedHeight,
@@ -1383,12 +3375,25 @@ export function Sidebar({ className }: SidebarProps) {
     setActiveMenuPath([parentTitle, childTitle, grandChildTitle]);
   };
 
-  const handleGrandChildItemHover = (parentTitle: string, childTitle: string, grandChildTitle: string, event: React.MouseEvent) => {
+  const handleGrandChildItemHover = (
+    parentTitle: string,
+    childTitle: string,
+    grandChildTitle: string,
+    event: React.MouseEvent
+  ) => {
     cancelPendingClose();
-    if (hoveredGrandChild === grandChildTitle && hoveredChild === childTitle && hoveredItem === parentTitle) {
+    if (
+      hoveredGrandChild === grandChildTitle &&
+      hoveredChild === childTitle &&
+      hoveredItem === parentTitle
+    ) {
       return;
     }
-    scheduleMenuOpen(() => openGrandChildItemMenu(parentTitle, childTitle, grandChildTitle, event), 60);
+    scheduleMenuOpen(
+      () =>
+        openGrandChildItemMenu(parentTitle, childTitle, grandChildTitle, event),
+      60
+    );
   };
 
   const handleMenuMouseEnter = () => {
@@ -1430,6 +3435,19 @@ export function Sidebar({ className }: SidebarProps) {
     scheduleMenuClose();
   };
 
+  const handleSidebarMouseEnter = () => {
+    cancelPendingClose();
+    if (collapsed) {
+      setHoverExpanded(true);
+    }
+  };
+
+  const toggleSidebar = () => {
+    setCollapsed((previous) => !previous);
+    setHoverExpanded(false);
+    clearMenus();
+  };
+
   const toggleSection = (title: string) => {
     const newExpanded = new Set(expandedSections);
     if (newExpanded.has(title)) {
@@ -1455,16 +3473,20 @@ export function Sidebar({ className }: SidebarProps) {
 
     return items.reduce<NavItem[]>((acc, item) => {
       const hasRoleAccess = !item.roles || hasAnyRole(item.roles);
-      const hasPermissionAccess = !item.permissions || hasAnyPermission(item.permissions);
-      const hasAccess = item.accessMode === 'any'
-        ? hasRoleAccess || hasPermissionAccess
-        : hasRoleAccess && hasPermissionAccess;
+      const hasPermissionAccess =
+        !item.permissions || hasAnyPermission(item.permissions);
+      const hasAccess =
+        item.accessMode === 'any'
+          ? hasRoleAccess || hasPermissionAccess
+          : hasRoleAccess && hasPermissionAccess;
 
       if (!hasAccess) {
         return acc;
       }
 
-      const children = item.children ? filterNavItems(item.children) : undefined;
+      const children = item.children
+        ? filterNavItems(item.children)
+        : undefined;
       if (item.children && (!children || children.length === 0)) {
         return acc;
       }
@@ -1482,88 +3504,98 @@ export function Sidebar({ className }: SidebarProps) {
     <div className="relative">
       <div
         ref={sidebarRef}
+        onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
         className={cn(
-          'flex h-full flex-col bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-r border-slate-200/50 dark:border-slate-800/50 transition-all duration-300',
-          collapsed ? 'w-16' : 'w-72',
+          'flex h-full flex-col bg-white/95 dark:bg-[#181818]/95 backdrop-blur-xl border-r border-slate-200/50 dark:border-neutral-800/70 transition-all duration-300',
+          sidebarIsCollapsed ? 'w-16' : 'w-64',
           className
         )}
       >
         {/* Header */}
-        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/50 dark:border-slate-800/50">
-          {!collapsed && (
+        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/50 dark:border-neutral-800/70">
+          {!sidebarIsCollapsed && (
             <div className="flex items-center space-x-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600">
                 <Building2 className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">ERP System</h2>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  ERP System
+                </h2>
               </div>
             </div>
           )}
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleSidebar}
+            aria-label={
+              collapsed ? 'Keep sidebar expanded' : 'Collapse sidebar'
+            }
             className="h-8 w-8 p-0"
           >
-            {collapsed ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
+            {collapsed ? (
+              <Menu className="h-4 w-4" />
+            ) : (
+              <X className="h-4 w-4" />
+            )}
           </Button>
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0 overflow-y-auto p-2">
-        {filterNavItems(navigationItems).map((item) => {
-          const Icon = item.icon;
-          const hasChildren = item.children && item.children.length > 0;
-          const itemIsActive = isActive(item.href);
+          {filterNavItems(sidebarNavigationItems).map((item) => {
+            const Icon = item.icon;
+            const hasChildren = item.children && item.children.length > 0;
+            const itemIsActive = isActive(item.href);
 
-          return (
-            <div key={item.title} className="relative">
-              {hasChildren ? (
-                <button
-                  onMouseEnter={(e) => handleMainItemHover(item.title, e)}
-                  onClick={(e) => {
-                    if (hoveredItem === item.title) {
-                      clearMenus();
-                      return;
-                    }
-                    cancelPendingOpen();
-                    openMainItemMenu(item.title, e);
-                  }}
-                  className={cn(
-                    'flex w-full items-center justify-between rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
-                    itemIsActive
-                      ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
-                      : 'text-slate-700 dark:text-slate-300'
-                  )}
-                >
-                  <div className="flex items-center space-x-4">
-                    <Icon className="h-6 w-6 flex-shrink-0" />
-                    {!collapsed && <span>{item.title}</span>}
-                  </div>
-                  {!collapsed && hasChildren && (
-                    <ChevronRight className="h-5 w-5" />
-                  )}
-                </button>
-              ) : (
-                <Link
+            return (
+              <div key={item.title} className="relative">
+                {hasChildren ? (
+                  <button
+                    onMouseEnter={(e) => handleMainItemHover(item.title, e)}
+                    onClick={(e) => {
+                      if (hoveredItem === item.title) {
+                        clearMenus();
+                        return;
+                      }
+                      cancelPendingOpen();
+                      openMainItemMenu(item.title, e);
+                    }}
+                    className={cn(
+                      'flex w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      itemIsActive
+                        ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
+                        : 'text-slate-700 dark:text-slate-300'
+                    )}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <Icon className="h-6 w-6 flex-shrink-0" />
+                      {!sidebarIsCollapsed && <span>{item.title}</span>}
+                    </div>
+                    {!sidebarIsCollapsed && hasChildren && (
+                      <ChevronRight className="h-5 w-5" />
+                    )}
+                  </button>
+                ) : (
+                  <Link
                     href={item.href}
                     className={cn(
-                      'flex items-center space-x-4 rounded-xl px-4 py-3 text-base font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      'flex items-center space-x-4 rounded-xl px-4 py-3 text-sm font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
                       itemIsActive
                         ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
                     <Icon className="h-6 w-6 flex-shrink-0" />
-                    {!collapsed && <span>{item.title}</span>}
+                    {!sidebarIsCollapsed && <span>{item.title}</span>}
                   </Link>
                 )}
-            </div>
-          );
-        })}
-      </nav>
+              </div>
+            );
+          })}
+        </nav>
       </div>
 
       {/* Invisible Bridge for First Level Menu */}
@@ -1571,7 +3603,7 @@ export function Sidebar({ className }: SidebarProps) {
         <div
           data-sidebar-flyout="true"
           className="fixed z-40"
-          style={getBridgeStyle(collapsed ? 64 : 288, hoveredItem)}
+          style={getBridgeStyle(sidebarIsCollapsed ? 64 : 256, hoveredItem)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />
@@ -1581,28 +3613,31 @@ export function Sidebar({ className }: SidebarProps) {
       {hoveredItem && menuPositions[hoveredItem] && (
         <div
           data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+          className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[hoveredItem].x,
             top: menuPositions[hoveredItem].y,
             scrollbarWidth: 'thin',
-            scrollbarColor: 'rgb(148 163 184) transparent'
+            scrollbarColor: 'rgb(148 163 184) transparent',
           }}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         >
-          {filterNavItems(navigationItems)
-            .find(item => item.title === hoveredItem)
+          {filterNavItems(sidebarNavigationItems)
+            .find((item) => item.title === hoveredItem)
             ?.children?.map((child) => {
               const ChildIcon = child.icon;
               const childIsActive = isActive(child.href);
-              const childHasChildren = child.children && child.children.length > 0;
-              
+              const childHasChildren =
+                child.children && child.children.length > 0;
+
               return (
                 <div key={child.title} className="relative">
                   {childHasChildren ? (
                     <button
-                      onMouseEnter={(e) => handleChildItemHover(hoveredItem, child.title, e)}
+                      onMouseEnter={(e) =>
+                        handleChildItemHover(hoveredItem, child.title, e)
+                      }
                       onClick={(e) => {
                         if (hoveredChild === child.title) {
                           setHoveredChild(null);
@@ -1613,7 +3648,7 @@ export function Sidebar({ className }: SidebarProps) {
                         cancelPendingOpen();
                         openChildItemMenu(hoveredItem, child.title, e);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
+                      className="w-full flex items-center gap-3 px-4 py-2 text-[13px] text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       <ChildIcon className="h-4 w-4 flex-shrink-0" />
                       <span className="flex-1">{child.title}</span>
@@ -1624,7 +3659,7 @@ export function Sidebar({ className }: SidebarProps) {
                       href={child.href}
                       onClick={clearMenus}
                       className={cn(
-                        'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                        'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                         childIsActive
                           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                           : 'text-slate-700 dark:text-slate-300'
@@ -1641,131 +3676,172 @@ export function Sidebar({ className }: SidebarProps) {
       )}
 
       {/* Invisible Bridge for Second Level Menu */}
-      {hoveredChild && hoveredItem && menuPositions[hoveredItem] && menuPositions[`${hoveredItem}-${hoveredChild}`] && (
-        <div
-          data-sidebar-flyout="true"
-          className="fixed z-40"
-          style={getBridgeStyle(menuPositions[hoveredItem].x + 224, `${hoveredItem}-${hoveredChild}`)}
-          onMouseEnter={handleMenuMouseEnter}
-          onMouseLeave={handleMenuMouseLeave}
-        />
-      )}
+      {hoveredChild &&
+        hoveredItem &&
+        menuPositions[hoveredItem] &&
+        menuPositions[`${hoveredItem}-${hoveredChild}`] && (
+          <div
+            data-sidebar-flyout="true"
+            className="fixed z-40"
+            style={getBridgeStyle(
+              menuPositions[hoveredItem].x + 224,
+              `${hoveredItem}-${hoveredChild}`
+            )}
+            onMouseEnter={handleMenuMouseEnter}
+            onMouseLeave={handleMenuMouseLeave}
+          />
+        )}
 
       {/* Second Level Floating Submenu */}
-      {hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`] && (
-        <div
-          data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
-          style={{
-            left: menuPositions[`${hoveredItem}-${hoveredChild}`].x,
-            top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
-            scrollbarWidth: 'thin',
-            scrollbarColor: 'rgb(148 163 184) transparent'
-          }}
-          onMouseEnter={handleMenuMouseEnter}
-          onMouseLeave={handleMenuMouseLeave}
-        >
-          {filterNavItems(navigationItems)
-            .find(item => item.title === hoveredItem)
-            ?.children?.find(child => child.title === hoveredChild)
-            ?.children?.map((grandchild) => {
-              const GrandChildIcon = grandchild.icon;
-              const grandchildIsActive = isActive(grandchild.href);
-              const grandchildHasChildren = grandchild.children && grandchild.children.length > 0;
-              
-              return (
-                <div key={grandchild.title} className="relative">
-                  {grandchildHasChildren ? (
-                    <button
-                      onMouseEnter={(e) => handleGrandChildItemHover(hoveredItem, hoveredChild, grandchild.title, e)}
-                      onClick={(e) => {
-                        if (hoveredGrandChild === grandchild.title) {
-                          setHoveredGrandChild(null);
-                          setActiveMenuPath([hoveredItem, hoveredChild]);
-                          return;
+      {hoveredChild &&
+        hoveredItem &&
+        menuPositions[`${hoveredItem}-${hoveredChild}`] && (
+          <div
+            data-sidebar-flyout="true"
+            className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+            style={{
+              left: menuPositions[`${hoveredItem}-${hoveredChild}`].x,
+              top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgb(148 163 184) transparent',
+            }}
+            onMouseEnter={handleMenuMouseEnter}
+            onMouseLeave={handleMenuMouseLeave}
+          >
+            {filterNavItems(sidebarNavigationItems)
+              .find((item) => item.title === hoveredItem)
+              ?.children?.find((child) => child.title === hoveredChild)
+              ?.children?.map((grandchild) => {
+                const GrandChildIcon = grandchild.icon;
+                const grandchildIsActive = isActive(grandchild.href);
+                const grandchildHasChildren =
+                  grandchild.children && grandchild.children.length > 0;
+
+                return (
+                  <div key={grandchild.title} className="relative">
+                    {grandchildHasChildren ? (
+                      <button
+                        onMouseEnter={(e) =>
+                          handleGrandChildItemHover(
+                            hoveredItem,
+                            hoveredChild,
+                            grandchild.title,
+                            e
+                          )
                         }
-                        cancelPendingOpen();
-                        openGrandChildItemMenu(hoveredItem, hoveredChild, grandchild.title, e);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
-                    >
-                      <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
-                      <span className="flex-1">{grandchild.title}</span>
-                      <ChevronRight className="h-3 w-3" />
-                    </button>
-                  ) : (
-                    <Link
-                      href={grandchild.href}
-                      onClick={clearMenus}
-                      className={cn(
-                        'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
-                        grandchildIsActive
-                          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
-                          : 'text-slate-600 dark:text-slate-400'
-                      )}
-                    >
-                      <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
-                      <span>{grandchild.title}</span>
-                    </Link>
-                  )}
-                </div>
-              );
-            })}
-        </div>
-      )}
+                        onClick={(e) => {
+                          if (hoveredGrandChild === grandchild.title) {
+                            setHoveredGrandChild(null);
+                            setActiveMenuPath([hoveredItem, hoveredChild]);
+                            return;
+                          }
+                          cancelPendingOpen();
+                          openGrandChildItemMenu(
+                            hoveredItem,
+                            hoveredChild,
+                            grandchild.title,
+                            e
+                          );
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2 text-[13px] text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
+                      >
+                        <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
+                        <span className="flex-1">{grandchild.title}</span>
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <Link
+                        href={grandchild.href}
+                        onClick={clearMenus}
+                        className={cn(
+                          'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                          grandchildIsActive
+                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
+                            : 'text-slate-600 dark:text-slate-400'
+                        )}
+                      >
+                        <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
+                        <span>{grandchild.title}</span>
+                      </Link>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
 
       {/* Invisible Bridge for Third Level Menu */}
-      {hoveredGrandChild && hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}`] && menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`] && (
-        <div
-          data-sidebar-flyout="true"
-          className="fixed z-40"
-          style={getBridgeStyle(menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224, `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`)}
-          onMouseEnter={handleMenuMouseEnter}
-          onMouseLeave={handleMenuMouseLeave}
-        />
-      )}
+      {hoveredGrandChild &&
+        hoveredChild &&
+        hoveredItem &&
+        menuPositions[`${hoveredItem}-${hoveredChild}`] &&
+        menuPositions[
+          `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
+        ] && (
+          <div
+            data-sidebar-flyout="true"
+            className="fixed z-40"
+            style={getBridgeStyle(
+              menuPositions[`${hoveredItem}-${hoveredChild}`].x + 224,
+              `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
+            )}
+            onMouseEnter={handleMenuMouseEnter}
+            onMouseLeave={handleMenuMouseLeave}
+          />
+        )}
 
       {/* Third Level Floating Submenu */}
-      {hoveredGrandChild && hoveredChild && hoveredItem && menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`] && (
-        <div
-          data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-800/50 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
-          style={{
-            left: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].x,
-            top: menuPositions[`${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`].y,
-            scrollbarWidth: 'thin',
-            scrollbarColor: 'rgb(148 163 184) transparent'
-          }}
-          onMouseEnter={handleMenuMouseEnter}
-          onMouseLeave={handleMenuMouseLeave}
-        >
-          {filterNavItems(navigationItems)
-            .find(item => item.title === hoveredItem)
-            ?.children?.find(child => child.title === hoveredChild)
-            ?.children?.find(grandchild => grandchild.title === hoveredGrandChild)
-            ?.children?.map((greatGrandchild) => {
-              const GreatGrandChildIcon = greatGrandchild.icon;
-              const greatGrandchildIsActive = isActive(greatGrandchild.href);
-              
-              return (
-                <Link
-                  key={greatGrandchild.title}
-                  href={greatGrandchild.href}
-                  onClick={clearMenus}
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
-                    greatGrandchildIsActive
-                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
-                      : 'text-slate-500 dark:text-slate-500'
-                  )}
-                >
-                  <GreatGrandChildIcon className="h-3 w-3 flex-shrink-0" />
-                  <span>{greatGrandchild.title}</span>
-                </Link>
-              );
-            })}
-        </div>
-      )}
+      {hoveredGrandChild &&
+        hoveredChild &&
+        hoveredItem &&
+        menuPositions[
+          `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
+        ] && (
+          <div
+            data-sidebar-flyout="true"
+            className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+            style={{
+              left: menuPositions[
+                `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
+              ].x,
+              top: menuPositions[
+                `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
+              ].y,
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgb(148 163 184) transparent',
+            }}
+            onMouseEnter={handleMenuMouseEnter}
+            onMouseLeave={handleMenuMouseLeave}
+          >
+            {filterNavItems(sidebarNavigationItems)
+              .find((item) => item.title === hoveredItem)
+              ?.children?.find((child) => child.title === hoveredChild)
+              ?.children?.find(
+                (grandchild) => grandchild.title === hoveredGrandChild
+              )
+              ?.children?.map((greatGrandchild) => {
+                const GreatGrandChildIcon = greatGrandchild.icon;
+                const greatGrandchildIsActive = isActive(greatGrandchild.href);
+
+                return (
+                  <Link
+                    key={greatGrandchild.title}
+                    href={greatGrandchild.href}
+                    onClick={clearMenus}
+                    className={cn(
+                      'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                      greatGrandchildIsActive
+                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
+                        : 'text-slate-500 dark:text-slate-500'
+                    )}
+                  >
+                    <GreatGrandChildIcon className="h-3 w-3 flex-shrink-0" />
+                    <span>{greatGrandchild.title}</span>
+                  </Link>
+                );
+              })}
+          </div>
+        )}
     </div>
   );
 }

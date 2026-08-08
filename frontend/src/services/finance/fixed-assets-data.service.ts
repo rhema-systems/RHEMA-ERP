@@ -28,6 +28,9 @@ import type {
   AssetValuation,
   BulkOperationResult,
   RequestBulkAssetDisposalDto,
+  FixedAssetCapitalizationReversal,
+  RequestFixedAssetCapitalizationReversalDto,
+  ReviewFixedAssetCapitalizationReversalDto,
 } from '@/types/fixed-assets';
 import {
   FixedAssetReportQuery,
@@ -70,6 +73,47 @@ class FixedAssetsDataService {
 
   async deleteAsset(id: string): Promise<void> {
     return apiService.delete(`/finance/fixed-assets/${id}`);
+  }
+
+  // ===== CAPITALIZATION CORRECTIONS =====
+  // These methods deliberately expose the controlled request/review/post stages
+  // separately. Combining them in the browser would bypass the maker-checker
+  // evidence required by TDC FR-GL-008 and FR-GL-010.
+
+  async getCapitalizationReversals(id: string): Promise<FixedAssetCapitalizationReversal[]> {
+    return apiService.get<FixedAssetCapitalizationReversal[]>(
+      `/finance/fixed-assets/${id}/capitalization-reversals`
+    );
+  }
+
+  async requestCapitalizationReversal(
+    id: string,
+    dto: RequestFixedAssetCapitalizationReversalDto
+  ): Promise<FixedAssetCapitalizationReversal> {
+    return apiService.post<FixedAssetCapitalizationReversal>(
+      `/finance/fixed-assets/${id}/capitalization-reversals`,
+      dto
+    );
+  }
+
+  async reviewCapitalizationReversal(
+    id: string,
+    requestId: string,
+    dto: ReviewFixedAssetCapitalizationReversalDto
+  ): Promise<FixedAssetCapitalizationReversal> {
+    return apiService.post<FixedAssetCapitalizationReversal>(
+      `/finance/fixed-assets/${id}/capitalization-reversals/${requestId}/review`,
+      dto
+    );
+  }
+
+  async postCapitalizationReversal(
+    id: string,
+    requestId: string
+  ): Promise<FixedAssetCapitalizationReversal> {
+    return apiService.post<FixedAssetCapitalizationReversal>(
+      `/finance/fixed-assets/${id}/capitalization-reversals/${requestId}/post`
+    );
   }
 
   // ===== CATEGORIES =====

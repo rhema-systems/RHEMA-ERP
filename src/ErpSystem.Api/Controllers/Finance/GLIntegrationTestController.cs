@@ -212,10 +212,9 @@ public class GLIntegrationTestController : ControllerBase
                 arInvoiceJournalEntry = arJe
             });
         }
-        catch (Exception ex)
+        catch
         {
-            _logger.LogError(ex, "Error running GL integration test.");
-            return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
+            throw;
         }
     }
 }

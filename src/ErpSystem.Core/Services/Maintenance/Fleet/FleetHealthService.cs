@@ -57,7 +57,12 @@ public sealed class FleetHealthService : IFleetHealthService
             .GetQueryable(c =>
                 c.TenantId == tenantId &&
                 !c.IsDeleted &&
-                c.DocumentType.ToLower().Contains("driver"))
+                // [HR-MODULE-PORT] `EmployeeIdentificationCard` no longer has a free-text `DocumentType` string.
+                // The HR module port replaced it with `IdentificationTypeId` + the `IdentificationType` lookup entity,
+                // so driver-licence detection now matches on `IdentificationType.Name`. Behaviour is preserved as long
+                // as the licence identification type is named with "driver" (e.g. "Driver's License"). If you referenced
+                // a `DocumentType` string elsewhere, use the `IdentificationType` relationship instead.
+                c.IdentificationType.Name.ToLower().Contains("driver"))
             .Select(c => c.EmployeeId)
             .Distinct()
             .CountAsync();

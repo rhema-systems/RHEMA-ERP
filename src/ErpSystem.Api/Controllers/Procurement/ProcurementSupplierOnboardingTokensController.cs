@@ -11,10 +11,15 @@ namespace ErpSystem.Api.Controllers.Procurement;
 public sealed class ProcurementSupplierOnboardingTokensController : ControllerBase
 {
     private readonly IProcurementSupplierOnboardingTokenService _service;
+    private readonly IProcurementSupplierApplicantAccessService _applicantAccess;
 
     public ProcurementSupplierOnboardingTokensController(
-        IProcurementSupplierOnboardingTokenService service) =>
+        IProcurementSupplierOnboardingTokenService service,
+        IProcurementSupplierApplicantAccessService applicantAccess)
+    {
         _service = service;
+        _applicantAccess = applicantAccess;
+    }
 
     [HttpGet("summary")]
     public Task<IActionResult> Summary(CancellationToken cancellationToken) =>
@@ -59,8 +64,13 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
         Guid id,
         [FromBody] ReissueProcurementSupplierOnboardingTokenRequest request,
         CancellationToken cancellationToken) =>
-        ExecuteAsync(async () => Ok(await _service.ReissueAsync(
-            id, request, CorrelationId, cancellationToken)));
+        ExecuteAsync(async () =>
+        {
+            var value = await _service.ReissueAsync(
+                id, request, CorrelationId, cancellationToken);
+            return Ok(await DeliverAndSanitizeAsync(
+                value, CorrelationId, cancellationToken));
+        });
 
     [HttpPost("{id:guid}/payments")]
     public Task<IActionResult> RecordPayment(
@@ -76,8 +86,13 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
         Guid paymentId,
         [FromBody] ReconcileProcurementSupplierOnboardingPaymentRequest request,
         CancellationToken cancellationToken) =>
-        ExecuteAsync(async () => Ok(await _service.ReconcilePaymentAsync(
-            tokenId, paymentId, request, CorrelationId, cancellationToken)));
+        ExecuteAsync(async () =>
+        {
+            var value = await _service.ReconcilePaymentAsync(
+                tokenId, paymentId, request, CorrelationId, cancellationToken);
+            await DeliverAndSanitizeAsync(value, CorrelationId, cancellationToken);
+            return Ok(value.Token);
+        });
 
     [HttpPost("{id:guid}/exemptions")]
     public Task<IActionResult> RequestExemption(
@@ -93,8 +108,53 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
         Guid exemptionId,
         [FromBody] DecideProcurementSupplierOnboardingExemptionRequest request,
         CancellationToken cancellationToken) =>
-        ExecuteAsync(async () => Ok(await _service.DecideExemptionAsync(
-            tokenId, exemptionId, request, CorrelationId, cancellationToken)));
+        ExecuteAsync(async () =>
+        {
+            var value = await _service.DecideExemptionAsync(
+                tokenId, exemptionId, request, CorrelationId, cancellationToken);
+            await DeliverAndSanitizeAsync(value, CorrelationId, cancellationToken);
+            return Ok(value.Token);
+        });
+
+    private async Task<ProcurementSupplierOnboardingTokenIssueResultDto>
+        DeliverAndSanitizeAsync(
+            ProcurementSupplierOnboardingTokenIssueResultDto value,
+            string correlationId,
+            CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(value.PlaintextToken))
+            return value;
+
+        SupplierApplicantTokenDeliveryDto delivery;
+        try
+        {
+            delivery = await _applicantAccess.DeliverApplicationTokenAsync(
+                value.Token.Id,
+                value.PlaintextToken,
+                correlationId,
+                cancellationToken);
+        }
+        catch (ProcurementSupplierApplicantAccessException)
+        {
+            throw new ProcurementSupplierOnboardingTokenConflictException(
+                "SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED",
+                "Application-token delivery could not be completed. " +
+                "Reissue the token to retry delivery.");
+        }
+        if (!delivery.ApplicantAccessFound)
+            return value;
+        if (!delivery.Delivered)
+            throw new ProcurementSupplierOnboardingTokenConflictException(
+                "SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED",
+                delivery.FailureMessage ??
+                "Application-token delivery failed. Reissue the token to retry delivery.");
+
+        return new ProcurementSupplierOnboardingTokenIssueResultDto
+        {
+            Token = value.Token,
+            PlaintextToken = null
+        };
+    }
 
     private string CorrelationId
     {

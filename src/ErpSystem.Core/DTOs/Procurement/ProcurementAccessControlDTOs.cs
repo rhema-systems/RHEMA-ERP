@@ -51,11 +51,22 @@ public sealed class ProcurementAccessUserOptionDto
     public string Username { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+    public List<string> RoleNames { get; set; } = new();
 }
 
 public sealed class ProcurementAccessWarehouseOptionDto
 {
     public Guid WarehouseId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+}
+
+public sealed class ProcurementAccessLocationOptionDto
+{
+    public Guid LocationId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public string WarehouseCode { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; }
@@ -72,6 +83,8 @@ public sealed class ProcurementResponsibilityAssignmentDto
     public string RoleDisplayName { get; set; } = string.Empty;
     public ProcurementWarehouseScopeMode WarehouseScopeMode { get; set; }
     public List<ProcurementAccessWarehouseOptionDto> Warehouses { get; set; } = new();
+    public ProcurementLocationScopeMode LocationScopeMode { get; set; }
+    public List<ProcurementAccessLocationOptionDto> Locations { get; set; } = new();
     public DateTime EffectiveFrom { get; set; }
     public DateTime? EffectiveTo { get; set; }
     public bool IsActive { get; set; }
@@ -85,6 +98,8 @@ public sealed class SaveProcurementResponsibilityAssignmentRequest
     [Required, StringLength(100)] public string RoleName { get; set; } = string.Empty;
     public ProcurementWarehouseScopeMode WarehouseScopeMode { get; set; }
     public List<Guid> WarehouseIds { get; set; } = new();
+    public ProcurementLocationScopeMode LocationScopeMode { get; set; }
+    public List<Guid> LocationIds { get; set; } = new();
     public DateTime EffectiveFrom { get; set; } = DateTime.UtcNow.Date;
     public DateTime? EffectiveTo { get; set; }
     public bool IsActive { get; set; } = true;
@@ -172,6 +187,8 @@ public sealed class ProcurementAccessCapabilityRequest
 {
     [Required, StringLength(100)] public string PermissionCode { get; set; } = string.Empty;
     public Guid? WarehouseId { get; set; }
+    public Guid? LocationId { get; set; }
+    public bool RequireLocationScope { get; set; }
     [StringLength(50)] public string? CommitteeCode { get; set; }
     [Required, StringLength(100)] public string SourceType { get; set; } = string.Empty;
     [Required, StringLength(100)] public string SourceReference { get; set; } = string.Empty;
@@ -186,6 +203,7 @@ public sealed class ProcurementAccessCapabilityDecisionDto
     public Guid TenantId { get; set; }
     public string PermissionCode { get; set; } = string.Empty;
     public Guid? WarehouseId { get; set; }
+    public Guid? LocationId { get; set; }
     public string? CommitteeCode { get; set; }
     public List<Guid> MatchedAssignmentIds { get; set; } = new();
     public List<string> MatchedRoles { get; set; } = new();

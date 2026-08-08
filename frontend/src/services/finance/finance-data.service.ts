@@ -10,6 +10,10 @@ import type {
     ExchangeRate,
     FiscalYear,
     FiscalPeriod,
+    FinanceCloseTemplate,
+    FinanceCloseWorkspace,
+    FinancePeriodReopenRequest,
+    SaveFinanceCloseTemplateVersion,
     JournalEntry,
     JournalEntryAttachment,
     FinanceJournalAuditLog,
@@ -29,6 +33,7 @@ import type {
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
     AddCurrencyLinkDto,
+    UpdateCurrencyLinkRatePolicyDto,
     ModuleDefinition,
     OpeningBalanceBatch,
     OpeningBalanceDiagnostic,
@@ -43,6 +48,8 @@ import type {
     DetailedLedgerRequestDto,
     IncomeStatementReportDto,
     IncomeStatementRequestDto,
+    FinancialStatementLayoutSummaryDto,
+    FinancialStatementType,
     MultiCurrencyDetailReportDto,
     MultiCurrencyDetailRequestDto,
     SubledgerAdjustmentJournal,
@@ -172,13 +179,15 @@ class FinanceDataService {
         baseCurrencyCode?: string;
         targetCurrencyCode?: string;
         rateType?: string;
+        quoteSide?: string;
         startDate?: string;
         endDate?: string;
     }): Promise<ExchangeRate[]> {
         const queryParams = new URLSearchParams();
-        if (filters?.baseCurrencyCode) queryParams.append('baseCurrencyCode', filters.baseCurrencyCode);
-        if (filters?.targetCurrencyCode) queryParams.append('targetCurrencyCode', filters.targetCurrencyCode);
+        if (filters?.baseCurrencyCode) queryParams.append('fromCurrency', filters.baseCurrencyCode);
+        if (filters?.targetCurrencyCode) queryParams.append('toCurrency', filters.targetCurrencyCode);
         if (filters?.rateType) queryParams.append('rateType', filters.rateType);
+        if (filters?.quoteSide) queryParams.append('quoteSide', filters.quoteSide);
         if (filters?.startDate) queryParams.append('startDate', filters.startDate);
         if (filters?.endDate) queryParams.append('endDate', filters.endDate);
 
@@ -246,12 +255,113 @@ class FinanceDataService {
     }
 
     async openFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
-        // The backend models opening a closed period as "reopen" (FiscalPeriodController).
-        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, { reason });
+        // Future-to-Open is a first-use lifecycle transition. Certified Closed periods continue
+        // through requestFiscalPeriodReopen so their signed close evidence remains protected.
+        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/open`, { reason });
     }
 
-    async closeFiscalPeriod(id: string): Promise<FiscalPeriod> {
-        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/close`, {});
+    async evaluateFiscalPeriodClose(id: string): Promise<FinanceCloseWorkspace> {
+        return apiService.post<FinanceCloseWorkspace>(`/finance/periods/${id}/close-workspace/evaluate`, {});
+    }
+
+    async prepareFiscalPeriodClose(id: string, declaration: string): Promise<FinanceCloseWorkspace> {
+        return apiService.post<FinanceCloseWorkspace>(`/finance/periods/${id}/close-workspace/prepare`, { declaration });
+    }
+
+    async getFinanceCloseTemplates(): Promise<FinanceCloseTemplate[]> {
+        return apiService.get<FinanceCloseTemplate[]>('/finance/close-templates');
+    }
+
+    async createFinanceCloseTemplateVersion(
+        request: SaveFinanceCloseTemplateVersion
+    ): Promise<FinanceCloseTemplate> {
+        return apiService.post<FinanceCloseTemplate>('/finance/close-templates/versions', request);
+    }
+
+    async updateFinanceCloseTemplateDraft(
+        id: string,
+        request: SaveFinanceCloseTemplateVersion
+    ): Promise<FinanceCloseTemplate> {
+        return apiService.put<FinanceCloseTemplate>(`/finance/close-templates/${id}`, request);
+    }
+
+    async approveFinanceCloseTemplate(id: string, declaration: string): Promise<FinanceCloseTemplate> {
+        return apiService.post<FinanceCloseTemplate>(`/finance/close-templates/${id}/approve`, { declaration });
+    }
+
+    async updateFinanceCloseTask(
+        periodId: string,
+        taskId: string,
+        request: {
+            assignToCurrentUser?: boolean;
+            assignedToUserId?: string;
+            dueAt?: string;
+            markCompleted?: boolean;
+            evidenceSummary?: string;
+        }
+    ): Promise<FinanceCloseWorkspace> {
+        return apiService.put<FinanceCloseWorkspace>(
+            `/finance/periods/${periodId}/close-workspace/tasks/${taskId}`,
+            request
+        );
+    }
+
+    async linkFinanceCloseEvidence(
+        periodId: string,
+        taskId: string,
+        request: { fileUploadRecordId: string; evidenceType: string; description?: string }
+    ): Promise<FinanceCloseWorkspace> {
+        return apiService.post<FinanceCloseWorkspace>(
+            `/finance/periods/${periodId}/close-workspace/tasks/${taskId}/evidence`,
+            request
+        );
+    }
+
+    async removeFinanceCloseEvidence(
+        periodId: string,
+        taskId: string,
+        attachmentId: string
+    ): Promise<FinanceCloseWorkspace> {
+        return apiService.delete<FinanceCloseWorkspace>(
+            `/finance/periods/${periodId}/close-workspace/tasks/${taskId}/evidence/${attachmentId}`
+        );
+    }
+
+    async requestFinanceCloseWaiver(
+        periodId: string,
+        snapshotId: string,
+        financeCloseEvidenceAttachmentId: string,
+        justification: string
+    ): Promise<FinanceCloseWorkspace> {
+        return apiService.post<FinanceCloseWorkspace>(
+            `/finance/periods/${periodId}/close-workspace/checks/${snapshotId}/waivers`,
+            { financeCloseEvidenceAttachmentId, justification }
+        );
+    }
+
+    async reviewFinanceCloseWaiver(
+        periodId: string,
+        waiverId: string,
+        approve: boolean,
+        comment: string
+    ): Promise<FinanceCloseWorkspace> {
+        return apiService.post<FinanceCloseWorkspace>(
+            `/finance/periods/${periodId}/close-workspace/waivers/${waiverId}/review`,
+            { approve, comment }
+        );
+    }
+
+    async closeFiscalPeriod(
+        id: string,
+        reviewerDeclaration: string,
+        closingNotes?: string
+    ): Promise<FiscalYearCloseResult> {
+        // Mandatory server checks have no bypass. The reviewer declaration is the second-person
+        // approval evidence linked to the active numbered close cycle.
+        return apiService.post<FiscalYearCloseResult>(`/finance/periods/${id}/close`, {
+            reviewerDeclaration,
+            closingNotes
+        });
     }
 
     // ===== MODULE LOCKING =====
@@ -268,8 +378,27 @@ class FinanceDataService {
         return apiService.post(`/finance/periods/${periodId}/unlock-module`, { moduleCode, reason, reopenUntilUtc });
     }
 
-    async reopenFiscalPeriod(id: string, reason: string): Promise<FiscalPeriod> {
-        return apiService.post<FiscalPeriod>(`/finance/periods/${id}/reopen`, { reason });
+    async requestFiscalPeriodReopen(
+        id: string,
+        reason: string,
+        affectedPeriodAssessment: string
+    ): Promise<FinancePeriodReopenRequest> {
+        return apiService.post<FinancePeriodReopenRequest>(`/finance/periods/${id}/reopen-requests`, {
+            reason,
+            affectedPeriodAssessment
+        });
+    }
+
+    async reviewFiscalPeriodReopen(
+        periodId: string,
+        requestId: string,
+        approved: boolean,
+        reviewComment: string
+    ): Promise<FinancePeriodReopenRequest> {
+        return apiService.post<FinancePeriodReopenRequest>(
+            `/finance/periods/${periodId}/reopen-requests/${requestId}/review`,
+            { approved, reviewComment }
+        );
     }
 
     // ===== JOURNAL ENTRIES =====
@@ -504,6 +633,8 @@ class FinanceDataService {
         if (params.periodEnd) queryParams.append('periodEnd', params.periodEnd);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        if (params.layoutId) queryParams.append('layoutId', params.layoutId);
+        if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<IncomeStatementReportDto>(`/finance/statements/income-statement?${queryParams}`);
@@ -514,9 +645,24 @@ class FinanceDataService {
         if (params.asAtDate) queryParams.append('asAtDate', params.asAtDate);
         if (params.bookClassification) queryParams.append('bookClassification', params.bookClassification);
         if (params.includeAccountDetails !== undefined) queryParams.append('includeAccountDetails', String(params.includeAccountDetails));
+        if (params.layoutId) queryParams.append('layoutId', params.layoutId);
+        if (params.useDefaultLayout !== undefined) queryParams.append('useDefaultLayout', String(params.useDefaultLayout));
         appendFinanceSegmentFilters(queryParams, params.segmentFilters);
 
         return apiService.get<BalanceSheetReportDto>(`/finance/statements/balance-sheet?${queryParams}`);
+    }
+
+    async getFinancialStatementLayouts(
+        statementType: FinancialStatementType,
+        accountingBookId?: string,
+    ): Promise<FinancialStatementLayoutSummaryDto[]> {
+        const queryParams = new URLSearchParams();
+        queryParams.append('statementType', statementType);
+        if (accountingBookId) queryParams.append('accountingBookId', accountingBookId);
+
+        return apiService.get<FinancialStatementLayoutSummaryDto[]>(
+            `/finance/financial-statement-layouts?${queryParams}`,
+        );
     }
 
     async getCashFlowStatement(params: CashFlowStatementRequestDto): Promise<CashFlowStatementReportDto> {
@@ -620,6 +766,17 @@ class FinanceDataService {
             currencyCode,
             linkedCurrencyCode: currencyCode,
         });
+    }
+
+    async updateAccountCurrencyLinkRatePolicy(
+        accountId: string,
+        currencyCode: string,
+        dto: UpdateCurrencyLinkRatePolicyDto
+    ): Promise<AccountCurrencyLink> {
+        return apiService.put<AccountCurrencyLink>(
+            `/finance/accounts/${accountId}/currencies/${currencyCode}/rate-policy`,
+            dto
+        );
     }
 
     async removeAccountCurrencyLink(accountId: string, currencyCode: string): Promise<void> {

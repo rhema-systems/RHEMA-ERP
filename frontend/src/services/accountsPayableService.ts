@@ -1,18 +1,33 @@
 import { apiService } from './api.service';
+import { DOCUMENT_TYPES, documentOutputService } from './document-output.service';
 import type {
     VendorInvoice,
     VendorInvoiceCreateRequest,
     VendorInvoiceUpdateRequest,
     VendorPayment,
     VendorPaymentCreateRequest,
+    SubmitVendorPaymentRequest,
+    VendorPaymentControl,
     VendorPaymentAllocationCreateRequest,
+    ReverseVendorPaymentRequest,
+    VendorPaymentTrace,
     PaymentBatch,
     PaymentBatchCreateRequest,
     ApAgingReport,
     SupplierDetailedLedgerReport,
     CashRequirementForecast,
     ApSummaryStats,
-    OutstandingVendorInvoice
+    OutstandingVendorInvoice,
+    InvoiceMatchingResult,
+    VendorPaymentInvoiceReadiness,
+    InvoicePaymentSodReadiness,
+    VendorInvoiceMatchException,
+    VendorInvoiceMatchExceptionOverview,
+    CreateVendorInvoiceMatchExceptionRequest,
+    VendorInvoiceMatchExceptionEvidenceRequest,
+    VendorInvoiceMatchExceptionReport,
+    VendorInvoiceMatchExceptionStatus,
+    ProcurementFinanceReconciliationReport
 } from '../types/ap';
 
 // Re-using the PagedResult structure from ar-service
@@ -115,6 +130,61 @@ class AccountsPayableService {
         return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/submit`, {});
     }
 
+    public async getThreeWayMatchReadiness(id: string): Promise<InvoiceMatchingResult> {
+        return apiService.get<InvoiceMatchingResult>(`${this.baseUrl}/invoices/${id}/match/readiness`);
+    }
+
+    public async performThreeWayMatch(id: string): Promise<InvoiceMatchingResult> {
+        return apiService.post<InvoiceMatchingResult>(`${this.baseUrl}/invoices/${id}/match/three-way`, {});
+    }
+
+    public async getMatchExceptionOverview(id: string): Promise<VendorInvoiceMatchExceptionOverview> {
+        return apiService.get<VendorInvoiceMatchExceptionOverview>(`${this.baseUrl}/invoices/${id}/match-exceptions`);
+    }
+
+    public async requestMatchException(
+        id: string,
+        data: CreateVendorInvoiceMatchExceptionRequest
+    ): Promise<VendorInvoiceMatchException> {
+        return apiService.post<VendorInvoiceMatchException>(`${this.baseUrl}/invoices/${id}/match-exceptions`, data);
+    }
+
+    public async decideMatchException(
+        exceptionId: string,
+        approved: boolean,
+        comment: string,
+        rowVersion: string
+    ): Promise<VendorInvoiceMatchException> {
+        return apiService.post<VendorInvoiceMatchException>(`${this.baseUrl}/invoices/match-exceptions/${exceptionId}/decision`, {
+            approved,
+            comment,
+            rowVersion,
+        });
+    }
+
+    public async cancelMatchException(
+        exceptionId: string,
+        reason: string,
+        rowVersion: string
+    ): Promise<VendorInvoiceMatchException> {
+        return apiService.post<VendorInvoiceMatchException>(`${this.baseUrl}/invoices/match-exceptions/${exceptionId}/cancel`, {
+            reason,
+            rowVersion,
+        });
+    }
+
+    public async completeMatchExceptionCorrectiveAction(
+        exceptionId: string,
+        completionNote: string,
+        rowVersion: string,
+        evidence: VendorInvoiceMatchExceptionEvidenceRequest[]
+    ): Promise<VendorInvoiceMatchException> {
+        return apiService.post<VendorInvoiceMatchException>(
+            `${this.baseUrl}/invoices/match-exceptions/${exceptionId}/corrective-action/complete`,
+            { completionNote, rowVersion, evidence }
+        );
+    }
+
     public async rejectInvoice(id: string, comments: string): Promise<VendorInvoice> {
         return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices/${id}/reject`, comments);
     }
@@ -151,16 +221,61 @@ class AccountsPayableService {
         return apiService.post<VendorPayment>(`${this.baseUrl}/payments`, data);
     }
 
+    /**
+     * Freezes the applicable evidence/authority policy and starts maker-checker approval. This is
+     * intentionally distinct from posting: only the completed workflow may authorize posting.
+     */
+    public async submitPayment(
+        id: string,
+        request: SubmitVendorPaymentRequest = {
+            isExceptionalPayment: false,
+            requestEvidenceException: false,
+        },
+    ): Promise<VendorPayment> {
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/submit`, request);
+    }
+
+    public async getPaymentControl(id: string): Promise<VendorPaymentControl> {
+        return apiService.get<VendorPaymentControl>(`${this.baseUrl}/payments/${id}/control`);
+    }
+
     public async postPayment(id: string): Promise<VendorPayment> {
         return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/post`, {});
     }
 
-    public async allocatePayment(paymentId: string, data: VendorPaymentAllocationCreateRequest): Promise<any> {
-        return apiService.post<any>(`${this.baseUrl}/payments/${paymentId}/allocate`, [data]);
+    public async getPaymentTrace(id: string): Promise<VendorPaymentTrace> {
+        return apiService.get<VendorPaymentTrace>(`${this.baseUrl}/payments/${id}/trace`);
+    }
+
+    /**
+     * Creates a linked compensating posting. The API keeps the original payment and journal
+     * immutable, so the UI intentionally calls this "reverse" rather than "void" or "delete".
+     */
+    public async reversePayment(id: string, request: ReverseVendorPaymentRequest): Promise<VendorPayment> {
+        return apiService.post<VendorPayment>(`${this.baseUrl}/payments/${id}/reverse`, request);
+    }
+
+    public async allocatePayment(
+        paymentId: string,
+        data: VendorPaymentAllocationCreateRequest | VendorPaymentAllocationCreateRequest[],
+    ): Promise<any> {
+        // The backend applies a set of advance allocations in one serializable transaction. Keep
+        // the single-row form compatible, while allowing the allocation workspace to submit all
+        // selected invoices atomically rather than partially consuming a currency lot.
+        const allocations = Array.isArray(data) ? data : [data];
+        return apiService.post<any>(`${this.baseUrl}/payments/${paymentId}/allocate`, allocations);
     }
 
     public async getOutstandingInvoices(supplierId: string): Promise<OutstandingVendorInvoice[]> {
         return apiService.get<OutstandingVendorInvoice[]>(`${this.baseUrl}/payments/supplier/${supplierId}/outstanding-invoices`);
+    }
+
+    public async getInvoicePaymentReadiness(invoiceId: string): Promise<VendorPaymentInvoiceReadiness> {
+        return apiService.get<VendorPaymentInvoiceReadiness>(`${this.baseUrl}/payments/invoices/${invoiceId}/readiness`);
+    }
+
+    public async getPaymentSodReadiness(id: string): Promise<InvoicePaymentSodReadiness> {
+        return apiService.get<InvoicePaymentSodReadiness>(`${this.baseUrl}/payments/${id}/sod-readiness`);
     }
 
     // --- Payment Batches ---
@@ -180,6 +295,10 @@ class AccountsPayableService {
 
     public async getBatch(id: string): Promise<PaymentBatch> {
         return apiService.get<PaymentBatch>(`${this.baseUrl}/payment-batches/${id}`);
+    }
+
+    public async getBatchSodReadiness(id: string): Promise<InvoicePaymentSodReadiness> {
+        return apiService.get<InvoicePaymentSodReadiness>(`${this.baseUrl}/payment-batches/${id}/sod-readiness`);
     }
 
     public async createBatch(data: PaymentBatchCreateRequest): Promise<PaymentBatch> {
@@ -249,8 +368,73 @@ class AccountsPayableService {
         });
     }
 
+    /**
+     * Downloads the controlled supplier statement through the shared document-output pipeline.
+     * PDF and XLSX therefore receive the same period, supplier selection and currency basis as
+     * the on-screen detailed ledger instead of rebuilding balances in the browser.
+     */
+    public async downloadSupplierStatementDocument(query: {
+        fromDate: string;
+        toDate: string;
+        supplierIds?: string[];
+        showSupplierCurrency?: boolean;
+        format: 'pdf' | 'xlsx';
+    }): Promise<void> {
+        await documentOutputService.downloadReportDocument(
+            DOCUMENT_TYPES.financeApSupplierStatement,
+            {
+                fromDate: query.fromDate,
+                toDate: query.toDate,
+                supplierIds: query.supplierIds ?? [],
+                showSupplierCurrency: query.showSupplierCurrency === true,
+            },
+            { format: query.format }
+        );
+    }
+
     public async getApSummary(): Promise<ApSummaryStats> {
         return apiService.get<ApSummaryStats>(`${this.baseUrl}/reports/summary`);
+    }
+
+    public async getThreeWayMatchExceptionReport(query: {
+        fromDate: string;
+        toDate: string;
+        status?: VendorInvoiceMatchExceptionStatus;
+        supplierId?: string;
+    }): Promise<VendorInvoiceMatchExceptionReport> {
+        return apiService.get<VendorInvoiceMatchExceptionReport>(`${this.baseUrl}/reports/three-way-match-exceptions`, query);
+    }
+
+    public async downloadThreeWayMatchExceptionReport(query: {
+        fromDate: string;
+        toDate: string;
+        status?: VendorInvoiceMatchExceptionStatus;
+        supplierId?: string;
+    }): Promise<Blob> {
+        return apiService.downloadBlob(`${this.baseUrl}/reports/three-way-match-exceptions/export`, {
+            ...query,
+            format: 'Csv',
+        });
+    }
+
+    public async getProcurementFinanceReconciliation(query: {
+        asOfDate?: string;
+        purchaseOrderId?: string;
+    } = {}): Promise<ProcurementFinanceReconciliationReport> {
+        return apiService.get<ProcurementFinanceReconciliationReport>(
+            `${this.baseUrl}/reports/procurement-reconciliation`,
+            query
+        );
+    }
+
+    public async downloadProcurementFinanceReconciliation(query: {
+        asOfDate?: string;
+        purchaseOrderId?: string;
+    } = {}): Promise<Blob> {
+        return apiService.downloadBlob(`${this.baseUrl}/reports/procurement-reconciliation/export`, {
+            ...query,
+            format: 'Csv',
+        });
     }
 
     // --- Supplier Returns & Debit Notes ---

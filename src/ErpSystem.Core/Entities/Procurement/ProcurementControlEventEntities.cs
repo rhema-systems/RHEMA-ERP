@@ -12,6 +12,7 @@ public sealed class ProcurementControlEvent : TenantEntity
     public int SchemaVersion { get; set; } = 1;
     [Required, StringLength(100)] public string EventType { get; set; } = string.Empty;
     [Required, StringLength(100)] public string Action { get; set; } = string.Empty;
+    public AuditOperationKind Operation { get; set; }
     public ProcurementControlEventResult Result { get; set; }
     [StringLength(200)] public string? RuleCode { get; set; }
     public Guid? RuleId { get; set; }

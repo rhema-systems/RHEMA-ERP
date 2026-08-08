@@ -1,5 +1,4 @@
 using System;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -7,98 +6,75 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <inheritdoc />
-    [DbContext(typeof(ApplicationDbContext))]
     [Migration("20260610172000_AddFinanceDiscountControlAccounts")]
     public partial class AddFinanceDiscountControlAccounts : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("""
-                IF OBJECT_ID(N'[dbo].[FinanceSettings]', N'U') IS NOT NULL
-                BEGIN
-                    IF COL_LENGTH(N'dbo.FinanceSettings', N'DiscountAllowedAccountId') IS NULL
-                        ALTER TABLE [dbo].[FinanceSettings] ADD [DiscountAllowedAccountId] uniqueidentifier NULL;
+            migrationBuilder.AddColumn<Guid>(
+                name: "DiscountAllowedAccountId",
+                table: "FinanceSettings",
+                type: "uniqueidentifier",
+                nullable: true);
 
-                    IF COL_LENGTH(N'dbo.FinanceSettings', N'DiscountReceivedAccountId') IS NULL
-                        ALTER TABLE [dbo].[FinanceSettings] ADD [DiscountReceivedAccountId] uniqueidentifier NULL;
+            migrationBuilder.AddColumn<Guid>(
+                name: "DiscountReceivedAccountId",
+                table: "FinanceSettings",
+                type: "uniqueidentifier",
+                nullable: true);
 
-                    IF NOT EXISTS (
-                        SELECT 1 FROM sys.indexes
-                        WHERE [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                          AND [name] = N'IX_FinanceSettings_DiscountAllowedAccountId')
-                        CREATE INDEX [IX_FinanceSettings_DiscountAllowedAccountId]
-                            ON [dbo].[FinanceSettings] ([DiscountAllowedAccountId]);
+            migrationBuilder.CreateIndex(
+                name: "IX_FinanceSettings_DiscountAllowedAccountId",
+                table: "FinanceSettings",
+                column: "DiscountAllowedAccountId");
 
-                    IF NOT EXISTS (
-                        SELECT 1 FROM sys.indexes
-                        WHERE [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                          AND [name] = N'IX_FinanceSettings_DiscountReceivedAccountId')
-                        CREATE INDEX [IX_FinanceSettings_DiscountReceivedAccountId]
-                            ON [dbo].[FinanceSettings] ([DiscountReceivedAccountId]);
+            migrationBuilder.CreateIndex(
+                name: "IX_FinanceSettings_DiscountReceivedAccountId",
+                table: "FinanceSettings",
+                column: "DiscountReceivedAccountId");
 
-                    IF OBJECT_ID(N'[dbo].[Accounts]', N'U') IS NOT NULL
-                       AND NOT EXISTS (
-                           SELECT 1 FROM sys.foreign_keys
-                           WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                             AND [name] = N'FK_FinanceSettings_Accounts_DiscountAllowedAccountId')
-                        ALTER TABLE [dbo].[FinanceSettings]
-                            ADD CONSTRAINT [FK_FinanceSettings_Accounts_DiscountAllowedAccountId]
-                            FOREIGN KEY ([DiscountAllowedAccountId]) REFERENCES [dbo].[Accounts] ([Id]);
+            migrationBuilder.AddForeignKey(
+                name: "FK_FinanceSettings_Accounts_DiscountAllowedAccountId",
+                table: "FinanceSettings",
+                column: "DiscountAllowedAccountId",
+                principalTable: "Accounts",
+                principalColumn: "Id");
 
-                    IF OBJECT_ID(N'[dbo].[Accounts]', N'U') IS NOT NULL
-                       AND NOT EXISTS (
-                           SELECT 1 FROM sys.foreign_keys
-                           WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                             AND [name] = N'FK_FinanceSettings_Accounts_DiscountReceivedAccountId')
-                        ALTER TABLE [dbo].[FinanceSettings]
-                            ADD CONSTRAINT [FK_FinanceSettings_Accounts_DiscountReceivedAccountId]
-                            FOREIGN KEY ([DiscountReceivedAccountId]) REFERENCES [dbo].[Accounts] ([Id]);
-                END;
-                """);
+            migrationBuilder.AddForeignKey(
+                name: "FK_FinanceSettings_Accounts_DiscountReceivedAccountId",
+                table: "FinanceSettings",
+                column: "DiscountReceivedAccountId",
+                principalTable: "Accounts",
+                principalColumn: "Id");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("""
-                IF OBJECT_ID(N'[dbo].[FinanceSettings]', N'U') IS NOT NULL
-                BEGIN
-                    IF EXISTS (
-                        SELECT 1 FROM sys.foreign_keys
-                        WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                          AND [name] = N'FK_FinanceSettings_Accounts_DiscountAllowedAccountId')
-                        ALTER TABLE [dbo].[FinanceSettings]
-                            DROP CONSTRAINT [FK_FinanceSettings_Accounts_DiscountAllowedAccountId];
+            migrationBuilder.DropForeignKey(
+                name: "FK_FinanceSettings_Accounts_DiscountAllowedAccountId",
+                table: "FinanceSettings");
 
-                    IF EXISTS (
-                        SELECT 1 FROM sys.foreign_keys
-                        WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                          AND [name] = N'FK_FinanceSettings_Accounts_DiscountReceivedAccountId')
-                        ALTER TABLE [dbo].[FinanceSettings]
-                            DROP CONSTRAINT [FK_FinanceSettings_Accounts_DiscountReceivedAccountId];
+            migrationBuilder.DropForeignKey(
+                name: "FK_FinanceSettings_Accounts_DiscountReceivedAccountId",
+                table: "FinanceSettings");
 
-                    IF EXISTS (
-                        SELECT 1 FROM sys.indexes
-                        WHERE [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                          AND [name] = N'IX_FinanceSettings_DiscountAllowedAccountId')
-                        DROP INDEX [IX_FinanceSettings_DiscountAllowedAccountId]
-                            ON [dbo].[FinanceSettings];
+            migrationBuilder.DropIndex(
+                name: "IX_FinanceSettings_DiscountAllowedAccountId",
+                table: "FinanceSettings");
 
-                    IF EXISTS (
-                        SELECT 1 FROM sys.indexes
-                        WHERE [object_id] = OBJECT_ID(N'[dbo].[FinanceSettings]')
-                          AND [name] = N'IX_FinanceSettings_DiscountReceivedAccountId')
-                        DROP INDEX [IX_FinanceSettings_DiscountReceivedAccountId]
-                            ON [dbo].[FinanceSettings];
+            migrationBuilder.DropIndex(
+                name: "IX_FinanceSettings_DiscountReceivedAccountId",
+                table: "FinanceSettings");
 
-                    IF COL_LENGTH(N'dbo.FinanceSettings', N'DiscountAllowedAccountId') IS NOT NULL
-                        ALTER TABLE [dbo].[FinanceSettings] DROP COLUMN [DiscountAllowedAccountId];
+            migrationBuilder.DropColumn(
+                name: "DiscountAllowedAccountId",
+                table: "FinanceSettings");
 
-                    IF COL_LENGTH(N'dbo.FinanceSettings', N'DiscountReceivedAccountId') IS NOT NULL
-                        ALTER TABLE [dbo].[FinanceSettings] DROP COLUMN [DiscountReceivedAccountId];
-                END;
-                """);
+            migrationBuilder.DropColumn(
+                name: "DiscountReceivedAccountId",
+                table: "FinanceSettings");
         }
     }
 }

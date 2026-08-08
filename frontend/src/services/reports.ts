@@ -66,6 +66,8 @@ export interface ExecuteReportDto {
   endDate?: string;
   maxRows?: number;
   includeMetadata?: boolean;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface ReportResult {
@@ -78,6 +80,11 @@ export interface ReportResult {
   data: Record<string, any>[];
   metadata?: ReportMetadata;
   chartData?: ReportChartData[];
+  currentPage: number;
+  pageSize: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
 
 export interface ReportMetadata {
@@ -138,10 +145,18 @@ export interface ReportSchedule {
 }
 
 export interface CreateReportTemplateDto {
+  reportId: string;
+  templateKey: string;
   name: string;
   description: string;
   category: string;
   type: string;
+  audience: 'PPA/GHANEPS' | 'Finance' | 'Audit' | 'Board';
+  cadence: 'Monthly' | 'Quarterly' | 'AdHoc';
+  defaultOutputFormat: 'Online' | 'XLSX' | 'PDF';
+  outputFormats: Array<'Online' | 'XLSX' | 'PDF'>;
+  savedFilters?: Record<string, unknown>;
+  generationMetadata?: Record<string, unknown>;
   chartType?: string;
   isCustom?: boolean;
   tags?: string[];
@@ -151,10 +166,21 @@ export interface CreateReportTemplateDto {
 
 export interface ReportTemplate {
   id: string;
+  reportId?: string;
+  reportName?: string;
+  templateKey: string;
+  version: number;
   name: string;
   description: string;
   category: string;
   type: string;
+  audience: 'PPA/GHANEPS' | 'Finance' | 'Audit' | 'Board';
+  cadence: 'Monthly' | 'Quarterly' | 'AdHoc';
+  status: 'Draft' | 'Published' | 'Archived';
+  defaultOutputFormat: 'Online' | 'XLSX' | 'PDF';
+  outputFormats: Array<'Online' | 'XLSX' | 'PDF'>;
+  savedFilters?: Record<string, unknown>;
+  generationMetadata?: Record<string, unknown>;
   chartType?: string;
   isCustom: boolean;
   isFavorite?: boolean;
@@ -165,6 +191,23 @@ export interface ReportTemplate {
   tags?: string[];
   previewImage?: string;
   configuration?: Record<string, any>;
+  lastGeneratedAt?: string;
+  lastGeneratedBy?: string;
+  lastGenerationFormat?: string;
+  rowVersion: string;
+}
+
+export interface UpdateReportTemplateDto extends CreateReportTemplateDto {
+  rowVersion: string;
+}
+
+export interface GenerateReportTemplateDto {
+  format: 'Online' | 'XLSX' | 'PDF';
+  filterOverrides?: Record<string, unknown>;
+  page?: number;
+  pageSize?: number;
+  includeCharts?: boolean;
+  includeHeaders?: boolean;
 }
 
 export interface ReportAnalytics {
@@ -255,6 +298,50 @@ export interface ReportAccessDto {
   canEdit: boolean;
   canSchedule: boolean;
   accessibleRoles: string[];
+}
+
+function decodeContentDispositionValue(value: string): string {
+  const trimmed = value.trim().replace(/^['"]|['"]$/g, '');
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+export function normalizeReportExportFileName(
+  contentDisposition: string | null,
+  format: ExportReportDto['format'],
+): string {
+  const normalizedFormat = format.toLowerCase();
+  const fallback = `report-${new Date().toISOString().split('T')[0]}.${normalizedFormat}`;
+  let candidate = '';
+
+  if (contentDisposition) {
+    const encodedMatch = contentDisposition.match(/filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i);
+    const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"]+)"/i);
+    const unquotedMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+    candidate = decodeContentDispositionValue(
+      encodedMatch?.[1] ?? quotedMatch?.[1] ?? unquotedMatch?.[1] ?? '',
+    );
+  }
+
+  candidate = candidate
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim() ?? '';
+
+  if (!candidate) return fallback;
+
+  const extension = `.${normalizedFormat}`;
+  const extensionIndex = candidate.toLowerCase().lastIndexOf(extension);
+  if (extensionIndex >= 0) {
+    return candidate.slice(0, extensionIndex + extension.length);
+  }
+
+  const baseName = candidate.replace(/[._\s-]+$/g, '') || 'report-export';
+  return `${baseName}${extension}`;
 }
 
 class ReportsService {
@@ -351,7 +438,9 @@ class ReportsService {
       const url = `${baseUrl}/reports/${reportId}/export`;
       
       // Get auth token for headers
-      const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+      const token = typeof window !== 'undefined'
+        ? localStorage.getItem('token') || localStorage.getItem('authToken')
+        : null;
       
       const response = await fetch(url, {
         method: 'POST',
@@ -366,20 +455,8 @@ class ReportsService {
         throw new Error(`Export failed with status ${response.status}`);
       }
 
-      // Get filename from Content-Disposition header or create a default one
       const contentDisposition = response.headers.get('Content-Disposition');
-      let fileName = 'report-export';
-      
-      if (contentDisposition) {
-        const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=(['"]*)([^'"\n]*(['"]*))/i);
-        if (fileNameMatch && fileNameMatch[2]) {
-          fileName = fileNameMatch[2];
-        }
-      } else {
-        // Create filename based on format
-        const timestamp = new Date().toISOString().split('T')[0];
-        fileName = `report-${timestamp}.${exportReportDto.format}`;
-      }
+      const fileName = normalizeReportExportFileName(contentDisposition, exportReportDto.format);
 
       const blob = await response.blob();
       return { fileName, blob };
@@ -412,10 +489,16 @@ class ReportsService {
   }
 
   // Templates
-  async getReportTemplates(category?: string): Promise<ReportTemplate[]> {
+  async getReportTemplates(filters?: {
+    audience?: string;
+    cadence?: string;
+    status?: string;
+  }): Promise<ReportTemplate[]> {
     try {
       const params = new URLSearchParams();
-      if (category) params.append('category', category);
+      if (filters?.audience) params.append('audience', filters.audience);
+      if (filters?.cadence) params.append('cadence', filters.cadence);
+      if (filters?.status) params.append('status', filters.status);
 
       return await apiService.request<ReportTemplate[]>(`/reports/templates?${params.toString()}`);
     } catch (error) {
@@ -434,6 +517,78 @@ class ReportsService {
       console.error('Error creating report template:', error);
       throw error;
     }
+  }
+
+  async updateReportTemplate(templateId: string, request: UpdateReportTemplateDto): Promise<ReportTemplate> {
+    return apiService.request<ReportTemplate>(`/reports/templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async publishReportTemplate(template: ReportTemplate): Promise<ReportTemplate> {
+    return this.mutateReportTemplate(template, 'publish');
+  }
+
+  async archiveReportTemplate(template: ReportTemplate): Promise<ReportTemplate> {
+    return this.mutateReportTemplate(template, 'archive');
+  }
+
+  async cloneReportTemplate(template: ReportTemplate): Promise<ReportTemplate> {
+    return apiService.request<ReportTemplate>(`/reports/templates/${template.id}/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ rowVersion: template.rowVersion }),
+    });
+  }
+
+  async deleteReportTemplate(template: ReportTemplate): Promise<void> {
+    await apiService.request<void>(`/reports/templates/${template.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ rowVersion: template.rowVersion }),
+    });
+  }
+
+  async executeReportTemplate(templateId: string, request: GenerateReportTemplateDto): Promise<ReportResult> {
+    return apiService.request<ReportResult>(`/reports/templates/${templateId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async exportReportTemplate(
+    templateId: string,
+    request: GenerateReportTemplateDto
+  ): Promise<{ fileName: string; blob: Blob }> {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+    const token = typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
+    const response = await fetch(`${baseUrl}/reports/templates/${templateId}/export`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error(`Template export failed with status ${response.status}`);
+    return {
+      fileName: normalizeReportExportFileName(
+        response.headers.get('Content-Disposition'),
+        request.format.toLowerCase()
+      ),
+      blob: await response.blob(),
+    };
+  }
+
+  private async mutateReportTemplate(
+    template: ReportTemplate,
+    action: 'publish' | 'archive'
+  ): Promise<ReportTemplate> {
+    return apiService.request<ReportTemplate>(`/reports/templates/${template.id}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ rowVersion: template.rowVersion }),
+    });
   }
 
   // Analytics

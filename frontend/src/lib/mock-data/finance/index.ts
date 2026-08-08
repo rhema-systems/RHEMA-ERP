@@ -118,6 +118,7 @@ export const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         targetCurrencyCode: 'USD',
         rate: 0.08,
         rateType: 'Daily',
+        quoteSide: 'Mid',
         effectiveDate: '2024-12-15T00:00:00Z',
         rateSource: 'Bank of Ghana',
         isActive: true,
@@ -131,6 +132,7 @@ export const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         targetCurrencyCode: 'EUR',
         rate: 0.076,
         rateType: 'Daily',
+        quoteSide: 'Mid',
         effectiveDate: '2024-12-15T00:00:00Z',
         rateSource: 'Bank of Ghana',
         isActive: true,
@@ -144,6 +146,7 @@ export const MOCK_EXCHANGE_RATES: ExchangeRate[] = [
         targetCurrencyCode: 'GBP',
         rate: 0.063,
         rateType: 'Daily',
+        quoteSide: 'Mid',
         effectiveDate: '2024-12-15T00:00:00Z',
         rateSource: 'Bank of Ghana',
         isActive: true,
@@ -305,6 +308,8 @@ export const MOCK_JOURNAL_ENTRIES: JournalEntry[] = [
 
 // ===== FINANCE SETTINGS =====
 export const MOCK_FINANCE_SETTINGS: FinanceSettings = {
+    apInvoicePriceTolerancePercent: 1,
+    apInvoiceQuantityTolerancePercent: 1,
     id: 'settings-1',
     tenantId: 'tenant-1',
     coaType: 'Standard',

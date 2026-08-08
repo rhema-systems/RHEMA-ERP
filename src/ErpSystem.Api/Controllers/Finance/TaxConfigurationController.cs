@@ -280,16 +280,16 @@ namespace ErpSystem.Api.Controllers.Finance
         /// - After deletion, the tax ID will no longer resolve via `GET /taxes/{id}`
         ///
         /// **Business Rules:**
-        /// - Cannot delete a tax that is currently referenced by tax group components
-        /// - Cannot delete a tax that has been used in posted transactions
-        /// - Consider deactivating (`IsActive = false`) instead of deleting for audit trail preservation
+        /// - Retires the tax by setting `IsActive = false`; the record is never physically deleted
+        /// - Retired taxes remain visible in tax details and retain their complete version history
+        /// - Retired taxes are immutable and cannot be reactivated or edited
         ///
         /// **Authorization:** Requires SuperAdmin, TenantAdmin, or Financial Controller role
         /// </remarks>
-        /// <param name="id">The unique identifier (GUID) of the tax to delete.</param>
-        /// <returns>A success message confirming deletion.</returns>
-        /// <response code="200">Tax deleted successfully.</response>
-        /// <response code="400">Tax cannot be deleted (e.g., in use by tax groups or transactions).</response>
+        /// <param name="id">The unique identifier (GUID) of the tax to retire.</param>
+        /// <returns>A success message confirming retirement.</returns>
+        /// <response code="200">Tax retired and locked successfully.</response>
+        /// <response code="400">Tax cannot be retired (for example, it is already inactive).</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
         /// <response code="403">Forbidden - user does not have a tax setup role.</response>
         /// <response code="500">Internal server error.</response>
@@ -300,7 +300,7 @@ namespace ErpSystem.Api.Controllers.Finance
             try
             {
                 await _taxConfigService.DeleteTaxAsync(id);
-                return Ok(new { message = "Tax deleted successfully" });
+                return Ok(new { message = "Tax retired and locked successfully" });
             }
             catch (InvalidOperationException ex)
             {
@@ -339,6 +339,24 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             var history = await _taxConfigService.GetTaxRateHistoryAsync(id);
             return Ok(history);
+        }
+
+        /// <summary>
+        /// Retrieves the immutable complete-configuration timeline for a tax,
+        /// including the current version.
+        /// </summary>
+        [HttpGet("taxes/{id}/versions")]
+        public async Task<ActionResult<IReadOnlyList<TaxConfigurationVersionDto>>> GetTaxConfigurationVersions(Guid id)
+        {
+            try
+            {
+                var versions = await _taxConfigService.GetTaxConfigurationVersionsAsync(id);
+                return Ok(versions);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
         }
 
         #endregion

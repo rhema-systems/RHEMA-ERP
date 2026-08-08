@@ -142,4 +142,44 @@ describe('supplier applicant evidence uploads', () => {
     expect(form.get('issueDate')).toBe('2026-07-01');
     expect(form.get('expiryDate')).toBe('2027-07-01');
   });
+
+  it('presents payment first and locks every downstream tab until verification', async () => {
+    mocks.portal.mockReset();
+    mocks.portal.mockResolvedValue({
+      ...portal,
+      tokenStatus: 'AwaitingPayment',
+      paymentStatus: 'Pending',
+      feeMode: 'Paid',
+      totalAmount: 100,
+      canEdit: false,
+      canSubmit: false,
+      paymentOnly: true,
+    });
+    mocks.paymentMethods.mockReset();
+    mocks.paymentMethods.mockResolvedValue([
+      {
+        id: 'method-1',
+        code: 'MOMO',
+        name: 'Mobile Money',
+        requiresReference: true,
+        isPostingReady: true,
+      },
+    ]);
+
+    render(<SupplierApplicantPortalPage />);
+
+    await screen.findByText(/status tracking are unlocked/i);
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Payment',
+      'Application',
+      'Documents',
+      'Status',
+    ]);
+    expect(screen.getByRole('tab', { name: 'Payment' }))
+      .toHaveAttribute('data-state', 'active');
+    expect(screen.getByRole('tab', { name: 'Application' })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: 'Documents' })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: 'Status' })).toBeDisabled();
+  });
 });

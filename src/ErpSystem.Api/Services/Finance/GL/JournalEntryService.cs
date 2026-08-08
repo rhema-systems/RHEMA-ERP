@@ -62,6 +62,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
+                .Include(j => j.JournalBatchItem)
+                .ThenInclude(i => i!.JournalBatch)
                 .Where(j => j.TenantId == tenantId && !j.IsDeleted)
                 .OrderByDescending(j => j.EntryDate)
                 .ToListAsync(cancellationToken);
@@ -76,6 +78,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
+                .Include(j => j.JournalBatchItem)
+                .ThenInclude(i => i!.JournalBatch)
                 .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
 
             return entry == null ? null : MapToDto(entry);
@@ -88,6 +92,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
+                .Include(j => j.JournalBatchItem)
+                .ThenInclude(i => i!.JournalBatch)
                 .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.JournalEntryNumber == journalNumber, cancellationToken);
 
             return entry == null ? null : MapToDto(entry);
@@ -100,6 +106,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
+                .Include(j => j.JournalBatchItem)
+                .ThenInclude(i => i!.JournalBatch)
                 .Where(j => j.TenantId == tenantId && !j.IsDeleted && j.EntryDate >= startDate && j.EntryDate <= endDate)
                 .OrderByDescending(j => j.EntryDate)
                 .ToListAsync(cancellationToken);
@@ -376,7 +384,36 @@ namespace ErpSystem.Api.Services.Finance.GL
                 cancellationToken);
         }
 
-        public async Task<JournalEntryDto> PostJournalEntryAsync(Guid id, CancellationToken cancellationToken = default)
+        public Task<JournalEntryDto> PostJournalEntryAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+            => PostJournalEntryCoreAsync(id, notifyOwner: true, cancellationToken);
+
+        public Task<JournalEntryDto> PostJournalEntryForBatchAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+            => PostJournalEntryCoreAsync(id, notifyOwner: false, cancellationToken);
+
+        public async Task NotifyJournalPostedAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+        {
+            var postedEntry = await LoadJournalEntryAsync(id, cancellationToken)
+                ?? throw new ArgumentException($"Journal Entry {id} not found.");
+            if (!string.Equals(postedEntry.PostingStatus, "Posted", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Only a committed posted journal entry can be notified.");
+
+            await NotifyJournalOwnerAsync(
+                postedEntry,
+                "Journal entry posted",
+                $"{postedEntry.JournalEntryNumber} has been posted to the General Ledger.",
+                "FinanceJournalPosted");
+        }
+
+        private async Task<JournalEntryDto> PostJournalEntryCoreAsync(
+            Guid id,
+            bool notifyOwner,
+            CancellationToken cancellationToken)
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Finance posting engine is not configured.");
@@ -453,11 +490,14 @@ namespace ErpSystem.Api.Services.Finance.GL
                 BuildJournalAuditSnapshot(postedEntry),
                 new { postingResult.PostingEventId, postingResult.JournalEntryId, postingResult.PostingAction },
                 postingEventId: postingResult.PostingEventId);
-            await NotifyJournalOwnerAsync(
-                postedEntry,
-                "Journal entry posted",
-                $"{postedEntry.JournalEntryNumber} has been posted to the General Ledger.",
-                "FinanceJournalPosted");
+            if (notifyOwner)
+            {
+                await NotifyJournalOwnerAsync(
+                    postedEntry,
+                    "Journal entry posted",
+                    $"{postedEntry.JournalEntryNumber} has been posted to the General Ledger.",
+                    "FinanceJournalPosted");
+            }
             return MapToDto(postedEntry);
         }
 
@@ -1340,6 +1380,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 .Include(j => j.Transactions)
                 .ThenInclude(t => t.Account)
                 .Include(j => j.Attachments)
+                .Include(j => j.JournalBatchItem)
+                .ThenInclude(i => i!.JournalBatch)
                 .FirstOrDefaultAsync(j => j.TenantId == tenantId && j.Id == id && !j.IsDeleted, cancellationToken);
         }
 
@@ -1363,6 +1405,9 @@ namespace ErpSystem.Api.Services.Finance.GL
                 ReversalDate = entry.ReversalDate,
                 ReversalReason = entry.ReversalReason,
                 ReversalType = entry.ReversalType,
+                JournalBatchId = entry.JournalBatchItem?.JournalBatchId,
+                JournalBatchNumber = entry.JournalBatchItem?.JournalBatch?.BatchNumber,
+                JournalBatchItemId = entry.JournalBatchItem?.Id,
                 PostedDate = entry.PostingDate,
                 PostedByUserId = entry.PostedByUserId,
                 RequiresApproval = entry.RequiresApproval,

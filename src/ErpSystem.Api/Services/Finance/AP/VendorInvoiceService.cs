@@ -1,21 +1,27 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 
 namespace ErpSystem.Api.Services.Finance.AP
 {
@@ -34,6 +40,8 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly ITaxCalculationEngine? _taxEngine;
         private readonly IFixedAssetService? _fixedAssetService;
+        private readonly IProcurementConfigurationService? _procurementConfiguration;
+        private readonly IProcurementControlEventService? _procurementControlEvents;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
@@ -45,7 +53,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
             ITaxCalculationEngine? taxEngine = null,
-            IFixedAssetService? fixedAssetService = null)
+            IFixedAssetService? fixedAssetService = null,
+            IProcurementConfigurationService? procurementConfiguration = null,
+            IProcurementControlEventService? procurementControlEvents = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -57,6 +67,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             _financeAuditService = financeAuditService;
             _taxEngine = taxEngine;
             _fixedAssetService = fixedAssetService;
+            _procurementConfiguration = procurementConfiguration;
+            _procurementControlEvents = procurementControlEvents;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -209,6 +221,12 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var invoiceNumber = await GenerateInvoiceNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
+            var invoiceWht = await ResolveInvoiceWhtAsync(
+                dto.WithholdingTaxId,
+                dto.WithholdingTaxRate,
+                dto.InvoiceDate,
+                dto.IsOpeningBalance,
+                cancellationToken);
 
             var invoice = new VendorInvoice
             {
@@ -228,12 +246,16 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentTermId = paymentTerm?.Id,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
                 EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
-                WithholdingTaxRate = dto.WithholdingTaxRate,
-                WithholdingTaxId = dto.WithholdingTaxId,
-                WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+                // Invoice WHT is an expected payment-time classification. The selected tenant tax
+                // owns the rate and account; request values cannot silently override statutory setup.
+                WithholdingTaxRate = invoiceWht.Rate,
+                WithholdingTaxId = invoiceWht.TaxId,
+                WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId,
                 WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
                 WithholdingCertificateDate = dto.WithholdingCertificateDate,
-                MatchingType = dto.MatchingType,
+                MatchingType = ProcurementInvoiceThreeWayMatchRules.IsRequired(dto.PurchaseOrderId, dto.IsOpeningBalance)
+                    ? InvoiceMatchingType.ThreeWay
+                    : dto.MatchingType,
                 MatchingStatus = InvoiceMatchingStatus.Unmatched,
                 Status = VendorInvoiceStatus.Draft,
                 ApprovalStatus = "Draft",
@@ -295,11 +317,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.PaidAmount = 0;
             invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
 
-            // WHT calculation
-            if (invoice.WithholdingTaxRate > 0)
-            {
-                invoice.WithholdingTaxAmount = invoice.SubTotal * (invoice.WithholdingTaxRate / 100);
-            }
+            // This is an invoice estimate only. The actual liability and annual threshold are
+            // recalculated from allocations when the supplier payment is created.
+            invoice.WithholdingTaxAmount = decimal.Round(
+                invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
+                2,
+                MidpointRounding.AwayFromZero);
 
             // Early payment discount amount
             if (invoice.EarlyPaymentDiscountPercentage > 0)
@@ -339,6 +362,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
                 ? dto.InvoiceDate.AddDays(paymentTerm.DiscountDays)
                 : dto.EarlyPaymentDiscountDueDate;
+            var invoiceWht = await ResolveInvoiceWhtAsync(
+                dto.WithholdingTaxId,
+                dto.WithholdingTaxRate,
+                dto.InvoiceDate,
+                dto.IsOpeningBalance,
+                cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.SupplierInvoiceNumber = dto.SupplierInvoiceNumber;
@@ -352,17 +381,20 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.PaymentTermId = paymentTerm?.Id;
             invoice.EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage;
             invoice.EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate;
-            invoice.WithholdingTaxRate = dto.WithholdingTaxRate;
-            invoice.WithholdingTaxId = dto.WithholdingTaxId;
-            invoice.WithholdingTaxAccountId = dto.WithholdingTaxAccountId;
+            invoice.WithholdingTaxRate = invoiceWht.Rate;
+            invoice.WithholdingTaxId = invoiceWht.TaxId;
+            invoice.WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId;
             invoice.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
             invoice.WithholdingCertificateDate = dto.WithholdingCertificateDate;
-            invoice.MatchingType = dto.MatchingType;
+            invoice.MatchingType = ProcurementInvoiceThreeWayMatchRules.IsRequired(dto.PurchaseOrderId, dto.IsOpeningBalance)
+                ? InvoiceMatchingType.ThreeWay
+                : dto.MatchingType;
             invoice.ExpenseAccountId = dto.ExpenseAccountId;
             invoice.ApAccountId = dto.ApAccountId;
             invoice.Notes = dto.Notes;
             invoice.Reference = dto.Reference;
             invoice.IsOpeningBalance = dto.IsOpeningBalance;
+            InvalidateMatching(invoice, "Invoice content changed after its previous matching evaluation.");
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
@@ -427,8 +459,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.TotalAmount = subtotal + totalTax;
             invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
 
-            if (invoice.WithholdingTaxRate > 0)
-                invoice.WithholdingTaxAmount = invoice.SubTotal * (invoice.WithholdingTaxRate / 100);
+            // Assign zero explicitly when WHT is removed so a draft edit cannot retain a stale
+            // deduction from the invoice's previous configured category.
+            invoice.WithholdingTaxAmount = decimal.Round(
+                invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
+                2,
+                MidpointRounding.AwayFromZero);
 
             if (invoice.EarlyPaymentDiscountPercentage > 0)
                 invoice.EarlyPaymentDiscountAmount = invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100);
@@ -465,19 +501,79 @@ namespace ErpSystem.Api.Services.Finance.AP
         //  APPROVAL WORKFLOW
         // ═════════════════════════════════════════════════════════════════
 
-        public async Task<VendorInvoiceDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
+        public async Task<VendorInvoiceDto> SubmitForApprovalAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+        {
+            var scope = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
+                .AsNoTracking()
+                .Select(i => new { i.PurchaseOrderId, i.IsOpeningBalance })
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
+
+            if (!ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                    scope.PurchaseOrderId,
+                    scope.IsOpeningBalance))
+            {
+                return await SubmitForApprovalCoreAsync(id, cancellationToken);
+            }
+
+            var lockResource =
+                $"tdc-ap-match:{TenantId:N}:{scope.PurchaseOrderId!.Value:N}";
+            if (_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    lockResource,
+                    cancellationToken);
+                return await SubmitForApprovalCoreAsync(id, cancellationToken);
+            }
+
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    cancellationToken);
+                try
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync(
+                        lockResource,
+                        cancellationToken);
+                    var result = await SubmitForApprovalCoreAsync(
+                        id,
+                        cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch (VendorInvoiceMatchControlException)
+                {
+                    // A denied evaluation is itself compliance evidence. The invoice
+                    // remains Draft, so commit that immutable decision before returning
+                    // the structured hard stop to the caller.
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    throw;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            }, cancellationToken);
+        }
+
+        private async Task<VendorInvoiceDto> SubmitForApprovalCoreAsync(
+            Guid id,
+            CancellationToken cancellationToken)
         {
             var invoice = await GetEntityOrThrowAsync(id, cancellationToken);
 
             if (invoice.Status != VendorInvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be submitted for approval.");
 
-            // Validate matching if configured
-            if (invoice.MatchingType != InvoiceMatchingType.None && invoice.MatchingStatus == InvoiceMatchingStatus.Unmatched)
-            {
-                _logger.LogWarning("Invoice {InvoiceNumber} submitted without matching — matching type is {MatchingType}",
-                    invoice.InvoiceNumber, invoice.MatchingType);
-            }
+            if (ProcurementInvoiceThreeWayMatchRules.IsRequired(invoice.PurchaseOrderId, invoice.IsOpeningBalance))
+                await EvaluateThreeWayMatchAsync(invoice.Id, "SubmitForApproval", requireApprovalReady: true, cancellationToken);
 
             var now = DateTime.UtcNow;
             invoice.Status = VendorInvoiceStatus.PendingApproval;
@@ -535,6 +631,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be approved.");
 
+            if (ProcurementInvoiceThreeWayMatchRules.IsRequired(invoice.PurchaseOrderId, invoice.IsOpeningBalance))
+                await EvaluateThreeWayMatchAsync(invoice.Id, "Approve", requireApprovalReady: true, cancellationToken);
+
+            invoice = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
+                .Include(i => i.LineItems)
+                .SingleAsync(cancellationToken);
+
             var approverId = CurrentUserId;
             if (approverId == Guid.Empty)
                 throw new InvalidOperationException("Unable to resolve the current approver.");
@@ -564,27 +668,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
-            // Opening-balance AP invoices preserve subledger balances but do not create
-            // inventory receipts; their GL impact is control account vs migration clearing.
-            foreach (var line in invoice.LineItems.Where(l => !invoice.IsOpeningBalance && l.LineItemType == "Inventory"))
-            {
-                if (line.InventoryItemId.HasValue && line.WarehouseId.HasValue)
-                {
-                    await _inventoryValuationService.ProcessReceiptAsync(
-                        line.InventoryItemId.Value,
-                        line.WarehouseId.Value,
-                        line.LocationId,
-                        line.Quantity,
-                        line.UnitPrice,
-                        ErpSystem.Core.Enums.ReferenceType.VendorInvoice,
-                        invoice.InvoiceNumber,
-                        invoice.Id,
-                        line.LotNumber,
-                        line.SerialNumber,
-                        line.ExpirationDate
-                    );
-                }
-            }
+            // Inventory is posted only by the governed purchase-receipt/inspection
+            // lifecycle. Invoice approval recognizes the AP obligation and must not
+            // create a second stock receipt (or a phantom non-PO receipt).
 
             await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -839,33 +925,182 @@ namespace ErpSystem.Api.Services.Finance.AP
             return MapToDto(invoice);
         }
 
-        public async Task<VendorInvoiceDto> VoidAsync(Guid id, string reason, CancellationToken cancellationToken = default)
+        public Task<VendorInvoiceDto> VoidAsync(
+            Guid id,
+            string reason,
+            CancellationToken cancellationToken = default) =>
+            VoidAsync(id, reason, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorInvoiceDto> VoidAsync(
+            Guid id,
+            string reason,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
-            var invoice = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
-                .Include(i => i.PaymentAllocations)
-                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("A void and reversal reason is required.", nameof(reason));
+            if (_financePostingEngine == null)
+                throw new InvalidOperationException("Central finance posting engine is not configured for AP invoice reversal.");
 
-            if (invoice == null)
-                throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => VoidAsync(id, reason, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
 
-            if (invoice.Status == VendorInvoiceStatus.Voided)
-                throw new InvalidOperationException("Invoice is already voided.");
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
-            if (invoice.PaymentAllocations.Any(a => !a.IsReversal))
-                throw new InvalidOperationException("Cannot void an invoice with active payment allocations. Reverse payments first.");
+            VendorInvoice? invoice = null;
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"tdc0508-invoice:{TenantId:N}:{id:N}", cancellationToken);
 
-            var now = DateTime.UtcNow;
-            invoice.Status = VendorInvoiceStatus.Voided;
-            invoice.Notes = $"{invoice.Notes}\n\nVoided on {now:yyyy-MM-dd HH:mm}: {reason}";
-            invoice.UpdatedAt = now;
-            invoice.UpdatedBy = UserName;
+                invoice = await _unitOfWork.Repository<VendorInvoice>()
+                    .GetQueryable(i => i.TenantId == TenantId && i.Id == id && !i.IsDeleted)
+                    .Include(i => i.PaymentAllocations.Where(a => !a.IsDeleted))
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
 
-            await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                var activeSettlement = RoundMoney(invoice.PaymentAllocations.Sum(
+                    allocation => allocation.AllocatedAmount +
+                                  allocation.DiscountAmount +
+                                  allocation.WithholdingTaxAmount));
+                if (Math.Abs(activeSettlement) > 0.01m)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot void an invoice with active payment settlement. Reverse or void the posted payment first.");
+                }
 
-            _logger.LogWarning("Voided vendor invoice {InvoiceNumber}. Reason: {Reason}", invoice.InvoiceNumber, reason);
-            return MapToDto(invoice);
+                FinancePostingResultDto? reversal = null;
+                if (invoice.JournalEntryId.HasValue)
+                {
+                    // AP-created fixed assets share the invoice journal. Validate the asset
+                    // lifecycle before reversing that journal; otherwise a successful AP void
+                    // could leave depreciation/valuation based on cost that no longer exists.
+                    // The post-step below then updates the register using this same reversal event
+                    // rather than creating a second journal that would duplicate AP/tax reversal.
+                    if (_fixedAssetService != null)
+                        await _fixedAssetService.ValidateApInvoiceCapitalizationReversalAsync(invoice.Id, cancellationToken);
+
+                    var originalEvent = await GetPostedInvoiceEventAsync(invoice, cancellationToken);
+                    var originalJournal = await _unitOfWork.Repository<JournalEntry>()
+                        .GetQueryable(j =>
+                            j.TenantId == TenantId &&
+                            j.Id == invoice.JournalEntryId.Value &&
+                            !j.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException(
+                            "The AP invoice posting journal was not found for this tenant.");
+
+                    if (!originalJournal.IsReversed)
+                    {
+                        var plan = await _financePostingEngine.GetReversalPlanAsync(
+                            originalEvent.Id,
+                            reason.Trim(),
+                            DateTime.UtcNow.Date,
+                            cancellationToken);
+                        reversal = await _financePostingEngine.PostAsync(
+                            BuildApReversalRequest(
+                                originalEvent,
+                                plan,
+                                invoice.Id,
+                                invoice.InvoiceNumber,
+                                "VendorInvoice",
+                                "AP Invoice Reversal",
+                                $"Reverse AP invoice {invoice.InvoiceNumber}",
+                                $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Reverse",
+                                reason),
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        reversal = await GetExistingReversalResultAsync(
+                            originalJournal,
+                            invoice.Id,
+                            "VendorInvoice",
+                            cancellationToken);
+                    }
+                }
+
+                if (reversal != null && _fixedAssetService != null)
+                {
+                    await _fixedAssetService.RecordApInvoiceCapitalizationReversalAsync(
+                        invoice.Id,
+                        reversal.JournalEntryId,
+                        reversal.PostingEventId,
+                        reason.Trim(),
+                        cancellationToken);
+                }
+
+                if (invoice.Status != VendorInvoiceStatus.Voided)
+                {
+                    var now = DateTime.UtcNow;
+                    invoice.Status = VendorInvoiceStatus.Voided;
+                    invoice.Notes = AppendLifecycleNote(
+                        invoice.Notes,
+                        $"Voided on {now:yyyy-MM-dd HH:mm}: {reason.Trim()}");
+                    invoice.UpdatedAt = now;
+                    invoice.UpdatedBy = UserName;
+                    invoice.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
+                    await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                    await RecordApInvoiceAuditAsync(
+                        invoice.JournalEntryId.HasValue
+                            ? FinanceAuditEvents.ApInvoiceReversed
+                            : FinanceAuditEvents.ApInvoiceVoided,
+                        invoice,
+                        postingEventId: reversal?.PostingEventId,
+                        journalEntryId: reversal?.JournalEntryId,
+                        beforeValues: new { status = "PostedOrApproved", invoice.JournalEntryId },
+                        afterValues: new
+                        {
+                            invoice.Status,
+                            OriginalJournalEntryId = invoice.JournalEntryId,
+                            ReversalPostingEventId = reversal?.PostingEventId,
+                            ReversalJournalEntryId = reversal?.JournalEntryId,
+                            ActiveSettlementAmount = activeSettlement
+                        },
+                        reason: reason.Trim(),
+                        comment: "AP invoice state and its balanced Finance reversal were committed atomically.",
+                        cancellationToken: cancellationToken);
+                }
+
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                _logger.LogWarning(
+                    "Voided AP invoice {InvoiceNumber}. OriginalJournal={OriginalJournalId}; ReversalJournal={ReversalJournalId}; Reason={Reason}",
+                    invoice.InvoiceNumber,
+                    invoice.JournalEntryId,
+                    reversal?.JournalEntryId,
+                    reason.Trim());
+
+                return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
+            }
+            catch (Exception ex)
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+
+                if (invoice != null)
+                {
+                    await RecordApInvoiceAuditAsync(
+                        FinanceAuditEvents.ApInvoiceReversalFailed,
+                        invoice,
+                        afterValues: new { invoice.JournalEntryId, error = ex.Message },
+                        reason: ex.Message,
+                        comment: "AP invoice void was rejected; no document or ledger mutation was committed.",
+                        cancellationToken: cancellationToken);
+                }
+
+                throw;
+            }
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -893,13 +1128,23 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (po == null)
                 throw new KeyNotFoundException($"Purchase order with Id '{invoice.PurchaseOrderId}' not found.");
 
+            var settings = await GetFinanceSettingsAsync(cancellationToken);
+            var priceTolerance = ProcurementInvoiceThreeWayMatchRules.NormalizeTolerance(
+                settings.ApInvoicePriceTolerancePercent);
+            var quantityTolerance = ProcurementInvoiceThreeWayMatchRules.NormalizeTolerance(
+                settings.ApInvoiceQuantityTolerancePercent);
+
             var result = new InvoiceMatchingResultDto
             {
                 VendorInvoiceId = invoiceId,
                 MatchingType = InvoiceMatchingType.TwoWay,
                 InvoiceTotal = invoice.TotalAmount,
                 PurchaseOrderTotal = po.TotalAmount,
-                TolerancePercentage = 1.0m
+                TolerancePercentage = priceTolerance,
+                PriceTolerancePercentage = priceTolerance,
+                QuantityTolerancePercentage = quantityTolerance,
+                IsRequired = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                    invoice.PurchaseOrderId, invoice.IsOpeningBalance)
             };
 
             // Compare totals
@@ -948,7 +1193,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     var priceVariance = Math.Abs(invoiceLine.UnitPrice - poItem.UnitPrice);
                     var priceVariancePct = priceVariance / poItem.UnitPrice * 100;
-                    if (priceVariancePct > result.TolerancePercentage)
+                    if (priceVariancePct > result.PriceTolerancePercentage)
                     {
                         result.Discrepancies.Add(new MatchingDiscrepancyDto
                         {
@@ -969,7 +1214,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     var qtyVariance = Math.Abs(invoiceLine.Quantity - poItem.OrderedQuantity);
                     var qtyVariancePct = qtyVariance / poItem.OrderedQuantity * 100;
-                    if (qtyVariancePct > result.TolerancePercentage)
+                    if (qtyVariancePct > result.QuantityTolerancePercentage)
                     {
                         result.Discrepancies.Add(new MatchingDiscrepancyDto
                         {
@@ -987,6 +1232,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
 
             // Persist matching result
+            InvalidateMatching(invoice, "Two-way matching cannot satisfy the mandatory PO/receipt/invoice approval gate.");
             invoice.MatchingStatus = result.MatchingStatus;
             invoice.MatchingNotes = result.IsMatched
                 ? "2-way match passed"
@@ -1003,81 +1249,14 @@ namespace ErpSystem.Api.Services.Finance.AP
         }
 
         public async Task<InvoiceMatchingResultDto> PerformThreeWayMatchAsync(Guid invoiceId, CancellationToken cancellationToken = default)
-        {
-            // Start with 2-way match
-            var result = await PerformTwoWayMatchAsync(invoiceId, cancellationToken);
-            result.MatchingType = InvoiceMatchingType.ThreeWay;
+            => await EvaluateThreeWayMatchAsync(
+                invoiceId, "ManualEvaluation", requireApprovalReady: false, cancellationToken);
 
-            var invoice = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(i => i.TenantId == TenantId && i.Id == invoiceId)
-                .Include(i => i.LineItems)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (invoice?.PurchaseOrderId == null) return result;
-
-            // Fetch goods receipts for this PO
-            var receipts = await _unitOfWork.Repository<PurchaseOrderReceipt>()
-                .GetQueryable(r => r.TenantId == TenantId && r.PurchaseOrderId == invoice.PurchaseOrderId.Value)
-                .ToListAsync(cancellationToken);
-
-            if (!receipts.Any())
-            {
-                result.IsMatched = false;
-                result.MatchingStatus = InvoiceMatchingStatus.MatchException;
-                result.Discrepancies.Add(new MatchingDiscrepancyDto
-                {
-                    ItemDescription = "Goods Receipt",
-                    DiscrepancyType = "Missing",
-                    InvoiceValue = invoice.TotalAmount
-                });
-            }
-            else
-            {
-                var totalReceived = receipts.Sum(r => r.Items.Sum(i => i.ReceivedQuantity));
-                var totalInvoiced = invoice.LineItems.Sum(l => l.Quantity);
-
-                if (totalReceived > 0)
-                {
-                    var qtyVariance = Math.Abs(totalInvoiced - totalReceived);
-                    var qtyVariancePct = qtyVariance / totalReceived * 100;
-
-                    if (qtyVariancePct > result.TolerancePercentage)
-                    {
-                        result.IsMatched = false;
-                        result.MatchingStatus = InvoiceMatchingStatus.MatchException;
-                        result.Discrepancies.Add(new MatchingDiscrepancyDto
-                        {
-                            ItemDescription = "Received Quantity",
-                            DiscrepancyType = "Quantity",
-                            InvoiceValue = totalInvoiced,
-                            ExpectedValue = totalReceived,
-                            Variance = qtyVariance,
-                            VariancePercentage = qtyVariancePct
-                        });
-                    }
-                    else if (result.IsMatched)
-                    {
-                        result.MatchingStatus = InvoiceMatchingStatus.ThreeWayMatched;
-                    }
-                }
-
-                result.GoodsReceiptTotal = totalReceived;
-            }
-
-            invoice.MatchingStatus = result.MatchingStatus;
-            invoice.MatchingNotes = result.IsMatched
-                ? "3-way match passed"
-                : $"3-way match failed — {result.Discrepancies.Count} discrepancies found";
-            invoice.UpdatedAt = DateTime.UtcNow;
-
-            await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("3-way matching for invoice {InvoiceNumber}: {Status}",
-                invoice.InvoiceNumber, result.MatchingStatus);
-
-            return result;
-        }
+        public async Task<InvoiceMatchingResultDto> GetThreeWayMatchReadinessAsync(
+            Guid invoiceId,
+            CancellationToken cancellationToken = default) =>
+            await EvaluateThreeWayMatchAsync(
+                invoiceId, "Readiness", requireApprovalReady: false, cancellationToken, persist: false);
 
         public async Task<InvoiceMatchingResultDto> GetMatchingResultAsync(Guid invoiceId, CancellationToken cancellationToken = default)
         {
@@ -1095,8 +1274,545 @@ namespace ErpSystem.Api.Services.Finance.AP
                 MatchingStatus = invoice.MatchingStatus,
                 IsMatched = invoice.MatchingStatus == InvoiceMatchingStatus.TwoWayMatched
                          || invoice.MatchingStatus == InvoiceMatchingStatus.ThreeWayMatched,
-                InvoiceTotal = invoice.TotalAmount
+                InvoiceTotal = invoice.TotalAmount,
+                IsRequired = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                    invoice.PurchaseOrderId, invoice.IsOpeningBalance),
+                ApprovalReady = invoice.MatchingControlEventId.HasValue &&
+                    (invoice.MatchingStatus == InvoiceMatchingStatus.ThreeWayMatched ||
+                     invoice.MatchExceptionControlEventId.HasValue),
+                MatchingControlEventId = invoice.MatchingControlEventId,
+                MatchExceptionControlEventId = invoice.MatchExceptionControlEventId,
+                SnapshotHash = invoice.MatchingSnapshotHash,
+                EvaluatedAtUtc = invoice.MatchingEvaluatedAtUtc,
+                PriceTolerancePercentage = invoice.MatchingPriceTolerancePercent,
+                QuantityTolerancePercentage = invoice.MatchingQuantityTolerancePercent,
+                TolerancePercentage = invoice.MatchingPriceTolerancePercent,
+                Message = invoice.MatchingNotes ?? string.Empty,
+                DecisionKeys = ProcurementInvoiceThreeWayMatchRules.DecisionKeys.ToList()
             };
+        }
+
+        private async Task<InvoiceMatchingResultDto> EvaluateThreeWayMatchAsync(
+            Guid invoiceId,
+            string action,
+            bool requireApprovalReady,
+            CancellationToken cancellationToken,
+            bool persist = true)
+        {
+            var invoice = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == invoiceId && !item.IsDeleted)
+                .Include(item => item.LineItems)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException($"Vendor invoice with Id '{invoiceId}' not found.");
+
+            var result = new InvoiceMatchingResultDto
+            {
+                VendorInvoiceId = invoice.Id,
+                MatchingType = InvoiceMatchingType.ThreeWay,
+                MatchingStatus = InvoiceMatchingStatus.Unmatched,
+                InvoiceTotal = invoice.TotalAmount,
+                IsRequired = ProcurementInvoiceThreeWayMatchRules.IsRequired(
+                    invoice.PurchaseOrderId, invoice.IsOpeningBalance),
+                DecisionKeys = ProcurementInvoiceThreeWayMatchRules.DecisionKeys.ToList()
+            };
+
+            if (!result.IsRequired)
+            {
+                result.ApprovalReady = true;
+                result.IsMatched = true;
+                result.Message = invoice.IsOpeningBalance
+                    ? "Opening-balance invoices use the controlled migration approval path and do not require PO three-way matching."
+                    : "This invoice is not linked to a purchase order; TDC-0504 three-way matching is not applicable.";
+                result.Checks.Add(Check("AP-MATCH-SCOPE", "Three-way matching applicability", true, false, result.Message));
+                return result;
+            }
+
+            var hardStops = new List<(string Code, string Message)>();
+            void AddHardStop(string code, string label, string message)
+            {
+                hardStops.Add((code, message));
+                result.Checks.Add(Check(code, label, false, false, message));
+            }
+            void AddVariance(string code, string label, string description, string kind,
+                decimal actual, decimal expected, decimal variance, decimal variancePercent)
+            {
+                result.Discrepancies.Add(new MatchingDiscrepancyDto
+                {
+                    ItemDescription = description,
+                    DiscrepancyType = kind,
+                    InvoiceValue = actual,
+                    ExpectedValue = expected,
+                    Variance = variance,
+                    VariancePercentage = variancePercent,
+                    ExceptionEligible = true
+                });
+                result.Checks.Add(Check(code, label, false, true,
+                    $"{description}: {kind.ToLowerInvariant()} variance {variancePercent:0.####}% exceeds the configured tolerance."));
+            }
+
+            var tolerancesResolved = false;
+            try
+            {
+                var tolerances = await GetInvoiceMatchTolerancesAsync(cancellationToken);
+                result.PriceTolerancePercentage = ProcurementInvoiceThreeWayMatchRules.NormalizeTolerance(
+                    tolerances.PriceTolerancePercent);
+                result.QuantityTolerancePercentage = ProcurementInvoiceThreeWayMatchRules.NormalizeTolerance(
+                    tolerances.QuantityTolerancePercent);
+                result.TolerancePercentage = result.PriceTolerancePercentage;
+                tolerancesResolved = true;
+                result.Checks.Add(Check("AP-MATCH-TOLERANCE", "Configured matching tolerances", true, false,
+                    $"Price tolerance {result.PriceTolerancePercentage:0.##}% and quantity tolerance {result.QuantityTolerancePercentage:0.##}% are active."));
+            }
+            catch (InvalidOperationException exception)
+            {
+                AddHardStop("AP_MATCH_SETTINGS_MISSING", "Configured matching tolerances", exception.Message);
+            }
+
+            ProcurementConfigurationProfileDto? profile = null;
+            if (_procurementConfiguration == null)
+            {
+                AddHardStop("AP_MATCH_CONFIGURATION_UNAVAILABLE", "Procurement configuration", "The procurement configuration control is not registered.");
+            }
+            else
+            {
+                profile = await _procurementConfiguration.GetEffectiveProfileAsync(
+                    "TDC-PROCUREMENT", DateTime.UtcNow, cancellationToken);
+                if (profile == null)
+                    AddHardStop("AP_MATCH_CONFIGURATION_MISSING", "Procurement configuration", "No effective Published TDC procurement configuration profile exists.");
+                else if (profile.Decisions.Count != 14 || profile.Decisions.Any(item => !item.IsComplete))
+                    AddHardStop("AP_MATCH_CONFIGURATION_INCOMPLETE", "Procurement configuration", "The effective procurement configuration must contain fourteen complete approved decisions.");
+                else
+                {
+                    result.ConfigurationProfileCode = profile.ProfileCode;
+                    result.ConfigurationProfileVersion = profile.Version;
+                    result.Checks.Add(Check("AP-MATCH-CONFIGURATION", "Procurement configuration", true, false,
+                        $"{profile.ProfileCode} v{profile.Version} and DEC-001 through DEC-014 are effective."));
+                }
+            }
+
+            var purchaseOrder = await _unitOfWork.Repository<PurchaseOrder>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id == invoice.PurchaseOrderId && !item.IsDeleted)
+                .Include(item => item.BusinessPartner)
+                .Include(item => item.Items)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (purchaseOrder == null)
+            {
+                AddHardStop("AP_MATCH_PO_NOT_FOUND", "Purchase order", "The linked purchase order was not found in the current tenant.");
+                return await FinalizeThreeWayEvaluationAsync(invoice, null, profile, action, result, hardStops,
+                    Array.Empty<object>(), requireApprovalReady, persist, cancellationToken);
+            }
+
+            result.PurchaseOrderTotal = purchaseOrder.TotalAmount;
+            var supplier = await _unitOfWork.Repository<Supplier>()
+                .FirstOrDefaultAsync(item => item.TenantId == TenantId && item.Id == invoice.SupplierId && !item.IsDeleted);
+            var supplierMatches = supplier != null &&
+                (supplier.Id == purchaseOrder.BusinessPartnerId ||
+                 string.Equals(supplier.SupplierCode, purchaseOrder.BusinessPartner.PartnerCode, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(supplier.Name, purchaseOrder.BusinessPartner.PartnerName, StringComparison.OrdinalIgnoreCase));
+            if (!supplierMatches)
+                AddHardStop("AP_MATCH_SUPPLIER_MISMATCH", "Supplier identity", "The invoice supplier does not match the linked purchase-order supplier.");
+            else
+                result.Checks.Add(Check("AP-MATCH-SUPPLIER", "Supplier identity", true, false, "Invoice and purchase-order supplier lineage match."));
+
+            if (!string.Equals(invoice.CurrencyCode, purchaseOrder.Currency, StringComparison.OrdinalIgnoreCase))
+                AddHardStop("AP_MATCH_CURRENCY_MISMATCH", "Currency", "Invoice and purchase-order currencies do not match.");
+            else
+                result.Checks.Add(Check("AP-MATCH-CURRENCY", "Currency", true, false, $"Currency {invoice.CurrencyCode} matches."));
+
+            var activeLines = invoice.LineItems.Where(item => !item.IsDeleted).ToList();
+            if (activeLines.Count == 0)
+                AddHardStop("AP_MATCH_LINES_MISSING", "Invoice lines", "The invoice has no active lines to match.");
+
+            var receipts = await _unitOfWork.Repository<PurchaseOrderReceipt>()
+                .GetQueryable(item => item.TenantId == TenantId &&
+                                      item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted)
+                .Include(item => item.Items)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            var receiptIds = receipts.Select(item => item.Id).ToList();
+            var inspectionCases = receiptIds.Count == 0
+                ? new List<ProcurementReceiptInspectionCase>()
+                : await _unitOfWork.Repository<ProcurementReceiptInspectionCase>()
+                    .GetQueryable(item => item.TenantId == TenantId &&
+                                          receiptIds.Contains(item.PurchaseOrderReceiptId) && !item.IsDeleted)
+                    .Include(item => item.Lines)
+                        .ThenInclude(item => item.PurchaseOrderReceiptItem)
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+            var latestInspections = inspectionCases
+                .GroupBy(item => item.PurchaseOrderReceiptId)
+                .Select(group => group.OrderByDescending(item => item.Sequence).First())
+                .ToList();
+            var eligibleInspections = latestInspections.Where(item =>
+                ProcurementReceiptInspectionRules.IsApEligible(
+                    item.Status, item.PendingQuantity, item.ApEligibleQuantity)).ToList();
+            var resolvedInspections = latestInspections.Where(item =>
+                ProcurementReceiptInspectionRules.IsApMatchingResolved(
+                    item.Status, item.PendingQuantity, item.ApEligibleQuantity)).ToList();
+
+            if (receipts.Count == 0)
+                AddHardStop("AP_MATCH_RECEIPT_MISSING", "Accepted receipt", "No governed purchase-order receipt exists for this invoice.");
+            else if (latestInspections.Count != receipts.Count || resolvedInspections.Count != receipts.Count)
+                AddHardStop("AP_MATCH_INSPECTION_BLOCKED", "Accepted receipt", "Every linked receipt must have a latest independently approved accepted quantity or a terminal zero-eligible rejection outcome.");
+            else
+                result.Checks.Add(Check("AP-MATCH-INSPECTION", "Accepted receipt", true, false,
+                    $"{eligibleInspections.Count} receipt inspection outcome(s) are AP eligible; " +
+                    $"{resolvedInspections.Count - eligibleInspections.Count} terminal zero-eligible outcome(s) contribute no invoiceable quantity."));
+
+            var acceptedByPoLine = eligibleInspections
+                .SelectMany(item => item.Lines)
+                .GroupBy(item => item.PurchaseOrderReceiptItem.PurchaseOrderItemId)
+                .ToDictionary(group => group.Key, group => group.Sum(item => item.AcceptedQuantity));
+            result.GoodsReceiptTotal = acceptedByPoLine.Values.Sum();
+
+            var committedStatuses = new[]
+            {
+                VendorInvoiceStatus.PendingApproval, VendorInvoiceStatus.Approved,
+                VendorInvoiceStatus.PartiallyPaid, VendorInvoiceStatus.Paid,
+                VendorInvoiceStatus.Overdue, VendorInvoiceStatus.OnHold
+            };
+            var priorInvoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(item => item.TenantId == TenantId && item.Id != invoice.Id &&
+                                      item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted &&
+                                      committedStatuses.Contains(item.Status))
+                .Include(item => item.LineItems)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            var priorByPoLine = priorInvoices.SelectMany(item => item.LineItems.Where(line => !line.IsDeleted))
+                .Where(item => item.PurchaseOrderItemId.HasValue)
+                .GroupBy(item => item.PurchaseOrderItemId!.Value)
+                .ToDictionary(group => group.Key, group => group.Sum(item => item.Quantity));
+
+            foreach (var group in activeLines.GroupBy(item => item.PurchaseOrderItemId))
+            {
+                if (!group.Key.HasValue)
+                {
+                    AddHardStop("AP_MATCH_PO_LINE_MISSING", "PO line mapping", "Every line on a PO-linked invoice must reference an exact purchase-order line.");
+                    continue;
+                }
+
+                var poLine = purchaseOrder.Items.SingleOrDefault(item => item.Id == group.Key.Value && !item.IsDeleted);
+                if (poLine == null)
+                {
+                    AddHardStop("AP_MATCH_PO_LINE_INVALID", "PO line mapping", "An invoice line references a foreign or missing purchase-order line.");
+                    continue;
+                }
+
+                foreach (var invoiceLine in group)
+                {
+                    var priceVariance = Math.Abs(invoiceLine.UnitPrice - poLine.UnitPrice);
+                    var priceVariancePercent = ProcurementInvoiceThreeWayMatchRules.PercentageVariance(
+                        invoiceLine.UnitPrice, poLine.UnitPrice);
+                    if (tolerancesResolved && !ProcurementInvoiceThreeWayMatchRules.IsPriceWithinTolerance(
+                            invoiceLine.UnitPrice, poLine.UnitPrice, result.PriceTolerancePercentage))
+                        AddVariance("AP-MATCH-PRICE", "PO unit price", invoiceLine.Description, "Price",
+                            invoiceLine.UnitPrice, poLine.UnitPrice, priceVariance, priceVariancePercent);
+                }
+
+                var currentQuantity = group.Sum(item => item.Quantity);
+                priorByPoLine.TryGetValue(poLine.Id, out var priorQuantity);
+                acceptedByPoLine.TryGetValue(poLine.Id, out var acceptedQuantity);
+                var cumulativeQuantity = priorQuantity + currentQuantity;
+                if (acceptedQuantity <= 0m)
+                {
+                    AddHardStop("AP_MATCH_ACCEPTED_QUANTITY_MISSING", "Accepted quantity",
+                        $"No independently accepted quantity exists for PO line '{poLine.ItemDescription ?? poLine.Id.ToString()}'.");
+                    continue;
+                }
+
+                if (tolerancesResolved && !ProcurementInvoiceThreeWayMatchRules.IsCumulativeQuantityWithinTolerance(
+                        cumulativeQuantity, acceptedQuantity, result.QuantityTolerancePercentage))
+                {
+                    var variance = cumulativeQuantity - acceptedQuantity;
+                    var variancePercent = ProcurementInvoiceThreeWayMatchRules.PercentageVariance(
+                        cumulativeQuantity, acceptedQuantity);
+                    AddVariance("AP-MATCH-QUANTITY", "Accepted cumulative quantity",
+                        poLine.ItemDescription ?? poLine.Id.ToString(), "Quantity",
+                        cumulativeQuantity, acceptedQuantity, variance, variancePercent);
+                }
+            }
+
+            if (hardStops.Count == 0 && result.Discrepancies.Count == 0)
+            {
+                result.Checks.Add(Check("AP-MATCH-THREE-WAY", "Three-way result", true, false,
+                    "Invoice price and cumulative quantity are within configured PO and accepted-receipt tolerances."));
+            }
+
+            var snapshot = new
+            {
+                schemaVersion = "tdc.ap-three-way-match.v1",
+                invoice = new
+                {
+                    invoice.Id, invoice.PurchaseOrderId, invoice.SupplierId, invoice.CurrencyCode,
+                    invoice.SubTotal, invoice.TaxAmount, invoice.DiscountAmount, invoice.TotalAmount,
+                    Lines = activeLines.OrderBy(item => item.Id).Select(item => new
+                    {
+                        item.Id, item.PurchaseOrderItemId, item.Quantity, item.UnitPrice,
+                        item.DiscountAmount, item.TaxAmount
+                    })
+                },
+                purchaseOrder = new
+                {
+                    purchaseOrder.Id, purchaseOrder.BusinessPartnerId, purchaseOrder.Currency,
+                    purchaseOrder.TotalAmount, purchaseOrder.SourceIntegrityHash,
+                    Lines = purchaseOrder.Items.Where(item => !item.IsDeleted).OrderBy(item => item.Id)
+                        .Select(item => new { item.Id, item.OrderedQuantity, item.UnitPrice })
+                },
+                acceptedByPoLine = acceptedByPoLine.OrderBy(item => item.Key),
+                priorByPoLine = priorByPoLine.OrderBy(item => item.Key),
+                tolerances = new { result.PriceTolerancePercentage, result.QuantityTolerancePercentage },
+                profile = profile == null ? null : new
+                {
+                    profile.Id, profile.ProfileCode, profile.Version,
+                    Decisions = profile.Decisions.OrderBy(item => item.DecisionKey)
+                        .Select(item => new { item.DecisionKey, ValueHash = ProcurementInvoiceThreeWayMatchRules.HashSnapshot(item.Value.GetRawText()) })
+                }
+            };
+
+            return await FinalizeThreeWayEvaluationAsync(invoice, purchaseOrder, profile, action, result,
+                hardStops, new object[] { snapshot }, requireApprovalReady, persist, cancellationToken);
+        }
+
+        private async Task<InvoiceMatchingResultDto> FinalizeThreeWayEvaluationAsync(
+            VendorInvoice invoice,
+            PurchaseOrder? purchaseOrder,
+            ProcurementConfigurationProfileDto? profile,
+            string action,
+            InvoiceMatchingResultDto result,
+            IReadOnlyCollection<(string Code, string Message)> hardStops,
+            IReadOnlyCollection<object> snapshotParts,
+            bool requireApprovalReady,
+            bool persist,
+            CancellationToken cancellationToken)
+        {
+            var snapshotHash = ProcurementInvoiceThreeWayMatchRules.HashSnapshot(new
+            {
+                invoice.Id,
+                invoice.PurchaseOrderId,
+                snapshotParts,
+                HardStops = hardStops,
+                result.Discrepancies
+            });
+            result.SnapshotHash = snapshotHash;
+            result.EvaluatedAtUtc = DateTime.UtcNow;
+            result.IsMatched = hardStops.Count == 0 && result.Discrepancies.Count == 0;
+            result.MatchingStatus = result.IsMatched
+                ? InvoiceMatchingStatus.ThreeWayMatched
+                : InvoiceMatchingStatus.MatchException;
+
+            ProcurementControlEvent? approvedException = null;
+            if (!result.IsMatched && hardStops.Count == 0 && purchaseOrder != null)
+                approvedException = await FindApprovedMatchExceptionAsync(
+                    invoice, purchaseOrder, snapshotHash, cancellationToken);
+            result.ApprovedExceptionApplied = approvedException != null;
+            result.MatchExceptionControlEventId = approvedException?.Id;
+            result.ApprovalReady = result.IsMatched || result.ApprovedExceptionApplied;
+
+            if (_procurementControlEvents == null)
+            {
+                result.ApprovalReady = false;
+                result.Checks.Add(Check("AP_MATCH_AUDIT_UNAVAILABLE", "Immutable decision audit", false, false,
+                    "The procurement control-event service is not registered."));
+            }
+
+            result.Message = result.ApprovalReady
+                ? result.IsMatched
+                    ? "Mandatory three-way matching passed."
+                    : "Three-way variances are covered by a current independently approved exception."
+                : hardStops.FirstOrDefault().Message ??
+                  $"Mandatory three-way matching failed with {result.Discrepancies.Count} tolerance variance(s).";
+
+            if (persist && _procurementControlEvents != null)
+            {
+                var correlation = $"tdc0504-{invoice.Id:N}-{Guid.NewGuid():N}";
+                var controlEvent = await _procurementControlEvents.RecordAsync(
+                    new ProcurementControlEventWriteRequest
+                    {
+                        EventKey = ProcurementControlEventKey.Create(
+                            "ap-three-way-match", TenantId, invoice.Id, action, correlation),
+                        EventType = "InvoiceThreeWayMatching",
+                        Action = ProcurementInvoiceThreeWayMatchRules.EvaluationAction,
+                        Result = result.ApprovalReady
+                            ? ProcurementControlEventResult.Allowed
+                            : ProcurementControlEventResult.Denied,
+                        RuleCode = ProcurementInvoiceThreeWayMatchRules.RuleCode,
+                        RuleVersion = ProcurementInvoiceThreeWayMatchRules.RuleVersion,
+                        DecisionKeys = ProcurementInvoiceThreeWayMatchRules.DecisionKeys.ToList(),
+                        SourceType = "VendorInvoice",
+                        SourceId = invoice.Id,
+                        SourceReference = invoice.InvoiceNumber,
+                        Reason = result.Message,
+                        InputValues = new
+                        {
+                            action,
+                            invoiceId = invoice.Id,
+                            purchaseOrderId = invoice.PurchaseOrderId,
+                            profile = profile == null ? null : new { profile.Id, profile.ProfileCode, profile.Version }
+                        },
+                        ResultValues = new
+                        {
+                            approvalReady = result.ApprovalReady,
+                            matched = result.IsMatched,
+                            approvedExceptionApplied = result.ApprovedExceptionApplied,
+                            snapshotHash,
+                            priceTolerancePercent = result.PriceTolerancePercentage,
+                            quantityTolerancePercent = result.QuantityTolerancePercentage,
+                            hardStops,
+                            result.Discrepancies
+                        },
+                        CorrelationId = correlation,
+                        OccurredAtUtc = result.EvaluatedAtUtc.Value,
+                        Evidence = approvedException == null
+                            ? new List<ProcurementControlEventEvidenceReference>()
+                            : new List<ProcurementControlEventEvidenceReference>
+                            {
+                                new()
+                                {
+                                    ReferenceKind = ProcurementControlEvidenceReferenceKind.ExternalReference,
+                                    Reference = approvedException.Id.ToString(),
+                                    Label = "Approved invoice-match exception control event",
+                                    RequirementKey = ProcurementInvoiceThreeWayMatchRules.ExceptionRuleCode
+                                }
+                            }
+                    }, cancellationToken);
+                result.MatchingControlEventId = controlEvent.Id;
+
+                invoice.MatchingType = InvoiceMatchingType.ThreeWay;
+                invoice.MatchingStatus = result.MatchingStatus;
+                invoice.MatchingNotes = result.Message;
+                invoice.MatchingControlEventId = controlEvent.Id;
+                invoice.MatchExceptionControlEventId = approvedException?.Id;
+                invoice.MatchingSnapshotHash = snapshotHash;
+                invoice.MatchingEvaluatedAtUtc = result.EvaluatedAtUtc;
+                invoice.MatchingPriceTolerancePercent = result.PriceTolerancePercentage;
+                invoice.MatchingQuantityTolerancePercent = result.QuantityTolerancePercentage;
+                invoice.UpdatedAt = DateTime.UtcNow;
+                invoice.UpdatedBy = UserName;
+                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            if (requireApprovalReady && !result.ApprovalReady)
+            {
+                var failure = hardStops.FirstOrDefault();
+                throw new VendorInvoiceMatchControlException(
+                    string.IsNullOrWhiteSpace(failure.Code) ? "AP_THREE_WAY_MATCH_BLOCKED" : failure.Code,
+                    result.Message);
+            }
+            return result;
+        }
+
+        private async Task<ProcurementControlEvent?> FindApprovedMatchExceptionAsync(
+            VendorInvoice invoice,
+            PurchaseOrder purchaseOrder,
+            string snapshotHash,
+            CancellationToken cancellationToken)
+        {
+            var candidates = await _unitOfWork.Repository<ProcurementControlEvent>()
+                .GetQueryable(item => item.TenantId == TenantId && item.SourceId == invoice.Id &&
+                                      item.SourceType == "VendorInvoice" &&
+                                      item.Action == ProcurementInvoiceThreeWayMatchRules.ExceptionApprovalAction &&
+                                      item.RuleCode == ProcurementInvoiceThreeWayMatchRules.ExceptionRuleCode &&
+                                      item.RuleVersion == ProcurementInvoiceThreeWayMatchRules.ExceptionRuleVersion &&
+                                      (item.Result == ProcurementControlEventResult.Allowed ||
+                                       item.Result == ProcurementControlEventResult.Succeeded) && !item.IsDeleted)
+                .Include(item => item.EvidenceLinks)
+                .OrderByDescending(item => item.OccurredAtUtc)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            foreach (var candidate in candidates)
+            {
+                if (candidate.EvidenceLinks.Count == 0 ||
+                    invoice.SubmittedById.HasValue && candidate.ActorUserId == invoice.SubmittedById.Value ||
+                    string.IsNullOrWhiteSpace(candidate.ResultValuesJson))
+                    continue;
+                try
+                {
+                    using var json = JsonDocument.Parse(candidate.ResultValuesJson);
+                    var root = json.RootElement;
+                    if (!TryGuid(root, "purchaseOrderId", out var purchaseOrderId) ||
+                        purchaseOrderId != purchaseOrder.Id ||
+                        !TryGuid(root, "workflowInstanceId", out var workflowInstanceId) ||
+                        !TryGuid(root, "exceptionId", out var exceptionId) ||
+                        !root.TryGetProperty("invoiceSnapshotHash", out var hashElement) ||
+                        !string.Equals(hashElement.GetString(), snapshotHash, StringComparison.OrdinalIgnoreCase) ||
+                        !root.TryGetProperty("expiresAtUtc", out var expiryElement) ||
+                        !expiryElement.TryGetDateTime(out var expiresAtUtc) || expiresAtUtc <= DateTime.UtcNow)
+                        continue;
+
+                    var workflow = await _unitOfWork.Repository<WorkflowInstance>()
+                        .FirstOrDefaultAsync(item => item.TenantId == TenantId &&
+                            item.Id == workflowInstanceId && item.Status == WorkflowInstanceStatus.Completed &&
+                            !item.IsDeleted);
+                    if (workflow == null || workflow.InitiatedById == candidate.ActorUserId)
+                        continue;
+
+                    var approvedException = await _unitOfWork
+                        .Repository<VendorInvoiceMatchException>()
+                        .GetQueryable(item =>
+                            item.TenantId == TenantId &&
+                            item.Id == exceptionId &&
+                            item.VendorInvoiceId == invoice.Id &&
+                            item.PurchaseOrderId == purchaseOrder.Id &&
+                            item.Status == VendorInvoiceMatchExceptionStatus.Approved &&
+                            item.ApprovalControlEventId == candidate.Id &&
+                            !item.IsDeleted)
+                        .Include(item => item.Evidence)
+                        .AsNoTracking()
+                        .SingleOrDefaultAsync(cancellationToken);
+                    if (approvedException == null || approvedException.Evidence.Count == 0)
+                        continue;
+                    try
+                    {
+                        await VendorInvoiceMatchExceptionEvidenceValidator.RevalidateAsync(
+                            _unitOfWork, TenantId, invoice,
+                            approvedException.Evidence, cancellationToken);
+                    }
+                    catch (VendorInvoiceMatchExceptionControlException exception)
+                        when (exception.Code == "AP_MATCH_EXCEPTION_EVIDENCE_STALE")
+                    {
+                        // Evidence can be revoked after approval. A stale exception is
+                        // ignored so the current match remains visibly blocked.
+                        continue;
+                    }
+                    return candidate;
+                }
+                catch (JsonException)
+                {
+                    // An unparseable exception event is untrusted and deliberately ignored.
+                }
+            }
+            return null;
+        }
+
+        private static bool TryGuid(JsonElement root, string property, out Guid value)
+        {
+            value = Guid.Empty;
+            return root.TryGetProperty(property, out var element) &&
+                   Guid.TryParse(element.GetString(), out value);
+        }
+
+        private static InvoiceMatchingCheckDto Check(
+            string key, string label, bool passed, bool exceptionEligible, string message) => new()
+        {
+            CheckKey = key,
+            Label = label,
+            Passed = passed,
+            ExceptionEligible = exceptionEligible,
+            Message = message
+        };
+
+        private static void InvalidateMatching(VendorInvoice invoice, string reason)
+        {
+            invoice.MatchingStatus = InvoiceMatchingStatus.Unmatched;
+            invoice.MatchingNotes = reason;
+            invoice.MatchingControlEventId = null;
+            invoice.MatchExceptionControlEventId = null;
+            invoice.MatchingSnapshotHash = null;
+            invoice.MatchingEvaluatedAtUtc = null;
+            invoice.MatchingPriceTolerancePercent = 0m;
+            invoice.MatchingQuantityTolerancePercent = 0m;
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -1471,6 +2187,24 @@ namespace ErpSystem.Api.Services.Finance.AP
             return supplier;
         }
 
+        private async Task<(decimal PriceTolerancePercent, decimal QuantityTolerancePercent)>
+            GetInvoiceMatchTolerancesAsync(CancellationToken cancellationToken)
+        {
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted)
+                .Select(item => new
+                {
+                    item.ApInvoicePriceTolerancePercent,
+                    item.ApInvoiceQuantityTolerancePercent
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (settings == null)
+                throw new InvalidOperationException("Finance settings are not configured for the current tenant.");
+
+            return (settings.ApInvoicePriceTolerancePercent, settings.ApInvoiceQuantityTolerancePercent);
+        }
+
         private async Task<FinanceSettings> GetFinanceSettingsAsync(CancellationToken cancellationToken)
         {
             var settings = await _unitOfWork.Repository<FinanceSettings>()
@@ -1833,6 +2567,104 @@ namespace ErpSystem.Api.Services.Finance.AP
                 || treatment == TaxTreatment.ZeroRated
                 || treatment == TaxTreatment.OutOfScope;
 
+        private async Task<FinancePostingEvent> GetPostedInvoiceEventAsync(
+            VendorInvoice invoice,
+            CancellationToken cancellationToken)
+        {
+            if (!invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException("The AP invoice is not linked to a posted journal.");
+
+            return await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.SourceModule == "AP" &&
+                    item.SourceDocumentType == "VendorInvoice" &&
+                    item.SourceDocumentId == invoice.Id &&
+                    item.PostingAction == "Post" &&
+                    item.PostingStatus == "Posted" &&
+                    item.JournalEntryId == invoice.JournalEntryId.Value &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The authoritative AP invoice posting event was not found for this tenant.");
+        }
+
+        private async Task<FinancePostingResultDto> GetExistingReversalResultAsync(
+            JournalEntry originalJournal,
+            Guid sourceDocumentId,
+            string sourceDocumentType,
+            CancellationToken cancellationToken)
+        {
+            if (!originalJournal.ReversalJournalEntryId.HasValue)
+                throw new InvalidOperationException(
+                    "The original journal is marked reversed but has no reversal-journal lineage.");
+
+            var existing = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(item =>
+                    item.TenantId == TenantId &&
+                    item.SourceModule == "AP" &&
+                    item.SourceDocumentType == sourceDocumentType &&
+                    item.SourceDocumentId == sourceDocumentId &&
+                    item.PostingAction != "Post" &&
+                    item.PostingStatus == "Posted" &&
+                    item.JournalEntryId == originalJournal.ReversalJournalEntryId.Value &&
+                    !item.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The existing AP reversal posting event was not found for this tenant.");
+
+            return new FinancePostingResultDto
+            {
+                PostingEventId = existing.Id,
+                JournalEntryId = existing.JournalEntryId!.Value,
+                PostingStatus = existing.PostingStatus,
+                WasDuplicate = true,
+                TotalDebitAmount = existing.TotalDebitAmount,
+                TotalCreditAmount = existing.TotalCreditAmount,
+                FunctionalCurrencyCode = existing.FunctionalCurrencyCode,
+                PostingDate = existing.PostingDate,
+                SourceModule = existing.SourceModule,
+                OriginModuleCode = existing.OriginModuleCode ?? existing.SourceModule,
+                SourceDocumentType = existing.SourceDocumentType,
+                SourceDocumentId = existing.SourceDocumentId,
+                PostingAction = existing.PostingAction
+            };
+        }
+
+        private static FinancePostingRequestDto BuildApReversalRequest(
+            FinancePostingEvent originalEvent,
+            FinanceReversalPlanDto plan,
+            Guid sourceDocumentId,
+            string sourceReference,
+            string sourceDocumentType,
+            string journalType,
+            string description,
+            string idempotencyKey,
+            string reason) => new()
+        {
+            SourceModule = "AP",
+            OriginModuleCode = originalEvent.OriginModuleCode,
+            SourceDocumentType = sourceDocumentType,
+            SourceDocumentId = sourceDocumentId,
+            SourceDocumentTenantId = originalEvent.TenantId,
+            PostingAction = "Reverse",
+            SourceDocumentReference = sourceReference,
+            Description = description,
+            PostingDate = plan.ReversalDate,
+            JournalType = journalType,
+            BookClassification = originalEvent.BookClassification,
+            FunctionalCurrencyCode = originalEvent.FunctionalCurrencyCode,
+            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+            ReversalReason = reason.Trim(),
+            ReversalType = "Controlled AP void",
+            IdempotencyKey = idempotencyKey,
+            ReturnExistingOnDuplicate = true,
+            Lines = plan.ReversalLines
+        };
+
+        private static string AppendLifecycleNote(string? notes, string entry) =>
+            string.IsNullOrWhiteSpace(notes) ? entry : $"{notes.TrimEnd()}\n\n{entry}";
+
         private async Task RecordTaxCalculationSnapshotsAsync(
             IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
             CancellationToken cancellationToken)
@@ -2118,6 +2950,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 MatchingType = invoice.MatchingType,
                 MatchingStatus = invoice.MatchingStatus,
                 MatchingNotes = invoice.MatchingNotes,
+                MatchingControlEventId = invoice.MatchingControlEventId,
+                MatchingSnapshotHash = invoice.MatchingSnapshotHash,
+                MatchingEvaluatedAtUtc = invoice.MatchingEvaluatedAtUtc,
+                MatchingPriceTolerancePercent = invoice.MatchingPriceTolerancePercent,
+                MatchingQuantityTolerancePercent = invoice.MatchingQuantityTolerancePercent,
+                MatchExceptionControlEventId = invoice.MatchExceptionControlEventId,
                 Status = invoice.Status,
                 ApprovalStatus = invoice.ApprovalStatus,
                 ExpenseAccountId = invoice.ExpenseAccountId,
@@ -2159,8 +2997,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                     VendorPaymentId = a.VendorPaymentId,
                     VendorInvoiceId = a.VendorInvoiceId,
                     AllocatedAmount = a.AllocatedAmount,
+                    PaymentCurrencyAmount = a.PaymentCurrencyAmount,
+                    InvoiceCurrencyCode = a.InvoiceCurrencyCode,
+                    PaymentCurrencyCode = a.PaymentCurrencyCode,
+                    IsCrossCurrency = a.IsCrossCurrency,
+                    InvoiceSettlementExchangeRateId = a.InvoiceSettlementExchangeRateId,
+                    InvoiceSettlementExchangeRate = a.InvoiceSettlementExchangeRate,
+                    PaymentExchangeRateId = a.PaymentExchangeRateId,
+                    PaymentExchangeRate = a.PaymentExchangeRate,
+                    PaymentFunctionalAmount = a.PaymentFunctionalAmount,
+                    SettlementFunctionalAmount = a.SettlementFunctionalAmount,
                     DiscountAmount = a.DiscountAmount,
+                    DiscountFunctionalAmount = a.DiscountFunctionalAmount,
                     WithholdingTaxAmount = a.WithholdingTaxAmount,
+                    WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
                     IsReversal = a.IsReversal
@@ -2206,6 +3056,60 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             return paymentTerm;
         }
+
+        /// <summary>
+        /// Resolves the AP invoice's expected payment-time WHT classification from tenant setup.
+        /// Threshold application is intentionally deferred to VendorPaymentService because the
+        /// Ghana annual supplier aggregate is triggered by payment, not invoice capture.
+        /// </summary>
+        private async Task<InvoiceWhtResolution> ResolveInvoiceWhtAsync(
+            Guid? taxId,
+            decimal requestedRate,
+            DateTime invoiceDate,
+            bool isOpeningBalance,
+            CancellationToken cancellationToken)
+        {
+            if (isOpeningBalance || !taxId.HasValue || taxId.Value == Guid.Empty)
+            {
+                if (!isOpeningBalance && requestedRate > 0m)
+                {
+                    throw new InvalidOperationException("Select a configured purchase WHT tax instead of supplying a standalone invoice WHT rate.");
+                }
+                return new InvoiceWhtResolution(null, 0m, null);
+            }
+
+            var tax = await _unitOfWork.Repository<Tax>().FirstOrDefaultAsync(item =>
+                item.TenantId == TenantId && !item.IsDeleted && item.IsActive && item.Id == taxId.Value
+                && item.Category == TaxCategory.Withholding
+                && (item.Applicability == TaxApplicability.Purchases || item.Applicability == TaxApplicability.Both));
+            if (tax == null)
+            {
+                throw new InvalidOperationException("The selected invoice tax is not an active purchase WHT configuration for this tenant.");
+            }
+
+            var effectiveRate = tax.EffectiveFrom.Date <= invoiceDate.Date
+                ? tax.Rate
+                : await _unitOfWork.Repository<TaxRateHistory>()
+                    .GetQueryable(history =>
+                        history.TenantId == TenantId && !history.IsDeleted && history.TaxId == tax.Id
+                        && history.EffectiveFrom <= invoiceDate
+                        && (!history.EffectiveTo.HasValue || history.EffectiveTo.Value >= invoiceDate))
+                    .OrderByDescending(history => history.EffectiveFrom)
+                    .Select(history => (decimal?)history.Rate)
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (!effectiveRate.HasValue)
+            {
+                throw new InvalidOperationException($"WHT tax {tax.Code} is not effective on {invoiceDate:yyyy-MM-dd}.");
+            }
+            if (!tax.TaxPayableAccountId.HasValue)
+            {
+                throw new InvalidOperationException($"WHT tax {tax.Code} has no payable account configured.");
+            }
+
+            return new InvoiceWhtResolution(tax.Id, effectiveRate.Value, tax.TaxPayableAccountId);
+        }
+
+        private sealed record InvoiceWhtResolution(Guid? TaxId, decimal Rate, Guid? TaxPayableAccountId);
 
         private sealed record TaxPostingBuildResult(
             List<FinancePostingLineDto> Lines,

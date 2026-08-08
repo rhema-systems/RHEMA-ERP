@@ -35,6 +35,16 @@ public sealed class SupplierApplicantTokenIssueDto
     public ProcurementSupplierOnboardingPaymentStatus PaymentStatus { get; set; }
     public decimal TotalAmount { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
+    public bool ResumedExistingApplication { get; set; }
+    public SupplierApplicantSessionDto? RestrictedSession { get; set; }
+}
+
+public sealed class SupplierApplicantTokenDeliveryDto
+{
+    public bool ApplicantAccessFound { get; set; }
+    public bool Delivered { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? FailureMessage { get; set; }
 }
 
 public sealed class StartSupplierApplicantSessionRequest
@@ -48,8 +58,9 @@ public sealed class StartSupplierApplicantSessionRequest
 
 public sealed class SupplierApplicantSessionDto
 {
+    public Guid SessionId { get; set; }
     public Guid SessionReference { get; set; }
-    public Guid SystemActorUserId { get; set; }
+    public Guid ApplicantActorId { get; set; }
     public Guid TenantId { get; set; }
     public Guid RegistrationId { get; set; }
     public Guid TokenId { get; set; }

@@ -5,10 +5,14 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.UnitAccounting;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -25,10 +29,13 @@ namespace ErpSystem.Tests.Services.Finance
         private readonly Mock<IUnitOfWork> _mockUnitOfWork;
         private readonly Mock<ICurrentUserService> _mockCurrentUserService;
         private readonly Mock<ILogger<UnitJournalEntryService>> _mockLogger;
-        private readonly Mock<IRepository<UnitJournalEntry>> _mockEntryRepository;
-        private readonly Mock<IRepository<UnitJournalEntryLine>> _mockLineRepository;
-        private readonly Mock<IRepository<UnitAccount>> _mockAccountRepository;
-        private readonly Mock<IRepository<FiscalPeriod>> _mockPeriodRepository;
+        private readonly Mock<IGenericRepository<UnitJournalEntry>> _mockEntryRepository;
+        private readonly Mock<IGenericRepository<UnitJournalEntryLine>> _mockLineRepository;
+        private readonly Mock<IGenericRepository<UnitAccount>> _mockAccountRepository;
+        private readonly Mock<IGenericRepository<UnitAccountBalance>> _mockBalanceRepository;
+        private readonly Mock<IGenericRepository<FiscalPeriod>> _mockPeriodRepository;
+        private readonly Mock<IDocumentNumberingService> _mockDocumentNumberingService;
+        private readonly Mock<IWorkflowService> _mockWorkflowService;
         private readonly UnitJournalEntryService _service;
         private readonly Guid _tenantId = Guid.NewGuid();
         private readonly Guid _userId = Guid.NewGuid();
@@ -39,10 +46,13 @@ namespace ErpSystem.Tests.Services.Finance
             _mockUnitOfWork = new Mock<IUnitOfWork>();
             _mockCurrentUserService = new Mock<ICurrentUserService>();
             _mockLogger = new Mock<ILogger<UnitJournalEntryService>>();
-            _mockEntryRepository = new Mock<IRepository<UnitJournalEntry>>();
-            _mockLineRepository = new Mock<IRepository<UnitJournalEntryLine>>();
-            _mockAccountRepository = new Mock<IRepository<UnitAccount>>();
-            _mockPeriodRepository = new Mock<IRepository<FiscalPeriod>>();
+            _mockEntryRepository = new Mock<IGenericRepository<UnitJournalEntry>>();
+            _mockLineRepository = new Mock<IGenericRepository<UnitJournalEntryLine>>();
+            _mockAccountRepository = new Mock<IGenericRepository<UnitAccount>>();
+            _mockBalanceRepository = new Mock<IGenericRepository<UnitAccountBalance>>();
+            _mockPeriodRepository = new Mock<IGenericRepository<FiscalPeriod>>();
+            _mockDocumentNumberingService = new Mock<IDocumentNumberingService>();
+            _mockWorkflowService = new Mock<IWorkflowService>();
 
             _mockCurrentUserService.Setup(s => s.TenantId).Returns(_tenantId);
             _mockCurrentUserService.Setup(s => s.UserName).Returns(_userName);
@@ -51,12 +61,67 @@ namespace ErpSystem.Tests.Services.Finance
             _mockUnitOfWork.Setup(u => u.Repository<UnitJournalEntry>()).Returns(_mockEntryRepository.Object);
             _mockUnitOfWork.Setup(u => u.Repository<UnitJournalEntryLine>()).Returns(_mockLineRepository.Object);
             _mockUnitOfWork.Setup(u => u.Repository<UnitAccount>()).Returns(_mockAccountRepository.Object);
+            _mockUnitOfWork.Setup(u => u.Repository<UnitAccountBalance>()).Returns(_mockBalanceRepository.Object);
             _mockUnitOfWork.Setup(u => u.Repository<FiscalPeriod>()).Returns(_mockPeriodRepository.Object);
+            _mockUnitOfWork
+                .Setup(u => u.ExecuteInStrategyAsync(
+                    It.IsAny<Func<Task<UnitJournalEntryDto>>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Func<Task<UnitJournalEntryDto>> operation, CancellationToken _) => operation());
+            _mockUnitOfWork
+                .Setup(u => u.BeginTransactionAsync(
+                    It.IsAny<System.Data.IsolationLevel>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            _mockUnitOfWork
+                .Setup(u => u.CommitAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            _mockUnitOfWork
+                .Setup(u => u.RollbackAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            SetupBalanceRepository(new List<UnitAccountBalance>());
+            _mockDocumentNumberingService
+                .Setup(s => s.GenerateAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid?>(),
+                    It.IsAny<DateTime?>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<Guid?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync($"UJE-{DateTime.UtcNow.Year}-0001");
+            _mockWorkflowService
+                .Setup(s => s.StartApprovalWorkflowAsync("UnitJournalEntry", It.IsAny<Guid>()))
+                .ReturnsAsync(new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.InProgress
+                });
+            _mockWorkflowService
+                .Setup(s => s.CanUserApproveAsync("UnitJournalEntry", It.IsAny<Guid>(), It.IsAny<Guid>()))
+                .ReturnsAsync(true);
+            _mockWorkflowService
+                .Setup(s => s.ProcessApprovalStepAsync(
+                    "UnitJournalEntry",
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string?>()))
+                .ReturnsAsync((string _, Guid _, Guid _, string action, string? _) =>
+                    new WorkflowExecutionResult
+                    {
+                        Success = true,
+                        Status = action == "Approve"
+                            ? WorkflowInstanceStatus.Completed
+                            : WorkflowInstanceStatus.Cancelled
+                    });
 
             _service = new UnitJournalEntryService(
                 _mockUnitOfWork.Object,
                 _mockCurrentUserService.Object,
-                _mockLogger.Object);
+                _mockLogger.Object,
+                _mockDocumentNumberingService.Object,
+                _mockWorkflowService.Object);
         }
 
         #region GetByIdAsync Tests
@@ -98,6 +163,7 @@ namespace ErpSystem.Tests.Services.Finance
         {
             // Arrange
             var fiscalPeriod = CreateFiscalPeriod();
+            var accountId = Guid.NewGuid();
             var dto = new CreateUnitJournalEntryDto
             {
                 EntryDate = DateTime.UtcNow,
@@ -105,16 +171,19 @@ namespace ErpSystem.Tests.Services.Finance
                 FiscalPeriodId = fiscalPeriod.Id,
                 Lines = new List<CreateUnitJournalEntryLineDto>
                 {
-                    new() { UnitAccountId = Guid.NewGuid(), Quantity = 10, Description = "Line 1" }
+                    new() { UnitAccountId = accountId, Quantity = 10, Description = "Line 1" }
                 }
             };
 
             SetupEntryQueryable(new List<UnitJournalEntry>());
-            _mockPeriodRepository
-                .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<FiscalPeriod, bool>>>()))
-                .ReturnsAsync(fiscalPeriod);
-            _mockEntryRepository.Setup(r => r.AddAsync(It.IsAny<UnitJournalEntry>())).Returns(Task.CompletedTask);
-            _mockLineRepository.Setup(r => r.AddAsync(It.IsAny<UnitJournalEntryLine>())).Returns(Task.CompletedTask);
+            SetupPeriodQueryable(new List<FiscalPeriod> { fiscalPeriod });
+            SetupAccountQueryable(new List<UnitAccount> { CreateAccount(accountId) });
+            _mockEntryRepository
+                .Setup(r => r.AddAsync(It.IsAny<UnitJournalEntry>()))
+                .ReturnsAsync((UnitJournalEntry entity) => entity);
+            _mockLineRepository
+                .Setup(r => r.AddAsync(It.IsAny<UnitJournalEntryLine>()))
+                .ReturnsAsync((UnitJournalEntryLine entity) => entity);
             _mockUnitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
             // Act
@@ -140,9 +209,7 @@ namespace ErpSystem.Tests.Services.Finance
             };
 
             SetupEntryQueryable(new List<UnitJournalEntry>());
-            _mockPeriodRepository
-                .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<FiscalPeriod, bool>>>()))
-                .ReturnsAsync((FiscalPeriod?)null);
+            SetupPeriodQueryable(new List<FiscalPeriod>());
 
             // Act
             Func<Task> act = async () => await _service.CreateAsync(dto);
@@ -187,7 +254,7 @@ namespace ErpSystem.Tests.Services.Finance
 
             // Assert
             await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("*Only draft entries*");
+                .WithMessage("*Only draft or rejected entries*");
         }
 
         #endregion
@@ -226,7 +293,7 @@ namespace ErpSystem.Tests.Services.Finance
 
             // Assert
             await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("*Only draft entries*");
+                .WithMessage("*Only draft or rejected entries*");
         }
 
         #endregion
@@ -240,6 +307,8 @@ namespace ErpSystem.Tests.Services.Finance
             var entry = CreateEntry(UnitJournalEntryStatus.Draft);
             entry.Lines.Add(CreateLine(entry.Id)); // Add a line
             SetupEntryQueryableWithIncludes(new List<UnitJournalEntry> { entry });
+            SetupAccountQueryable(new List<UnitAccount> { CreateAccount(entry.Lines.Single().UnitAccountId) });
+            SetupPeriodQueryable(new List<FiscalPeriod> { CreateFiscalPeriod(entry.FiscalPeriodId, entry.FiscalYearId) });
             _mockEntryRepository.Setup(r => r.UpdateAsync(It.IsAny<UnitJournalEntry>())).Returns(Task.CompletedTask);
             _mockUnitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
@@ -352,9 +421,11 @@ namespace ErpSystem.Tests.Services.Finance
             var line = CreateLine(entry.Id);
             entry.Lines.Add(line);
 
-            var account = new UnitAccount { Id = line.UnitAccountId, CurrentBalance = 100 };
+            var account = CreateAccount(line.UnitAccountId, currentBalance: 100);
 
             SetupEntryQueryableWithIncludes(new List<UnitJournalEntry> { entry });
+            SetupAccountQueryable(new List<UnitAccount> { account });
+            SetupPeriodQueryable(new List<FiscalPeriod> { CreateFiscalPeriod(entry.FiscalPeriodId, entry.FiscalYearId) });
             _mockAccountRepository
                 .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitAccount, bool>>>()))
                 .ReturnsAsync(account);
@@ -398,17 +469,25 @@ namespace ErpSystem.Tests.Services.Finance
             var line = CreateLine(entry.Id);
             entry.Lines.Add(line);
 
-            var account = new UnitAccount { Id = line.UnitAccountId, CurrentBalance = 110 };
+            var account = CreateAccount(line.UnitAccountId, currentBalance: 110);
 
             SetupEntryQueryableWithIncludes(new List<UnitJournalEntry> { entry });
-            SetupEntryQueryable(new List<UnitJournalEntry>()); // For entry number generation
+            SetupAccountQueryable(new List<UnitAccount> { account });
+            SetupPeriodQueryable(new List<FiscalPeriod>
+            {
+                CreateFiscalPeriod(entry.FiscalPeriodId, entry.FiscalYearId)
+            });
             _mockAccountRepository
                 .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitAccount, bool>>>()))
                 .ReturnsAsync(account);
             _mockAccountRepository.Setup(r => r.UpdateAsync(It.IsAny<UnitAccount>())).Returns(Task.CompletedTask);
-            _mockEntryRepository.Setup(r => r.AddAsync(It.IsAny<UnitJournalEntry>())).Returns(Task.CompletedTask);
+            _mockEntryRepository
+                .Setup(r => r.AddAsync(It.IsAny<UnitJournalEntry>()))
+                .ReturnsAsync((UnitJournalEntry entity) => entity);
             _mockEntryRepository.Setup(r => r.UpdateAsync(It.IsAny<UnitJournalEntry>())).Returns(Task.CompletedTask);
-            _mockLineRepository.Setup(r => r.AddAsync(It.IsAny<UnitJournalEntryLine>())).Returns(Task.CompletedTask);
+            _mockLineRepository
+                .Setup(r => r.AddAsync(It.IsAny<UnitJournalEntryLine>()))
+                .ReturnsAsync((UnitJournalEntryLine entity) => entity);
             _mockUnitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
             // Act
@@ -474,15 +553,34 @@ namespace ErpSystem.Tests.Services.Finance
             };
         }
 
-        private FiscalPeriod CreateFiscalPeriod()
+        private UnitAccount CreateAccount(Guid id, decimal currentBalance = 0m)
+        {
+            return new UnitAccount
+            {
+                Id = id,
+                TenantId = _tenantId,
+                AccountNumber = $"UNIT-{id:N}",
+                Name = "Test Unit Account",
+                IsActive = true,
+                IsPostingAccount = true,
+                CurrentBalance = currentBalance,
+                ChildAccounts = new List<UnitAccount>()
+            };
+        }
+
+        private FiscalPeriod CreateFiscalPeriod(Guid? id = null, Guid? fiscalYearId = null)
         {
             return new FiscalPeriod
             {
-                Id = Guid.NewGuid(),
+                Id = id ?? Guid.NewGuid(),
                 TenantId = _tenantId,
-                FiscalYearId = Guid.NewGuid(),
+                FiscalYearId = fiscalYearId ?? Guid.NewGuid(),
                 PeriodName = "Test Period",
+                StartDate = DateTime.UtcNow.Date.AddDays(-15),
+                EndDate = DateTime.UtcNow.Date.AddDays(15),
                 IsOpen = true,
+                IsClosed = false,
+                IsLocked = false,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _userName
             };
@@ -493,7 +591,7 @@ namespace ErpSystem.Tests.Services.Finance
             _mockEntryRepository
                 .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitJournalEntry, bool>>>()))
                 .Returns((Expression<Func<UnitJournalEntry, bool>> predicate) =>
-                    entries.AsQueryable().Where(predicate));
+                    entries.Where(predicate.Compile()).AsAsyncQueryable());
         }
 
         private void SetupEntryQueryableWithIncludes(List<UnitJournalEntry> entries)
@@ -501,7 +599,45 @@ namespace ErpSystem.Tests.Services.Finance
             _mockEntryRepository
                 .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitJournalEntry, bool>>>()))
                 .Returns((Expression<Func<UnitJournalEntry, bool>> predicate) =>
-                    entries.AsQueryable().Where(predicate));
+                    entries.Where(predicate.Compile()).AsAsyncQueryable());
+        }
+
+        private void SetupAccountQueryable(List<UnitAccount> accounts)
+        {
+            _mockAccountRepository
+                .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitAccount, bool>>>()))
+                .Returns((Expression<Func<UnitAccount, bool>> predicate) =>
+                    accounts.Where(predicate.Compile()).AsAsyncQueryable());
+        }
+
+        private void SetupPeriodQueryable(List<FiscalPeriod> periods)
+        {
+            _mockPeriodRepository
+                .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<FiscalPeriod, bool>>>()))
+                .Returns((Expression<Func<FiscalPeriod, bool>> predicate) =>
+                    periods.Where(predicate.Compile()).AsAsyncQueryable());
+        }
+
+        private void SetupBalanceRepository(List<UnitAccountBalance> balances)
+        {
+            _mockBalanceRepository
+                .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitAccountBalance, bool>>>()))
+                .ReturnsAsync((Expression<Func<UnitAccountBalance, bool>> predicate) =>
+                    balances.FirstOrDefault(predicate.Compile()));
+            _mockBalanceRepository
+                .Setup(r => r.GetQueryable(It.IsAny<Expression<Func<UnitAccountBalance, bool>>>()))
+                .Returns((Expression<Func<UnitAccountBalance, bool>> predicate) =>
+                    balances.Where(predicate.Compile()).AsAsyncQueryable());
+            _mockBalanceRepository
+                .Setup(r => r.AddAsync(It.IsAny<UnitAccountBalance>()))
+                .ReturnsAsync((UnitAccountBalance balance) =>
+                {
+                    balances.Add(balance);
+                    return balance;
+                });
+            _mockBalanceRepository
+                .Setup(r => r.UpdateAsync(It.IsAny<UnitAccountBalance>()))
+                .Returns(Task.CompletedTask);
         }
 
         #endregion

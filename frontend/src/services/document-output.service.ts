@@ -1,15 +1,21 @@
 import { getStoredToken } from '@/services/api.service';
+import type { ControlledDocumentCopyType } from '@/types/controlled-documents';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export const DOCUMENT_TYPES = {
   financeJournalVoucher: 'Finance.JournalVoucher',
+  financeApPaymentVoucher: 'Finance.AP.PaymentVoucher',
+  financeCashBankPaymentSlip: 'Finance.CashBank.PaymentSlip',
+  financeArCustomerReceipt: 'Finance.AR.CustomerReceipt',
+  financeApSupplierStatement: 'Finance.AP.SupplierStatement',
   financeTrialBalance: 'Finance.TrialBalance',
   financeIncomeStatement: 'Finance.IncomeStatement',
   financeBalanceSheet: 'Finance.BalanceSheet',
   financeCashFlowStatement: 'Finance.CashFlowStatement',
   financeMultiCurrencyDetail: 'Finance.MultiCurrencyDetail',
   financeDetailedLedger: 'Finance.DetailedLedger',
+  financeClosePack: 'Finance.ClosePack',
 } as const;
 
 export interface RenderedDocumentFile {
@@ -19,6 +25,11 @@ export interface RenderedDocumentFile {
 }
 
 type DocumentOptions = { format?: string; copyType?: string };
+type ControlledDocumentIssueOptions = {
+  format?: string;
+  copyType: ControlledDocumentCopyType;
+  replacementReason?: string;
+};
 type DocumentParameters = Record<string, string | number | boolean | string[] | null | undefined>;
 
 class DocumentOutputService {
@@ -92,6 +103,42 @@ class DocumentOutputService {
   ): Promise<void> {
     const file = await this.fetchDocument(documentType, entityId, options);
     this.downloadFile(file);
+  }
+
+  async issueControlledDocument(
+    documentType: string,
+    entityId: string,
+    options: ControlledDocumentIssueOptions
+  ): Promise<void> {
+    const url = this.buildApiUrl(
+      `/documents/${encodeURIComponent(documentType)}/${encodeURIComponent(entityId)}/issue`
+    );
+    const token = getStoredToken();
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        format: options.format || 'pdf',
+        copyType: options.copyType,
+        replacementReason: options.replacementReason?.trim() || undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      const message = await this.readErrorMessage(response);
+      throw new Error(message || `Failed to issue controlled document (${response.status} ${response.statusText})`);
+    }
+
+    const blob = await response.blob();
+    const contentType = response.headers.get('content-type') || blob.type || 'application/pdf';
+    const fileName = this.getFileName(
+      response.headers.get('content-disposition'),
+      `${documentType}-${entityId}.pdf`
+    );
+    this.downloadFile({ blob, fileName, contentType });
   }
 
   async downloadReportDocument(

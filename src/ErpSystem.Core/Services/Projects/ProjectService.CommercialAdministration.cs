@@ -1,4 +1,6 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Projects;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 
@@ -214,6 +216,7 @@ public partial class ProjectService
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
         var interimValuation = await ValidateProjectCommercialInterimValuationAsync(projectId, dto.ProjectInterimValuationId);
 
+        var now = DateTime.UtcNow;
         var entity = new ProjectPaymentCertificate
         {
             TenantId = _currentUserProvider.TenantId,
@@ -225,7 +228,7 @@ public partial class ProjectService
             CertificateNumber = TrimOrNull(dto.CertificateNumber),
             Title = dto.Title.Trim(),
             Status = NormalizeProjectPaymentCertificateStatus(dto.Status),
-            IssueDate = dto.IssueDate ?? DateTime.UtcNow,
+            IssueDate = dto.IssueDate ?? now,
             PaymentDueDate = dto.PaymentDueDate,
             GrossCertifiedAmount = dto.GrossCertifiedAmount,
             RetentionHeldAmount = dto.RetentionHeldAmount,
@@ -235,10 +238,16 @@ public partial class ProjectService
             Currency = await ResolveProjectCurrencyAsync(dto.Currency),
             Notes = TrimOrNull(dto.Notes),
             CreatedBy = _currentUserProvider.Username,
-            CreatedById = _currentUserProvider.UserId
+            CreatedById = _currentUserProvider.UserId,
+            CreatedAt = now
         };
 
         await _unitOfWork.Repository<ProjectPaymentCertificate>().AddAsync(entity);
+        await AddPaymentCertificateSnapshotAuditAsync(
+            entity.Id,
+            oldValues: null,
+            CapturePaymentCertificateSnapshot(entity),
+            now);
         await _unitOfWork.SaveChangesAsync();
         return await GetProjectPaymentCertificateDtoAsync(projectId, entity.Id);
     }
@@ -251,6 +260,8 @@ public partial class ProjectService
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
         var interimValuation = await ValidateProjectCommercialInterimValuationAsync(entity.ProjectId, dto.ProjectInterimValuationId);
+        var before = CapturePaymentCertificateSnapshot(entity);
+        var now = DateTime.UtcNow;
 
         entity.ProjectPhaseId = phase?.Id;
         entity.ProjectPackageId = package?.Id;
@@ -270,8 +281,14 @@ public partial class ProjectService
         entity.Notes = TrimOrNull(dto.Notes);
         entity.UpdatedBy = _currentUserProvider.Username;
         entity.LastModifiedById = _currentUserProvider.UserId;
+        entity.UpdatedAt = now;
 
         await _unitOfWork.Repository<ProjectPaymentCertificate>().UpdateAsync(entity);
+        await AddPaymentCertificateSnapshotAuditAsync(
+            entity.Id,
+            before,
+            CapturePaymentCertificateSnapshot(entity),
+            now);
         await _unitOfWork.SaveChangesAsync();
         return await GetProjectPaymentCertificateDtoAsync(entity.ProjectId, entity.Id);
     }
@@ -280,7 +297,14 @@ public partial class ProjectService
     {
         var entity = await GetProjectPaymentCertificateEntityAsync(paymentCertificateId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        var before = CapturePaymentCertificateSnapshot(entity);
+        var now = DateTime.UtcNow;
         await _unitOfWork.Repository<ProjectPaymentCertificate>().DeleteAsync(entity);
+        await AddPaymentCertificateSnapshotAuditAsync(
+            entity.Id,
+            before,
+            before with { IsDeleted = true, DeletedAt = now, UpdatedAt = now },
+            now);
         await _unitOfWork.SaveChangesAsync();
     }
 
@@ -991,6 +1015,60 @@ public partial class ProjectService
             ProjectPaymentCertificateStatuses.Cancelled => ProjectPaymentCertificateStatuses.Cancelled,
             _ => ProjectPaymentCertificateStatuses.Draft
         };
+
+    private async Task AddPaymentCertificateSnapshotAuditAsync(
+        Guid certificateId,
+        ProjectPaymentCertificateAuditSnapshot? oldValues,
+        ProjectPaymentCertificateAuditSnapshot newValues,
+        DateTime timestamp)
+    {
+        await _unitOfWork.Repository<AuditLog>().AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _currentUserProvider.TenantId,
+            UserId = _currentUserProvider.UserId,
+            Username = string.IsNullOrWhiteSpace(_currentUserProvider.Username)
+                ? "Unknown"
+                : _currentUserProvider.Username,
+            Action = ProjectPaymentCertificateAuditEvents.Snapshot,
+            Resource = ProjectPaymentCertificateAuditEvents.Resource,
+            ResourceId = certificateId.ToString(),
+            OldValues = oldValues is null ? null : JsonSerializer.Serialize(oldValues),
+            NewValues = JsonSerializer.Serialize(newValues),
+            IpAddress = "Unknown",
+            Timestamp = timestamp,
+            CreatedAt = timestamp,
+            CreatedBy = _currentUserProvider.Username,
+            CreatedById = _currentUserProvider.UserId
+        });
+    }
+
+    private static ProjectPaymentCertificateAuditSnapshot CapturePaymentCertificateSnapshot(
+        ProjectPaymentCertificate entity) => new(
+            entity.Id,
+            entity.ContractId,
+            entity.Status,
+            entity.Currency,
+            entity.RetentionHeldAmount,
+            entity.RetentionReleasedAmount,
+            entity.IssueDate,
+            entity.CreatedAt,
+            entity.UpdatedAt,
+            entity.IsDeleted,
+            entity.DeletedAt);
+
+    private sealed record ProjectPaymentCertificateAuditSnapshot(
+        Guid Id,
+        Guid? ContractId,
+        string Status,
+        string Currency,
+        decimal RetentionHeldAmount,
+        decimal RetentionReleasedAmount,
+        DateTime IssueDate,
+        DateTime CreatedAt,
+        DateTime? UpdatedAt,
+        bool IsDeleted,
+        DateTime? DeletedAt);
 
     private static string NormalizeProjectExtensionOfTimeStatus(string? value)
         => value?.Trim() switch

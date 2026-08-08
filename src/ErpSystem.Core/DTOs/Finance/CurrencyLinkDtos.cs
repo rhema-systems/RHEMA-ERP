@@ -25,7 +25,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool RevaluationRequired { get; set; } = true;
         public string? RevaluationFrequency { get; set; } = "Monthly";
         public string? TransactionRateType { get; set; } = "Daily";
+        public string? TransactionQuoteSide { get; set; } = "Mid";
         public string? RevaluationRateType { get; set; } = "Month-End";
+        public string? RevaluationQuoteSide { get; set; } = "Mid";
         public string? Notes { get; set; }
         public bool IsActive { get; set; } = true;
     }
@@ -53,7 +55,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool RevaluationRequired { get; set; }
         public string RevaluationFrequency { get; set; } = string.Empty;
         public string TransactionRateType { get; set; } = string.Empty;
+        public string TransactionQuoteSide { get; set; } = "Mid";
         public string RevaluationRateType { get; set; } = string.Empty;
+        public string RevaluationQuoteSide { get; set; } = "Mid";
         public DateTime? LastRevaluationDate { get; set; }
         public decimal? LastRevaluationRate { get; set; }
         public decimal? LastRevaluationAdjustment { get; set; }
@@ -66,6 +70,22 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime CreatedDate { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+    }
+
+    /// <summary>
+    /// Updates rate-selection defaults without replacing or deleting the link.
+    /// </summary>
+    public class UpdateCurrencyLinkRatePolicyDto
+    {
+        public bool RevaluationRequired { get; set; } = true;
+        public string? RevaluationFrequency { get; set; } = "Monthly";
+        public string? TransactionRateType { get; set; } = "Daily";
+        public string? TransactionQuoteSide { get; set; } = "Mid";
+        public string? RevaluationRateType { get; set; } = "Month-End";
+        public string? RevaluationQuoteSide { get; set; } = "Mid";
+
+        [MaxLength(1000)]
+        public string? Notes { get; set; }
     }
 
     /// <summary>

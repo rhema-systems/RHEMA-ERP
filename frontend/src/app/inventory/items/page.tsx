@@ -15,14 +15,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Plus, Search, Edit, Trash2, Package, AlertTriangle, TrendingUp,
-  Users, Eye, BarChart3, Filter, DollarSign, ImageIcon, Upload, X
+  Users, Eye, BarChart3, Filter, DollarSign, ImageIcon, Upload, X, History
 } from 'lucide-react';
 import { fileUploadService, UploadedFile } from '@/services/fileUploadService';
 import {
   inventoryManagementService,
   InventoryItemDto, CreateInventoryItemDto, UpdateInventoryItemDto,
   ItemSupplierDto, UnitOfMeasureDto, InventoryCategoryDto,
-  UnitOfMeasureScheduleDto
+  UnitOfMeasureScheduleDto, InventoryItemChangeAuditDto
 } from '@/services/inventoryManagementService';
 import { priceListService, ItemPriceListLineDto, getPriceListTypeLabel, getPriceListStatusLabel } from '@/services/priceListService';
 import { useInventoryItemLabels } from '@/hooks/useFieldLabels';
@@ -30,14 +30,10 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 
 const ItemTypes = [
-  { value: 0, label: 'Raw Material' },
-  { value: 1, label: 'Consumable' },
-  { value: 2, label: 'Finished Good' },
-  { value: 3, label: 'Service' },
-  { value: 4, label: 'Tool' },
-  { value: 5, label: 'Spare Part' },
-  { value: 6, label: 'Stock Item' },
-  { value: 7, label: 'Fixed Asset' }
+  { value: 1, label: 'Stock Item' },
+  { value: 2, label: 'Service' },
+  { value: 3, label: 'Non-stock Item' },
+  { value: 4, label: 'Fixed Asset' }
 ];
 
 const ItemStatuses = [
@@ -97,6 +93,12 @@ export default function InventoryItemsPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<InventoryItemChangeAuditDto[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [importJson, setImportJson] = useState('[]');
+  const [isImporting, setIsImporting] = useState(false);
 
   // For edit mode - track isActive separately
   const [editIsActive, setEditIsActive] = useState(true);
@@ -110,14 +112,15 @@ export default function InventoryItemsPage() {
     itemCode: '', name: '', description: '', categoryId: '', unitOfMeasure: 'EA',
     unitOfMeasureScheduleId: undefined,
     valuationMethod: 1, // WeightedAverage
-    itemType: 1, quantityDecimals: 2, currencyDecimals: 2,
+    itemType: 1, status: 1, quantityDecimals: 2, currencyDecimals: 2,
+    isProjectApplicable: false, isCostCentreApplicable: false,
     // Costs & Pricing
     standardCost: 0, currentCost: 0, listPrice: 0,
     // Stock Settings
     minimumLevel: 0, maximumLevel: 1000, reorderLevel: 10, reorderQuantity: 50,
     safetyStock: 0, leadTimeDays: 7, safetyLeadTimeDays: 0, allowBackorder: false, autoReorder: false,
     // Tracking
-    isSerialTracked: false, isLotTracked: false, isBatchTracked: false, isExpirationTracked: false, isLocationTracked: false,
+    isSerialTracked: false, isLotTracked: false, isBatchTracked: false, isManufactureDateTracked: false, isExpirationTracked: false, isLocationTracked: false,
     minimumShelfLifeDays: 0, warnBeforeLotExpires: false, daysBeforeExpiryWarning: 30,
     // Item Options
     substituteItem1Id: undefined, substituteItem2Id: undefined, substituteItem3Id: undefined, substituteItem4Id: undefined,
@@ -208,6 +211,41 @@ export default function InventoryItemsPage() {
     }
   };
 
+  const handleImport = async () => {
+    try {
+      setIsImporting(true);
+      const parsed: unknown = JSON.parse(importJson);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error('Enter a JSON array containing at least one item profile.');
+      }
+      const result = await inventoryManagementService.importInventoryItems(parsed as CreateInventoryItemDto[]);
+      setItems(prev => [...prev, ...result.items]);
+      setIsImportDialogOpen(false);
+      setImportJson('[]');
+      toast.success(`${result.importedCount} item profile(s) imported`);
+    } catch (err) {
+      console.error('Error importing item profiles:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to import item profiles');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const openHistory = async (item: InventoryItemDto) => {
+    setSelectedItem(item);
+    setIsHistoryDialogOpen(true);
+    setHistoryLoading(true);
+    try {
+      setHistoryEntries(await inventoryManagementService.getInventoryItemHistory(item.id));
+    } catch (err) {
+      console.error('Error loading item history:', err);
+      setHistoryEntries([]);
+      toast.error('Failed to load item change history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const handleEdit = async (item: InventoryItemDto) => {
     setSelectedItem(item);
     
@@ -234,7 +272,8 @@ export default function InventoryItemsPage() {
       categoryId: item.categoryId, unitOfMeasure: item.unitOfMeasure,
       unitOfMeasureScheduleId: (item as any).unitOfMeasureScheduleId,
       valuationMethod: valuationMethodValue,
-      itemType: item.itemType, quantityDecimals: item.quantityDecimals || 2, currencyDecimals: item.currencyDecimals || 2,
+      itemType: item.itemType, status: item.status, quantityDecimals: item.quantityDecimals || 2, currencyDecimals: item.currencyDecimals || 2,
+      isProjectApplicable: item.isProjectApplicable, isCostCentreApplicable: item.isCostCentreApplicable,
       brand: item.brand, manufacturer: item.manufacturer, model: item.model,
       style: item.style, feature: item.feature,
       itemClassId: item.itemClassId, priceGroupId: item.priceGroupId,
@@ -243,11 +282,12 @@ export default function InventoryItemsPage() {
       // Stock Settings
       minimumLevel: item.minimumLevel, maximumLevel: item.maximumLevel,
       reorderLevel: item.reorderLevel, reorderQuantity: item.reorderQuantity,
-      safetyStock: 0, leadTimeDays: item.leadTimeDays, safetyLeadTimeDays: 0,
+      safetyStock: item.safetyStock || 0, leadTimeDays: item.leadTimeDays, safetyLeadTimeDays: 0,
       allowBackorder: item.allowBackorder || false, autoReorder: false,
       // Tracking
       isSerialTracked: item.isSerialTracked, isLotTracked: item.isLotTracked, isBatchTracked: item.isBatchTracked,
-      isExpirationTracked: false, isLocationTracked: false,
+      isManufactureDateTracked: item.isManufactureDateTracked,
+      isExpirationTracked: item.isExpirationTracked, isLocationTracked: false,
       lotCategory: item.lotCategory, minimumShelfLifeDays: item.minimumShelfLifeDays || 0,
       warnBeforeLotExpires: item.warnBeforeLotExpires || false, daysBeforeExpiryWarning: item.daysBeforeExpiryWarning || 30,
       // Item Options
@@ -295,7 +335,12 @@ export default function InventoryItemsPage() {
   const handleUpdate = async () => {
     if (!selectedItem) return;
     try {
-      const updateData: UpdateInventoryItemDto = { ...formData, isActive: editIsActive };
+      const updateData: UpdateInventoryItemDto = {
+        ...formData,
+        isActive: editIsActive,
+        status: formData.status,
+        rowVersion: selectedItem.rowVersion
+      };
       const updated = await inventoryManagementService.updateInventoryItem(selectedItem.id, updateData);
       setItems(prev => prev.map(i => i.id === selectedItem.id ? updated : i));
       setIsEditDialogOpen(false);
@@ -363,14 +408,15 @@ export default function InventoryItemsPage() {
       itemCode: '', name: '', description: '', categoryId: '', unitOfMeasure: 'EA',
       unitOfMeasureScheduleId: undefined,
       valuationMethod: 1, // WeightedAverage
-      itemType: 1, quantityDecimals: 2, currencyDecimals: 2,
+      itemType: 1, status: 1, quantityDecimals: 2, currencyDecimals: 2,
+      isProjectApplicable: false, isCostCentreApplicable: false,
       // Costs & Pricing
       standardCost: 0, currentCost: 0, listPrice: 0,
       // Stock Settings
       minimumLevel: 0, maximumLevel: 1000, reorderLevel: 10, reorderQuantity: 50,
       safetyStock: 0, leadTimeDays: 7, safetyLeadTimeDays: 0, allowBackorder: false, autoReorder: false,
       // Tracking
-      isSerialTracked: false, isLotTracked: false, isBatchTracked: false, isExpirationTracked: false, isLocationTracked: false,
+      isSerialTracked: false, isLotTracked: false, isBatchTracked: false, isManufactureDateTracked: false, isExpirationTracked: false, isLocationTracked: false,
       minimumShelfLifeDays: 0, warnBeforeLotExpires: false, daysBeforeExpiryWarning: 30,
       // Item Options
       substituteItem1Id: undefined, substituteItem2Id: undefined, substituteItem3Id: undefined, substituteItem4Id: undefined,
@@ -400,7 +446,11 @@ export default function InventoryItemsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Inventory Items</h1>
           <p className="text-muted-foreground">Manage products, parts, and materials</p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+            <Upload className="mr-2 h-4 w-4" />Import profiles
+          </Button>
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4" />Add Item</Button>
           </DialogTrigger>
@@ -858,6 +908,14 @@ export default function InventoryItemsPage() {
                       <Switch checked={formData.isProcurementItem} onCheckedChange={(v) => setFormData({...formData, isProcurementItem: v})} />
                       <Label>Non-Saleable Item</Label>
                     </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch checked={formData.isProjectApplicable} onCheckedChange={(v) => setFormData({...formData, isProjectApplicable: v})} />
+                      <Label>Project applicable</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch checked={formData.isCostCentreApplicable} onCheckedChange={(v) => setFormData({...formData, isCostCentreApplicable: v})} />
+                      <Label>Cost-centre applicable</Label>
+                    </div>
                   </div>
                 </div>
                 <div className="border rounded-lg p-4">
@@ -952,6 +1010,14 @@ export default function InventoryItemsPage() {
                     <Switch checked={formData.isLotTracked} onCheckedChange={(v) => setFormData({...formData, isLotTracked: v})} />
                   </div>
                   <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div><Label>Batch Tracking</Label><p className="text-xs text-muted-foreground">Require a distinct production batch identifier</p></div>
+                    <Switch checked={formData.isBatchTracked} onCheckedChange={(v) => setFormData({...formData, isBatchTracked: v})} />
+                  </div>
+                  <div className="flex items-center justify-between p-3 border rounded-lg">
+                    <div><Label>Manufacture Date Tracking</Label><p className="text-xs text-muted-foreground">Require manufacture date capture on receipt</p></div>
+                    <Switch checked={formData.isManufactureDateTracked} onCheckedChange={(v) => setFormData({...formData, isManufactureDateTracked: v})} />
+                  </div>
+                  <div className="flex items-center justify-between p-3 border rounded-lg">
                     <div><Label>Expiration Tracking</Label><p className="text-xs text-muted-foreground">Track items by expiration date</p></div>
                     <Switch checked={formData.isExpirationTracked} onCheckedChange={(v) => setFormData({...formData, isExpirationTracked: v})} />
                   </div>
@@ -992,7 +1058,8 @@ export default function InventoryItemsPage() {
               <Button onClick={handleCreate}>Create</Button>
             </DialogFooter>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {/* Breadcrumbs */}
@@ -1098,6 +1165,7 @@ export default function InventoryItemsPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <Button size="sm" variant="outline" onClick={() => openSuppliers(item)}><Users className="h-4 w-4 mr-1" />Suppliers</Button>
+                        <Button size="sm" variant="outline" onClick={() => openHistory(item)}><History className="h-4 w-4 mr-1" />History</Button>
                         <Button size="sm" variant="outline" onClick={() => handleEdit(item)}><Edit className="h-4 w-4" /></Button>
                         <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>
                       </div>
@@ -1135,7 +1203,10 @@ export default function InventoryItemsPage() {
                     <div className="flex items-center space-x-2">
                       <Switch 
                         checked={editIsActive} 
-                        onCheckedChange={(v) => setEditIsActive(v)} 
+                        onCheckedChange={(v) => {
+                          setEditIsActive(v);
+                          setFormData({...formData, status: v ? 1 : 2});
+                        }}
                         className="data-[state=checked]:bg-green-600"
                       />
                       <Label className="font-semibold">
@@ -1146,6 +1217,19 @@ export default function InventoryItemsPage() {
                         )}
                       </Label>
                     </div>
+                    <Select
+                      value={formData.status.toString()}
+                      onValueChange={(value) => {
+                        const status = Number(value);
+                        setFormData({...formData, status});
+                        setEditIsActive(status === 1);
+                      }}
+                    >
+                      <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {ItemStatuses.map(status => <SelectItem key={status.value} value={status.value.toString()}>{status.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="flex items-center gap-6 text-sm">
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-gray-800 rounded-lg border">
@@ -1547,6 +1631,8 @@ export default function InventoryItemsPage() {
                   <div className="flex items-center space-x-2"><Switch checked={formData.isFinishedGood} onCheckedChange={(v) => setFormData({...formData, isFinishedGood: v})} /><Label>Finished Good</Label></div>
                   <div className="flex items-center space-x-2"><Switch checked={formData.isFinishedGoodComponent} onCheckedChange={(v) => setFormData({...formData, isFinishedGoodComponent: v})} /><Label>Finished Good Component</Label></div>
                   <div className="flex items-center space-x-2"><Switch checked={formData.isProcurementItem} onCheckedChange={(v) => setFormData({...formData, isProcurementItem: v})} /><Label>Non-Saleable Item</Label></div>
+                  <div className="flex items-center space-x-2"><Switch checked={formData.isProjectApplicable} onCheckedChange={(v) => setFormData({...formData, isProjectApplicable: v})} /><Label>Project applicable</Label></div>
+                  <div className="flex items-center space-x-2"><Switch checked={formData.isCostCentreApplicable} onCheckedChange={(v) => setFormData({...formData, isCostCentreApplicable: v})} /><Label>Cost-centre applicable</Label></div>
                 </div>
               </div>
               <div className="border rounded-lg p-4">
@@ -1617,6 +1703,14 @@ export default function InventoryItemsPage() {
                 <div className="flex items-center justify-between p-3 border rounded-lg">
                   <div><Label>Lot Tracking</Label><p className="text-xs text-muted-foreground">Track items by lot/batch number</p></div>
                   <Switch checked={formData.isLotTracked} onCheckedChange={(v) => setFormData({...formData, isLotTracked: v})} />
+                </div>
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div><Label>Batch Tracking</Label><p className="text-xs text-muted-foreground">Require a distinct production batch identifier</p></div>
+                  <Switch checked={formData.isBatchTracked} onCheckedChange={(v) => setFormData({...formData, isBatchTracked: v})} />
+                </div>
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div><Label>Manufacture Date Tracking</Label><p className="text-xs text-muted-foreground">Require manufacture date capture on receipt</p></div>
+                  <Switch checked={formData.isManufactureDateTracked} onCheckedChange={(v) => setFormData({...formData, isManufactureDateTracked: v})} />
                 </div>
                 <div className="flex items-center justify-between p-3 border rounded-lg">
                   <div><Label>Expiration Tracking</Label><p className="text-xs text-muted-foreground">Track items by expiration date</p></div>
@@ -1700,6 +1794,67 @@ export default function InventoryItemsPage() {
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleUpdate}>Save Changes</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Validated item-profile import */}
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent className="sm:max-w-[760px]">
+          <DialogHeader>
+            <DialogTitle>Import TDC item profiles</DialogTitle>
+            <DialogDescription>
+              Paste a JSON array of item profiles. The complete batch is validated and committed atomically through the same rules as create, edit and maker-checker changes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Required fields include itemCode, name, categoryId and unitOfMeasure. Weighted Average (`valuationMethod: 1`) is the default; transaction-derived stock and WAC values are never imported.
+            </div>
+            <Textarea
+              className="min-h-64 font-mono text-xs"
+              value={importJson}
+              onChange={(event) => setImportJson(event.target.value)}
+              aria-label="Item profile import JSON"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} disabled={isImporting}>Cancel</Button>
+            <Button onClick={handleImport} disabled={isImporting}>{isImporting ? 'Importing…' : 'Validate and import'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Immutable change history */}
+      <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
+        <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Item change history</DialogTitle>
+            <DialogDescription>{selectedItem?.itemCode} — {selectedItem?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="overflow-y-auto border rounded-md">
+            {historyLoading ? (
+              <div className="p-8 text-center text-muted-foreground">Loading history…</div>
+            ) : historyEntries.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground">No recorded changes.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow><TableHead>When</TableHead><TableHead>Actor</TableHead><TableHead>Action</TableHead><TableHead>Profile snapshot</TableHead></TableRow>
+                </TableHeader>
+                <TableBody>
+                  {historyEntries.map(entry => (
+                    <TableRow key={entry.id}>
+                      <TableCell className="whitespace-nowrap text-xs">{format(new Date(entry.occurredAtUtc), 'dd MMM yyyy HH:mm')}</TableCell>
+                      <TableCell>{entry.username}</TableCell>
+                      <TableCell><Badge variant="outline">{entry.action}</Badge></TableCell>
+                      <TableCell><pre className="max-w-[420px] whitespace-pre-wrap break-all text-[11px] text-muted-foreground">{entry.newValues || '—'}</pre></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setIsHistoryDialogOpen(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -7,10 +7,20 @@ export type ProcurementControlEventResult =
   | 'Failed'
   | 'Warning';
 
+export type ProcurementControlEventOperation =
+  | 'Other'
+  | 'Create'
+  | 'Update'
+  | 'Approve'
+  | 'Reject'
+  | 'Override'
+  | 'Post'
+  | 'Reverse'
+  | 'Dispatch'
+  | 'Receive';
+
 export type ProcurementControlEvidenceReferenceKind =
-  | 'WorkflowEvidenceDocument'
-  | 'FileUploadRecord'
-  | 'ExternalReference';
+  'WorkflowEvidenceDocument' | 'FileUploadRecord' | 'ExternalReference';
 
 export interface ProcurementControlEventSearch {
   eventType?: string;
@@ -52,6 +62,7 @@ export interface ProcurementControlEvent {
   schemaVersion: number;
   eventType: string;
   action: string;
+  operation: ProcurementControlEventOperation;
   result: ProcurementControlEventResult;
   ruleCode?: string;
   ruleId?: string;

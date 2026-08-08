@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { Plus, Trash2, Search, Package, AlertCircle, Barcode, Layers } from 'lucide-react';
 import {
   inventoryManagementService,
   InventoryTransferDto, InventoryTransferDetailDto, InventoryTransferItemDto,
-  WarehouseDto, InventoryItemDto, AddTransferItemDto, UpdateTransferItemDto, WarehouseLocationDto
+  WarehouseDto, InventoryItemDto, AddTransferItemDto, UpdateTransferItemDto, WarehouseLocationDto,
+  InventoryTransferEvidenceRequest
 } from '@/services/inventoryManagementService';
+import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
@@ -46,7 +49,11 @@ interface ItemFormData {
   sourceLocationId: string;
   destinationLocationId: string;
   lotNumber: string;
+  batchNumber: string;
   serialNumber: string;
+  manufactureDate: string;
+  expiryDate: string;
+  inventoryTrackingExceptionId: string;
   notes: string;
 }
 
@@ -74,6 +81,14 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
   const [itemSearchTerm, setItemSearchTerm] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlComment, setControlComment] = useState('');
+  const [resolutionCodes, setResolutionCodes] = useState<Record<string, string>>({});
+  const [resolutionCode, setResolutionCode] = useState('CONFIRMED_LOSS');
+  const [selectedDiscrepancyIds, setSelectedDiscrepancyIds] = useState<string[]>([]);
+  const [controlEvidence, setControlEvidence] = useState<InventoryTransferEvidenceRequest[]>([]);
+  const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
+  const controlKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
   
   const [formData, setFormData] = useState<FormData>({
     sourceWarehouseId: '',
@@ -88,7 +103,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
     sourceLocationId: '',
     destinationLocationId: '',
     lotNumber: '',
+    batchNumber: '',
     serialNumber: '',
+    manufactureDate: '',
+    expiryDate: '',
+    inventoryTrackingExceptionId: '',
     notes: ''
   });
 
@@ -127,8 +146,15 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
     if (!transfer?.id) return;
     try {
       setLoading(true);
-      const detail = await inventoryManagementService.getInventoryTransferById(transfer.id);
+      const [detail, resolutions, records] = await Promise.all([
+        inventoryManagementService.getInventoryTransferById(transfer.id),
+        inventoryManagementService.getTransferDiscrepancyResolutions(),
+        documentManagementService.getRecords(),
+      ]);
       setTransferDetail(detail);
+      setResolutionCodes(resolutions);
+      setDmsRecords(records.filter((record) => record.lifecycleStatus === 'Active' && record.versionStatus === 'Published' && Boolean(record.currentVersion)));
+      setSelectedDiscrepancyIds(detail.discrepancies.filter((item) => item.status === 'Open').map((item) => item.id));
       setFormData({
         sourceWarehouseId: detail.sourceWarehouseId,
         destinationWarehouseId: detail.destinationWarehouseId,
@@ -171,6 +197,10 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
     });
     setTransferDetail(null);
     setActiveTab('details');
+    setControlComment('');
+    setControlEvidence([]);
+    setSelectedDiscrepancyIds([]);
+    controlKeyRef.current = null;
     setWarehouseInventoryItems([]);
     resetItemForm();
   };
@@ -182,7 +212,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
       sourceLocationId: '',
       destinationLocationId: '',
       lotNumber: '',
+      batchNumber: '',
       serialNumber: '',
+      manufactureDate: '',
+      expiryDate: '',
+      inventoryTrackingExceptionId: '',
       notes: ''
     });
     setShowAddItem(false);
@@ -290,7 +324,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
         sourceLocationId: itemFormData.sourceLocationId || undefined,
         destinationLocationId: itemFormData.destinationLocationId || undefined,
         lotNumber: itemFormData.lotNumber || undefined,
+        batchNumber: itemFormData.batchNumber || undefined,
         serialNumber: itemFormData.serialNumber || undefined,
+        manufactureDate: itemFormData.manufactureDate || undefined,
+        expiryDate: itemFormData.expiryDate || undefined,
+        inventoryTrackingExceptionId: itemFormData.inventoryTrackingExceptionId || undefined,
         notes: itemFormData.notes || undefined
       };
       await inventoryManagementService.addTransferItem(transfer.id, dto);
@@ -333,7 +371,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
         sourceLocationId: itemFormData.sourceLocationId || undefined,
         destinationLocationId: itemFormData.destinationLocationId || undefined,
         lotNumber: itemFormData.lotNumber || undefined,
+        batchNumber: itemFormData.batchNumber || undefined,
         serialNumber: itemFormData.serialNumber || undefined,
+        manufactureDate: itemFormData.manufactureDate || undefined,
+        expiryDate: itemFormData.expiryDate || undefined,
+        inventoryTrackingExceptionId: itemFormData.inventoryTrackingExceptionId || undefined,
         notes: itemFormData.notes || undefined
       };
       await inventoryManagementService.updateTransferItem(transfer.id, itemId, dto);
@@ -380,14 +422,99 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
       sourceLocationId: item.sourceLocationId || '',
       destinationLocationId: item.destinationLocationId || '',
       lotNumber: item.lotNumber || '',
+      batchNumber: item.batchNumber || '',
       serialNumber: item.serialNumber || '',
+      manufactureDate: item.manufactureDate?.slice(0, 10) || '',
+      expiryDate: item.expiryDate?.slice(0, 10) || '',
+      inventoryTrackingExceptionId: item.inventoryTrackingExceptionId || '',
       notes: item.notes || ''
     });
     setEditingItemId(item.id);
     setShowAddItem(true);
   };
 
+  const controlKeyFor = (kind: string, payload: unknown) => {
+    const fingerprint = `${kind}:${JSON.stringify(payload)}`;
+    if (controlKeyRef.current?.fingerprint !== fingerprint) {
+      controlKeyRef.current = { fingerprint, key: crypto.randomUUID() };
+    }
+    return controlKeyRef.current.key;
+  };
+
+  const addControlEvidence = async (recordId: string) => {
+    try {
+      const detail = await documentManagementService.getRecord(recordId);
+      const version = detail?.versions.find((item) => item.versionNumber === detail.record.currentVersion && item.status === 'Published' && item.fileUploadRecordId);
+      if (!detail || !version) throw new Error('Select a central-DMS record with a current published repository version.');
+      setControlEvidence((items) => items.some((item) => item.centralDocumentVersionId === version.id) ? items : [...items, {
+        centralDocumentVersionId: version.id,
+        evidenceReference: `${detail.record.documentReference} / ${version.versionNumber}`,
+      }]);
+    } catch (error) {
+      toast({ title: 'Evidence unavailable', description: error instanceof Error ? error.message : 'Unable to link central-DMS evidence.', variant: 'destructive' });
+    }
+  };
+
+  const resolveDiscrepancies = async () => {
+    if (!transferDetail || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0) {
+      toast({ title: 'Resolution evidence required', description: 'Select open discrepancies and provide resolution notes plus current published central-DMS evidence.', variant: 'destructive' });
+      return;
+    }
+    const payload = { selectedDiscrepancyIds, resolutionCode, controlComment, controlEvidence };
+    const idempotencyKey = controlKeyFor('resolve', payload);
+    try {
+      setControlBusy(true);
+      await inventoryManagementService.resolveTransferDiscrepancies(transferDetail.id, {
+        discrepancyIds: selectedDiscrepancyIds,
+        resolutionCode,
+        resolutionNotes: controlComment.trim(),
+        evidence: controlEvidence,
+        rowVersion: transferDetail.rowVersion,
+        idempotencyKey,
+        correlationId: `transfer-resolution:${transferDetail.id}:${idempotencyKey}`,
+        comment: controlComment.trim(),
+      });
+      toast({ title: 'Discrepancies resolved', description: 'The immutable resolution action and DMS evidence lineage were recorded.' });
+      setControlComment('');
+      setControlEvidence([]);
+      controlKeyRef.current = null;
+      await loadTransferDetails();
+      onSuccess();
+    } catch (error: any) {
+      toast({ title: 'Resolution blocked', description: error.response?.data?.message || error.message || 'The controlled resolution failed.', variant: 'destructive' });
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
+  const closeControlledTransfer = async () => {
+    if (!transferDetail || !controlComment.trim()) {
+      toast({ title: 'Closure comment required', description: 'Enter the independent closure basis before closing this transfer.', variant: 'destructive' });
+      return;
+    }
+    const idempotencyKey = controlKeyFor('close', { controlComment });
+    try {
+      setControlBusy(true);
+      await inventoryManagementService.closeTransfer(transferDetail.id, {
+        rowVersion: transferDetail.rowVersion,
+        idempotencyKey,
+        correlationId: `transfer-close:${transferDetail.id}:${idempotencyKey}`,
+        comment: controlComment.trim(),
+      });
+      toast({ title: 'Transfer closed', description: 'Independent closure and the immutable action register were completed.' });
+      setControlComment('');
+      controlKeyRef.current = null;
+      await loadTransferDetails();
+      onSuccess();
+    } catch (error: any) {
+      toast({ title: 'Closure blocked', description: error.response?.data?.message || error.message || 'The controlled closure failed.', variant: 'destructive' });
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
   const showApprovalsTab = !!transferDetail && mode !== 'create';
+  const showControlsTab = !!transferDetail && mode !== 'create';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -407,7 +534,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
           <div className="py-8 text-center text-muted-foreground">Loading...</div>
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className={`grid w-full ${showApprovalsTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <TabsList className={`grid w-full ${showApprovalsTab && showControlsTab ? 'grid-cols-4' : showApprovalsTab || showControlsTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="details">Transfer Details</TabsTrigger>
               <TabsTrigger value="items" disabled={mode === 'create' && !transfer?.id}>
                 Items ({transferDetail?.items?.length || 0})
@@ -415,6 +542,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
               {showApprovalsTab && (
                 <WorkflowTabTrigger value="approvals" />
               )}
+              {showControlsTab && <TabsTrigger value="controls">Transfer Controls</TabsTrigger>}
             </TabsList>
 
             {/* Details Tab */}
@@ -590,6 +718,44 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
             <TabsContent value="items" className="space-y-4">
               {renderItemsTab()}
             </TabsContent>
+
+            {showControlsTab && transferDetail && (
+              <TabsContent value="controls" className="space-y-4">
+                <Card>
+                  <CardHeader><CardTitle className="text-base">Immutable transfer action register</CardTitle><CardDescription>Submission, approval, dispatch, receipt, discrepancy resolution and closure are retained with actor, correlation and sequence lineage.</CardDescription></CardHeader>
+                  <CardContent>
+                    {transferDetail.actions.length === 0 ? <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No controlled actions recorded yet.</div> : (
+                      <div className="overflow-x-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>#</TableHead><TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>UTC time</TableHead><TableHead>Comment</TableHead><TableHead>Correlation</TableHead></TableRow></TableHeader><TableBody>{transferDetail.actions.map((action) => <TableRow key={action.id}><TableCell>{action.sequence}</TableCell><TableCell><Badge variant="outline">{action.actionType}</Badge></TableCell><TableCell className="font-mono text-xs">{action.actorUserId}</TableCell><TableCell>{format(new Date(action.occurredAtUtc), 'MMM dd, yyyy HH:mm')}</TableCell><TableCell>{action.comment || '—'}</TableCell><TableCell className="max-w-52 truncate font-mono text-xs" title={action.correlationId}>{action.correlationId}</TableCell></TableRow>)}</TableBody></Table></div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader><CardTitle className="text-base">Receipt discrepancy register</CardTitle><CardDescription>Damage and shortage remain open until an independent actor records a governed resolution with protected central-DMS evidence.</CardDescription></CardHeader>
+                  <CardContent className="space-y-4">
+                    {transferDetail.discrepancies.length === 0 ? <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No transfer discrepancies.</div> : transferDetail.discrepancies.map((item) => (
+                      <div key={item.id} className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                        <Checkbox checked={selectedDiscrepancyIds.includes(item.id)} disabled={item.status !== 'Open'} onCheckedChange={(checked) => setSelectedDiscrepancyIds((ids) => checked ? [...new Set([...ids, item.id])] : ids.filter((id) => id !== item.id))} aria-label={`Select discrepancy ${item.id}`} />
+                        <div className="flex-1"><div className="flex flex-wrap items-center gap-2"><Badge variant={item.status === 'Open' ? 'destructive' : 'secondary'}>{item.status}</Badge><span className="font-medium">{item.reasonCode}</span><span>Damaged {item.damagedQuantity.toFixed(2)} · Shortage {item.shortageQuantity.toFixed(2)}</span></div><p className="mt-1 text-muted-foreground">{item.reason}</p>{item.resolutionCode && <p className="mt-1">Resolution: {item.resolutionCode} · {item.resolutionNotes}</p>}<div className="mt-2 flex flex-wrap gap-2">{item.evidence.map((evidence) => <Badge key={evidence.id} variant="outline">{evidence.evidenceReference}</Badge>)}</div></div>
+                      </div>
+                    ))}
+
+                    {transferDetail.status === 'Received' && transferDetail.hasOpenDiscrepancy && (
+                      <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/50 p-4">
+                        <div className="grid gap-3 md:grid-cols-2"><div className="space-y-1"><Label>Resolution outcome *</Label><Select value={resolutionCode} onValueChange={setResolutionCode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(resolutionCodes).map(([code, label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1"><Label>Current published Central DMS evidence *</Label><Select onValueChange={(value) => void addControlEvidence(value)}><SelectTrigger><SelectValue placeholder="Link protected resolution evidence" /></SelectTrigger><SelectContent>{dmsRecords.map((record) => <SelectItem key={record.id} value={record.id}>{record.documentReference} · {record.title}</SelectItem>)}</SelectContent></Select></div></div>
+                        <div className="flex flex-wrap gap-2">{controlEvidence.map((evidence) => <Badge key={evidence.centralDocumentVersionId} variant="outline" className="gap-2">{evidence.evidenceReference}<button type="button" aria-label={`Remove ${evidence.evidenceReference}`} onClick={() => setControlEvidence((values) => values.filter((value) => value.centralDocumentVersionId !== evidence.centralDocumentVersionId))}>×</button></Badge>)}</div>
+                        <div className="space-y-1"><Label>Resolution notes *</Label><Textarea value={controlComment} onChange={(event) => setControlComment(event.target.value)} placeholder="State the independently verified disposition and supporting basis" /></div>
+                        <Button disabled={controlBusy || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0} onClick={() => void resolveDiscrepancies()}>Resolve selected discrepancies</Button>
+                      </div>
+                    )}
+
+                    {transferDetail.status === 'Received' && !transferDetail.hasOpenDiscrepancy && (
+                      <div className="space-y-3 rounded-md border border-green-200 bg-green-50/50 p-4"><div><div className="font-medium">Independent transfer closure</div><p className="text-sm text-muted-foreground">Closure is available only after every dispatched quantity is accounted and every discrepancy is resolved.</p></div><Textarea value={controlComment} onChange={(event) => setControlComment(event.target.value)} placeholder="Required closure basis" /><Button disabled={controlBusy || !controlComment.trim()} onClick={() => void closeControlledTransfer()}>Close transfer</Button></div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
 
             {showApprovalsTab && transferDetail && (
               <WorkflowTabContent
@@ -815,6 +981,16 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, warehouses,
                       />
                     </div>
                   )}
+                  {selectedItem?.isBatchTracked && (
+                    <div className="space-y-2"><Label>Batch Number</Label><Input value={itemFormData.batchNumber} onChange={(e) => setItemFormData({...itemFormData, batchNumber: e.target.value})} placeholder="Enter batch number" /></div>
+                  )}
+                  {selectedItem?.isManufactureDateTracked && (
+                    <div className="space-y-2"><Label>Manufacture Date</Label><Input type="date" value={itemFormData.manufactureDate} onChange={(e) => setItemFormData({...itemFormData, manufactureDate: e.target.value})} /></div>
+                  )}
+                  {selectedItem?.isExpirationTracked && (
+                    <div className="space-y-2"><Label>Expiry Date</Label><Input type="date" value={itemFormData.expiryDate} onChange={(e) => setItemFormData({...itemFormData, expiryDate: e.target.value})} /></div>
+                  )}
+                  <div className="space-y-2 col-span-2"><Label>Approved Tracking Exception ID</Label><Input value={itemFormData.inventoryTrackingExceptionId} onChange={(e) => setItemFormData({...itemFormData, inventoryTrackingExceptionId: e.target.value})} placeholder="Only when an approved exception is required" /></div>
                 </div>
 
                 {/* Bin/Location Selection */}

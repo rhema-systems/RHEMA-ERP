@@ -8,80 +8,387 @@ namespace ErpSystem.Application.Extensions
     /// </summary>
     public static class LeaveMappingExtensions
     {
-        // ===== CREATE DTO TO ENTITY =====
-        public static LeaveRequest ToEntity(this CreateLeaveRequestDto dto)
-        {
-            return new LeaveRequest
-            {
-                EmployeeId = dto.EmployeeId,
-                LeaveTypeId = dto.LeaveTypeId,
-                StartDate = dto.StartDate,
-                EndDate = dto.EndDate,
-                Reason = dto.Reason,
-                RelieverEmployeeId = dto.RelieverEmployeeId,
-                RelieverNotes = dto.RelieverNotes
-            };
-        }
+        // ===== LEAVE TYPE =====
 
-        // ===== ENTITY TO DTO =====
-        public static LeaveRequestDto ToDto(this LeaveRequest entity)
+        public static LeaveTypeDto ToDto(this LeaveType entity) => new LeaveTypeDto
         {
-            return new LeaveRequestDto
-            {
-                Id = entity.Id,
-                RequestNumber = entity.RequestNumber,
-                EmployeeId = entity.EmployeeId,
-                EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
-                EmployeeName = entity.Employee?.FullName ?? string.Empty,
-                LeaveTypeId = entity.LeaveTypeId,
-                LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
-                IsPaidLeave = entity.LeaveType?.IsPaid ?? false,
-                StartDate = entity.StartDate,
-                EndDate = entity.EndDate,
-                TotalDays = entity.TotalDays,
-                RequestDate = entity.RequestDate,
-                Reason = entity.Reason,
-                Status = entity.Status,
-                RelieverEmployeeId = entity.RelieverEmployeeId,
-                RelieverEmployeeName = entity.RelieverEmployee?.FullName,
-                RelieverNotes = entity.RelieverNotes,
-                ApprovedByEmployeeId = entity.ApprovedByEmployeeId,
-                ApprovedByEmployeeName = entity.ApprovedByEmployee?.FullName,
-                ApprovalDate = entity.ApprovalDate,
-                ApprovalNotes = entity.ApprovalNotes,
-                RejectionDate = entity.RejectionDate,
-                RejectionReason = entity.RejectionReason,
-                CreatedAt = entity.CreatedAt
-            };
-        }
+            Id = entity.Id,
+            Name = entity.Name,
+            Code = entity.Code,
+            Description = entity.Description,
+            IsPaid = entity.IsPaid,
+            DefaultDaysPerYear = entity.DefaultDaysPerYear,
+            MaxDaysPerYear = entity.MaxDaysPerYear,
+            MinDaysNotice = entity.MinDaysNotice,
+            RequiresApproval = entity.RequiresApproval,
+            CalendarColor = entity.CalendarColor,
+            HasSubTypes = entity.HasSubTypes,
+            AllowCarryOver = entity.AllowCarryOver,
+            MaxCarryOverDays = entity.MaxCarryOverDays,
+            CountWeekendsAsLeave = entity.CountWeekendsAsLeave,
+            CountHolidaysAsLeave = entity.CountHolidaysAsLeave,
+            AllowCashConversion = entity.AllowCashConversion,
+            RequiresReliever = entity.RequiresReliever,
+            MinServiceMonthsToAccess = entity.MinServiceMonthsToAccess,
+            CarryOverExpiryMonths = entity.CarryOverExpiryMonths,
+            ForfeitUnusedAfterMonths = entity.ForfeitUnusedAfterMonths,
+            MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
+            EncashmentRateBasis = entity.EncashmentRateBasis,
+            EncashmentRatePerDay = entity.EncashmentRatePerDay,
+            EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
+            IsActive = entity.IsActive
+        };
 
-        // ===== LEAVE BALANCE MAPPINGS =====
-        public static LeaveBalanceDto ToDto(this LeaveBalance entity)
+        public static LeaveType ToEntity(this CreateLeaveTypeDto dto) => new LeaveType
         {
-            return new LeaveBalanceDto
-            {
-                Id = entity.Id,
-                EmployeeId = entity.EmployeeId,
-                LeaveTypeId = entity.LeaveTypeId,
-                LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
-                Year = entity.Year,
-                EntitledDays = entity.EntitledDays,
-                UsedDays = entity.UsedDays,
-                CarriedOverDays = entity.CarriedOverDays,
-                AdjustmentDays = entity.AdjustmentDays,
-                AvailableDays = entity.AvailableDays
-            };
-        }
+            Name = dto.Name,
+            Code = dto.Code,
+            Description = dto.Description,
+            IsPaid = dto.IsPaid,
+            DefaultDaysPerYear = dto.DefaultDaysPerYear,
+            MaxDaysPerYear = dto.MaxDaysPerYear,
+            MinDaysNotice = dto.MinDaysNotice,
+            RequiresApproval = dto.RequiresApproval,
+            CalendarColor = dto.CalendarColor,
+            HasSubTypes = dto.HasSubTypes,
+            AllowCarryOver = dto.AllowCarryOver,
+            MaxCarryOverDays = dto.MaxCarryOverDays,
+            CountWeekendsAsLeave = dto.CountWeekendsAsLeave,
+            CountHolidaysAsLeave = dto.CountHolidaysAsLeave,
+            AllowCashConversion = dto.AllowCashConversion,
+            RequiresReliever = dto.RequiresReliever,
+            MinServiceMonthsToAccess = dto.MinServiceMonthsToAccess,
+            CarryOverExpiryMonths = dto.CarryOverExpiryMonths,
+            ForfeitUnusedAfterMonths = dto.ForfeitUnusedAfterMonths,
+            MandatoryAnnualLeave = dto.MandatoryAnnualLeave,
+            EncashmentRateBasis = dto.EncashmentRateBasis,
+            EncashmentRatePerDay = dto.EncashmentRatePerDay,
+            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth
+        };
 
-        // ===== COLLECTION MAPPINGS =====
+        public static List<LeaveTypeDto> ToDtoList(this IEnumerable<LeaveType> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE SUB TYPE =====
+
+        public static LeaveSubTypeDto ToDto(this LeaveSubType entity) => new LeaveSubTypeDto
+        {
+            Id = entity.Id,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            SubTypeName = entity.SubTypeName,
+            Description = entity.Description,
+            MaxDaysAllowed = entity.MaxDaysAllowed,
+            IsActive = entity.IsActive
+        };
+
+        public static LeaveSubType ToEntity(this CreateLeaveSubTypeDto dto) => new LeaveSubType
+        {
+            LeaveTypeId = dto.LeaveTypeId,
+            SubTypeName = dto.SubTypeName,
+            Description = dto.Description,
+            MaxDaysAllowed = dto.MaxDaysAllowed
+        };
+
+        public static List<LeaveSubTypeDto> ToDtoList(this IEnumerable<LeaveSubType> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE CATEGORY ALLOCATION =====
+
+        public static LeaveCategoryAllocationDto ToDto(this LeaveCategoryAllocation entity) => new LeaveCategoryAllocationDto
+        {
+            Id = entity.Id,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            LeaveSubTypeId = entity.LeaveSubTypeId,
+            LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
+            StaffLevelId = entity.StaffLevelId,
+            StaffLevelName = entity.StaffLevel?.Name ?? string.Empty,
+            AllocationDays = entity.AllocationDays,
+            EffectiveFrom = entity.EffectiveFrom,
+            EffectiveTo = entity.EffectiveTo
+        };
+
+        public static LeaveCategoryAllocation ToEntity(this CreateLeaveCategoryAllocationDto dto) => new LeaveCategoryAllocation
+        {
+            LeaveTypeId = dto.LeaveTypeId,
+            LeaveSubTypeId = dto.LeaveSubTypeId,
+            StaffLevelId = dto.StaffLevelId,
+            AllocationDays = dto.AllocationDays,
+            EffectiveFrom = dto.EffectiveFrom,
+            EffectiveTo = dto.EffectiveTo
+        };
+
+        public static List<LeaveCategoryAllocationDto> ToDtoList(this IEnumerable<LeaveCategoryAllocation> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE TYPE ELIGIBILITY =====
+
+        public static LeaveTypeEligibilityDto ToDto(this LeaveTypeEligibility entity) => new LeaveTypeEligibilityDto
+        {
+            Id = entity.Id,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            EligibilityType = entity.EligibilityType,
+            OrganizationLevelId = entity.OrganizationLevelId,
+            OrganizationLevelName = entity.OrganizationLevel?.Name,
+            OrganizationUnitId = entity.OrganizationUnitId,
+            OrganizationUnitName = entity.OrganizationUnit?.Name,
+            PositionId = entity.PositionId,
+            PositionName = entity.Position?.Title,
+            Gender = entity.Gender
+        };
+
+        public static LeaveTypeEligibility ToEntity(this CreateLeaveTypeEligibilityDto dto) => new LeaveTypeEligibility
+        {
+            LeaveTypeId = dto.LeaveTypeId,
+            EligibilityType = dto.EligibilityType,
+            OrganizationLevelId = dto.OrganizationLevelId,
+            OrganizationUnitId = dto.OrganizationUnitId,
+            PositionId = dto.PositionId,
+            Gender = dto.Gender
+        };
+
+        public static List<LeaveTypeEligibilityDto> ToDtoList(this IEnumerable<LeaveTypeEligibility> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE ACCRUAL POLICY =====
+
+        public static LeaveAccrualPolicyDto ToDto(this LeaveAccrualPolicy entity) => new LeaveAccrualPolicyDto
+        {
+            Id = entity.Id,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            Frequency = entity.Frequency,
+            Mode = entity.Mode,
+            AccrualRate = entity.AccrualRate,
+            MinServiceMonths = entity.MinServiceMonths,
+            ProRateOnJoin = entity.ProRateOnJoin,
+            ProRateOnExit = entity.ProRateOnExit,
+            IsActive = entity.IsActive
+        };
+
+        public static LeaveAccrualPolicy ToEntity(this CreateLeaveAccrualPolicyDto dto) => new LeaveAccrualPolicy
+        {
+            LeaveTypeId = dto.LeaveTypeId,
+            Frequency = dto.Frequency,
+            Mode = dto.Mode,
+            AccrualRate = dto.AccrualRate,
+            MinServiceMonths = dto.MinServiceMonths,
+            ProRateOnJoin = dto.ProRateOnJoin,
+            ProRateOnExit = dto.ProRateOnExit
+        };
+
+        public static List<LeaveAccrualPolicyDto> ToDtoList(this IEnumerable<LeaveAccrualPolicy> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE PLAN =====
+
+        public static LeavePlanDto ToDto(this LeavePlan entity) => new LeavePlanDto
+        {
+            Id = entity.Id,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            OrganizationLevelId = entity.OrganizationLevelId,
+            OrganizationLevelName = entity.OrganizationLevel?.Name,
+            OrganizationUnitId = entity.OrganizationUnitId,
+            OrganizationUnitName = entity.OrganizationUnit?.Name,
+            PositionId = entity.PositionId,
+            PositionName = entity.Position?.Title,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            LeaveSubTypeId = entity.LeaveSubTypeId,
+            LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
+            StartDate = entity.StartDate,
+            EndDate = entity.EndDate,
+            RelieverId = entity.RelieverId,
+            RelieverName = entity.RelieverEmployee?.FullName,
+            SecondRelieverId = entity.SecondRelieverId,
+            SecondRelieverName = entity.SecondRelieverEmployee?.FullName,
+            Notes = entity.Notes,
+            PlannedBy = entity.PlannedBy,
+            PlannedByName = entity.PlannedByEmployee?.FullName ?? string.Empty,
+            Year = entity.Year,
+            Status = entity.Status,
+            SuggestedStartDate = entity.SuggestedStartDate,
+            SuggestedEndDate = entity.SuggestedEndDate,
+            ManagerSuggestionNotes = entity.ManagerSuggestionNotes,
+            WorkflowInstanceId = entity.WorkflowInstanceId,
+            ApprovedById = entity.ApprovedById,
+            ApprovedDate = entity.ApprovedDate,
+            RejectionReason = entity.RejectionReason
+        };
+
+        public static LeavePlan ToEntity(this CreateLeavePlanDto dto) => new LeavePlan
+        {
+            EmployeeId = dto.EmployeeId,
+            OrganizationLevelId = dto.OrganizationLevelId,
+            OrganizationUnitId = dto.OrganizationUnitId,
+            PositionId = dto.PositionId,
+            LeaveTypeId = dto.LeaveTypeId,
+            LeaveSubTypeId = dto.LeaveSubTypeId,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate,
+            RelieverId = dto.RelieverId,
+            SecondRelieverId = dto.SecondRelieverId,
+            Notes = dto.Notes,
+            PlannedBy = dto.PlannedBy,
+            Year = dto.Year
+        };
+
+        public static List<LeavePlanDto> ToDtoList(this IEnumerable<LeavePlan> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE REQUEST =====
+
+        public static LeaveRequest ToEntity(this CreateLeaveRequestDto dto) => new LeaveRequest
+        {
+            EmployeeId = dto.EmployeeId,
+            LeaveTypeId = dto.LeaveTypeId,
+            LeaveSubTypeId = dto.LeaveSubTypeId,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate,
+            Reason = dto.Reason,
+            RelieverEmployeeId = dto.RelieverEmployeeId,
+            SecondRelieverEmployeeId = dto.SecondRelieverEmployeeId,
+            RelieverNotes = dto.RelieverNotes,
+            HandoverNotes = dto.HandoverNotes,
+            LeavePlanId = dto.LeavePlanId
+        };
+
+        public static LeaveRequestDto ToDto(this LeaveRequest entity) => new LeaveRequestDto
+        {
+            Id = entity.Id,
+            RequestNumber = entity.RequestNumber,
+            EmployeeId = entity.EmployeeId,
+            EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            IsPaidLeave = entity.LeaveType?.IsPaid ?? false,
+            LeaveSubTypeId = entity.LeaveSubTypeId,
+            LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
+            StartDate = entity.StartDate,
+            EndDate = entity.EndDate,
+            TotalDays = entity.TotalDays,
+            RequestDate = entity.RequestDate,
+            Reason = entity.Reason,
+            HandoverNotes = entity.HandoverNotes,
+            Status = entity.Status,
+            RelieverEmployeeId = entity.RelieverEmployeeId,
+            RelieverEmployeeName = entity.RelieverEmployee?.FullName,
+            SecondRelieverEmployeeId = entity.SecondRelieverEmployeeId,
+            SecondRelieverEmployeeName = entity.SecondRelieverEmployee?.FullName,
+            RelieverNotes = entity.RelieverNotes,
+            LeavePlanId = entity.LeavePlanId,
+            ClosureDate = entity.ClosureDate,
+            ClosureNotes = entity.ClosureNotes,
+            CancellationDate = entity.CancellationDate,
+            CancellationReason = entity.CancellationReason,
+            CreatedAt = entity.CreatedAt
+        };
+
         public static List<LeaveRequestDto> ToDtoList(this IEnumerable<LeaveRequest> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE BALANCE =====
+
+        public static LeaveBalanceDto ToDto(this LeaveBalance entity) => new LeaveBalanceDto
         {
-            return entities.Select(e => e.ToDto()).ToList();
-        }
+            Id = entity.Id,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            OrganizationUnitName = entity.Employee?.OrganizationUnit?.Name,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveType?.Name ?? string.Empty,
+            LeaveSubTypeId = entity.LeaveSubTypeId,
+            LeaveSubTypeName = entity.LeaveSubType?.SubTypeName,
+            Year = entity.Year,
+            EntitledDays = entity.EntitledDays,
+            // Default accrued-to-date to the full entitlement; service getters override this with
+            // the engine-computed accrued figure for accrual-governed leave types.
+            AccruedToDateDays = entity.EntitledDays,
+            UsedDays = entity.UsedDays,
+            PendingDays = entity.PendingDays,
+            CarriedOverDays = entity.CarriedOverDays,
+            AdjustmentDays = entity.AdjustmentDays,
+            EncashedDays = entity.EncashedDays,
+            AvailableDays = entity.AvailableDays
+        };
 
         public static List<LeaveBalanceDto> ToDtoList(this IEnumerable<LeaveBalance> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE ADJUSTMENT =====
+
+        public static LeaveAdjustmentDto ToDto(this LeaveAdjustment entity) => new LeaveAdjustmentDto
         {
-            return entities.Select(e => e.ToDto()).ToList();
-        }
+            Id               = entity.Id,
+            LeaveBalanceId   = entity.LeaveBalanceId,
+            EmployeeId       = entity.EmployeeId,
+            EmployeeName     = entity.LeaveBalance?.Employee?.FullName ?? string.Empty,
+            LeaveTypeId      = entity.LeaveTypeId,
+            LeaveTypeName    = entity.LeaveBalance?.LeaveType?.Name ?? string.Empty,
+            LeaveSubTypeId   = entity.LeaveSubTypeId,
+            LeaveSubTypeName = entity.LeaveBalance?.LeaveSubType?.SubTypeName,
+            Year             = entity.Year,
+            Days             = entity.Days,
+            ReasonCodeId     = entity.ReasonCodeId,
+            ReasonCodeName   = entity.ReasonCode?.Name,
+            Reason           = entity.Reason,
+            AdjustmentDate   = entity.AdjustmentDate,
+            PerformedBy      = entity.PerformedBy,
+            PerformedByName  = entity.PerformedByEmployee?.FullName ?? string.Empty
+        };
+
+        public static List<LeaveAdjustmentDto> ToDtoList(this IEnumerable<LeaveAdjustment> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE REQUEST ATTACHMENT =====
+
+        public static LeaveRequestAttachmentDto ToDto(this LeaveRequestAttachment entity) => new LeaveRequestAttachmentDto
+        {
+            Id = entity.Id,
+            LeaveRequestId = entity.LeaveRequestId,
+            FileName = entity.FileName,
+            FilePath = entity.FilePath,
+            ContentType = entity.ContentType,
+            FileSizeBytes = entity.FileSizeBytes,
+            UploadedDate = entity.UploadedDate,
+            UploadedBy = entity.UploadedBy,
+            UploadedByName = entity.UploadedByEmployee?.FullName ?? string.Empty
+        };
+
+        public static List<LeaveRequestAttachmentDto> ToDtoList(this IEnumerable<LeaveRequestAttachment> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
+        // ===== LEAVE ENCASHMENT =====
+
+        public static LeaveEncashmentDto ToDto(this LeaveEncashment entity) => new LeaveEncashmentDto
+        {
+            Id = entity.Id,
+            LeaveRequestId = entity.LeaveRequestId,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            LeaveTypeId = entity.LeaveTypeId,
+            LeaveTypeName = entity.LeaveRequest?.LeaveType?.Name ?? string.Empty,
+            Year = entity.Year,
+            DaysEncashed = entity.DaysEncashed,
+            AmountPaid = entity.AmountPaid,
+            Status = entity.Status,
+            ProcessedDate = entity.ProcessedDate,
+            ProcessedByEmployeeId = entity.ProcessedByEmployeeId,
+            ProcessedByName = entity.ProcessedByEmployee?.FullName,
+            PaymentReference = entity.PaymentReference,
+            Notes = entity.Notes,
+            WorkflowInstanceId = entity.WorkflowInstanceId,
+            ApprovedById = entity.ApprovedById,
+            ApprovedDate = entity.ApprovedDate,
+            RejectionReason = entity.RejectionReason
+        };
+
+        public static List<LeaveEncashmentDto> ToDtoList(this IEnumerable<LeaveEncashment> entities)
+            => entities.Select(e => e.ToDto()).ToList();
+
     }
 }

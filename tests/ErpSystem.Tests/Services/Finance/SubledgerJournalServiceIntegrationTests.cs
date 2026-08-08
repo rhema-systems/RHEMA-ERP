@@ -257,6 +257,16 @@ namespace ErpSystem.Tests.Services.Finance
                 return new JournalEntryDto { Id = id };
             }
 
+            public Task<JournalEntryDto> PostJournalEntryForBatchAsync(
+                Guid id,
+                CancellationToken cancellationToken = default)
+                => PostJournalEntryAsync(id, cancellationToken);
+
+            public Task NotifyJournalPostedAsync(
+                Guid id,
+                CancellationToken cancellationToken = default)
+                => Task.CompletedTask;
+
             // Unused methods for this test
             public Task<IReadOnlyList<JournalEntryDto>> GetJournalEntriesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
             public Task<JournalEntryDto?> GetJournalEntryByIdAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotImplementedException();

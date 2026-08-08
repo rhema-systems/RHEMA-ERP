@@ -11,6 +11,44 @@ public sealed class FinanceConcurrencyHardeningTests
 {
     [Fact]
     [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinancePeriodCloseIssue32")]
+    public void PeriodCloseTransactions_ShouldStartInsideSqlServerExecutionStrategy()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Fiscal",
+            "FiscalPeriodService.cs"));
+        var templateControl = ExtractMember(
+            source,
+            "private async Task<T> ExecuteCloseTemplateControlAsync<T>",
+            "private async Task EnsureDefaultCloseTemplatesAsync");
+        var periodControl = ExtractMember(
+            source,
+            "private async Task<T> ExecutePeriodCloseControlAsync<T>",
+            "private async Task<FinanceCloseCycle> GetOrCreateActiveCloseCycleAsync");
+
+        foreach (var control in new[] { templateControl, periodControl })
+        {
+            var strategyIndex = control.IndexOf("ExecuteInStrategyAsync", StringComparison.Ordinal);
+            var transactionIndex = control.IndexOf("BeginTransactionAsync", StringComparison.Ordinal);
+            strategyIndex.Should().BeGreaterThan(-1, "SQL Server retry handling must own the complete close-control unit");
+            transactionIndex.Should().BeGreaterThan(strategyIndex, "the user transaction must be created inside the execution strategy");
+            control.Should().Contain("IsolationLevel.Serializable", "period-close decisions still require serializable isolation");
+            control.Should().Contain("AcquireTransactionLockAsync", "the transaction-scoped application lock remains the concurrency boundary");
+            control.Should().Contain("RollbackAsync", "a failed retry attempt must release transaction state before it can be repeated");
+        }
+
+        periodControl.Should().Contain("FIN:CLOSE:", "evaluation, certification, close and reopen actions must share a period lock");
+        templateControl.Should().Contain("FIN:CLOSE-TEMPLATE:", "template version allocation must retain its tenant-wide lock");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
     public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseAtomicBalanceDeltas()
     {
@@ -25,6 +63,28 @@ public sealed class FinanceConcurrencyHardeningTests
         source.Should().Contain("ApplyTrackedAccountBalanceDeltasAsync", "non-SQL Server providers need a provider-neutral balance update path");
         source.Should().NotContain("account.Balance += transaction", "balance snapshot updates must not use read-modify-write per transaction line");
         source.Should().NotContain("account.Balance -= transaction", "balance snapshot updates must not use read-modify-write per transaction line");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinancePostingEngine_ShouldCollapseConcurrentDuplicatePostsToOneDurableEvent()
+    {
+        var root = FindRepositoryRoot();
+        var engine = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "GL", "FinancePostingEngine.cs"));
+        var model = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "ApplicationDbContext.cs"));
+
+        var raceCatch = ExtractMember(engine, "catch (DbUpdateException ex)", "private async Task<FinancePostingResultDto> ExecutePostingAsync");
+        raceCatch.Should().Contain("RollbackAsync(cancellationToken)", "a losing concurrent posting must discard its partial transaction");
+        raceCatch.Should().Contain("_context.ChangeTracker.Clear()", "the losing request must not retain partial tracked ledger state");
+        raceCatch.Should().Contain("FindExistingPostingAsync", "the winner's durable posting must be reloaded after the unique-key race");
+        raceCatch.Should().Contain("request.ReturnExistingOnDuplicate", "duplicate convergence must remain an explicit caller contract");
+        raceCatch.Should().Contain("wasDuplicate: true", "the losing request must return the winner as a duplicate result");
+
+        var postingEventModel = ExtractMember(model, "builder.Entity<FinancePostingEvent>", "builder.Entity<AccountTransaction>");
+        postingEventModel.Should().Contain(".IsUnique()", "the database must arbitrate competing posting-event inserts");
+        postingEventModel.Should().Contain("e.SourceModule, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction", "the unique key must identify the same source action within the tenant");
+        postingEventModel.Should().Contain("[IsDeleted] = 0", "active idempotency must ignore only explicitly soft-deleted historical rows");
     }
 
     [Fact]
@@ -118,12 +178,16 @@ public sealed class FinanceConcurrencyHardeningTests
         var approvalsMethod = ExtractMember(approvalsSource, "private async Task FinalizeVendorInvoiceApprovalAsync", "private async Task RecordFinanceWorkflowAuditAsync");
         var serviceMethod = ExtractMember(serviceSource, "public async Task<VendorInvoiceDto> ApproveAsync", "public async Task<VendorInvoiceDto> PostAsync");
 
-        approvalsMethod.Should().Contain("!invoice.IsOpeningBalance && l.LineItemType == \"Inventory\"", "the workbench approval path must not create inventory receipts for opening-balance AP invoices");
+        approvalsMethod.Should().NotContain("ProcessInventoryReceiptAsync", "the workbench approval path must leave every stock receipt to the governed purchase-receipt/inspection lifecycle");
+        approvalsMethod.Should().NotContain("LineItemType == \"Inventory\"", "invoice approval must not contain a parallel inventory-receipt branch");
+        approvalsMethod.Should().Contain("must not post stock again", "the authoritative receiving boundary should remain explicit in the approval path");
         approvalsMethod.Should().Contain("if (invoice.IsOpeningBalance)", "the workbench approval path must skip normal AP posting for opening-balance invoices");
         approvalsMethod.IndexOf("if (invoice.IsOpeningBalance)", StringComparison.Ordinal)
             .Should().BeLessThan(approvalsMethod.IndexOf("_vendorInvoiceService.PostAsync", StringComparison.Ordinal), "opening-balance AP invoices must return before normal posting");
 
-        serviceMethod.Should().Contain("!invoice.IsOpeningBalance && l.LineItemType == \"Inventory\"", "the service approval path must not create inventory receipts for opening-balance AP invoices");
+        serviceMethod.Should().NotContain("ProcessInventoryReceiptAsync", "the service approval path must leave every stock receipt to the governed purchase-receipt/inspection lifecycle");
+        serviceMethod.Should().NotContain("LineItemType == \"Inventory\"", "invoice approval must not contain a parallel inventory-receipt branch");
+        serviceMethod.Should().Contain("must not", "the authoritative receiving boundary should remain explicit in the service approval path");
         serviceMethod.Should().Contain("if (!invoice.IsOpeningBalance)", "the service approval path must post only normal AP invoices");
         serviceMethod.IndexOf("if (!invoice.IsOpeningBalance)", StringComparison.Ordinal)
             .Should().BeLessThan(serviceMethod.IndexOf("await PostAsync(invoice.Id", StringComparison.Ordinal), "normal AP posting must be guarded by the opening-balance check");
@@ -455,6 +519,77 @@ public sealed class FinanceConcurrencyHardeningTests
         using var context = new ApplicationDbContext(options);
         context.GetService<IMigrationsAssembly>().Migrations.Should()
             .ContainKey("20260720110000_AlignCustomerPaymentsToBusinessPartners");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void FinanceApprovalQueue_ShouldPageAndBatchPaymentSodReadiness()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Finance",
+            "FinanceApprovalsController.cs"));
+        var method = ExtractMember(
+            source,
+            "public async Task<ActionResult<IReadOnlyList<FinanceApprovalQueueItemDto>>> GetPending",
+            "[HttpPost(\"{approvalId:guid}/approve\")]");
+
+        method.Should().Contain(".Take(pageSize + 1)",
+            "the queue must not materialize an unbounded tenant approval set");
+        method.Should().Contain("GetQueueReadinessAsync",
+            "payment and batch participants must be evaluated from set-based page loads");
+        method.Should().NotContain("GetPaymentReadinessAsync",
+            "the queue must not reload the complete payment graph once per row");
+        method.Should().NotContain("GetBatchReadinessAsync",
+            "the queue must not reload the complete batch graph once per row");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void ApExceptionReport_ShouldCountOnlyCompletableCorrectiveActions()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "AP",
+            "ApReportsService.cs"));
+
+        source.Should().Contain("OpenCorrectiveActionCount = rows.Count(row =>");
+        source.Should().Contain("VendorInvoiceMatchExceptionRules.CanCompleteCorrectiveAction(",
+            "pending, rejected, cancelled, and expired exceptions are not actionable corrective work");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceReviewHardening")]
+    public void GovernedGrnProjection_ShouldUseBaseUnitsAndHeaderLocationFallback()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Inventory",
+            "GoodsReceiptNoteService.cs"));
+
+        source.Should().Contain("purchaseOrderItem.OrderedQuantity * conversion");
+        source.Should().Contain("sourceLine.PreviouslyReceiptedQuantity * conversion");
+        source.Should().Contain("sourceLine.ToleranceQuantity * conversion");
+        source.Should().Contain("sourceLine.MaximumReceivableQuantity * conversion");
+        source.Should().Contain("sourceLine.RemainingQuantity * conversion");
+        source.Should().Contain("UnitOfMeasure = item.UnitOfMeasure");
+        source.Should().Contain("itemDto.StorageLocationId ?? dto.ReceivingLocationId");
     }
 
     [Fact]

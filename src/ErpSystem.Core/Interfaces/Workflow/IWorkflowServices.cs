@@ -323,6 +323,14 @@ public sealed record WorkflowEntityTypeCatalogItem(
 
 public static class WorkflowEntityTypeCodeGenerator
 {
+    /// <summary>
+    /// WorkflowEntityTypes.Code is nvarchar(50). Generated codes longer than this used to be
+    /// written straight through, so a single long catalog name (for example
+    /// EstatePropertyManagementMoveInMoveOutHandover) failed the INSERT and took the whole
+    /// seed batch down with it — leaving every entity type after it unregistered.
+    /// </summary>
+    private const int MaxCodeLength = 50;
+
     public static string Generate(string entityType)
     {
         if (string.IsNullOrWhiteSpace(entityType))
@@ -352,7 +360,29 @@ public static class WorkflowEntityTypeCodeGenerator
         }
 
         var code = new string(codeChars.ToArray()).Trim('_');
-        return string.IsNullOrWhiteSpace(code) ? "ENTITY" : code;
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return "ENTITY";
+        }
+
+        return code.Length <= MaxCodeLength ? code : Shorten(code);
+    }
+
+    /// <summary>
+    /// Keeps a readable prefix and appends a hash of the full code, so two long names that
+    /// share a prefix still produce distinct codes. Deterministic: the same name always
+    /// yields the same code, which matters because the code is the lookup key.
+    /// </summary>
+    private static string Shorten(string code)
+    {
+        const int suffixLength = 8;
+        var prefix = code[..(MaxCodeLength - suffixLength - 1)].TrimEnd('_');
+
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(code));
+        var suffix = Convert.ToHexString(hash)[..suffixLength];
+
+        return $"{prefix}_{suffix}";
     }
 }
 

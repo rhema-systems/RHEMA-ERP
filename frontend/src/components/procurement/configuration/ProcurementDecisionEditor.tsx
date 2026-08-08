@@ -1,19 +1,27 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { FileUp, Link2, Save, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { procurementDecisionFormRegistry, procurementDecisionOwnerOptions } from '@/lib/procurement-configuration-registry';
+import {
+  normalizeDecisionFormValue,
+  procurementDecisionFormRegistry,
+  procurementDecisionOwnerOptions,
+} from '@/lib/procurement-configuration-registry';
 import { fileUploadService } from '@/services/fileUploadService';
+import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
 import { procurementConfigurationService } from '@/services/procurement-configuration.service';
+import { workflowApiService } from '@/services/workflow-api.service';
 import type {
   ProcurementConfigurationDecision,
   ProcurementConfigurationDecisionStatus,
@@ -45,13 +53,77 @@ export function ProcurementDecisionEditor({ profileId, decision, editable, isSup
   const [notes, setNotes] = useState(decision.notes ?? '');
   const [reason, setReason] = useState('');
   const [externalReference, setExternalReference] = useState('');
+  const isSupplierFeeDecision = decision.decisionKey === 'DEC-007';
 
-  const missingRequired = useMemo(() => definition.fields.filter(field => {
+  const accountLookup = useQuery({
+    queryKey: ['procurement-configuration', 'dec-007', 'accounts'],
+    queryFn: () => financeDataService.getAccounts({ status: 'Active', pageSize: 1000 }),
+    enabled: isSupplierFeeDecision,
+    staleTime: 5 * 60 * 1000,
+  });
+  const paymentMethodLookup = useQuery({
+    queryKey: ['procurement-configuration', 'dec-007', 'payment-methods'],
+    queryFn: () => cashManagementDataService.getActivePaymentMethods(),
+    enabled: isSupplierFeeDecision,
+    staleTime: 5 * 60 * 1000,
+  });
+  const workflowLookup = useQuery({
+    queryKey: ['procurement-configuration', 'dec-007', 'workflows'],
+    queryFn: () => workflowApiService.getWorkflowDefinitions({
+      page: 1,
+      pageSize: 1000,
+      isActive: true,
+      sortBy: 'name',
+      sortDescending: false,
+    }),
+    enabled: isSupplierFeeDecision,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const postingAccounts = useMemo(
+    () => (accountLookup.data ?? []).filter(account =>
+      account.status === 'Active' && account.allowDirectPosting && account.isPostingAllowed !== false),
+    [accountLookup.data],
+  );
+  const revenueAccounts = useMemo(
+    () => postingAccounts.filter(account => account.accountType === 'Revenue'),
+    [postingAccounts],
+  );
+  const taxLiabilityAccounts = useMemo(
+    () => postingAccounts.filter(account => account.accountType === 'Liability'),
+    [postingAccounts],
+  );
+  const paymentMethods = useMemo(
+    () => (paymentMethodLookup.data ?? []).filter(method => method.isActive && Boolean(method.code?.trim())),
+    [paymentMethodLookup.data],
+  );
+  const publishedWorkflows = useMemo(
+    () => (workflowLookup.data?.data ?? []).filter(workflow => workflow.isActive && workflow.lifecycleStatus === 'Published'),
+    [workflowLookup.data],
+  );
+
+  const missingRequired = useMemo(() => {
+    const missing = definition.fields.filter(field => {
     if (!field.required) return false;
     const current = value[field.key];
     if (Array.isArray(current)) return current.length === 0;
     return current === undefined || current === null || current === '';
-  }), [definition.fields, value]);
+    });
+
+    if (isSupplierFeeDecision && value.mode === 'paid') {
+      if (!Array.isArray(value.paymentChannels) || value.paymentChannels.length === 0) {
+        missing.push({ key: 'paymentChannels', label: 'Allowed payment methods', type: 'textList', required: true });
+      }
+      if (!value.revenueAccountId) {
+        missing.push({ key: 'revenueAccountId', label: 'Fee revenue account', type: 'text', required: true });
+      }
+      if (Number(value.taxPercent ?? 0) > 0 && !value.taxAccountId) {
+        missing.push({ key: 'taxAccountId', label: 'Tax liability account', type: 'text', required: true });
+      }
+    }
+
+    return missing;
+  }, [definition.fields, isSupplierFeeDecision, value]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -61,7 +133,7 @@ export function ProcurementDecisionEditor({ profileId, decision, editable, isSup
         ownerGroup,
         status: nextStatus,
         approvalStatus: nextStatus === 'Approved' ? 'Approved' : nextStatus === 'Rejected' ? 'Rejected' : 'Pending',
-        value,
+        value: normalizeDecisionFormValue(decision.decisionKey, value),
         decisionDate: new Date().toISOString(),
         approvalReference: approvalReference.trim() || undefined,
         sourceLineage: sourceLineage.trim() || undefined,
@@ -121,16 +193,121 @@ export function ProcurementDecisionEditor({ profileId, decision, editable, isSup
   if (!definition) return <p className="text-sm text-destructive">No registered editor exists for {decision.decisionKey}.</p>;
 
   const setField = (key: string, next: unknown) => setValue(current => ({ ...current, [key]: next }));
+  const togglePaymentMethod = (code: string, checked: boolean) => {
+    const selected = Array.isArray(value.paymentChannels)
+      ? value.paymentChannels.filter((item): item is string => typeof item === 'string')
+      : [];
+    setField('paymentChannels', checked
+      ? Array.from(new Set([...selected, code]))
+      : selected.filter(item => item !== code));
+  };
 
   return (
     <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-2">
         {definition.fields.map(field => {
           const current = value[field.key];
+          const isPaymentMethods = isSupplierFeeDecision && field.key === 'paymentChannels';
+          const isAccount = isSupplierFeeDecision && (field.key === 'revenueAccountId' || field.key === 'taxAccountId');
+          const isExemptionWorkflow = isSupplierFeeDecision && field.key === 'exemptionWorkflowDefinitionId';
+          const accountOptions = field.key === 'revenueAccountId' ? revenueAccounts : taxLiabilityAccounts;
           return (
             <div key={field.key} className={field.type === 'textarea' || field.type === 'textList' ? 'space-y-2 md:col-span-2' : 'space-y-2'}>
               <Label htmlFor={`${decision.decisionKey}-${field.key}`}>{field.label}{field.required ? ' *' : ''}</Label>
-              {field.type === 'select' ? (
+              {isPaymentMethods ? (
+                <div className="rounded-md border p-3">
+                  {paymentMethodLookup.isLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading active payment methods…</p>
+                  ) : paymentMethodLookup.isError ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm text-destructive">Active payment methods could not be loaded.</p>
+                      <Button type="button" variant="outline" size="sm" onClick={() => paymentMethodLookup.refetch()}>Retry</Button>
+                    </div>
+                  ) : paymentMethods.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No active coded payment methods are configured in Finance.</p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {paymentMethods.map(method => {
+                        const code = method.code?.trim().toUpperCase();
+                        if (!code) return null;
+                        const checked = Array.isArray(current) && current.includes(code);
+                        return (
+                          <Label key={method.id} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 font-normal hover:bg-muted/50">
+                            <Checkbox
+                              checked={checked}
+                              disabled={!editable}
+                              onCheckedChange={next => togglePaymentMethod(code, next === true)}
+                              aria-label={`${method.name} (${code})`}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-medium">{method.name}</span>
+                              <span className="block text-xs text-muted-foreground">{code}</span>
+                            </span>
+                          </Label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : isAccount ? (
+                <>
+                  <Select
+                    disabled={!editable || accountLookup.isLoading || accountLookup.isError}
+                    value={String(current || '__none__')}
+                    onValueChange={next => setField(field.key, next === '__none__' ? undefined : next)}
+                  >
+                    <SelectTrigger id={`${decision.decisionKey}-${field.key}`}>
+                      <SelectValue placeholder={accountLookup.isLoading ? 'Loading accounts…' : 'Select a GL account'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not selected</SelectItem>
+                      {accountOptions.map(account => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {account.accountNumber || account.accountCode} — {account.accountName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {accountLookup.isError && (
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+                      <p className="text-xs text-destructive">Finance GL accounts could not be loaded.</p>
+                      <Button type="button" variant="outline" size="sm" onClick={() => accountLookup.refetch()}>Retry</Button>
+                    </div>
+                  )}
+                  {!accountLookup.isLoading && !accountLookup.isError && accountOptions.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No eligible active direct-posting {field.key === 'revenueAccountId' ? 'revenue' : 'liability'} account is configured.</p>
+                  )}
+                </>
+              ) : isExemptionWorkflow ? (
+                <>
+                  <Select
+                    disabled={!editable || workflowLookup.isLoading || workflowLookup.isError}
+                    value={String(current || '__none__')}
+                    onValueChange={next => setField(field.key, next === '__none__' ? undefined : next)}
+                  >
+                    <SelectTrigger id={`${decision.decisionKey}-${field.key}`}>
+                      <SelectValue placeholder={workflowLookup.isLoading ? 'Loading workflows…' : 'Select a published workflow'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Not selected</SelectItem>
+                      {publishedWorkflows.map(workflow => (
+                        <SelectItem key={workflow.id} value={workflow.id}>
+                          {workflow.name} — v{workflow.version}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {workflowLookup.isError && (
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+                      <p className="text-xs text-destructive">Published workflow definitions could not be loaded.</p>
+                      <Button type="button" variant="outline" size="sm" onClick={() => workflowLookup.refetch()}>Retry</Button>
+                    </div>
+                  )}
+                  {!workflowLookup.isLoading && !workflowLookup.isError && publishedWorkflows.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No active Published workflow definition is available.</p>
+                  )}
+                </>
+              ) : field.type === 'select' ? (
                 <Select disabled={!editable} value={String(current ?? '')} onValueChange={next => setField(field.key, next)}>
                   <SelectTrigger id={`${decision.decisionKey}-${field.key}`}><SelectValue placeholder="Select an option" /></SelectTrigger>
                   <SelectContent>{field.options?.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
@@ -145,7 +322,10 @@ export function ProcurementDecisionEditor({ profileId, decision, editable, isSup
               ) : field.type === 'textList' ? (
                 <Textarea id={`${decision.decisionKey}-${field.key}`} disabled={!editable} value={Array.isArray(current) ? current.join('\n') : ''} onChange={event => setField(field.key, event.target.value.split(/[\n,]/).map(item => item.trim()).filter(Boolean))} placeholder={field.placeholder ?? 'One value per line'} />
               ) : (
-                <Input id={`${decision.decisionKey}-${field.key}`} disabled={!editable} type={field.type} min={field.min} max={field.max} step={field.step} value={String(current ?? '')} onChange={event => setField(field.key, field.type === 'number' ? (event.target.value === '' ? undefined : Number(event.target.value)) : event.target.value)} placeholder={field.placeholder} />
+                <Input id={`${decision.decisionKey}-${field.key}`} disabled={!editable} type={field.type} min={field.min} max={field.max} step={field.step} value={String(current ?? '')} onChange={event => setField(field.key, field.type === 'number' ? (event.target.value === '' ? undefined : Number(event.target.value)) : field.type === 'date' && event.target.value === '' ? undefined : event.target.value)} placeholder={field.placeholder} />
+              )}
+              {isSupplierFeeDecision && field.key === 'receiptNumberFormat' && (
+                <p className="text-xs text-muted-foreground">Include <code>{'{SEQ}'}</code> or a hash sequence such as <code>{'{######}'}</code>. Example: <code>SUP-REC-{'{YYYY}'}-{'{######}'}</code>.</p>
               )}
             </div>
           );

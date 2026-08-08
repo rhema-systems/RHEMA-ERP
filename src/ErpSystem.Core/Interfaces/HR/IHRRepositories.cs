@@ -1,7 +1,5 @@
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
-using ErpSystem.Core.Entities;
-using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -17,16 +15,16 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<Employee?> GetByEmployeeNumberWithFullProfileAsync(string employeeNumber);
     Task<Employee?> GetByEmailAsync(string email);
     Task<Employee?> GetByIdWithDetailsAsync(Guid id);
-    Task<Employee?> GetByApplicationUserIdAsync(Guid applicationUserId);
     Task<Employee?> GetByIdWithFullProfileAsync(Guid id);
     Task<IEnumerable<Employee>> GetActiveEmployeesAsync();
+
+    // Organizational assignment (preferred over legacy Department/Section)
     Task<IEnumerable<Employee>> GetByOrganizationUnitAsync(Guid organizationUnitId);
     Task<IEnumerable<Employee>> GetByOrganizationLevelAsync(Guid organizationLevelId);
-    Task<IEnumerable<Employee>> GetByStationAsync(Guid stationId);
-    Task<IEnumerable<Employee>> GetByDivisionAsync(Guid divisionId);
+
+    // Legacy organizational structure (kept for backward compatibility)
     Task<IEnumerable<Employee>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<Employee>> GetBySectionAsync(Guid sectionId);
-    Task<IEnumerable<Employee>> GetByUnitAsync(Guid unitId);
     Task<IEnumerable<Employee>> GetByPositionAsync(Guid positionId);
     Task<IEnumerable<Employee>> GetByManagerAsync(Guid managerId);
     Task<IEnumerable<Employee>> GetByStatusAsync(StaffStatus status);
@@ -36,10 +34,13 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<IEnumerable<Employee>> GetMaintenanceTechniciansAsync();
     Task<IEnumerable<Employee>> GetAvailableTechniciansAsync();
     Task<IEnumerable<Employee>> GetEmployeesBySkillAsync(Guid skillId, SkillLevel? minLevel = null);
+
+    // Common identifier lookups (UI validations, payroll/HR integrations)
     Task<Employee?> GetByBadgeNumberAsync(string badgeNumber);
     Task<Employee?> GetByTaxNumberAsync(string taxNumber);
     Task<Employee?> GetBySocialSecurityNumberAsync(string socialSecurityNumber);
     Task<Employee?> GetByTinNumberAsync(string tinNumber);
+
     Task<bool> EmployeeNumberExistsAsync(string employeeNumber);
     Task<bool> EmployeeNumberExistsAsync(string employeeNumber, Guid excludeEmployeeId);
     Task<bool> EmailExistsAsync(string email);
@@ -52,7 +53,7 @@ public interface IEmployeeRepository : IGenericRepository<Employee>
     Task<bool> SocialSecurityNumberExistsAsync(string socialSecurityNumber, Guid excludeEmployeeId);
     Task<bool> TinNumberExistsAsync(string tinNumber);
     Task<bool> TinNumberExistsAsync(string tinNumber, Guid excludeEmployeeId);
-    Task<string> GenerateEmployeeNumberAsync();    
+    Task<string> GenerateEmployeeNumberAsync();
 }
 
 /// <summary>
@@ -140,25 +141,29 @@ public interface IEmployeeSkillRepository : IGenericRepository<EmployeeSkill>
 }
 
 /// <summary>
-/// Repository interface for employee biometric operations
+/// Repository interface for employee position history operations.
 /// </summary>
-public interface IEmployeeBiometricRepository : IGenericRepository<EmployeeBiometric>
+public interface IEmployeePositionHistoryRepository : IGenericRepository<EmployeePositionHistory>
 {
-    Task<IEnumerable<EmployeeBiometric>> GetByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<EmployeeBiometric>> GetActiveByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<EmployeeBiometric>> GetByTypeAsync(string biometricType);
-    Task<EmployeeBiometric?> GetByEmployeeAndTypeAsync(Guid employeeId, string biometricType);
+    Task<IEnumerable<EmployeePositionHistory>> GetByEmployeeAsync(Guid employeeId);
+    Task<EmployeePositionHistory?> GetCurrentAsync(Guid employeeId);
 }
 
 /// <summary>
-/// Repository interface for employee shift preference operations
+/// Repository interface for employee salary assignment operations.
 /// </summary>
-public interface IEmployeeShiftPreferenceRepository : IGenericRepository<EmployeeShiftPreference>
+public interface IEmployeeSalaryAssignmentRepository : IGenericRepository<EmployeeSalaryAssignment>
 {
-    Task<IEnumerable<EmployeeShiftPreference>> GetByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<EmployeeShiftPreference>> GetByShiftAsync(Guid shiftId);
-    Task<EmployeeShiftPreference?> GetByEmployeeAndShiftAsync(Guid employeeId, Guid shiftId);
-    Task<IEnumerable<EmployeeShiftPreference>> GetOrderedPreferencesAsync(Guid employeeId);
+    Task<IEnumerable<EmployeeSalaryAssignment>> GetByEmployeeAsync(Guid employeeId);
+    Task<EmployeeSalaryAssignment?> GetCurrentAsync(Guid employeeId);
+}
+
+/// <summary>
+/// Repository interface for employee referee operations.
+/// </summary>
+public interface IEmployeeRefereeRepository : IGenericRepository<EmployeeReferee>
+{
+    Task<IEnumerable<EmployeeReferee>> GetByEmployeeAsync(Guid employeeId);
 }
 
 /// <summary>
@@ -169,6 +174,28 @@ public interface IEmployeeBankDetailRepository : IGenericRepository<EmployeeBank
     Task<IEnumerable<EmployeeBankDetail>> GetByEmployeeAsync(Guid employeeId);
     Task<EmployeeBankDetail?> GetPrimaryBankDetailAsync(Guid employeeId);
     Task<IEnumerable<EmployeeBankDetail>> GetActiveByEmployeeAsync(Guid employeeId);
+}
+
+/// <summary>
+/// Repository interface for bank (financial institution) operations
+/// </summary>
+public interface IBankRepository : IGenericRepository<EmployeeBank>
+{
+    Task<IEnumerable<EmployeeBank>> GetActiveAsync(Guid tenantId);
+    Task<EmployeeBank?> GetByCodeAsync(Guid tenantId, string code);
+    Task<EmployeeBank?> GetWithBranchesAsync(Guid tenantId, Guid id);
+    Task<bool> CodeExistsAsync(Guid tenantId, string code, Guid? excludeId = null);
+}
+
+/// <summary>
+/// Repository interface for bank branch operations
+/// </summary>
+public interface IBankBranchRepository : IGenericRepository<EmployeeBankBranch>
+{
+    Task<IEnumerable<EmployeeBankBranch>> GetByBankAsync(Guid tenantId, Guid bankId);
+    Task<IEnumerable<EmployeeBankBranch>> GetActiveByBankAsync(Guid tenantId, Guid bankId);
+    Task<EmployeeBankBranch?> GetByCodeAsync(Guid tenantId, Guid bankId, string code);
+    Task<bool> CodeExistsAsync(Guid tenantId, Guid bankId, string code, Guid? excludeId = null);
 }
 
 /// <summary>
@@ -236,6 +263,24 @@ public interface IEmployeePositionRepository : IGenericRepository<EmployeePositi
     Task<EmployeePosition?> GetWithSkillRequirementsAsync(Guid id);
     Task<IEnumerable<EmployeePosition>> GetByLevelAsync(int level);
     Task<bool> CodeExistsAsync(string code);
+    /// <summary>Explicitly marks a new benefit as Added so EF Core inserts rather than updates it.</summary>
+    void TrackBenefit(EmployeePositionBenefit benefit);
+    /// <summary>Explicitly marks a new skill requirement as Added so EF Core inserts rather than updates it.</summary>
+    void TrackSkillRequirement(PositionSkillRequirement requirement);
+
+    /// <summary>
+    /// A position's benefit entitlements <b>including soft-deleted ones</b>, tracked so they can be
+    /// revived. The ordinary include cannot serve this: the global soft-delete filter applies to
+    /// included navigations too, so a removed row is invisible to a later save — which then tries to
+    /// insert a duplicate and violates the unique index on (TenantId, PositionId, PolicyId).
+    /// </summary>
+    Task<IReadOnlyList<EmployeePositionBenefit>> GetBenefitsIncludingDeletedAsync(Guid positionId);
+
+    /// <summary>
+    /// A position's skill requirements <b>including soft-deleted ones</b>, for the same reason as
+    /// <see cref="GetBenefitsIncludingDeletedAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<PositionSkillRequirement>> GetSkillRequirementsIncludingDeletedAsync(Guid positionId);
 }
 
 /// <summary>
@@ -262,45 +307,6 @@ public interface IWorkStationRepository : IGenericRepository<WorkStation>
 
 #endregion Organizational Structure Repositories
 
-#region Attendance Management Repositories
-
-/// <summary>
-/// Repository interface for shift operations
-/// </summary>
-public interface IShiftRepository : IGenericRepository<Shift>
-{
-    Task<IEnumerable<Shift>> GetActiveShiftsAsync();
-    Task<Shift?> GetByNameAsync(string name);
-    Task<IEnumerable<Shift>> GetOverlappingShiftsAsync(TimeOnly startTime, TimeOnly endTime);
-    Task<bool> NameExistsAsync(string name);
-}
-
-/// <summary>
-/// Repository interface for attendance record operations
-/// </summary>
-public interface IAttendanceRecordRepository : IGenericRepository<AttendanceRecord>
-{
-    Task<IEnumerable<AttendanceRecord>> GetByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<AttendanceRecord>> GetByDateRangeAsync(Guid employeeId, DateOnly startDate, DateOnly endDate);
-    Task<AttendanceRecord?> GetByEmployeeAndDateAsync(Guid employeeId, DateOnly date);
-    Task<IEnumerable<AttendanceRecord>> GetByDateAsync(DateOnly date);
-    Task<IEnumerable<AttendanceRecord>> GetAbsentEmployeesAsync(DateOnly date);
-    Task<IEnumerable<AttendanceRecord>> GetLateEmployeesAsync(DateOnly date);
-}
-
-/// <summary>
-/// Repository interface for shift assignment operations
-/// </summary>
-public interface IShiftAssignmentRepository : IGenericRepository<ShiftAssignment>
-{
-    Task<IEnumerable<ShiftAssignment>> GetByEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<ShiftAssignment>> GetByShiftAsync(Guid shiftId);
-    Task<ShiftAssignment?> GetActiveAssignmentAsync(Guid employeeId);
-    Task<IEnumerable<ShiftAssignment>> GetActiveAssignmentsAsync();
-    Task<IEnumerable<ShiftAssignment>> GetByDateRangeAsync(DateOnly startDate, DateOnly endDate);
-}
-#endregion Attendance Management Repositories
-
 #region Misc Repositories
 /// <summary>
 /// Repository interface for skill operations
@@ -311,6 +317,14 @@ public interface ISkillRepository : IGenericRepository<Skill>
     Task<IEnumerable<Skill>> GetByCategoryAsync(string category);
     Task<IEnumerable<Skill>> GetCertificationRequiredSkillsAsync();
     Task<Skill?> GetByNameAsync(string name);
+    Task<bool> NameExistsAsync(string name);
+}
+
+public interface IQualificationCatalogueRepository : IGenericRepository<Qualification>
+{
+    Task<IEnumerable<Qualification>> GetActiveAsync();
+    Task<IEnumerable<Qualification>> GetByTypeAsync(QualificationType type);
+    Task<Qualification?> GetByNameAsync(string name);
     Task<bool> NameExistsAsync(string name);
 }
 

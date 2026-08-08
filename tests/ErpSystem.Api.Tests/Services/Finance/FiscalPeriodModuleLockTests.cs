@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -69,7 +70,8 @@ public sealed class FiscalPeriodModuleLockTests
         var service = new FiscalPeriodService(
             unitOfWork,
             currentUser.Object,
-            Mock.Of<ILogger<FiscalPeriodService>>());
+            Mock.Of<ILogger<FiscalPeriodService>>(),
+            Mock.Of<ISubledgerSettlementReadModelService>());
         var expiry = DateTime.UtcNow.AddHours(4);
 
         var partialResult = await service.UnlockPeriodForModuleAsync(
@@ -166,7 +168,8 @@ public sealed class FiscalPeriodModuleLockTests
         var service = new FiscalPeriodService(
             unitOfWork,
             currentUser.Object,
-            Mock.Of<ILogger<FiscalPeriodService>>());
+            Mock.Of<ILogger<FiscalPeriodService>>(),
+            Mock.Of<ISubledgerSettlementReadModelService>());
         var replacementExpiry = DateTime.UtcNow.AddHours(2);
 
         await service.UnlockPeriodForModuleAsync(
