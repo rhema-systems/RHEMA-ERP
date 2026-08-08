@@ -336,9 +336,9 @@ Rollback is safe only before fixed asset capitalization postings are used. After
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open.
 - `FIN-LIM-0028`: procurement/GRV-origin capitalization remains open and is guarded.
 - `FIN-LIM-0029`: direct capitalization workflow routing remains open.
-- `FIN-LIM-0030`: capitalization reversal/adjustment remains open.
+- `FIN-LIM-0030`: resolved by the controlled capitalization reversal/correction follow-up in `docs/fixed-asset-capitalization-reversal-foundation.md`.
 
-None of these open fixed asset limitations blocks starting the depreciation batch because the acquisition/capitalization accounting base is now available. They remain go-live blockers unless explicitly accepted by accounting/product leadership.
+The limitations still marked open do not block starting the depreciation batch because the acquisition/capitalization accounting base is available. They remain go-live blockers unless explicitly accepted by accounting/product leadership.
 
 ## Definition Of Done
 

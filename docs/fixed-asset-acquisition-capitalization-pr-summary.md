@@ -131,9 +131,9 @@ Results:
 - `FIN-LIM-0027`: reporting/reconciliation remains open.
 - `FIN-LIM-0028`: procurement/GRV-origin capitalization remains open and guarded.
 - `FIN-LIM-0029`: direct capitalization workflow routing remains open.
-- `FIN-LIM-0030`: capitalization reversal/adjustment remains open.
+- `FIN-LIM-0030`: resolved by the controlled capitalization reversal/correction follow-up in `docs/fixed-asset-capitalization-reversal-foundation.md`.
 
-None blocks the depreciation batch; all remain final go-live controls unless explicitly accepted.
+The limitations still marked open do not block the depreciation batch; they remain final go-live controls unless explicitly accepted.
 
 ## Rollback Considerations
 

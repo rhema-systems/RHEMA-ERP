@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -126,6 +127,98 @@ public class FixedAssetsController : ControllerBase
         {
             var result = await _fixedAssetService.SubmitCapitalizationForApprovalAsync(id, request?.Comments);
             return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id}/capitalization-reversals")]
+    public async Task<ActionResult<IReadOnlyList<FixedAssetCapitalizationReversalDto>>> GetCapitalizationReversals(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _fixedAssetService.GetCapitalizationReversalsAsync(id, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
+    /// Captures a reasoned request without touching posted cost. An independent authorised user
+    /// must review it before the central posting engine can create the linked compensating entry.
+    /// </summary>
+    [HttpPost("{id}/capitalization-reversals")]
+    [Authorize(Policy = FinancePermissions.ReverseFixedAssetCapitalization)]
+    public async Task<ActionResult<FixedAssetCapitalizationReversalDto>> RequestCapitalizationReversal(
+        Guid id,
+        [FromBody] RequestFixedAssetCapitalizationReversalDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _fixedAssetService.RequestCapitalizationReversalAsync(id, dto, cancellationToken);
+            return CreatedAtAction(nameof(GetCapitalizationReversals), new { id }, result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("{id}/capitalization-reversals/{requestId}/review")]
+    [Authorize(Policy = FinancePermissions.ApproveFixedAssetCapitalizationReversal)]
+    public async Task<ActionResult<FixedAssetCapitalizationReversalDto>> ReviewCapitalizationReversal(
+        Guid id,
+        Guid requestId,
+        [FromBody] ReviewFixedAssetCapitalizationReversalDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _fixedAssetService.ReviewCapitalizationReversalAsync(id, requestId, dto, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("{id}/capitalization-reversals/{requestId}/post")]
+    [Authorize(Policy = FinancePermissions.ReverseFixedAssetCapitalization)]
+    public async Task<ActionResult<FixedAssetCapitalizationReversalDto>> PostCapitalizationReversal(
+        Guid id,
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _fixedAssetService.PostCapitalizationReversalAsync(id, requestId, cancellationToken));
         }
         catch (KeyNotFoundException)
         {

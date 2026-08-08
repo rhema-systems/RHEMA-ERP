@@ -50,6 +50,7 @@ public static class FinanceDocumentTypes
 {
     public const string JournalEntry = "JournalEntry";
     public const string JournalBatch = "JournalBatch";
+    public const string RecurringJournal = "RecurringJournal";
     public const string UnitJournalEntry = "UnitJournalEntry";
     public const string ARInvoice = "ARInvoice";
     public const string ARPayment = "ARPayment";
@@ -101,6 +102,7 @@ public static class DocumentSequenceDefaults
         {
             Finance(tenantId, FinanceDocumentTypes.JournalEntry, "General Journal Entry", "JE-{YYYY}-{######}", 6, DocumentSequenceResetPolicies.Yearly, true, "GL journal entries, reversals, and subledger postings."),
             Finance(tenantId, FinanceDocumentTypes.JournalBatch, "General Journal Batch", "JB-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Controlled groups of manual GL journal entries."),
+            Finance(tenantId, FinanceDocumentTypes.RecurringJournal, "Recurring Journal Template", "RJ-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Versioned standing journal instructions and generated occurrences."),
             Finance(tenantId, FinanceDocumentTypes.UnitJournalEntry, "Unit Journal Entry", "UJE-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, true, "Unit accounting journal entries and reversals."),
             Finance(tenantId, FinanceDocumentTypes.ARInvoice, "Customer Invoice", "INV-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable invoices."),
             Finance(tenantId, FinanceDocumentTypes.ARPayment, "Customer Payment", "PMT-{YYYY}{MM}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Accounts receivable receipts/payments."),

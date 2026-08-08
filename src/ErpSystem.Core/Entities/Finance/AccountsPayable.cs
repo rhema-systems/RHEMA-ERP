@@ -320,6 +320,15 @@ public class VendorInvoiceLineItem : TenantEntity
     public Guid? CapitalizationPostingEventId { get; set; }
     public DateTime? CapitalizedAt { get; set; }
 
+    /// <summary>
+    /// When the containing AP invoice is voided, these fields prove that its shared reversal
+    /// journal also removed this line's asset-register cost. A separate asset journal is never
+    /// posted because doing so would reverse the invoice's AP/tax lines twice.
+    /// </summary>
+    public Guid? CapitalizationReversalJournalEntryId { get; set; }
+    public Guid? CapitalizationReversalPostingEventId { get; set; }
+    public DateTime? CapitalizationReversedAt { get; set; }
+
     // ── For product-based lines (links to PO item for matching) ─────────
 
     /// <summary>
