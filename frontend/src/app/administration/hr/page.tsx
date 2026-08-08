@@ -15,6 +15,7 @@ import {
   Clock,
   CalendarDays,
   Coins,
+  Target,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -134,6 +135,21 @@ export default function HrAdministrationPage() {
                 'Pay components mirrored from Payroll, position emoluments and benefit policies.',
               href: '/administration/hr/compensation',
               icon: Coins,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Performance</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Performance Setup',
+              description:
+                'Strategic goals, the goal library, KPI definitions and the goal risk thresholds.',
+              href: '/administration/hr/performance',
+              icon: Target,
             },
           ]}
         />

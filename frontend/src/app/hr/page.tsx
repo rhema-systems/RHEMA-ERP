@@ -11,6 +11,8 @@ import {
   Briefcase,
   Coins,
   ShieldPlus,
+  Target,
+  HandCoins,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -127,6 +129,20 @@ export default function HrHomePage() {
               description: 'Client engagements, consultant timesheets and invoices.',
               href: '/hr/consulting',
               icon: Briefcase,
+            },
+            {
+              title: 'Performance',
+              description:
+                'Appraisal cycles and the goal cascade, through calibration, appeals and the outcomes an appraisal leads to.',
+              href: '/hr/performance',
+              icon: Target,
+            },
+            {
+              title: 'Service Bonds',
+              description:
+                'Service obligations from sponsored training — who owes time, who owes money, and what has been settled.',
+              href: '/hr/service-bonds',
+              icon: HandCoins,
             },
             {
               title: 'Payroll',

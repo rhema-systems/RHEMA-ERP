@@ -40,7 +40,11 @@ import {
   Workflow,
   Wrench,
   Calendar,
+  CalendarRange,
   ClipboardCheck,
+  ListChecks,
+  Medal,
+  SlidersHorizontal,
   AlertTriangle,
   Clock,
   CheckSquare,
@@ -55,6 +59,7 @@ import {
   TrendingUp,
   AlertCircle,
   ClipboardList,
+  ClipboardPen,
   Tag,
   MapPin,
   Truck,
@@ -76,6 +81,7 @@ import {
   KeyRound,
   PackageCheck,
   CalendarCheck,
+  MessagesSquare,
   ScrollText,
   Timer,
   BellRing,
@@ -86,6 +92,13 @@ import {
   ShieldPlus,
   ScanLine,
   WalletCards,
+  Layers,
+  Library,
+  Gauge,
+  Lightbulb,
+  Handshake,
+  FastForward,
+  HandCoins,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -435,8 +448,54 @@ export const navigationItems: NavItem[] = [
           { title: 'Invoices', href: '/hr/consulting/invoices', icon: Receipt },
         ],
       },
-      // Performance is re-added with its area — linking to routes that do not exist yet
-      // only produces 404s.
+      {
+        // Cycles, the goal cascade, and the appraisal run itself. Ordered by who acts: the
+        // employee's own work first, then the manager's, then HR's — then what happens around
+        // the sign-off (calibration before it, appeals after it, outcomes off the back of it),
+        // with the deadline override last as the exception path.
+        title: 'Performance',
+        href: '/hr/performance',
+        icon: Target,
+        children: [
+          { title: 'Analytics', href: '/hr/performance/analytics', icon: BarChart3 },
+          { title: 'Appraisal Cycles', href: '/hr/performance/cycles', icon: CalendarRange },
+          { title: 'My Appraisals', href: '/hr/performance/appraisals', icon: ClipboardCheck },
+          { title: 'Peer Reviews', href: '/hr/performance/peer-reviews', icon: MessagesSquare },
+          { title: 'Team Appraisals', href: '/hr/performance/team-appraisals', icon: UserCheck },
+          { title: 'Check-ins', href: '/hr/performance/check-ins', icon: CalendarCheck },
+          { title: 'Conversations', href: '/hr/performance/conversations', icon: MessagesSquare },
+          {
+            title: 'Development Plans',
+            href: '/hr/performance/development-plans',
+            icon: GraduationCap,
+          },
+          { title: 'Improvement Plans', href: '/hr/performance/pip', icon: ClipboardPen },
+          { title: 'HR Review', href: '/hr/performance/hr-review', icon: ClipboardList },
+          { title: 'Calibration', href: '/hr/performance/calibration', icon: Scale },
+          { title: 'Appeals', href: '/hr/performance/appeals', icon: Gavel },
+          { title: 'Recommendations', href: '/hr/performance/recommendations', icon: Lightbulb },
+          { title: 'Proposals', href: '/hr/performance/proposals', icon: Handshake },
+          { title: 'Company Goals', href: '/hr/performance/company-goals', icon: Building2 },
+          { title: 'Unit Goals', href: '/hr/performance/unit-goals', icon: Layers },
+          { title: 'Employee Goals', href: '/hr/performance/employee-goals', icon: Target },
+          { title: 'Team Goals', href: '/hr/performance/team-goals', icon: Users },
+          { title: 'Goals At Risk', href: '/hr/performance/at-risk', icon: AlertTriangle },
+          { title: 'Notifications', href: '/hr/performance/notifications', icon: Bell },
+          {
+            title: 'Deadline Enforcement',
+            href: '/hr/performance/deadline-enforcement',
+            icon: FastForward,
+          },
+        ],
+      },
+      {
+        // The enforcement side of a sponsored training nomination. It sits outside Performance
+        // because the obligation is a training commitment, not an appraisal outcome — Training
+        // links here too once that area is built.
+        title: 'Service Bonds',
+        href: '/hr/service-bonds',
+        icon: HandCoins,
+      },
     ],
   },
   {
@@ -1223,6 +1282,21 @@ export const navigationItems: NavItem[] = [
               { title: 'Devices', href: '/administration/hr/attendance/devices', icon: Fingerprint },
               { title: 'Alert Rules', href: '/administration/hr/attendance/alert-rules', icon: BellRing },
               { title: 'Overtime Policies', href: '/administration/hr/attendance/overtime-policies', icon: Timer },
+            ],
+          },
+          {
+            title: 'Performance',
+            href: '/administration/hr/performance',
+            icon: Target,
+            children: [
+              { title: 'Appraisal Settings', href: '/administration/hr/performance/settings', icon: SlidersHorizontal },
+              { title: 'Appraisal Templates', href: '/administration/hr/performance/templates', icon: ClipboardCheck },
+              { title: 'Appraisal Criteria', href: '/administration/hr/performance/criteria', icon: ListChecks },
+              { title: 'Grade Definitions', href: '/administration/hr/performance/grade-definitions', icon: Medal },
+              { title: 'Strategic Goals', href: '/administration/hr/performance/strategic-goals', icon: Target },
+              { title: 'Goal Library', href: '/administration/hr/performance/goal-library', icon: Library },
+              { title: 'KPI Definitions', href: '/administration/hr/performance/kpi-definitions', icon: Gauge },
+              { title: 'Goal Risk Thresholds', href: '/administration/hr/performance/goal-risk-settings', icon: AlertTriangle },
             ],
           },
           // Employee Categories has no backing controller at all, so it stays dropped.
