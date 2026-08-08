@@ -1429,10 +1429,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             // Primary Contact Information (from contact person)
             PrimaryContactName = additionalData.ContactPersonName,
             PrimaryContactTitle = additionalData.ContactPersonTitle,
-            // Preserve legacy account-first registrations. In the token-gated path,
-            // credential provisioning replaces the system actor with the approved
-            // supplier account while leaving registration audit fields unchanged.
-            UserId = registration.CreatedById,
+            // The registration creator is audit provenance, not necessarily an
+            // ApplicationUser. Token-gated applications are created by an
+            // applicant-session subject, so copying CreatedById into this foreign
+            // key can reference a non-existent Users row. Credential provisioning
+            // links the approved supplier account after that account is created.
+            UserId = null,
             // Operational status used across internal UIs and downstream docs.
             RegistrationStatus = BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus,
             ApprovalStatus = BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,

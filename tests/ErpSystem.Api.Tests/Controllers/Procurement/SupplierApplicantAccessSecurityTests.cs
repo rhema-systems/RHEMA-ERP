@@ -200,6 +200,24 @@ public sealed class SupplierApplicantAccessSecurityTests
     }
 
     [Fact]
+    public async Task RegistrationApprovalLetsUnexpectedFailuresReachCentralExceptionHandling()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.ApproveRegistrationAsync(
+                registrationId, actorId, It.IsAny<string?>()))
+            .ThrowsAsync(new ApplicationException("database failure"));
+        var controller = RegistrationController(registrations.Object, actorId);
+
+        var action = () => controller.ApproveRegistration(
+            registrationId, new ApproveRegistrationRequest("approved"));
+
+        await action.Should().ThrowAsync<ApplicationException>()
+            .WithMessage("database failure");
+    }
+
+    [Fact]
     public void SharedAndSupplierUploadControllersUseTheSameControlledUploadService()
     {
         var sharedField = typeof(FileUploadController).GetFields(

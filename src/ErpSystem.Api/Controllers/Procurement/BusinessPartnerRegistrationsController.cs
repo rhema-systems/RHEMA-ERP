@@ -453,11 +453,6 @@ public class BusinessPartnerRegistrationsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error approving business partner registration {RegistrationId}", id);
-            return StatusCode(500, "An error occurred while approving the business partner registration");
-        }
     }
 
     /// <summary>
