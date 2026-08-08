@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { JournalEntry, JournalType, PostingStatus } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
+import { journalSourceOptions } from './journal-source-options';
 
 export default function JournalEntriesPage() {
     const searchParams = useSearchParams();
@@ -207,12 +208,11 @@ export default function JournalEntriesPage() {
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Sources</SelectItem>
-                                    <SelectItem value="AP">Accounts Payable</SelectItem>
-                                    <SelectItem value="AR">Accounts Receivable</SelectItem>
-                                    <SelectItem value="GL">General Ledger</SelectItem>
-                                    <SelectItem value="BANK">Cash/Bank</SelectItem>
-                                    <SelectItem value="FixedAssets">Fixed Assets</SelectItem>
-                                    <SelectItem value="PAYROLL">Payroll</SelectItem>
+                                    {journalSourceOptions.map(option => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                         </div>
