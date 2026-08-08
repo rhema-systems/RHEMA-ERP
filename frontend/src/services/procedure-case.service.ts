@@ -64,6 +64,7 @@ export interface ProcedureCaseDetail extends ProcedureCaseSummary {
   description?: string | null;
   currentStageOwner?: string | null;
   canEditCurrentStage: boolean;
+  currentStageFieldKeys: string[];
   fields: ProcedureCaseField[];
   checklistItems: ProcedureCaseChecklistItem[];
   documents: ProcedureCaseDocument[];

@@ -95,8 +95,6 @@ export default function DevelopmentPlanningPage() {
     };
   }, []);
 
-  const totalStages = procedures.reduce((sum, procedure) => sum + procedure.stageCount, 0);
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -131,8 +129,8 @@ export default function DevelopmentPlanningPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Stages</CardDescription>
-            <CardTitle>{totalStages}</CardTitle>
+            <CardDescription>Workflow stages</CardDescription>
+            <CardTitle className="text-base">Configured in Workflow Setup</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -155,6 +153,9 @@ export default function DevelopmentPlanningPage() {
         </Button>
         <Button asChild variant="outline">
           <Link href="/document-management?module=Planning">Document Mngt</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/reports?module=planning">Planning Reports</Link>
         </Button>
         <Button asChild variant="outline">
           <Link href="/development/project-approvals">Approvals</Link>
@@ -189,7 +190,7 @@ export default function DevelopmentPlanningPage() {
                     <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
                       <Icon className={`h-5 w-5 ${accent}`} />
                     </div>
-                    <Badge variant="secondary">{procedure.stageCount} stages</Badge>
+                    <Badge variant="secondary">Configured workflow</Badge>
                   </div>
                   <div>
                     <CardTitle className="text-base leading-6">{procedure.title}</CardTitle>

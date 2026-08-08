@@ -147,6 +147,15 @@ public class UpdateEstateManagedAssetRegisterDto
     public string? PropertyFileReference { get; set; }
 }
 
+public class UpdateEstateManagedAssetOccupancyDto
+{
+    public EstateManagedAssetStatus Status { get; set; }
+    public bool? IsAvailableForLease { get; set; }
+    public bool? IsAvailableForSale { get; set; }
+    public bool? IsPublishedToExternalPortal { get; set; }
+    public string? Notes { get; set; }
+}
+
 public class CreateManualExistingLandDto
 {
     public string? AssetCode { get; set; }

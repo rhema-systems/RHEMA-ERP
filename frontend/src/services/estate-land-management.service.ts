@@ -16,6 +16,8 @@ export enum EstateManagedAssetStatus {
   Occupied = 5,
   Sold = 6,
   Retired = 7,
+  UnderMaintenance = 8,
+  Blocked = 9,
 }
 
 export enum EstateManagedAssetSourceType {
@@ -245,6 +247,14 @@ export interface UpdateEstateManagedAssetRegister {
   propertyFileReference?: string | null;
 }
 
+export interface UpdateEstateManagedAssetOccupancy {
+  status: EstateManagedAssetStatus;
+  isAvailableForLease?: boolean | null;
+  isAvailableForSale?: boolean | null;
+  isPublishedToExternalPortal?: boolean | null;
+  notes?: string | null;
+}
+
 export interface EstateManagedAssetQuery {
   assetType?: EstateManagedAssetType;
   status?: EstateManagedAssetStatus;
@@ -270,6 +280,8 @@ const assetStatusNames: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.Occupied]: 'Occupied',
   [EstateManagedAssetStatus.Sold]: 'Sold',
   [EstateManagedAssetStatus.Retired]: 'Retired',
+  [EstateManagedAssetStatus.UnderMaintenance]: 'UnderMaintenance',
+  [EstateManagedAssetStatus.Blocked]: 'Blocked',
 };
 
 const enumMatches = <T extends number>(
@@ -406,6 +418,26 @@ export class EstateLandManagementService {
     }>(`/estate/managed-assets/${assetId}/register`, payload);
     if (!response.data) {
       throw new Error(response.message || 'Unable to update register record.');
+    }
+    return normalizeManagedAsset(response.data);
+  }
+
+  async updateOccupancy(
+    assetId: string,
+    payload: UpdateEstateManagedAssetOccupancy
+  ): Promise<EstateManagedAsset> {
+    const response = await apiService.patch<{
+      success?: boolean;
+      data?: EstateManagedAsset;
+      message?: string;
+    }>(`/estate/managed-assets/${assetId}/occupancy`, {
+      ...payload,
+      status: assetStatusNames[payload.status],
+    });
+    if (!response.data) {
+      throw new Error(
+        response.message || 'Unable to update occupancy and availability.'
+      );
     }
     return normalizeManagedAsset(response.data);
   }

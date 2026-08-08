@@ -92,6 +92,7 @@ public class LocationStructureService : ILocationStructureService
             throw new InvalidOperationException($"Location structure with code '{createDto.Code}' already exists.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = _currentUserProvider.TenantId;
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -182,17 +183,20 @@ public class LocationLevelService : ILocationLevelService
     private readonly ILocationLevelRepository _repository;
     private readonly ILocationStructureRepository _structureRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationLevelService> _logger;
 
     public LocationLevelService(
         ILocationLevelRepository repository,
         ILocationStructureRepository structureRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<LocationLevelService> logger)
     {
         _repository = repository;
         _structureRepository = structureRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
@@ -273,6 +277,7 @@ public class LocationLevelService : ILocationLevelService
             throw new InvalidOperationException($"Level number '{createDto.LevelNumber}' is already used in this structure.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = _currentUserProvider.TenantId;
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -341,17 +346,20 @@ public class LocationService : ILocationService
     private readonly ILocationRepository _repository;
     private readonly ILocationLevelRepository _levelRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationService> _logger;
 
     public LocationService(
         ILocationRepository repository,
         ILocationLevelRepository levelRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<LocationService> logger)
     {
         _repository = repository;
         _levelRepository = levelRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
@@ -492,7 +500,7 @@ public class LocationService : ILocationService
         }
         else
         {
-            if (!level.IsRootLevel)
+            if (level.LevelNumber != 1)
                 throw new InvalidOperationException("Root locations must be created under a root level.");
 
             var rootCount = await _repository.GetRootLocationCountAsync(createDto.StructureId);
@@ -509,6 +517,7 @@ public class LocationService : ILocationService
             throw new InvalidOperationException($"Location with name '{createDto.Name}' already exists in this level.");
 
         var entity = createDto.ToEntity();
+        entity.TenantId = _currentUserProvider.TenantId;
 
         // Build path
         if (createDto.ParentLocationId.HasValue)

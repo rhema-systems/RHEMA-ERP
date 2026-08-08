@@ -1,9 +1,12 @@
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Procedures;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procedures;
+using ErpSystem.Core.Models;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -38,6 +41,35 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         _procedureCaseService = procedureCaseService;
         _fileStorageService = fileStorageService;
         _notificationService = notificationService;
+    }
+
+    [HttpGet("/api/estate/external/customer-profiles")]
+    public async Task<IActionResult> GetCustomerProfiles(CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var customers = await PortalCustomers(tenantId, userId.Value)
+            .OrderBy(item => item.PartnerName)
+            .ToListAsync(cancellationToken);
+        return Ok(new
+        {
+            success = true,
+            data = customers.Select(customer => new
+            {
+                customer.Id,
+                customer.PartnerName,
+                customer.PrimaryEmail,
+                customer.PrimaryPhone,
+                customer.PhysicalAddress,
+                customer.CustomerAccountNumber,
+                customer.Currency
+            })
+        });
     }
 
     [HttpGet]
@@ -180,8 +212,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Ok(new { success = true, data = Array.Empty<object>() });
         }
 
-        var requests = await _db.ProcedureCases
+        var cases = await _db.ProcedureCases
             .AsNoTracking()
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
             .Where(item => item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.OpenedById == userId.Value
@@ -190,6 +223,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     || item.SourceDepartment == "External Portal - Estate Listings"))
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .Take(100)
+            .ToListAsync(cancellationToken);
+
+        var requests = cases
             .Select(item => new
             {
                 item.Id,
@@ -198,15 +234,185 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 item.Title,
                 item.ReferenceNumber,
                 item.ApplicantName,
+                item.SourceDepartment,
                 item.Status,
                 item.CurrentStageName,
                 item.CurrentAssignedRole,
+                FieldValues = item.Fields.ToDictionary(
+                    field => field.Key,
+                    field => field.Value,
+                    StringComparer.OrdinalIgnoreCase),
                 item.CreatedAt,
                 item.UpdatedAt
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         return Ok(new { success = true, data = requests });
+    }
+
+    [HttpPost("/api/estate/external/requests/{requestId:guid}/customer-decision")]
+    public async Task<IActionResult> SubmitCustomerDecision(
+        Guid requestId,
+        [FromBody] ExternalPropertyRequestDecision request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        var procedureCase = await LoadOwnedExternalListingCaseAsync(tenantId, userId.Value, requestId, cancellationToken);
+        if (procedureCase is null)
+        {
+            return NotFound(new { success = false, message = "Property request was not found." });
+        }
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        var decisionStatus = FieldValue(fields, "decisionStatus");
+        if (!string.Equals(decisionStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "Customer acceptance is available only after Property Management approves the request." });
+        }
+
+        var accepted = string.Equals(request.Decision, "Accept", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.Decision, "Accepted", StringComparison.OrdinalIgnoreCase);
+        var rejected = string.Equals(request.Decision, "Reject", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.Decision, "Rejected", StringComparison.OrdinalIgnoreCase);
+        if (!accepted && !rejected)
+        {
+            return BadRequest(new { success = false, message = "Choose Accept or Reject." });
+        }
+
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        UpsertField(procedureCase, fields, "customerAcceptanceStatus", "Customer acceptance status", "select", accepted ? "Accepted" : "Rejected");
+        UpsertField(procedureCase, fields, "customerNotificationStatus", "Customer notification status", "select", accepted ? "Accepted by customer" : "Rejected by customer");
+        UpsertField(procedureCase, fields, "customerAcceptanceDate", "Customer acceptance date", "date", today);
+        UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", accepted ? "Customer accepted" : "Customer rejected");
+        UpsertField(procedureCase, fields, "billingStartStatus", "Billing start status", "select", accepted ? "Blocked - signature pending" : "Not applicable");
+        if (!string.IsNullOrWhiteSpace(request.Notes))
+        {
+            UpsertField(procedureCase, fields, "notes", "Property request notes", "textarea", request.Notes.Trim());
+        }
+
+        AddExternalCaseActivity(
+            procedureCase,
+            userId.Value,
+            accepted ? "Customer accepted" : "Customer rejected",
+            request.Notes);
+        procedureCase.LastActionById = userId.Value;
+        procedureCase.UpdatedAt = DateTime.UtcNow;
+        procedureCase.LastModifiedById = userId.Value;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            success = true,
+            message = accepted
+                ? "Your acceptance has been recorded. Upload the signed agreement when it is ready."
+                : "Your rejection has been recorded.",
+            data = ToExternalRequestDto(procedureCase)
+        });
+    }
+
+    [HttpPost("/api/estate/external/requests/{requestId:guid}/signed-agreement")]
+    [RequestSizeLimit(25_000_000)]
+    public async Task<IActionResult> UploadSignedAgreement(
+        Guid requestId,
+        [FromForm] IFormFile? file,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { success = false, message = "Select the signed agreement document to upload." });
+        }
+
+        var procedureCase = await LoadOwnedExternalListingCaseAsync(tenantId, userId.Value, requestId, cancellationToken);
+        if (procedureCase is null)
+        {
+            return NotFound(new { success = false, message = "Property request was not found." });
+        }
+
+        var fields = procedureCase.Fields
+            .Where(field => !field.IsDeleted)
+            .ToDictionary(field => field.Key, field => field, StringComparer.OrdinalIgnoreCase);
+        if (!string.Equals(FieldValue(fields, "customerAcceptanceStatus"), "Accepted", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { success = false, message = "Accept the approved request before uploading a signed agreement." });
+        }
+
+        await using var stream = file.OpenReadStream();
+        var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
+        {
+            FileStream = stream,
+            FileName = file.FileName,
+            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+            FileSize = file.Length,
+            Category = "procedure-case-documents",
+            TenantId = tenantId.ToString(),
+            OverwriteExisting = false
+        });
+        if (!upload.Success)
+        {
+            return BadRequest(new { success = false, message = upload.ErrorMessage ?? "Signed agreement upload failed." });
+        }
+
+        var now = DateTime.UtcNow;
+        var document = new ProcedureCaseDocument
+        {
+            TenantId = tenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Name = "Signed lease / tenancy agreement",
+            RequiredFrom = "Agreement generation, signing, and close",
+            IsMandatory = true,
+            FileName = upload.OriginalFileName,
+            FileUrl = upload.FilePath,
+            Notes = string.IsNullOrWhiteSpace(notes) ? "Uploaded by customer from External Portal." : notes.Trim(),
+            UploadedById = userId.Value,
+            UploadedAt = now,
+            CreatedAt = now,
+            CreatedById = userId.Value
+        };
+        procedureCase.Documents.Add(document);
+
+        var agreementReference = FirstNonBlank(
+            upload.OriginalFileName,
+            upload.FileName,
+            upload.FilePath) ?? $"SIGNED-{procedureCase.ReferenceNumber ?? procedureCase.Id.ToString()}";
+        UpsertField(procedureCase, fields, "signedAgreementReference", "Signed agreement upload reference", "text", agreementReference);
+        UpsertField(
+            procedureCase,
+            fields,
+            "billingStartStatus",
+            "Billing start status",
+            "select",
+            string.IsNullOrWhiteSpace(FieldValue(fields, "moveInDate"))
+                ? "Blocked - move-in date pending"
+                : "Ready for billing");
+        UpsertField(procedureCase, fields, "applicationStatus", "Request status", "select", "Signed agreement uploaded");
+        AddExternalCaseActivity(procedureCase, userId.Value, "Signed agreement uploaded", upload.OriginalFileName);
+        procedureCase.LastActionById = userId.Value;
+        procedureCase.UpdatedAt = now;
+        procedureCase.LastModifiedById = userId.Value;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Signed agreement uploaded. Property Management can now complete move-in and billing readiness.",
+            data = ToExternalRequestDto(procedureCase)
+        });
     }
 
     [HttpPost("/api/estate/external/requests")]
@@ -274,6 +480,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         [FromQuery] string? location = null,
         [FromQuery] string? listingType = null,
         [FromQuery] string? search = null,
+        [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] int take = 100,
         CancellationToken cancellationToken = default)
     {
@@ -295,6 +502,34 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
                     || asset.AssetType == EstateManagedAssetType.Facility));
+
+        var portalUserId = GetUserId();
+        if (portalUserId.HasValue && businessPartnerId.HasValue)
+        {
+            var selectedCustomer = await FindPortalCustomerAsync(
+                tenantId,
+                portalUserId.Value,
+                businessPartnerId.Value,
+                cancellationToken);
+            if (selectedCustomer is null)
+            {
+                return BadRequest(new { success = false, message = "Select a customer account linked to your portal login." });
+            }
+
+            var selectedCustomerId = selectedCustomer.Id.ToString();
+            query = query.Where(asset => !_db.ProcedureCases.Any(procedureCase =>
+                procedureCase.TenantId == tenantId
+                && !procedureCase.IsDeleted
+                && procedureCase.OpenedById == portalUserId.Value
+                && procedureCase.SourceDepartment == "External Portal - Estate Listings"
+                && procedureCase.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "sourceReference"
+                    && field.Value == selectedCustomerId)
+                && procedureCase.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "propertyUnit"
+                    && (field.Value == asset.AssetCode
+                        || (asset.ProjectUnitCode != null && field.Value == asset.ProjectUnitCode)))));
+        }
 
         if (normalizedListingType != null)
         {
@@ -388,43 +623,107 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             return BadRequest(new { success = false, message = "Enter a positive bid amount for this land sale." });
         }
-        var applicantName = string.IsNullOrWhiteSpace(request.ApplicantName)
-            ? _currentUserService.UserName
-            : request.ApplicantName.Trim();
-        var contact = string.IsNullOrWhiteSpace(request.Contact)
-            ? _currentUserService.Email ?? _currentUserService.UserName
-            : request.Contact.Trim();
+
+        var portalUserId = GetUserId();
+        if (portalUserId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        if (!request.BusinessPartnerId.HasValue)
+        {
+            return BadRequest(new { success = false, message = "Select the customer account placing this request." });
+        }
+
+        var customer = await FindPortalCustomerAsync(
+            tenantId,
+            portalUserId.Value,
+            request.BusinessPartnerId.Value,
+            cancellationToken);
+        if (customer is null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The selected customer account is not linked to your portal login."
+            });
+        }
+
+        var alreadySubmitted = await _db.ProcedureCases
+            .AsNoTracking()
+            .AnyAsync(procedureCase => procedureCase.TenantId == tenantId
+                && !procedureCase.IsDeleted
+                && procedureCase.OpenedById == portalUserId.Value
+                && procedureCase.SourceDepartment == "External Portal - Estate Listings"
+                && procedureCase.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "sourceReference"
+                    && field.Value == customer.Id.ToString())
+                && procedureCase.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "propertyUnit"
+                    && (field.Value == asset.AssetCode
+                        || (asset.ProjectUnitCode != null && field.Value == asset.ProjectUnitCode))),
+                cancellationToken);
+        if (alreadySubmitted)
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = "You have already submitted a request for this property. Track it under My Property Requests."
+            });
+        }
+
+        var applicantName = customer.PartnerName;
         var reference = BuildExternalReference("LISTING");
-        var requestLabel = requestType == "Purchase" ? "Purchase bid" : "Lease request";
+        var requestLabel = requestType == "Purchase" ? "Purchase bid" : "Rental request";
+        var transactionSummary = requestType == "Purchase"
+            ? $"{requestLabel} for {asset.AssetCode} - {asset.Name} by {customer.PartnerName} ({customer.CustomerAccountNumber}) at {asset.ExternalListingCurrency} {request.OfferAmount:0.##}."
+            : $"{requestLabel} for {asset.AssetCode} - {asset.Name} by {customer.PartnerName} ({customer.CustomerAccountNumber}).";
         var description = string.IsNullOrWhiteSpace(request.Message)
-            ? $"External portal {requestLabel.ToLowerInvariant()} for {asset.AssetCode} - {asset.Name}."
-            : request.Message.Trim();
+            ? transactionSummary
+            : $"{transactionSummary} {request.Message.Trim()}";
+        var publishedListingType = asset.ExternalListingType == "SaleAndRent"
+            ? "Sale or Rent"
+            : asset.ExternalListingType;
+        var publishedAmount = requestType == "Purchase"
+            ? asset.ExternalSalePrice ?? asset.ExternalListingPrice
+            : asset.ExternalMonthlyRent ?? asset.ExternalListingPrice;
 
         var fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["sourceLabel"] = "Source: External Portal -> Estate / Property Management",
-            ["sourceSystem"] = "External Portal",
-            ["sourceWorkspace"] = "Customer Sale / Rent Listings",
-            ["listingRequestType"] = requestType,
-            ["assetId"] = asset.Id.ToString(),
-            ["assetCode"] = asset.AssetCode,
-            ["propertyNumber"] = asset.AssetCode,
+            ["applicationReference"] = reference,
+            ["sourceWorkspace"] = "External Portal - Property Listings",
+            ["sourceReference"] = customer.Id.ToString(),
+            ["customerAccountReference"] = customer.CustomerAccountNumber,
+            ["customerName"] = customer.PartnerName,
             ["propertyUnit"] = asset.ProjectUnitCode ?? asset.AssetCode,
-            ["propertyName"] = asset.Name,
-            ["location"] = asset.Location,
-            ["locationDetail"] = FirstNonBlank(asset.Location, asset.Town, asset.District, asset.Region),
-            ["applicantName"] = applicantName,
-            ["requester"] = applicantName,
-            ["requesterType"] = "External customer",
-            ["contactReference"] = contact,
-            ["listingPrice"] = asset.ExternalListingPrice?.ToString("0.##"),
-            ["salePrice"] = asset.ExternalSalePrice?.ToString("0.##"),
-            ["monthlyRent"] = asset.ExternalMonthlyRent?.ToString("0.##"),
-            ["leaseTermMonths"] = asset.ExternalLeaseTermMonths?.ToString(),
-            ["listingCurrency"] = asset.ExternalListingCurrency,
-            ["listingType"] = asset.ExternalListingType,
-            ["offerAmount"] = request.OfferAmount?.ToString("0.##"),
-            ["offerCurrency"] = asset.ExternalListingCurrency,
+            ["listingReference"] = asset.AssetCode,
+            ["listingType"] = publishedListingType,
+            ["requestType"] = requestLabel,
+            ["listingPrice"] = publishedAmount?.ToString("0.##"),
+            ["offerAmount"] = requestType == "Purchase" ? request.OfferAmount?.ToString("0.##") : null,
+            ["currency"] = asset.ExternalListingCurrency,
+            ["requestedLeaseTerm"] = requestType == "Purchase" || !asset.ExternalLeaseTermMonths.HasValue
+                ? null
+                : $"{asset.ExternalLeaseTermMonths.Value} months",
+            ["requestMessage"] = request.Message?.Trim(),
+            ["customerValidationStatus"] = "Pending",
+            ["listingValidationStatus"] = "Pending",
+            ["availabilityCheck"] = "Pending",
+            ["commercialReviewStatus"] = "Pending",
+            ["decisionStatus"] = "Pending review",
+            ["reservationStatus"] = "Not reserved",
+            ["customerNotificationStatus"] = "Not notified",
+            ["customerAcceptanceStatus"] = "Pending",
+            ["customerAcceptanceDate"] = null,
+            ["agreementTemplateReference"] = null,
+            ["generatedAgreementReference"] = null,
+            ["signedAgreementReference"] = null,
+            ["moveInDate"] = null,
+            ["billingStartStatus"] = requestType == "Purchase"
+                ? "Not applicable"
+                : "Blocked - agreement pending",
+            ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+            ["applicationStatus"] = "Submitted",
             ["notes"] = description
         };
 
@@ -432,7 +731,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             var created = await _procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
                 "PropertyManagement",
-                "EstatePropertyManagementOccupancyAvailability",
+                "EstatePropertyManagementListingApplication",
                 $"{requestLabel} - {asset.Name}",
                 reference,
                 applicantName,
@@ -665,13 +964,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 _notificationService,
                 tenantId,
                 GetUserId(),
-                new[] { "Property Manager", "Estate Manager", "Estate Officer" },
+                new[] { "Property Management Officer", "Property Manager", "Estate Manager", "Estate Officer" },
                 "External property listing request submitted",
                 $"{requestType} request {referenceNumber} was submitted for {asset.AssetCode} - {asset.Name} by {applicantName ?? "an external customer"}.",
                 "estate.property.listing-request",
                 "ProcedureCase",
                 caseId,
-                "/estate/property-management/EstatePropertyManagementOccupancyAvailability",
+                "/estate/property-management/EstatePropertyManagementListingApplication",
                 new Dictionary<string, object>
                 {
                     ["sourceLabel"] = "Source: External Portal -> Estate / Property Management",
@@ -721,6 +1020,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.ExternalSalePrice,
             asset.ExternalMonthlyRent,
             asset.ExternalLeaseTermMonths,
+            asset.GroundRentPayable,
+            asset.GroundRentRatePerAcre,
+            asset.GroundRentComputed,
             asset.ExternalListingCurrency,
             asset.ExternalListingNotes,
             asset.ExternalPublishedAt,
@@ -729,6 +1031,130 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             SourceLabel = "Source: Estate / Property Management -> External Portal"
         };
     }
+
+    private async Task<ProcedureCase?> LoadOwnedExternalListingCaseAsync(
+        Guid tenantId,
+        Guid userId,
+        Guid requestId,
+        CancellationToken cancellationToken)
+        => await _db.ProcedureCases
+            .Include(item => item.Fields.Where(field => !field.IsDeleted))
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item =>
+                item.Id == requestId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.OpenedById == userId
+                && item.SourceDepartment == "External Portal - Estate Listings"
+                && item.EntityType == "EstatePropertyManagementListingApplication",
+                cancellationToken);
+
+    private static object ToExternalRequestDto(ProcedureCase procedureCase)
+        => new
+        {
+            procedureCase.Id,
+            procedureCase.Module,
+            procedureCase.EntityType,
+            procedureCase.Title,
+            procedureCase.ReferenceNumber,
+            procedureCase.ApplicantName,
+            procedureCase.SourceDepartment,
+            procedureCase.Status,
+            procedureCase.CurrentStageName,
+            procedureCase.CurrentAssignedRole,
+            FieldValues = procedureCase.Fields
+                .Where(field => !field.IsDeleted)
+                .ToDictionary(
+                    field => field.Key,
+                    field => field.Value,
+                    StringComparer.OrdinalIgnoreCase),
+            procedureCase.CreatedAt,
+            procedureCase.UpdatedAt
+        };
+
+    private static string? FieldValue(
+        IReadOnlyDictionary<string, ProcedureCaseField> fields,
+        string key)
+        => fields.TryGetValue(key, out var field)
+            ? field.Value
+            : null;
+
+    private static void UpsertField(
+        ProcedureCase procedureCase,
+        IDictionary<string, ProcedureCaseField> fields,
+        string key,
+        string label,
+        string fieldType,
+        string? value)
+    {
+        if (fields.TryGetValue(key, out var field))
+        {
+            field.Value = value;
+            field.UpdatedAt = DateTime.UtcNow;
+            field.LastModifiedById = procedureCase.LastActionById;
+            return;
+        }
+
+        var created = new ProcedureCaseField
+        {
+            TenantId = procedureCase.TenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Key = key,
+            Label = label,
+            FieldType = fieldType,
+            Value = value,
+            CreatedAt = DateTime.UtcNow,
+            CreatedById = procedureCase.LastActionById
+        };
+        procedureCase.Fields.Add(created);
+        fields[key] = created;
+    }
+
+    private void AddExternalCaseActivity(
+        ProcedureCase procedureCase,
+        Guid userId,
+        string action,
+        string? details)
+    {
+        var now = DateTime.UtcNow;
+        procedureCase.Activities.Add(new ProcedureCaseActivity
+        {
+            TenantId = procedureCase.TenantId,
+            ProcedureCaseId = procedureCase.Id,
+            Action = action,
+            StageName = procedureCase.CurrentStageName,
+            Details = string.IsNullOrWhiteSpace(details) ? null : details.Trim(),
+            PerformedById = userId,
+            PerformedAt = now,
+            CreatedAt = now,
+            CreatedById = userId
+        });
+    }
+
+    private IQueryable<BusinessPartner> PortalCustomers(Guid tenantId, Guid userId)
+        => _db.BusinessPartners
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsActive
+                && item.ApprovalStatus == "Approved"
+                && item.CustomerAccountNumber != null
+                && (item.PartnerType == "Customer" || item.PartnerType == "Both")
+                && (item.UserId == userId
+                    || _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId
+                        && !link.IsDeleted
+                        && link.IsActive
+                        && link.UserId == userId
+                        && link.BusinessPartnerId == item.Id)));
+
+    private Task<BusinessPartner?> FindPortalCustomerAsync(
+        Guid tenantId,
+        Guid userId,
+        Guid businessPartnerId,
+        CancellationToken cancellationToken)
+        => PortalCustomers(tenantId, userId)
+            .Where(item => item.Id == businessPartnerId)
+            .FirstOrDefaultAsync(cancellationToken);
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
@@ -771,13 +1197,22 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             && asset.IsPublishedToExternalPortal
             && asset.ExternalListingStatus == "Published"
             && (asset.Status == EstateManagedAssetStatus.Available || asset.Status == EstateManagedAssetStatus.LandBank)
+            && !asset.CustomerBusinessPartnerId.HasValue
+            && string.IsNullOrEmpty(asset.LesseeName)
             && (asset.ExternalListingType == "Sale"
                 || ((asset.ExternalListingType == "Rent"
                         || asset.ExternalListingType == "SaleAndRent")
                     && asset.ExternalMonthlyRent.HasValue
                     && asset.ExternalMonthlyRent > 0
+                    && (asset.AssetType != EstateManagedAssetType.Land
+                        || (asset.GroundRentPayable.HasValue
+                            && asset.GroundRentPayable > 0))
                     && asset.ExternalLeaseTermMonths.HasValue
                     && asset.ExternalLeaseTermMonths > 0))
+            && ((asset.ExternalListingType == "Sale" && asset.IsAvailableForSale)
+                || (asset.ExternalListingType == "Rent" && asset.IsAvailableForLease)
+                || (asset.ExternalListingType == "SaleAndRent"
+                    && (asset.IsAvailableForSale || asset.IsAvailableForLease)))
             && ((asset.AssetType == EstateManagedAssetType.Land
                     && asset.Status == EstateManagedAssetStatus.LandBank
                     && !asset.ProjectId.HasValue
@@ -894,10 +1329,15 @@ public sealed record CreateExternalEstateServiceRequest(
 
 public sealed record CreateExternalListingRequest(
     string? RequestType,
+    Guid? BusinessPartnerId,
     string? ApplicantName,
     string? Contact,
     decimal? OfferAmount,
     string? Message);
+
+public sealed record ExternalPropertyRequestDecision(
+    string? Decision,
+    string? Notes);
 
 public sealed record ExternalEstateRequestDefinition(
     string Code,

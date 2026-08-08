@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Workflow;
@@ -26,16 +27,22 @@ namespace ErpSystem.Api.Controllers.Estate;
 [Authorize]
 public class LandAcquisitionsController : ControllerBase
 {
+    private const string AcquiringOwnerName = "TDC";
     private const string WorkflowEntityType = "LandAcquisition";
     private const double OwnershipCoordinateToleranceFeet = 5d;
+    private static readonly JsonSerializerOptions WorkflowStepJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
     private static readonly IReadOnlyDictionary<int, string[]> RequiredStageInputs = new Dictionary<int, string[]>
     {
         [0] = ["projectReference", "parcelLocation", "estimatedSize", "coordinates", "vendorId", "vendorName", "acquisitionType", "intendedUse", "openingNotes", "inspectionDate", "inspectionOfficer", "soilType", "topography", "hasAccessRoad", "hasUtilities", "siteAccessRoute", "drainageCondition", "existingDevelopment", "zoningClassification", "planningSchemeReference", "isFloodProne", "planningCompatible", "accessConfirmed", "environmentalClearance", "utilityAvailability", "encumbranceObserved"],
         [1] = ["assessmentRecommendation", "approvalNotes"],
         [2] = ["cadastreDescription", "regionId", "districtId", "townId", "totalArea", "areaUnit", "beacon1Index", "beacon1NorthingFeet", "beacon1EastingFeet", "beacon1Bearing", "beacon1DistanceFeet", "beacon2Index", "beacon2NorthingFeet", "beacon2EastingFeet", "beacon2Bearing", "beacon2DistanceFeet", "beacon3Index", "beacon3NorthingFeet", "beacon3EastingFeet", "beacon3Bearing", "beacon3DistanceFeet", "beacon4Index", "beacon4NorthingFeet", "beacon4EastingFeet", "beacon4Bearing", "beacon4DistanceFeet", "boundaryCoordinates", "surveyorName", "licensedSurveyor", "surveyDate", "surveyorSignedDate", "surveyPlanNumber", "mapSheetNumber", "surveyStatus", "isCertified", "beaconCount", "regionalSurveyorName", "regionalSurveyorSignedDate", "mainPortion", "coordinateReference", "surveyNotes"],
-        [3] = ["cadastralMatch", "cadastralMatchVerified", "overlapCleared", "boundaryConfirmed", "verificationReference", "verificationOfficer", "verificationDate", "verificationNotes"],
+        [3] = [],
         [4] = ["ownershipType", "ownerName", "contactNumber", "address", "acquisitionMethod", "tenureType", "ownershipStartDate", "isCurrentOwner", "identificationType", "identificationNumber", "interestHeld", "classificationRisk", "dateGapReason", "ownerRegionId", "ownerDistrictId", "ownerTownId", "ownerBeacon1NorthingFeet", "ownerBeacon1EastingFeet", "ownerBeacon2NorthingFeet", "ownerBeacon2EastingFeet", "ownerBeacon3NorthingFeet", "ownerBeacon3EastingFeet", "ownerBeacon4NorthingFeet", "ownerBeacon4EastingFeet", "witnessName1", "witnessContact1", "witnessRelation1", "witnessAddress1", "witnessName2", "witnessContact2", "witnessRelation2", "witnessAddress2", "classificationNotes"],
-        [5] = ["dueDiligenceStatus", "titleSearchCompleted", "ownerIdentityVerified", "authorityToSellVerified", "encumbrancesFound", "litigationFound", "landsCommissionSearchReference", "searchReference", "ownershipVerified", "verificationNotes"],
+        [5] = ["dueDiligenceStatus", "titleSearchCompleted", "ownerIdentityVerified", "authorityToSellVerified", "overlapCleared", "encumbrancesFound", "litigationFound", "landsCommissionSearchReference", "searchReference", "ownershipVerified", "verificationNotes"],
         [6] = ["sellerQuote", "offerAmount", "counterOffer", "negotiatedValue", "paymentType", "offerTerms", "agreementDay", "agreementMonth", "agreementYear", "isAccepted", "agreementGenerated", "negotiationNotes", "agreementDate", "rootOfTitle", "specialConditions", "grantorName", "grantorAddress", "grantorPhone", "granteeName", "granteeAddress", "granteePhone", "agreementPaymentType", "agreementPaymentAmount", "agreementPaymentDueDate", "agreementPaymentMethod", "agreementWitness1Name", "agreementWitness1Address", "agreementWitness2Name", "agreementWitness2Address"],
         [7] = ["legalReviewComplete", "financeReviewComplete", "boardApprovalReference", "approvalConditions"],
         [8] = ["instrumentType", "instrumentNumber", "documentName", "documentType", "executionDate", "executedBy", "counterpartySignatory", "isExecuted", "witnessDetails", "executionNotes"],
@@ -109,7 +116,12 @@ public class LandAcquisitionsController : ControllerBase
 
         var isAdministrator = IsWorkflowAdministrator();
         var userId = GetUserId();
-        var documentRequirementsByStage = await GetActiveWorkflowDocumentRequirementsByStageAsync(tenantId, cancellationToken);
+        var documentRequirementsByAcquisition = new Dictionary<Guid, IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>>();
+        foreach (var acquisition in acquisitions)
+        {
+            documentRequirementsByAcquisition[acquisition.Id] =
+                await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
+        }
         var visibleByStage = new Dictionary<int, List<LandAcquisition>>();
         foreach (var acquisition in acquisitions)
         {
@@ -129,7 +141,7 @@ public class LandAcquisitionsController : ControllerBase
             .Select(stage =>
             {
                 var items = visibleByStage.TryGetValue(stage.Order, out var visible)
-                    ? visible.Select(item => ToItemDto(item, documentRequirementsByStage)).ToList()
+                    ? visible.Select(item => ToItemDto(item, documentRequirementsByAcquisition[item.Id])).ToList()
                     : [];
                 return new LandAcquisitionStageDto(
                 stage.Id,
@@ -147,6 +159,14 @@ public class LandAcquisitionsController : ControllerBase
             }).ToList();
 
         return Ok(new LandAcquisitionBoardDto(stages));
+    }
+
+    [HttpGet("active-document-requirements")]
+    public async Task<ActionResult<IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>>> GetActiveDocumentRequirements(
+        CancellationToken cancellationToken)
+    {
+        var requirements = await GetActiveWorkflowDocumentRequirementsByStageAsync(GetTenantId(), cancellationToken);
+        return Ok(requirements);
     }
 
     [HttpPost("workspace")]
@@ -205,6 +225,9 @@ public class LandAcquisitionsController : ControllerBase
 
         var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
         var missingInputs = GetMissingStageInputs(acquisition, request.ProcedureId, documentRequirementsByStage);
+        var documentRequirements = documentRequirementsByStage.TryGetValue(request.ProcedureId, out var configuredRequirements)
+            ? configuredRequirements
+            : Array.Empty<WorkflowDocumentRequirementDto>();
         return Ok(new LandAcquisitionWorkspaceResponse
         {
             Success = true,
@@ -212,7 +235,8 @@ public class LandAcquisitionsController : ControllerBase
             AcquisitionId = acquisition.Id,
             Item = ToItemDto(acquisition, documentRequirementsByStage),
             StageInputsComplete = missingInputs.Count == 0,
-            MissingInputs = missingInputs
+            MissingInputs = missingInputs,
+            DocumentRequirements = documentRequirements
         });
     }
 
@@ -234,8 +258,23 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
+        var userId = GetUserId();
+        var isAdministrator = IsWorkflowAdministrator();
+        var canViewRequestedStage = await CanViewStageAsync(
+            acquisition,
+            procedureId,
+            userId,
+            isAdministrator);
+        var canReviewPriorStageFromCurrentAssignment =
+            procedureId < acquisition.StageOrder &&
+            await CanAccessStageAsync(
+                acquisition,
+                acquisition.StageOrder,
+                userId,
+                isAdministrator);
+
         if (procedureId > acquisition.StageOrder ||
-            !await CanViewStageAsync(acquisition, procedureId, GetUserId(), IsWorkflowAdministrator()))
+            (!canViewRequestedStage && !canReviewPriorStageFromCurrentAssignment))
         {
             return Forbid();
         }
@@ -271,13 +310,17 @@ public class LandAcquisitionsController : ControllerBase
 
         var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
         var missingInputs = GetMissingStageInputs(acquisition, procedureId, documentRequirementsByStage, responseValues);
+        var documentRequirements = documentRequirementsByStage.TryGetValue(procedureId, out var configuredRequirements)
+            ? configuredRequirements
+            : Array.Empty<WorkflowDocumentRequirementDto>();
         return Ok(new LandAcquisitionWorkspaceDataResponse
         {
             AcquisitionId = id,
             ProcedureId = procedureId,
             Values = responseValues,
             StageInputsComplete = missingInputs.Count == 0,
-            MissingInputs = missingInputs
+            MissingInputs = missingInputs,
+            DocumentRequirements = documentRequirements
         });
     }
 
@@ -320,6 +363,9 @@ public class LandAcquisitionsController : ControllerBase
                 ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
             var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder, documentRequirementsByStage);
+            var documentRequirements = documentRequirementsByStage.TryGetValue(acquisition.StageOrder, out var configuredRequirements)
+                ? configuredRequirements
+                : Array.Empty<WorkflowDocumentRequirementDto>();
 
             return Ok(new LandAcquisitionWorkspaceDataResponse
             {
@@ -327,7 +373,8 @@ public class LandAcquisitionsController : ControllerBase
                 ProcedureId = acquisition.StageOrder,
                 Values = responseValues,
                 StageInputsComplete = missingInputs.Count == 0,
-                MissingInputs = missingInputs
+                MissingInputs = missingInputs,
+                DocumentRequirements = documentRequirements
             });
         }
         catch (InvalidOperationException ex)
@@ -968,12 +1015,9 @@ public class LandAcquisitionsController : ControllerBase
                     IsCurrentOwner = item.IsCurrentOwner
                 })
                 .ToList(),
-            BoundaryVerified = survey is
-            {
-                CadastralMatch: true,
-                OverlapCleared: true,
-                BoundaryConfirmed: true
-            },
+            // Reaching asset creation proves the Survey Verification workflow stage was approved.
+            // The removed verification checkboxes must not remain a hidden prerequisite for Land Bank use.
+            BoundaryVerified = acquisition.StageOrder > (int)AcquisitionProcedure.SurveyVerification,
             IsReadyForProjectManagement = false,
             Notes = "Land asset published from land acquisition into Estate Land Bank for demarcation and project-readiness review."
         });
@@ -1075,19 +1119,12 @@ public class LandAcquisitionsController : ControllerBase
                 survey.Notes = Text(values, "surveyNotes") ?? survey.Notes;
                 break;
 
-            case AcquisitionProcedure.SurveyVerification:
-                var verification = acquisition.CadastralSurveys.FirstOrDefault() ?? Child(new CadastralSurvey(), acquisition);
-                verification.CadastralMatch = Bool(values, "cadastralMatch");
-                verification.OverlapCleared = Bool(values, "overlapCleared");
-                verification.BoundaryConfirmed = Bool(values, "boundaryConfirmed");
-                verification.VerificationReference = Text(values, "verificationReference") ?? verification.VerificationReference;
-                verification.Notes = Text(values, "verificationNotes") ?? verification.Notes;
-                break;
-
             case AcquisitionProcedure.OwnershipClassification:
             case AcquisitionProcedure.OwnershipVerification:
-                var owner = acquisition.OwnershipHistories.FirstOrDefault() ?? Child(new OwnershipHistory(), acquisition);
                 var isCurrentOwner = Bool(values, "isCurrentOwner");
+                var owner = acquisition.OwnershipHistories.FirstOrDefault(item =>
+                                !item.IsDeleted && item.IsCurrentOwner == isCurrentOwner) ??
+                            Child(new OwnershipHistory(), acquisition);
                 owner.BusinessPartnerId = isCurrentOwner && Guid.TryParse(Text(values, "vendorId"), out var businessPartnerId)
                     ? businessPartnerId
                     : null;
@@ -1126,6 +1163,14 @@ public class LandAcquisitionsController : ControllerBase
                 acquisition.OwnershipType = ParseOwnership(Text(values, "ownershipType")) ?? acquisition.OwnershipType;
                 owner.OwnershipType = acquisition.OwnershipType;
                 owner.AcquisitionMethod = ParseAcquisitionMethod(Text(values, "acquisitionMethod") ?? Text(values, "acquisitionType")) ?? owner.AcquisitionMethod;
+                if ((AcquisitionProcedure)request.ProcedureId == AcquisitionProcedure.OwnershipVerification)
+                {
+                    var cadastralSurvey = acquisition.CadastralSurveys.FirstOrDefault();
+                    if (cadastralSurvey != null)
+                    {
+                        cadastralSurvey.OverlapCleared = Bool(values, "overlapCleared");
+                    }
+                }
                 ApplyPastOwners(acquisition, values);
                 break;
 
@@ -1219,11 +1264,12 @@ public class LandAcquisitionsController : ControllerBase
 
             case AcquisitionProcedure.LandAssetCreation:
                 var asset = acquisition.LandAssets.FirstOrDefault() ?? Child(new LandAsset(), acquisition);
+                values["ownerName"] = AcquiringOwnerName;
                 asset.AssetCode = Text(values, "assetCode") ?? Text(values, "assetNumber") ?? asset.AssetCode;
                 asset.AssetNumber = Text(values, "assetNumber") ?? asset.AssetNumber;
                 asset.ParcelIdentifier = Text(values, "parcelIdentifier") ?? asset.ParcelIdentifier;
                 asset.RegistrationNumber = Text(values, "registrationNumber") ?? asset.RegistrationNumber;
-                asset.OwnerName = Text(values, "ownerName") ?? asset.OwnerName;
+                asset.OwnerName = AcquiringOwnerName;
                 asset.Location = Text(values, "assetLocation") ?? Text(values, "location") ?? asset.Location;
                 asset.AssetCategory = Text(values, "assetCategory") ?? Text(values, "assetType") ?? asset.AssetCategory;
                 asset.Size = Decimal(values, "size") ?? asset.Size;
@@ -1236,8 +1282,46 @@ public class LandAcquisitionsController : ControllerBase
                 asset.GlAccount = Text(values, "glAccount") ?? asset.GlAccount;
                 asset.Custodian = Text(values, "custodian") ?? asset.Custodian;
                 asset.Notes = Text(values, "assetNotes") ?? asset.Notes;
+                ApplyOwnershipTransferAtAssetCreation(acquisition, asset);
                 break;
         }
+    }
+
+    private void ApplyOwnershipTransferAtAssetCreation(
+        LandAcquisition acquisition,
+        LandAsset asset)
+    {
+        var transferDate = asset.CreatedAt;
+        var activeOwners = acquisition.OwnershipHistories
+            .Where(item => !item.IsDeleted && item.IsCurrentOwner)
+            .ToList();
+        var acquiringOwner = activeOwners.FirstOrDefault(item =>
+            string.Equals(item.OwnerName, AcquiringOwnerName, StringComparison.OrdinalIgnoreCase));
+
+        foreach (var owner in activeOwners.Where(item => item != acquiringOwner))
+        {
+            owner.IsCurrentOwner = false;
+            owner.OwnershipEndDate = transferDate;
+            owner.UpdatedAt = transferDate;
+            owner.UpdatedBy = _currentUserService.UserName;
+            owner.LastModifiedById = GetUserId();
+        }
+
+        acquiringOwner ??= Child(new OwnershipHistory(), acquisition);
+        acquiringOwner.BusinessPartnerId = null;
+        acquiringOwner.OwnerName = AcquiringOwnerName;
+        acquiringOwner.OwnershipType = LandOwnershipType.StateOrVested;
+        acquiringOwner.AcquisitionMethod = LandAcquisitionMethod.Purchase;
+        acquiringOwner.TenureType = "Acquired land";
+        acquiringOwner.InterestHeld = "Registered owner";
+        acquiringOwner.OwnershipStartDate = transferDate;
+        acquiringOwner.OwnershipEndDate = null;
+        acquiringOwner.OwnershipPercentage = 100m;
+        acquiringOwner.IsCurrentOwner = true;
+        acquiringOwner.Notes = "Ownership transferred to TDC when the land asset was created.";
+        acquiringOwner.UpdatedAt = transferDate;
+        acquiringOwner.UpdatedBy = _currentUserService.UserName;
+        acquiringOwner.LastModifiedById = GetUserId();
     }
 
     private static Dictionary<int, Dictionary<string, JsonElement>> ReadWorkspaceSnapshots(LandAcquisition acquisition)
@@ -1477,16 +1561,10 @@ public class LandAcquisitionsController : ControllerBase
     {
         snapshots.TryGetValue((int)AcquisitionProcedure.LandsCommissionRegistration, out var registrationSnapshot);
         snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipVerification, out var ownershipVerification);
-        snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipClassification, out var ownershipClassification);
 
         var asset = acquisition.LandAssets
             .Where(item => !item.IsDeleted)
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
-            .FirstOrDefault();
-        var owner = acquisition.OwnershipHistories
-            .Where(item => !item.IsDeleted)
-            .OrderByDescending(item => item.IsCurrentOwner)
-            .ThenByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .FirstOrDefault();
         var registration = acquisition.Registrations
             .Where(item => !item.IsDeleted)
@@ -1515,10 +1593,7 @@ public class LandAcquisitionsController : ControllerBase
         SetMissingResponseValue(
             responseValues,
             "ownerName",
-            asset?.OwnerName ??
-            owner?.OwnerName ??
-            SnapshotText(ownershipClassification, "ownerName") ??
-            SnapshotText(ownershipClassification, "vendorName"));
+            asset?.OwnerName ?? AcquiringOwnerName);
         SetMissingResponseValue(responseValues, "assetLocation", asset?.Location ?? acquisition.Location);
         SetMissingResponseValue(responseValues, "assetCategory", asset?.AssetCategory ?? "Land");
         SetMissingResponseValue(
@@ -2362,7 +2437,16 @@ public class LandAcquisitionsController : ControllerBase
     }
 
     private static bool HasCompleteWitnessOath(IReadOnlyDictionary<string, JsonElement> values)
-        => HasCompleteWitnessOath(values, 1) || HasCompleteWitnessOath(values, 2);
+    {
+        var witnessOneSworn = SnapshotBool(values, "witnessSwornOath1");
+        var witnessTwoSworn = SnapshotBool(values, "witnessSwornOath2");
+        if (witnessOneSworn == witnessTwoSworn)
+        {
+            return false;
+        }
+
+        return HasCompleteWitnessOath(values, witnessOneSworn ? 1 : 2);
+    }
 
     private static bool HasCompleteWitnessOath(IReadOnlyDictionary<string, JsonElement> values, int witnessNumber)
         => SnapshotBool(values, $"witnessSwornOath{witnessNumber}") &&
@@ -2776,8 +2860,9 @@ public class LandAcquisitionsController : ControllerBase
 
         try
         {
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, options);
+            return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(
+                configurationJson,
+                WorkflowStepJsonOptions);
         }
         catch (JsonException)
         {
@@ -2807,10 +2892,19 @@ public class LandAcquisitionsController : ControllerBase
                     return null;
                 }
 
+                var checklistItem = stepConfig?.QualityConfig?.QualityChecks?
+                    .FirstOrDefault(check =>
+                        check.RequiresDocument &&
+                        NormalizeDocumentValue(check.DocumentName ?? check.Name) ==
+                        NormalizeDocumentValue(requirement.DocumentName));
+
                 return new WorkflowTaskAttachmentDto
                 {
                     Id = $"{document.Id:N}-{requirement.RequirementKey}",
                     RequirementKey = requirement.RequirementKey,
+                    ChecklistItemId = string.IsNullOrWhiteSpace(checklistItem?.Id)
+                        ? null
+                        : checklistItem.Id.Trim(),
                     DocumentType = string.IsNullOrWhiteSpace(requirement.DocumentType) ? document.DocumentType : requirement.DocumentType,
                     DocumentName = requirement.DocumentName,
                     FileName = document.FileName,
@@ -3002,7 +3096,7 @@ public class LandAcquisitionsController : ControllerBase
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .ToArray();
         var documentName = NormalizeDocumentValue(document.FileName);
-        var documentNameWithoutExtension = NormalizeDocumentValue(Path.GetFileNameWithoutExtension(document.FileName));
+        var documentNameWithoutExtension = NormalizeDocumentValue(RemoveLogicalDocumentExtension(document.FileName));
         var requirementType = NormalizeDocumentValue(requirement.DocumentType);
         var documentType = NormalizeDocumentValue(document.DocumentType);
 
@@ -3014,6 +3108,12 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         return !string.IsNullOrWhiteSpace(requirementType) && documentType == requirementType;
+    }
+
+    private static string RemoveLogicalDocumentExtension(string fileName)
+    {
+        var extension = Path.GetExtension(fileName);
+        return string.IsNullOrEmpty(extension) ? fileName : fileName[..^extension.Length];
     }
 
     private static string NormalizeDocumentValue(string? value)
@@ -3507,7 +3607,11 @@ public class LandAcquisitionsController : ControllerBase
         LandAcquisition item,
         IReadOnlyDictionary<int, IReadOnlyList<WorkflowDocumentRequirementDto>>? documentRequirementsByStage = null)
     {
-        var owner = item.OwnershipHistories.FirstOrDefault();
+        var owner = item.OwnershipHistories
+            .Where(history => !history.IsDeleted)
+            .OrderByDescending(history => history.IsCurrentOwner)
+            .ThenByDescending(history => history.UpdatedAt ?? history.CreatedAt)
+            .FirstOrDefault();
         var snapshots = ReadWorkspaceSnapshots(item);
         snapshots.TryGetValue(0, out var identification);
         var identifiedVendorName = identification != null &&
@@ -3851,9 +3955,9 @@ public class LandAcquisitionsController : ControllerBase
         new(0, 0, "Parcel Identification", "Parcel Identification", "Identify the land parcel, intended use, location, size, and opening notes.", "parcel-identification", "/LandParcel/ParcelIdentificationView", "GET", "Estate Officer", "Submit for Suitability Approval", "Return Identification"),
         new(1, 1, "Suitability Approval", "Suitability Approval", "Review planning fit, access, environmental constraints, and acquisition suitability.", "suitability-approval", "/LandParcel/SuitabilityApprovalView", "GET", "Estate Manager", "Approve Suitability", "Reject Suitability"),
         new(2, 2, "Cadastral Survey", "Cadastral Survey", "Capture cadastral survey plan, coordinates, demarcation details, and survey documents.", "cadastral-survey", "/LandParcel/CadastralSurvey", "GET", "Survey Officer", "Submit for Survey Verification", "Return Survey"),
-        new(3, 3, "Cadastral Survey Verification", "Cadastral Survey Verification", "Verify cadastral match, boundary consistency, encumbrances, and survey overlap checks.", "cadastral-verification", "/LandParcel/CadastralSurveyVerifcation", "GET", "Senior Surveyor", "Approve Survey Verification", "Reject Survey Verification"),
+        new(3, 3, "Cadastral Survey Verification", "Cadastral Survey Verification", "Review the submitted survey plan and saved demarcated boundary before approval.", "cadastral-verification", "/LandParcel/CadastralSurveyVerifcation", "GET", "Senior Surveyor", "Approve Survey Verification", "Reject Survey Verification"),
         new(4, 4, "Ownership Classification", "Ownership Classification", "Classify ownership as stool, family, private, state, allodial, or mixed interest.", "ownership-classification", "/LandParcel/OwnershipClassification", "GET", "Legal Officer", "Submit for Ownership Verification", "Return Classification"),
-        new(5, 5, "Ownership Verification", "Ownership Verification", "Verify title documents, identity, searches, authority to sell, and ownership history.", "ownership-verification", "/LandParcel/OwnershipVerification", "POST", "Legal Manager", "Approve Ownership Verification", "Reject Ownership Verification"),
+        new(5, 5, "Ownership Verification", "Ownership Verification", "Compare ownership and cadastral boundaries, clear overlaps and encumbrances, and verify title, identity, searches, authority to sell, and ownership history.", "ownership-verification", "/LandParcel/OwnershipVerification", "POST", "Legal Manager", "Approve Ownership Verification", "Reject Ownership Verification"),
         new(6, 6, "Agreement Negotiation", "Agreement Negotiation", "Record offers, counteroffers, negotiated value, conditions, and negotiation notes.", "agreement-negotiation", "/LandParcel/AgreementNegotiation", "POST", "Acquisition Committee", "Submit for Agreement Approval", "Return Negotiation"),
         new(7, 7, "Agreement Approval", "Agreement Approval", "Approve negotiated agreement terms before land instrument execution.", "agreement-approval", "/LandParcel/AgreementApproval", "POST", "Executive Approver", "Approve Agreement", "Reject Agreement"),
         new(8, 8, "Land Instrument Execution", "Land Instrument Execution", "Capture execution details for the conveyance, assignment, lease, or acquisition instrument.", "execution", "/LandParcel/Execution", "GET", "Legal Officer", "Submit Executed Instrument", "Return Execution"),

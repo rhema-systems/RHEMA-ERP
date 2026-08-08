@@ -216,6 +216,13 @@ export default function EstatePropertyListingsPage() {
   const includesRent =
     form.externalListingType === 'Rent' ||
     form.externalListingType === 'SaleAndRent';
+  const rentPublicationBlockedByGroundRent = Boolean(
+    selected &&
+      form.isPublishedToExternalPortal &&
+      includesRent &&
+      selected.assetType === EstateManagedAssetType.Land &&
+      !(selected.groundRentPayable != null && selected.groundRentPayable > 0)
+  );
 
   const saveListing = async () => {
     if (!selected) return;
@@ -630,6 +637,47 @@ export default function EstatePropertyListingsPage() {
                   </div>
                 </div>
 
+                {includesRent &&
+                selected.assetType === EstateManagedAssetType.Land ? (
+                  <div
+                    className={`rounded-md border p-4 ${
+                      selected.groundRentPayable != null &&
+                      selected.groundRentPayable > 0
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        : 'border-amber-200 bg-amber-50 text-amber-900'
+                    }`}
+                  >
+                    <div className="font-medium">Ground rent assessment</div>
+                    <p className="mt-1 text-sm">
+                      {selected.groundRentPayable != null &&
+                      selected.groundRentPayable > 0
+                        ? `Annual ground rent assessed at ${formatMoney(
+                            selected.groundRentPayable,
+                            form.externalListingCurrency || selected.currency
+                          )}. This can be shown on the portal, but billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
+                        : 'Assess and approve annual ground rent before publishing this land rental listing.'}
+                    </p>
+                    {selected.groundRentPayable == null ||
+                    selected.groundRentPayable <= 0 ? (
+                      <Button
+                        asChild
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="mt-3 bg-white"
+                      >
+                        <Link
+                          href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(
+                            selected.id
+                          )}`}
+                        >
+                          Set up ground rent
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label>Listing notes</Label>
                   <Textarea
@@ -652,7 +700,15 @@ export default function EstatePropertyListingsPage() {
                     <Trash2 className="mr-2 h-4 w-4" />
                     Remove from Portal Listings
                   </Button>
-                  <Button onClick={saveListing} disabled={isSaving}>
+                  <Button
+                    onClick={saveListing}
+                    disabled={isSaving || rentPublicationBlockedByGroundRent}
+                    title={
+                      rentPublicationBlockedByGroundRent
+                        ? 'Assess annual ground rent before publishing this land rental listing.'
+                        : undefined
+                    }
+                  >
                     {isSaving ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (

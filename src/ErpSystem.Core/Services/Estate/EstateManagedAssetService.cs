@@ -810,8 +810,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             throw new InvalidOperationException("Estate asset was not found.");
         }
 
-        if (asset.Status != EstateManagedAssetStatus.Available
-            || !asset.IsAvailableForLease)
+        var isExistingLeaseRecord = asset.CustomerBusinessPartnerId.HasValue
+            && asset.CustomerBusinessPartnerId == request.CustomerBusinessPartnerId
+            && asset.Status is EstateManagedAssetStatus.Reserved
+                or EstateManagedAssetStatus.Leased
+                or EstateManagedAssetStatus.Occupied;
+        if (!isExistingLeaseRecord
+            && (asset.Status != EstateManagedAssetStatus.Available
+                || !asset.IsAvailableForLease))
         {
             throw new InvalidOperationException(
                 "Only land, property, or units released as available for lease can be assigned to a customer.");
@@ -821,7 +827,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             && asset.CustomerBusinessPartnerId != request.CustomerBusinessPartnerId)
         {
             throw new InvalidOperationException(
-                "This asset already has a customer assignment. Manage changes through its existing lease case.");
+                "This asset already has a customer assignment. Manage changes through its existing lease record.");
         }
 
         BusinessPartner? customer = null;
@@ -854,6 +860,113 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.LesseeAddress = TrimOrNull(request.LesseeAddress)
             ?? TrimOrNull(customer?.PhysicalAddress);
         asset.PropertyFileReference = TrimOrNull(request.PropertyFileReference);
+        if (request.CustomerBusinessPartnerId.HasValue
+            && asset.Status == EstateManagedAssetStatus.Available)
+        {
+            asset.Status = EstateManagedAssetStatus.Reserved;
+        }
+
+        if (request.CustomerBusinessPartnerId.HasValue)
+        {
+            asset.IsAvailableForLease = false;
+            asset.IsAvailableForSale = false;
+            asset.IsPublishedToExternalPortal = false;
+            asset.ExternalListingStatus = "Withdrawn";
+            asset.ExternalPublishedAt = null;
+        }
+
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = _currentUserProvider.Username;
+        asset.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(asset);
+        await _unitOfWork.SaveChangesAsync();
+        return MapToDto(asset);
+    }
+
+    public Task<EstateManagedAssetDto> UpdateOccupancyAsync(
+        Guid assetId,
+        UpdateEstateManagedAssetOccupancyDto request)
+        => ExecuteSerializableMutationAsync(
+            () => UpdateOccupancyCoreAsync(assetId, request));
+
+    private async Task<EstateManagedAssetDto> UpdateOccupancyCoreAsync(
+        Guid assetId,
+        UpdateEstateManagedAssetOccupancyDto request)
+    {
+        var repository = _unitOfWork.Repository<EstateManagedAsset>();
+        var asset = await repository.FirstOrDefaultAsync(item =>
+            item.Id == assetId
+            && item.TenantId == _currentUserProvider.TenantId
+            && !item.IsDeleted);
+        if (asset == null)
+        {
+            throw new InvalidOperationException("Estate asset was not found.");
+        }
+
+        if (asset.Status == EstateManagedAssetStatus.Sold
+            && request.Status != EstateManagedAssetStatus.Sold)
+        {
+            throw new InvalidOperationException(
+                "Sold assets cannot be reopened from Occupancy / Availability.");
+        }
+
+        var hasOccupant = asset.CustomerBusinessPartnerId.HasValue
+            || !string.IsNullOrWhiteSpace(asset.LesseeName);
+        if (request.Status is EstateManagedAssetStatus.Reserved
+                or EstateManagedAssetStatus.Leased
+                or EstateManagedAssetStatus.Occupied
+            && !hasOccupant)
+        {
+            throw new InvalidOperationException(
+                "Reserve, lease, or occupy the asset only after a customer or occupant is linked in Lease Management.");
+        }
+
+        if (request.Status == EstateManagedAssetStatus.Available && hasOccupant)
+        {
+            throw new InvalidOperationException(
+                "Release the lease or occupant link before marking this asset available.");
+        }
+
+        if (request.Status == EstateManagedAssetStatus.LandBank
+            && asset.AssetType != EstateManagedAssetType.Land)
+        {
+            throw new InvalidOperationException("Only land assets can return to Land Bank status.");
+        }
+
+        asset.Status = request.Status;
+        asset.Notes = TrimOrNull(request.Notes) ?? asset.Notes;
+
+        if (request.Status == EstateManagedAssetStatus.Available)
+        {
+            asset.IsAvailableForLease = request.IsAvailableForLease ?? asset.IsAvailableForLease;
+            asset.IsAvailableForSale = request.IsAvailableForSale ?? asset.IsAvailableForSale;
+            if (request.IsPublishedToExternalPortal == false)
+            {
+                asset.IsPublishedToExternalPortal = false;
+                asset.ExternalListingStatus = "Withdrawn";
+                asset.ExternalPublishedAt = null;
+            }
+        }
+        else if (request.Status is EstateManagedAssetStatus.LandBank)
+        {
+            asset.IsAvailableForLease = false;
+            asset.IsAvailableForSale = false;
+            asset.IsPublishedToExternalPortal = false;
+            asset.ExternalListingStatus = "Withdrawn";
+            asset.ExternalPublishedAt = null;
+        }
+        else
+        {
+            asset.IsAvailableForLease = false;
+            asset.IsAvailableForSale = false;
+            asset.IsPublishedToExternalPortal = false;
+            asset.ExternalListingStatus = request.Status == EstateManagedAssetStatus.Sold
+                ? "Sold"
+                : "Withdrawn";
+            asset.ExternalPublishedAt = null;
+        }
+
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
@@ -959,6 +1072,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             if (!monthlyRent.HasValue)
             {
                 throw new InvalidOperationException("Enter the monthly rent before publishing a rental listing.");
+            }
+
+            if (asset.AssetType == EstateManagedAssetType.Land
+                && asset.GroundRentPayable is not > 0m)
+            {
+                throw new InvalidOperationException(
+                    "Assess and approve the annual ground rent before publishing a land rental listing.");
             }
 
             if (!leaseTermMonths.HasValue || leaseTermMonths > 1200)

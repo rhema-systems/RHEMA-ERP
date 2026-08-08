@@ -84,6 +84,7 @@ import {
   type LandAcquisitionSummary,
   type LandAcquisitionStage,
   type LandAcquisitionStageDocumentRequirement,
+  type HrLocationLookup,
 } from '@/services/estate-acquisition.service';
 
 const CadastralMapPanel = dynamic(() => import('./CadastralMapPanel'), {
@@ -97,7 +98,14 @@ const ProcedurePdfViewer = dynamic(
 
 const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 10, 12]);
 
-type FieldType = 'text' | 'date' | 'textarea' | 'select' | 'check';
+type FieldType =
+  | 'text'
+  | 'date'
+  | 'textarea'
+  | 'select'
+  | 'check'
+  | 'region'
+  | 'district';
 
 interface WorkspaceField {
   key: string;
@@ -262,8 +270,8 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
   ],
   'cadastral-survey': [
     field('cadastreDescription', 'Cadastre Description'),
-    field('regionId', 'Region'),
-    field('districtId', 'District'),
+    field('regionId', 'Region', 'region'),
+    field('districtId', 'District', 'district'),
     field('townId', 'Town'),
     field('totalArea', 'Total Area'),
     field('areaUnit', 'Area Unit', 'select', [
@@ -300,7 +308,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       2
     ),
     field('surveyorName', 'Surveyor Name'),
-    field('licensedSurveyor', 'Licensed Surveyor'),
+    field('licensedSurveyor', 'Surveyor Licence Number'),
     field('surveyDate', 'Survey Date', 'date'),
     field('surveyorSignedDate', 'Surveyor Signed Date', 'date'),
     field('surveyPlanNumber', 'Survey Plan Number'),
@@ -323,16 +331,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('coordinateReference', 'Coordinate Reference'),
     field('surveyNotes', 'Survey Notes', 'textarea', undefined, 2),
   ],
-  'cadastral-verification': [
-    field('cadastralMatch', 'Cadastral Match', 'check'),
-    field('cadastralMatchVerified', 'Cadastral Match Verified', 'check'),
-    field('overlapCleared', 'Overlap Cleared', 'check'),
-    field('boundaryConfirmed', 'Boundary Confirmed', 'check'),
-    field('verificationReference', 'Verification Reference'),
-    field('verificationOfficer', 'Verification Officer'),
-    field('verificationDate', 'Verification Date', 'date'),
-    field('verificationNotes', 'Verification Notes', 'textarea', undefined, 2),
-  ],
+  'cadastral-verification': [],
   'ownership-classification': [
     field('ownershipType', 'Ownership Type', 'select', [
       'Allodial',
@@ -379,8 +378,8 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       'High',
     ]),
     field('dateGapReason', 'Date Gap Reason', 'textarea', undefined, 2),
-    field('ownerRegionId', 'Ownership Region'),
-    field('ownerDistrictId', 'Ownership District'),
+    field('ownerRegionId', 'Ownership Region', 'region'),
+    field('ownerDistrictId', 'Ownership District', 'district'),
     field('ownerTownId', 'Ownership Town'),
     field('ownerBeacon1NorthingFeet', 'Owner Beacon 1 Northing (Y, ft)'),
     field('ownerBeacon1EastingFeet', 'Owner Beacon 1 Easting (X, ft)'),
@@ -421,6 +420,11 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('titleSearchCompleted', 'Title Search Completed', 'check'),
     field('ownerIdentityVerified', 'Owner Identity Verified', 'check'),
     field('authorityToSellVerified', 'Authority To Sell Verified', 'check'),
+    field(
+      'overlapCleared',
+      'Ownership / Title Overlap Cleared',
+      'check'
+    ),
     field('encumbrancesFound', 'Encumbrances Found', 'check'),
     field('litigationFound', 'Litigation Found', 'check'),
     field(
@@ -748,23 +752,6 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
   ],
-  'cadastral-verification': [
-    {
-      title: 'Verification checks',
-      description:
-        'Confirm the survey matches the parcel, boundaries are consistent, and overlaps are cleared.',
-      keys: [
-        'cadastralMatch',
-        'cadastralMatchVerified',
-        'overlapCleared',
-        'boundaryConfirmed',
-        'verificationReference',
-        'verificationOfficer',
-        'verificationDate',
-        'verificationNotes',
-      ],
-    },
-  ],
   'ownership-classification': [
     {
       title: 'Owner and tenure',
@@ -841,12 +828,13 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Due diligence checks',
       description:
-        'Confirm search, owner identity, and authority to sell before agreement negotiation.',
+        'Confirm the ownership boundary comparison, overlap clearance, title search, owner identity, and authority to sell before agreement negotiation.',
       keys: [
         'dueDiligenceStatus',
         'titleSearchCompleted',
         'ownerIdentityVerified',
         'authorityToSellVerified',
+        'overlapCleared',
         'encumbrancesFound',
         'litigationFound',
         'landsCommissionSearchReference',
@@ -1120,6 +1108,10 @@ function defaultsFor(
       config.type === 'check' ? '' : config.options?.[0] || '';
   }
 
+  if (kind === 'cadastral-survey') {
+    values.mainPortion = true;
+  }
+
   if (item) {
     values.projectReference = item.projectReference;
     values.parcelLocation = item.location;
@@ -1209,6 +1201,18 @@ const WITNESS_OATH_FIELD_KEYS = new Set([
   'witnessOathSwornDate2',
 ]);
 
+const WITNESS_ONE_OATH_FIELD_KEYS = new Set([
+  'witnessSwornOath1',
+  'witnessOathSwornBefore1',
+  'witnessOathSwornDate1',
+]);
+
+const WITNESS_TWO_OATH_FIELD_KEYS = new Set([
+  'witnessSwornOath2',
+  'witnessOathSwornBefore2',
+  'witnessOathSwornDate2',
+]);
+
 function requiredMarker(config: WorkspaceField) {
   return WITNESS_OATH_FIELD_KEYS.has(config.key) ? null : (
     <span className="text-destructive">*</span>
@@ -1216,12 +1220,29 @@ function requiredMarker(config: WorkspaceField) {
 }
 
 function hasCompleteWitnessOath(values: WorkspaceValues) {
-  return [1, 2].some((witnessNumber) => {
-    const sworn = values[`witnessSwornOath${witnessNumber}`] === true;
-    const swornBefore = `${values[`witnessOathSwornBefore${witnessNumber}`] ?? ''}`.trim();
-    const swornDate = `${values[`witnessOathSwornDate${witnessNumber}`] ?? ''}`.trim();
-    return sworn && swornBefore && swornDate;
-  });
+  const witnessOneSworn = values.witnessSwornOath1 === true;
+  const witnessTwoSworn = values.witnessSwornOath2 === true;
+  if (witnessOneSworn === witnessTwoSworn) return false;
+
+  const witnessNumber = witnessOneSworn ? 1 : 2;
+  const swornBefore = `${values[`witnessOathSwornBefore${witnessNumber}`] ?? ''}`.trim();
+  const swornDate = `${values[`witnessOathSwornDate${witnessNumber}`] ?? ''}`.trim();
+  return Boolean(swornBefore && swornDate);
+}
+
+function hideOtherWitnessOathField(
+  kind: AcquisitionWorkspaceKind,
+  key: string,
+  values: WorkspaceValues
+) {
+  if (kind !== 'ownership-classification') return false;
+  if (values.witnessSwornOath1 === true) {
+    return WITNESS_TWO_OATH_FIELD_KEYS.has(key);
+  }
+  if (values.witnessSwornOath2 === true) {
+    return WITNESS_ONE_OATH_FIELD_KEYS.has(key);
+  }
+  return false;
 }
 
 function workspaceDate(value: string | boolean | undefined): Date | null {
@@ -1561,6 +1582,8 @@ export default function LandAcquisitionPage() {
     React.useState<Record<number, LandAcquisitionStageDocumentRequirement[]>>(
       {}
     );
+  const [documentRequirementsError, setDocumentRequirementsError] =
+    React.useState<string | null>(null);
 
   const selectedStage =
     stages.find((stage) => stage.id === selectedStageId) || stages[0];
@@ -1571,12 +1594,16 @@ export default function LandAcquisitionPage() {
   const selectedItem = React.useMemo(() => {
     if (selectedItemId)
       return allItems.find((item) => item.id === selectedItemId) || null;
-    return selectedStage?.items[0] || allItems[0] || null;
+    return selectedStage?.items[0] || null;
   }, [allItems, selectedItemId, selectedStage]);
   const selectedItemStage =
     (selectedItem &&
       stages.find((stage) => stage.order === selectedItem.stageOrder)) ||
     selectedStage;
+  const draftStage = draftItem
+    ? stages.find((stage) => stage.order === draftItem.stageOrder) || null
+    : null;
+  const workspaceStage = draftStage || selectedItemStage;
 
   React.useEffect(() => {
     if (!selectedItem && selectedStage?.items[0])
@@ -1649,12 +1676,18 @@ export default function LandAcquisitionPage() {
     let mounted = true;
     (async () => {
       try {
+        setDocumentRequirementsError(null);
         const requirements =
           await estateAcquisitionService.getActiveWorkflowDocumentRequirements();
         if (mounted) setStageDocumentRequirements(requirements);
       } catch (error) {
         console.error(error);
-        if (mounted) setStageDocumentRequirements({});
+        if (mounted) {
+          setStageDocumentRequirements({});
+          setDocumentRequirementsError(
+            'Required document configuration could not be loaded. Refresh the page before attaching files or submitting this stage.'
+          );
+        }
       }
     })();
 
@@ -1676,7 +1709,18 @@ export default function LandAcquisitionPage() {
         item.id,
         stage.id
       );
-      setWorkspaceValues({ ...defaults, ...workspace.values });
+      const mergedValues = { ...defaults, ...workspace.values };
+      if (
+        stage.workspaceKind === 'cadastral-survey' &&
+        typeof mergedValues.mainPortion !== 'boolean'
+      ) {
+        mergedValues.mainPortion = true;
+      }
+      setWorkspaceValues(mergedValues);
+      setStageDocumentRequirements((current) => ({
+        ...current,
+        [stage.order]: workspace.documentRequirements,
+      }));
     } catch (error) {
       console.error(error);
       setWorkspaceValues(defaults);
@@ -1808,7 +1852,7 @@ export default function LandAcquisitionPage() {
     const item = draftItem || selectedItem;
     const stage =
       draftItem || !selectedItem
-        ? selectedStage
+        ? draftStage || selectedStage
         : selectedItemStage || selectedStage;
     if (!item || !stage) return;
     try {
@@ -2032,7 +2076,7 @@ export default function LandAcquisitionPage() {
         </section>
       </div>
 
-      {(draftItem || selectedItem) && (draftItem ? selectedStage : selectedItemStage) && (
+      {(draftItem || selectedItem) && workspaceStage && (
         <WorkspaceDialog
           open={workspaceOpen}
           onOpenChange={(open) => {
@@ -2040,16 +2084,13 @@ export default function LandAcquisitionPage() {
             if (!open) setDraftItem(null);
           }}
           item={(draftItem || selectedItem) as LandAcquisitionItem}
-          stage={(draftItem ? selectedStage : selectedItemStage) as LandAcquisitionStage}
+          stage={workspaceStage}
           documentRequirements={
-            stageDocumentRequirements[
-              ((draftItem ? selectedStage : selectedItemStage) as LandAcquisitionStage).id
-            ] ||
-            stageDocumentRequirements[
-              ((draftItem ? selectedStage : selectedItemStage) as LandAcquisitionStage).order
-            ] ||
+            stageDocumentRequirements[workspaceStage.id] ||
+            stageDocumentRequirements[workspaceStage.order] ||
             []
           }
+          documentRequirementsError={documentRequirementsError}
           values={workspaceValues}
           onChange={setWorkspaceValues}
           onSave={saveWorkspace}
@@ -2598,6 +2639,7 @@ function AcquisitionDetail({
                 externalTaskAttachments={workflowStageAttachments}
                 hideSatisfiedTaskDocumentUploads
                 hideSatisfiedTaskDocumentSection
+                hideDocumentChecklistItems
                 onOpenWorkflows={
                   canManageWorkflows ? onOpenWorkflows : undefined
                 }
@@ -2858,9 +2900,8 @@ function PastOwnersPanel({
             Ownership History / Past Owners
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Add previous owners in chronological order. Gap reason is required
-            when one owner&apos;s start date is later than the previous
-            owner&apos;s end date.
+            Add previous owners from oldest to newest. Date Gap Reason appears
+            only when a later owner starts after the preceding owner ended.
           </p>
         </div>
         <Button
@@ -3019,29 +3060,28 @@ function PastOwnersPanel({
                       }
                     />
                   </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label>
-                      Date Gap Reason{' '}
-                      {gapRequired && (
+                  {gapRequired && (
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>
+                        Date Gap Reason{' '}
                         <span className="text-destructive">*</span>
-                      )}
-                    </Label>
-                    <Textarea
-                      value={owner.dateGapReason}
-                      disabled={disabled}
-                      rows={2}
-                      onChange={(event) =>
-                        updateOwner(index, {
-                          dateGapReason: event.target.value,
-                        })
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {gapRequired
-                        ? 'Required because this start date is later than the previous owner end date.'
-                        : 'Required only when this owner starts after the previous owner ended.'}
-                    </p>
-                  </div>
+                      </Label>
+                      <Textarea
+                        value={owner.dateGapReason}
+                        disabled={disabled}
+                        rows={2}
+                        onChange={(event) =>
+                          updateOwner(index, {
+                            dateGapReason: event.target.value,
+                          })
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Required because this owner starts after the preceding
+                        owner ended.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -3058,6 +3098,7 @@ function WorkspaceDialog({
   item,
   stage,
   documentRequirements,
+  documentRequirementsError,
   values,
   onChange,
   onSave,
@@ -3070,6 +3111,7 @@ function WorkspaceDialog({
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
   documentRequirements: LandAcquisitionStageDocumentRequirement[];
+  documentRequirementsError: string | null;
   values: WorkspaceValues;
   onChange: React.Dispatch<React.SetStateAction<WorkspaceValues>>;
   onSave: (pendingDocuments?: PendingAcquisitionDocument[]) => Promise<void>;
@@ -3093,6 +3135,11 @@ function WorkspaceDialog({
   const [vendors, setVendors] = React.useState<BusinessPartnerDto[]>([]);
   const [vendorsLoading, setVendorsLoading] = React.useState(false);
   const [vendorsError, setVendorsError] = React.useState<string | null>(null);
+  const [hrLocations, setHrLocations] = React.useState<HrLocationLookup[]>([]);
+  const [hrLocationsLoading, setHrLocationsLoading] = React.useState(false);
+  const [hrLocationsError, setHrLocationsError] = React.useState<string | null>(
+    null
+  );
   const [syncingPayable, setSyncingPayable] = React.useState(false);
   const [preview, setPreview] = React.useState<{
     url: string;
@@ -3117,6 +3164,16 @@ function WorkspaceDialog({
   const workspaceLockedMessage = isPublishedAssetWorkspace
     ? 'This asset has already been published to Estate Land Bank, so the workspace is read-only.'
     : assignmentMessage;
+
+  React.useEffect(() => {
+    if (
+      open &&
+      stage.workspaceKind === 'cadastral-survey' &&
+      typeof values.mainPortion !== 'boolean'
+    ) {
+      onChange((current) => ({ ...current, mainPortion: true }));
+    }
+  }, [onChange, open, stage.workspaceKind, values.mainPortion]);
 
   const refreshAccountsPayableStatus = async () => {
     if (!item.id) return;
@@ -3214,6 +3271,42 @@ function WorkspaceDialog({
     };
 
     loadVendors();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, stage.workspaceKind]);
+
+  React.useEffect(() => {
+    if (
+      !open ||
+      !['cadastral-survey', 'ownership-classification'].includes(
+        stage.workspaceKind
+      )
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadHrLocations = async () => {
+      setHrLocationsLoading(true);
+      setHrLocationsError(null);
+      try {
+        const locations = await estateAcquisitionService.getActiveHrLocations();
+        if (!cancelled) setHrLocations(locations);
+      } catch (error) {
+        if (!cancelled) {
+          setHrLocationsError(
+            error instanceof Error
+              ? error.message
+              : 'Unable to load HR locations.'
+          );
+        }
+      } finally {
+        if (!cancelled) setHrLocationsLoading(false);
+      }
+    };
+
+    void loadHrLocations();
     return () => {
       cancelled = true;
     };
@@ -3580,6 +3673,11 @@ function WorkspaceDialog({
                   </Button>
                 ))}
               </div>
+              {documentRequirementsError && (
+                <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  {documentRequirementsError}
+                </div>
+              )}
               <div className="space-y-2">
                 {loadingDocuments && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -3587,7 +3685,8 @@ function WorkspaceDialog({
                     Loading documents
                   </div>
                 )}
-                {!loadingDocuments &&
+                {!documentRequirementsError &&
+                  !loadingDocuments &&
                   !hasRequirements &&
                   unclassifiedDocuments.length === 0 &&
                   pendingDocuments.length === 0 && (
@@ -3849,7 +3948,21 @@ function WorkspaceDialog({
                   </p>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
-                  {section.fields.map((config) =>
+                  {section.fields
+                    .filter(
+                      (config) =>
+                        !hideOtherWitnessOathField(
+                          stage.workspaceKind,
+                          config.key,
+                          values
+                        ) &&
+                        !(
+                          stage.workspaceKind === 'ownership-classification' &&
+                          config.key === 'dateGapReason' &&
+                          !hasOwnershipDateGap(values)
+                        )
+                    )
+                    .map((config) =>
                     config.key === 'vendorName' &&
                     stage.workspaceKind === 'parcel-identification' ? (
                       <div key={config.key} className="space-y-2">
@@ -3934,7 +4047,6 @@ function WorkspaceDialog({
                                   identificationType: '',
                                   identificationNumber: '',
                                   ownershipEndDate: '',
-                                  dateGapReason: '',
                                 }));
                               }}
                             >
@@ -4014,9 +4126,7 @@ function WorkspaceDialog({
                       <div key={config.key} className="space-y-2 md:col-span-2">
                         <Label>
                           Date Gap Reason{' '}
-                          {hasOwnershipDateGap(values) && (
-                            <span className="text-destructive">*</span>
-                          )}
+                          <span className="text-destructive">*</span>
                         </Label>
                         <Textarea
                           value={`${values.dateGapReason || ''}`}
@@ -4027,10 +4137,22 @@ function WorkspaceDialog({
                           rows={4}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Required only when the previous owner&apos;s end date
-                          and this owner&apos;s start date leave a timeline gap.
+                          Required because the current ownership starts after
+                          the most recent past ownership ended.
                         </p>
                       </div>
+                    ) : config.type === 'region' ||
+                      config.type === 'district' ? (
+                      <HrLocationControl
+                        key={config.key}
+                        config={config}
+                        locations={hrLocations}
+                        values={values}
+                        loading={hrLocationsLoading}
+                        error={hrLocationsError}
+                        disabled={Boolean(!workspaceCanEdit || config.readOnly)}
+                        onChange={onChange}
+                      />
                     ) : (
                       <WorkspaceControl
                         key={config.key}
@@ -4039,6 +4161,27 @@ function WorkspaceDialog({
                         disabled={!workspaceCanEdit || config.readOnly}
                         onChange={(value) => {
                           if (!workspaceCanEdit || config.readOnly) return;
+                          if (
+                            config.key === 'witnessSwornOath1' ||
+                            config.key === 'witnessSwornOath2'
+                          ) {
+                            const witnessNumber = config.key.endsWith('1')
+                              ? 1
+                              : 2;
+                            const otherWitnessNumber = witnessNumber === 1 ? 2 : 1;
+                            onChange((current) => ({
+                              ...current,
+                              [config.key]: value,
+                              ...(value === true
+                                ? {
+                                    [`witnessSwornOath${otherWitnessNumber}`]: false,
+                                    [`witnessOathSwornBefore${otherWitnessNumber}`]: '',
+                                    [`witnessOathSwornDate${otherWitnessNumber}`]: '',
+                                  }
+                                : {}),
+                            }));
+                            return;
+                          }
                           if (config.key === 'isCurrentOwner') {
                             const currentOwner = value === true;
                             onChange((current) => ({
@@ -4068,9 +4211,6 @@ function WorkspaceDialog({
                               ownershipEndDate: currentOwner
                                 ? ''
                                 : `${current.ownershipEndDate || ''}`,
-                              dateGapReason: currentOwner
-                                ? ''
-                                : `${current.dateGapReason || ''}`,
                             }));
                             return;
                           }
@@ -4136,6 +4276,101 @@ function WorkspaceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function HrLocationControl({
+  config,
+  locations,
+  values,
+  loading,
+  error,
+  disabled,
+  onChange,
+}: {
+  config: WorkspaceField;
+  locations: HrLocationLookup[];
+  values: WorkspaceValues;
+  loading: boolean;
+  error: string | null;
+  disabled: boolean;
+  onChange: React.Dispatch<React.SetStateAction<WorkspaceValues>>;
+}) {
+  const isDistrict = config.type === 'district';
+  const regionKey = config.key.startsWith('owner')
+    ? 'ownerRegionId'
+    : 'regionId';
+  const currentValue = `${values[config.key] || ''}`;
+  const selectedRegionValue = `${values[regionKey] || ''}`;
+  const matchesValue = (location: HrLocationLookup, value: string) =>
+    location.id === value ||
+    location.name.localeCompare(value, undefined, { sensitivity: 'accent' }) === 0;
+  const levelName = (location: HrLocationLookup) =>
+    `${location.levelName || ''}`.trim().toLowerCase();
+  const selectedRegion = locations.find((location) =>
+    matchesValue(location, selectedRegionValue)
+  );
+  const selectedLocation = locations.find((location) =>
+    matchesValue(location, currentValue)
+  );
+  const options = locations.filter((location) => {
+    const level = levelName(location);
+    if (!isDistrict) return level === 'region' || level.endsWith(' region');
+    if (!(level === 'district' || level.endsWith(' district'))) return false;
+    return selectedRegion
+      ? location.parentLocationId === selectedRegion.id
+      : false;
+  });
+
+  return (
+    <div className="space-y-2">
+      <Label>
+        {config.label} {requiredMarker(config)}
+      </Label>
+      <Select
+        value={selectedLocation?.id || ''}
+        disabled={disabled || loading || (isDistrict && !selectedRegion)}
+        onValueChange={(locationId) => {
+          onChange((current) => {
+            const next = { ...current, [config.key]: locationId };
+            if (!isDistrict) {
+              const districtKey = config.key.startsWith('owner')
+                ? 'ownerDistrictId'
+                : 'districtId';
+              next[districtKey] = '';
+            }
+            return next;
+          });
+        }}
+      >
+        <SelectTrigger>
+          <SelectValue
+            placeholder={
+              loading
+                ? `Loading ${config.label.toLowerCase()}s...`
+                : isDistrict && !selectedRegion
+                  ? 'Select a region first'
+                  : `Select ${config.label.toLowerCase()}`
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((location) => (
+            <SelectItem key={location.id} value={location.id}>
+              {location.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      {!loading && !error && options.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          {isDistrict && !selectedRegion
+            ? 'Select an HR Region to load its Districts.'
+            : `No active HR ${config.label} locations are configured.`}
+        </p>
+      )}
+    </div>
   );
 }
 

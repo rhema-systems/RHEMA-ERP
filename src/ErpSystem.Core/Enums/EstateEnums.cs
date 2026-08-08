@@ -82,5 +82,7 @@ public enum EstateManagedAssetStatus
     Leased = 4,
     Occupied = 5,
     Sold = 6,
-    Retired = 7
+    Retired = 7,
+    UnderMaintenance = 8,
+    Blocked = 9
 }

@@ -230,6 +230,23 @@ public sealed class EstateManagedAssetsController : ControllerBase
         }
     }
 
+    [HttpPatch("{id:guid}/occupancy")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer")]
+    public async Task<IActionResult> UpdateOccupancy(
+        Guid id,
+        [FromBody] UpdateEstateManagedAssetOccupancyDto request)
+    {
+        try
+        {
+            var asset = await _managedAssetService.UpdateOccupancyAsync(id, request);
+            return Ok(new { success = true, data = asset, message = "Occupancy and availability updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpGet("{id:guid}/documents")]
     public async Task<IActionResult> GetDocuments(Guid id)
         => Ok(new { success = true, data = await _managedAssetService.GetDocumentsAsync(id) });

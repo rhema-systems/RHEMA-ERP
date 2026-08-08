@@ -118,9 +118,11 @@ export default function MyBidsPage() {
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <FileText className="h-8 w-8 text-blue-600" />
-          My Bids
+          My Tender Bids
         </h1>
-        <p className="text-gray-500">View and manage your submitted bids</p>
+        <p className="text-gray-500">
+          View and manage bids submitted for Procurement tenders
+        </p>
       </div>
 
       {/* Stats */}

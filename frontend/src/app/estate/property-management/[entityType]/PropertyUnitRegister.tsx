@@ -55,6 +55,8 @@ const statusLabels: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.Occupied]: 'Occupied',
   [EstateManagedAssetStatus.Sold]: 'Sold',
   [EstateManagedAssetStatus.Retired]: 'Retired',
+  [EstateManagedAssetStatus.UnderMaintenance]: 'Under maintenance',
+  [EstateManagedAssetStatus.Blocked]: 'Blocked',
 };
 
 const typeLabels: Record<EstateManagedAssetType, string> = {
