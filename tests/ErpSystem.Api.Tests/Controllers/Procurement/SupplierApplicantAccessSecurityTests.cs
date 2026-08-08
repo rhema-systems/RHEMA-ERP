@@ -189,6 +189,12 @@ public sealed class SupplierApplicantAccessSecurityTests
 
         registrations.Verify(item => item.ApproveRegistrationAsync(
             registrationId, actorId, "approved"), Times.Once);
+        applicantAccess.Verify(item =>
+            item.ValidateApprovedSupplierProvisioningAsync(
+                registrationId,
+                actorId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Once);
         registrations.Verify(item => item.RejectRegistrationAsync(
             registrationId, actorId, "rejected"), Times.Once);
         applicantAccess.Verify(item => item.CloseForTerminalRegistrationAsync(
@@ -197,6 +203,39 @@ public sealed class SupplierApplicantAccessSecurityTests
             actorId,
             It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegistrationApprovalPreflightConflictDoesNotCommitApproval()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        var applicantAccess = new Mock<IProcurementSupplierApplicantAccessService>();
+        applicantAccess.Setup(item =>
+                item.ValidateApprovedSupplierProvisioningAsync(
+                    registrationId,
+                    actorId,
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementSupplierApplicantAccessException(
+                "SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS",
+                "The verified contact belongs to an existing ERP account.",
+                StatusCodes.Status409Conflict));
+        var controller = RegistrationController(
+            registrations.Object, actorId, applicantAccess.Object);
+
+        var result = await controller.ApproveRegistration(
+            registrationId, new ApproveRegistrationRequest("approved"));
+
+        var conflict = result.Result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Detail.Should().Contain("existing ERP account");
+        problem.Extensions["code"].Should()
+            .Be("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS");
+        registrations.Verify(item => item.ApproveRegistrationAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ const dateTime = (value?: string) =>
 export default function SupplierApplicantAccessAdministrationPage() {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
-  const canManage = hasPermission('procurement.supplier.manage');
+  const canRecover = hasPermission('procurement.supplier.approve');
   const [busyId, setBusyId] = useState<string>();
   const summary = useQuery({
     queryKey: ['supplier-applicant-access-summary'],
@@ -142,16 +142,17 @@ export default function SupplierApplicantAccessAdministrationPage() {
             <TableBody>
               {(history.data || []).map((item) => {
                 const status = String(item.status);
+                const isPending =
+                  status === 'ApprovedPendingCredentialDelivery' || status === '1';
+                const isDelivered =
+                  status === 'CredentialDelivered' || status === '2';
+                const isFailed =
+                  status === 'ActivationFailed' || status === '5';
+                const hasProvisionedLogin = Boolean(item.loginIdentifier);
                 const canResend =
-                  canManage &&
-                  ['CredentialDelivered', 'ApprovedPendingCredentialDelivery', '4', '2'].includes(
-                    status
-                  );
+                  canRecover && hasProvisionedLogin && (isDelivered || isPending);
                 const canRetry =
-                  canManage &&
-                  ['ActivationFailed', 'ApprovedPendingCredentialDelivery', '6', '2'].includes(
-                    status
-                  );
+                  canRecover && (isFailed || (isPending && !hasProvisionedLogin));
                 return (
                   <TableRow key={item.id}>
                     <TableCell>

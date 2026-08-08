@@ -1986,12 +1986,13 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             <div class='info-box'>
                 <strong>Your Partner Number:</strong> {partnerNumber}
             </div>
-            <p>You can now access all business partner features and services.</p>
+            <p>Your supplier approval is complete. Portal account access is activated through a separate credential-delivery step.</p>
             <p><strong>What's Next:</strong></p>
             <ul>
-                <li>Log in to your account using your credentials</li>
-                <li>Complete your profile information</li>
-                <li>Start exploring available opportunities</li>
+                <li>If this application uses the supplier portal, your login identifier and one-time temporary password will be sent separately to the verified application contact after account provisioning</li>
+                <li>Do not use the application token as your portal password</li>
+                <li>The temporary password must be changed at first login and expires after the configured validity period</li>
+                <li>If the separate credential message does not arrive, contact procurement support</li>
             </ul>
             <p>Welcome to our business partner network!</p>
             <p>Best regards,<br>Business Partner Registration Team</p>

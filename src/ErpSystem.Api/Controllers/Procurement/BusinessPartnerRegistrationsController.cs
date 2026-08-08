@@ -423,6 +423,15 @@ public class BusinessPartnerRegistrationsController : ControllerBase
         {
             var userId = AuthenticatedUserId();
 
+            // Reject identity and supplier-role configuration conflicts before the
+            // approval transaction creates a business partner or sends an approval
+            // notice. Provisioning remains a separate retryable delivery step.
+            await _applicantAccessService.ValidateApprovedSupplierProvisioningAsync(
+                id,
+                userId,
+                $"supplier-applicant-approval-preflight-{id:N}",
+                HttpContext.RequestAborted);
+
             // Approve the registration (creates business partner and saves everything)
             await _registrationService.ApproveRegistrationAsync(id, userId, request.Notes);
 
@@ -448,6 +457,17 @@ public class BusinessPartnerRegistrationsController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (ProcurementSupplierApplicantAccessException ex)
+        {
+            return StatusCode(ex.StatusCode, new ProblemDetails
+            {
+                Type = "https://tdc.gov.gh/problems/supplier-applicant-access",
+                Title = "Supplier account provisioning is not ready",
+                Status = ex.StatusCode,
+                Detail = ex.Message,
+                Extensions = { ["code"] = ex.Code }
+            });
         }
         catch (InvalidOperationException ex)
         {

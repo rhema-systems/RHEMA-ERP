@@ -23,6 +23,50 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementSupplierApplicantLifecycleTests
 {
     [Fact]
+    public async Task ExistingErpIdentityCannotStartSupplierApplication()
+    {
+        await using var fixture = new Fixture();
+        fixture.Context.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "internal.admin@example.test",
+            NormalizedUserName = "INTERNAL.ADMIN@EXAMPLE.TEST",
+            Email = "internal.admin@example.test",
+            NormalizedEmail = "INTERNAL.ADMIN@EXAMPLE.TEST",
+            EmailConfirmed = true,
+            FirstName = "Internal",
+            LastName = "Administrator",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            AuthenticationProvider = AuthenticationProvider.LDAP,
+            CreatedAt = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var create = () => fixture.Service.CreateVerifiedApplicationAsync(
+            new VerifyAndIssueSupplierApplicantTokenRequest
+            {
+                TenantId = fixture.TenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                Contact = "INTERNAL.ADMIN@example.test",
+                CompanyName = "Unsafe Supplier",
+                RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods
+            },
+            "existing-internal-identity");
+
+        (await create.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which.Code.Should()
+            .Be("SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED");
+        (await fixture.Context.BusinessPartnerRegistrations.AnyAsync())
+            .Should().BeFalse();
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.AnyAsync())
+            .Should().BeFalse();
+        (await fixture.Context.ProcurementSupplierOnboardingTokens.AnyAsync())
+            .Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ApplicationTokenDeliveryAcceptsUppercaseOnboardingHash()
     {
         await using var fixture = new Fixture();
@@ -466,6 +510,45 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         (await resend.Should()
                 .ThrowAsync<ProcurementSupplierApplicantAccessException>())
             .Which.Code.Should().Be("SUPPLIER_APPLICANT_RESEND_NOT_ALLOWED");
+    }
+
+    [Fact]
+    public async Task ApprovalPreflightRejectsExistingErpIdentityBeforeProvisioning()
+    {
+        await using var fixture = new Fixture();
+        var subject = fixture.SeedApprovedApplication();
+        fixture.Context.Users.Add(new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "approved@example.test",
+            NormalizedUserName = "APPROVED@EXAMPLE.TEST",
+            Email = "approved@example.test",
+            NormalizedEmail = "APPROVED@EXAMPLE.TEST",
+            EmailConfirmed = true,
+            FirstName = "Existing",
+            LastName = "Administrator",
+            TenantId = fixture.TenantId,
+            IsActive = true,
+            AuthenticationProvider = AuthenticationProvider.LDAP,
+            CreatedAt = DateTime.UtcNow.AddDays(-30)
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var validate = () => fixture.Service
+            .ValidateApprovedSupplierProvisioningAsync(
+                subject.RegistrationId,
+                fixture.ActorId,
+                "approval-identity-preflight");
+
+        var exception = (await validate.Should()
+                .ThrowAsync<ProcurementSupplierApplicantAccessException>())
+            .Which;
+        exception.Code.Should().Be("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS");
+        exception.Message.Should().Contain("existing ERP account");
+        (await fixture.Context.ProcurementSupplierApplicantAccesses.SingleAsync())
+            .ApprovedUserId.Should().BeNull();
+        (await fixture.Context.BusinessPartnerUsers.AnyAsync())
+            .Should().BeFalse();
     }
 
     [Fact]

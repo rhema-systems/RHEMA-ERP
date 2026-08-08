@@ -25,7 +25,8 @@ import {
   User,
   Download,
   Eye,
-  X
+  X,
+  KeyRound
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { registrationReviewService, type RegistrationDetailDto } from '@/services/registrationReviewService';
@@ -190,7 +191,9 @@ export default function RegistrationDetailPage() {
     try {
       setActionLoading(true);
       await registrationReviewService.approve(id, approvalNotes || undefined);
-      toast.success('Registration approved successfully');
+      toast.success(
+        'Registration approved. Check Supplier Applicant Access for credential delivery.'
+      );
       setApproveDialogOpen(false);
       router.push('/administration/procurement/registrations');
     } catch (error: any) {
@@ -379,6 +382,17 @@ export default function RegistrationDetailPage() {
         </div>
 
         <div className="flex gap-2">
+          {registration.status === 'Approved' && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push('/administration/procurement/supplier-applicant-access')
+              }
+            >
+              <KeyRound className="w-4 h-4 mr-2" />
+              Supplier Applicant Access
+            </Button>
+          )}
           {canApprove && (
             <Button onClick={handleApproveClick} className="bg-green-600 hover:bg-green-700">
               <CheckCircle className="w-4 h-4 mr-2" />

@@ -177,6 +177,18 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 existingMatches[0], request, correlation, cancellationToken);
         }
 
+        if (await FindConflictingIdentityAsync(
+                request.TenantId,
+                request.Channel,
+                contact,
+                cancellationToken) is not null)
+        {
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED",
+                "This contact is already assigned to an ERP account. Sign in with that account or use a separate supplier contact.",
+                409);
+        }
+
         // A verified applicant is not an ERP user until approval. Use the
         // applicant-access identity as the external actor instead of borrowing
         // an administrator account for ownership and audit lineage.
@@ -885,6 +897,51 @@ public sealed class ProcurementSupplierApplicantAccessService :
             cancellationToken);
     }
 
+    public async Task ValidateApprovedSupplierProvisioningAsync(
+        Guid registrationId,
+        Guid actorUserId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureInternalTenant();
+        EnsureAuthenticatedActor(actorUserId);
+        await EnsureApprovalPermissionAsync(
+            registrationId, correlationId, cancellationToken);
+
+        var access = await Accesses.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.RegistrationId == registrationId &&
+                !item.IsDeleted)
+            .Include(item => item.Registration)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (access is null)
+            return;
+
+        var roles = NormalizeApprovedRoles();
+        foreach (var role in roles)
+        {
+            if (!await _roleManager.RoleExistsAsync(role))
+            {
+                throw Error(
+                    "SUPPLIER_APPLICANT_ROLE_NOT_CONFIGURED",
+                    $"The approved supplier role '{role}' is not configured.",
+                    409);
+            }
+        }
+        _ = NormalizeBusinessPartnerRole();
+
+        var existing = await FindConflictingIdentityAsync(
+            access.TenantId,
+            access.VerifiedChannel,
+            access.VerifiedContact,
+            cancellationToken);
+        if (existing is not null && access.ApprovedUserId != existing.Id)
+        {
+            throw LoginAlreadyExists();
+        }
+    }
+
     public async Task ProvisionApprovedSupplierAsync(
         Guid registrationId,
         Guid businessPartnerId,
@@ -971,11 +1028,11 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     $"The approved supplier role '{role}' is not configured.", 409);
         }
         var loginIdentifier = BuildLoginIdentifier(access);
-        var existing = await _userManager.Users.SingleOrDefaultAsync(item =>
-            item.TenantId == access.TenantId &&
-            (item.NormalizedUserName == loginIdentifier.ToUpper() ||
-             (!string.IsNullOrWhiteSpace(item.Email) &&
-              item.Email == access.VerifiedContact)), cancellationToken);
+        var existing = await FindConflictingIdentityAsync(
+            access.TenantId,
+            access.VerifiedChannel,
+            access.VerifiedContact,
+            cancellationToken);
         var resumedPartialIdentity = existing is not null &&
             access.ApprovedUserId != existing.Id &&
             await IsRecoverablePartialSupplierIdentityAsync(
@@ -986,8 +1043,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         if (existing is not null &&
             access.ApprovedUserId != existing.Id &&
             !resumedPartialIdentity)
-            throw Error("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS",
-                "The verified contact is already assigned to another account.", 409);
+            throw LoginAlreadyExists();
 
         var temporaryPassword = GenerateTemporaryPassword();
         var now = DateTime.UtcNow;
@@ -1331,8 +1387,10 @@ public sealed class ProcurementSupplierApplicantAccessService :
         await EnsureApprovalPermissionAsync(
             registrationId, correlationId, cancellationToken);
         var access = await LoadAccessAsync(registrationId, cancellationToken, tracked: true);
-        if (!access.ApprovedUserId.HasValue || access.Status ==
-            ProcurementSupplierApplicantAccessStatus.Activated)
+        if (!access.ApprovedUserId.HasValue)
+            throw Error("SUPPLIER_APPLICANT_CREDENTIAL_NOT_PROVISIONED",
+                "No supplier login has been provisioned for this application. Use Retry to resolve the provisioning failure before resending credentials.", 409);
+        if (access.Status == ProcurementSupplierApplicantAccessStatus.Activated)
             throw Error("SUPPLIER_APPLICANT_RESEND_NOT_ALLOWED",
                 "Temporary credentials can be resent only before credential activation.", 409);
         var user = await _userManager.FindByIdAsync(access.ApprovedUserId.Value.ToString())
@@ -1827,9 +1885,66 @@ public sealed class ProcurementSupplierApplicantAccessService :
 
     private static string BuildLoginIdentifier(
         ProcurementSupplierApplicantAccess access) =>
-        access.VerifiedChannel == ProcurementSupplierApplicantVerificationChannel.Email
-            ? access.VerifiedContact
-            : $"{access.VerifiedContact}.{access.TenantId.ToString("N")[..8]}";
+        BuildLoginIdentifier(
+            access.TenantId,
+            access.VerifiedChannel,
+            access.VerifiedContact);
+
+    private static string BuildLoginIdentifier(
+        Guid tenantId,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string contact) =>
+        channel == ProcurementSupplierApplicantVerificationChannel.Email
+            ? contact
+            : $"{contact}.{tenantId.ToString("N")[..8]}";
+
+    private async Task<ApplicationUser?> FindConflictingIdentityAsync(
+        Guid tenantId,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string contact,
+        CancellationToken cancellationToken)
+    {
+        var users = _userManager.Users.IgnoreQueryFilters();
+        var loginIdentifier = BuildLoginIdentifier(tenantId, channel, contact);
+        var normalizedLogin = loginIdentifier.ToUpperInvariant();
+        var loginConflict = await users.FirstOrDefaultAsync(item =>
+            item.NormalizedUserName == normalizedLogin ||
+            item.UserName == loginIdentifier,
+            cancellationToken);
+        if (loginConflict is not null)
+            return loginConflict;
+
+        if (channel == ProcurementSupplierApplicantVerificationChannel.Email)
+        {
+            var normalizedEmail = contact.ToUpperInvariant();
+            return await users.FirstOrDefaultAsync(item =>
+                    item.NormalizedEmail == normalizedEmail ||
+                    item.Email == contact,
+                cancellationToken);
+        }
+
+        var phoneAliases = SupplierApplicantContactNormalizer
+            .GetLookupAliases(channel, contact)
+            .ToArray();
+        return await users.FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId &&
+                item.PhoneNumber != null &&
+                phoneAliases.Contains(
+                    item.PhoneNumber
+                        .Replace(" ", string.Empty)
+                        .Replace("-", string.Empty)
+                        .Replace("(", string.Empty)
+                        .Replace(")", string.Empty)
+                        .Replace("/", string.Empty)
+                        .Replace(".", string.Empty)),
+            cancellationToken);
+    }
+
+    private static ProcurementSupplierApplicantAccessException LoginAlreadyExists() =>
+        Error(
+            "SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS",
+            "The verified contact belongs to an existing ERP account and cannot be used to provision a supplier login. Use a separate verified supplier contact.",
+            409);
 
     private static void ValidateContact(
         ProcurementSupplierApplicantVerificationChannel channel,

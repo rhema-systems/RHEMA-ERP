@@ -40,6 +40,11 @@ public interface IProcurementSupplierApplicantAccessService
         Guid actorUserId,
         string correlationId,
         CancellationToken cancellationToken = default);
+    Task ValidateApprovedSupplierProvisioningAsync(
+        Guid registrationId,
+        Guid actorUserId,
+        string correlationId,
+        CancellationToken cancellationToken = default);
     Task ProvisionApprovedSupplierAsync(
         Guid registrationId,
         Guid businessPartnerId,
