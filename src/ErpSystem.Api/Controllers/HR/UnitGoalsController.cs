@@ -217,6 +217,10 @@ public class UnitGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUnitGoalDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
         try
         {
             var result = await _unitGoalService.UpdateAsync(updateDto, cancellationToken);

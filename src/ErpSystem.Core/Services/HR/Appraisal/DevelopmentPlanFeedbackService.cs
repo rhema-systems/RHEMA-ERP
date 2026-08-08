@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,7 @@ public class DevelopmentPlanFeedbackService : IDevelopmentPlanFeedbackService
     private readonly IGenericRepository<EmployeeDevelopmentPlanFeedback> _feedbackRepository;
     private readonly IGenericRepository<EmployeeDevelopmentPlan> _planRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IAppraisalNotificationService _notifications;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<DevelopmentPlanFeedbackService> _logger;
 
@@ -23,12 +25,14 @@ public class DevelopmentPlanFeedbackService : IDevelopmentPlanFeedbackService
         IGenericRepository<EmployeeDevelopmentPlanFeedback> feedbackRepository,
         IGenericRepository<EmployeeDevelopmentPlan> planRepository,
         ICurrentUserProvider currentUserProvider,
+        IAppraisalNotificationService notifications,
         IUnitOfWork unitOfWork,
         ILogger<DevelopmentPlanFeedbackService> logger)
     {
         _feedbackRepository = feedbackRepository;
         _planRepository     = planRepository;
         _currentUserProvider = currentUserProvider;
+        _notifications      = notifications;
         _unitOfWork         = unitOfWork;
         _logger             = logger;
     }
@@ -68,7 +72,7 @@ public class DevelopmentPlanFeedbackService : IDevelopmentPlanFeedbackService
     public async Task<EmployeeDevelopmentPlanFeedbackDto> AddAsync(
         CreateEmployeeDevelopmentPlanFeedbackDto dto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPlanAsync(dto.DevelopmentPlanId);
+        var plan = await GetOwnedPlanAsync(dto.DevelopmentPlanId);
 
         var entity = dto.ToEntity(GetTenantId());
 
@@ -78,6 +82,30 @@ public class DevelopmentPlanFeedbackService : IDevelopmentPlanFeedbackService
         _logger.LogInformation(
             "Feedback added to plan {PlanId} by manager {ManagerId}: {FeedbackId}",
             dto.DevelopmentPlanId, dto.ManagerId, entity.Id);
+
+        // Feedback nobody is told about is feedback nobody reads. The employee's own notes on
+        // their plan are not news to them, so those raise nothing.
+        if (plan.EmployeeId != dto.ManagerId)
+        {
+            try
+            {
+                await _notifications.RaiseAsync(new[]
+                {
+                    new AppraisalNotificationRequest(
+                        plan.EmployeeId,
+                        AppraisalNotificationType.DevelopmentFeedbackAdded,
+                        "New development feedback",
+                        string.IsNullOrWhiteSpace(plan.Title)
+                            ? "Your manager has added feedback to your development plan."
+                            : $"Your manager has added feedback to \"{plan.Title}\".",
+                        NavigationUrl: $"/hr/performance/development-plans/{plan.Id}")
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to notify the employee of new development feedback; the feedback stands.");
+            }
+        }
 
         return entity.ToDto();
     }

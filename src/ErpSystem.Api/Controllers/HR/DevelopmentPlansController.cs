@@ -1,28 +1,101 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Employee development plans — the growth half of the appraisal cycle, as opposed to the
+/// corrective half in <see cref="PerformanceImprovementPlansController"/>.
+///
+/// <para><b>Who owns what.</b> The plan is the employee's: they write it, add objectives and log
+/// progress. The manager reviews it and adds feedback (see
+/// <see cref="DevelopmentPlanFeedbackController"/>). HR can see and touch any of them. Nobody
+/// else — a development plan records what someone is not yet good at, and before this any
+/// authenticated user could read any plan by id.</para>
+///
+/// <para><b>Deliberately not on the workflow engine.</b> Unlike an improvement plan, this has no
+/// single-writer approval lifecycle: employee and manager both edit it, feedback arrives at any
+/// time, and objectives move independently of the plan's own status. Activating a plan is the
+/// manager agreeing to support it, not an approval gate that a definition should route — the same
+/// reasoning that keeps goal approval bespoke.</para>
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
 public class DevelopmentPlansController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IDevelopmentPlanService _developmentPlanService;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<DevelopmentPlansController> _logger;
 
-    public DevelopmentPlansController(IDevelopmentPlanService developmentPlanService, ILogger<DevelopmentPlansController> logger)
+    public DevelopmentPlansController(
+        IDevelopmentPlanService developmentPlanService,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
+        ILogger<DevelopmentPlansController> logger)
     {
         _developmentPlanService = developmentPlanService;
+        _db = db;
+        _currentUserService = currentUserService;
         _logger = logger;
     }
 
-    /// <summary>Get development plans with pagination</summary>
+    private bool IsHr =>
+        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+
+    /// <summary>
+    /// Business rules — "a completed plan cannot be edited" and the like — come back as 422 with
+    /// the rule's own message rather than falling to the generic handler, which returns a bare
+    /// string body the client cannot read a message out of.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Development plan rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
+    /// <summary>HR, the employee whose plan it is, or that employee's line manager.</summary>
+    private async Task<bool> CanAccessPlanAsync(Guid planId, CancellationToken ct = default)
+    {
+        if (IsHr) return true;
+        if (_currentUserService.EmployeeId is not Guid me) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<EmployeeDevelopmentPlan>()
+            .AsNoTracking()
+            .Where(p => p.Id == planId && p.TenantId == tenantId)
+            .AnyAsync(p => p.EmployeeId == me || p.Employee.ManagerId == me, ct);
+    }
+
+    /// <summary>Same rule for a plan that does not exist yet, keyed on who it is for.</summary>
+    private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, CancellationToken ct = default)
+    {
+        if (IsHr) return true;
+        if (_currentUserService.EmployeeId is not Guid me) return false;
+        if (me == employeeId) return true;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<Employee>()
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == me, ct);
+    }
+
+    /// <summary>Get development plans with pagination. HR's org-wide view.</summary>
     [HttpGet("paged")]
+    [Authorize(Roles = HrRoles)]
     [ProducesResponseType(typeof(PagedResult<EmployeeDevelopmentPlanDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
@@ -41,9 +114,12 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Get a development plan by ID</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(EmployeeDevelopmentPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.GetByIdAsync(id, cancellationToken);
@@ -60,11 +136,55 @@ public class DevelopmentPlansController : ControllerBase
         }
     }
 
+    /// <summary>The signed-in employee's own development plans.</summary>
+    [HttpGet("mine")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeDevelopmentPlanDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMine(CancellationToken cancellationToken = default)
+    {
+        // An account with no employee link has no plans rather than an error — the shape every
+        // other /me route in this module returns.
+        if (_currentUserService.EmployeeId is not Guid me)
+            return Ok(Array.Empty<EmployeeDevelopmentPlanDto>());
+
+        try
+        {
+            return Ok(await _developmentPlanService.GetByEmployeeIdAsync(me, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving the caller's development plans");
+            return StatusCode(500, "An error occurred while retrieving your development plans");
+        }
+    }
+
+    /// <summary>Development plans belonging to the signed-in manager's direct reports.</summary>
+    [HttpGet("my-team")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeDevelopmentPlanDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyTeam(CancellationToken cancellationToken = default)
+    {
+        if (_currentUserService.EmployeeId is not Guid me)
+            return Ok(Array.Empty<EmployeeDevelopmentPlanDto>());
+
+        try
+        {
+            return Ok(await _developmentPlanService.GetByManagerIdAsync(me, cancellationToken));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving team development plans");
+            return StatusCode(500, "An error occurred while retrieving your team's development plans");
+        }
+    }
+
     /// <summary>Get all development plans for direct reports of a manager</summary>
     [HttpGet("by-manager/{managerId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDevelopmentPlanDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByManager(Guid managerId, CancellationToken cancellationToken = default)
     {
+        // Another manager's team is not this caller's to read; use /my-team for your own.
+        if (!IsHr && _currentUserService.EmployeeId != managerId) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.GetByManagerIdAsync(managerId, cancellationToken);
@@ -80,8 +200,11 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Get development plans for an employee</summary>
     [HttpGet("by-employee/{employeeId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDevelopmentPlanDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByEmployee(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.GetByEmployeeIdAsync(employeeId, cancellationToken);
@@ -97,9 +220,12 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Get the active development plan for an employee, optionally filtered by cycle</summary>
     [HttpGet("active/{employeeId:guid}")]
     [ProducesResponseType(typeof(EmployeeDevelopmentPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetActivePlan(Guid employeeId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.GetActivePlanAsync(employeeId, cycleId, cancellationToken);
@@ -117,8 +243,11 @@ public class DevelopmentPlansController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(EmployeeDevelopmentPlanDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateEmployeeDevelopmentPlanDto createDto, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeAsync(createDto.EmployeeId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.CreateAsync(createDto, cancellationToken);
@@ -127,6 +256,10 @@ public class DevelopmentPlansController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating");
         }
         catch (Exception ex)
         {
@@ -138,9 +271,16 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Update an existing development plan</summary>
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(EmployeeDevelopmentPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateEmployeeDevelopmentPlanDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service keys off the body's Id, so a mismatch would silently edit a different plan.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "The id in the route does not match the id in the body." });
+        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.UpdateAsync(updateDto, cancellationToken);
@@ -149,6 +289,10 @@ public class DevelopmentPlansController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
         }
         catch (Exception ex)
         {
@@ -160,9 +304,12 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Delete a development plan</summary>
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.DeleteAsync(id, cancellationToken);
@@ -172,6 +319,10 @@ public class DevelopmentPlansController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (Exception ex)
         {
@@ -183,12 +334,16 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Update the status of a development plan</summary>
     [HttpPatch("{id:guid}/status")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] DevelopmentPlanStatus status, CancellationToken cancellationToken = default)
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateDevelopmentPlanStatusRequest request, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(id, cancellationToken)) return Forbid();
+
         try
         {
-            var result = await _developmentPlanService.UpdateStatusAsync(id, status, cancellationToken);
+            var result = await _developmentPlanService.UpdateStatusAsync(id, request.Status, cancellationToken);
             if (!result) return NotFound(new { message = "Development plan not found" });
             return NoContent();
         }
@@ -198,7 +353,7 @@ public class DevelopmentPlansController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BusinessRuleRejected(ex, "changing status");
         }
         catch (Exception ex)
         {
@@ -212,9 +367,12 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Add an objective to a development plan</summary>
     [HttpPost("{planId:guid}/objectives")]
     [ProducesResponseType(typeof(EmployeeDevelopmentObjectiveDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddObjective(Guid planId, [FromBody] CreateEmployeeDevelopmentObjectiveDto dto, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.AddObjectiveAsync(planId, dto, cancellationToken);
@@ -223,6 +381,10 @@ public class DevelopmentPlansController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "adding an objective");
         }
         catch (Exception ex)
         {
@@ -234,8 +396,11 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Get objectives for a development plan</summary>
     [HttpGet("{planId:guid}/objectives")]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDevelopmentObjectiveDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetObjectives(Guid planId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.GetObjectivesAsync(planId, cancellationToken);
@@ -255,9 +420,17 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Update an objective in a development plan</summary>
     [HttpPut("{planId:guid}/objectives/{objectiveId:guid}")]
     [ProducesResponseType(typeof(EmployeeDevelopmentObjectiveDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateObjective(Guid planId, Guid objectiveId, [FromBody] UpdateEmployeeDevelopmentObjectiveDto dto, CancellationToken cancellationToken = default)
     {
+        // The service resolves the objective from the body's Id and ignores the route segment, so
+        // without this guard a mismatched pair silently edited a different objective.
+        if (objectiveId != dto.Id)
+            return BadRequest(new { message = "The objective id in the route does not match the id in the body." });
+        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.UpdateObjectiveAsync(planId, dto, cancellationToken);
@@ -266,6 +439,10 @@ public class DevelopmentPlansController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating an objective");
         }
         catch (Exception ex)
         {
@@ -277,9 +454,12 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Delete an objective from a development plan</summary>
     [HttpDelete("{planId:guid}/objectives/{objectiveId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteObjective(Guid planId, Guid objectiveId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.DeleteObjectiveAsync(planId, objectiveId, cancellationToken);
@@ -300,9 +480,12 @@ public class DevelopmentPlansController : ControllerBase
     /// <summary>Update progress on a specific objective</summary>
     [HttpPatch("{planId:guid}/objectives/{objectiveId:guid}/progress")]
     [ProducesResponseType(typeof(EmployeeDevelopmentObjectiveDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateObjectiveProgress(Guid planId, Guid objectiveId, [FromBody] UpdateObjectiveProgressRequest request, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(planId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _developmentPlanService.UpdateObjectiveProgressAsync(planId, objectiveId, request.ProgressPercent, request.Notes, request.Status, cancellationToken);
@@ -311,6 +494,10 @@ public class DevelopmentPlansController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "recording progress");
         }
         catch (Exception ex)
         {
@@ -323,4 +510,8 @@ public class DevelopmentPlansController : ControllerBase
 /// <summary>Request body for updating objective progress</summary>
 public record UpdateObjectiveProgressRequest(decimal ProgressPercent, string? Notes, DevelopmentObjectiveStatus Status);
 
-
+/// <summary>
+/// Request body for a plan status change. A wrapper rather than a bare enum in the body: the raw
+/// form is awkward to send and gives the endpoint no room to grow a reason field.
+/// </summary>
+public record UpdateDevelopmentPlanStatusRequest(DevelopmentPlanStatus Status);

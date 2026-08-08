@@ -46,6 +46,9 @@ public class HRCycleDashboardDto
     // ── Recommendation summary ─────────────────────────────────────────────────
     public HRCycleRecommendationSummaryDto Recommendations { get; set; } = new();
 
+    // ── What the recommendations actually became ───────────────────────────────
+    public HRCycleOutcomePipelineDto OutcomePipeline { get; set; } = new();
+
     // ── Department breakdown ───────────────────────────────────────────────────
     public List<HRCycleDepartmentProgressDto> DepartmentBreakdown { get; set; } = new();
 
@@ -112,6 +115,49 @@ public class HRCycleRecommendationSummaryDto
     public int TerminationCount { get; set; }
 }
 
+/// <summary>
+/// One bucket in an outcome stream — a status, or a recommendation type, with how many rows
+/// of this cycle's appraisals sit in it.
+/// </summary>
+public class HRCycleOutcomeCountDto
+{
+    /// <summary>The enum member name, so the client can link straight to a filtered list.</summary>
+    public string Key   { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public int    Count { get; set; }
+
+    /// <summary>
+    /// True when the rows behind this count are out for approval on the workflow engine and
+    /// nothing further happens until an approver acts.
+    /// </summary>
+    public bool AwaitingApproval { get; set; }
+}
+
+/// <summary>
+/// What the cycle's recommendations actually became.
+///
+/// <para><see cref="HRCycleRecommendationSummaryDto"/> counts the boxes managers ticked on the
+/// appraisal form — intent. This counts the records those ticks produced and where each one has
+/// got to: the recommendation itself, then the salary-review proposal, employment-action
+/// proposal or improvement plan raised when HR approved it. The three downstream streams run on
+/// the workflow engine, so a cycle can look finished while its outcomes are still queued behind
+/// an approver who has not acted.</para>
+/// </summary>
+public class HRCycleOutcomePipelineDto
+{
+    public List<HRCycleOutcomeCountDto> Recommendations           { get; set; } = new();
+    public List<HRCycleOutcomeCountDto> RecommendationTypes       { get; set; } = new();
+    public List<HRCycleOutcomeCountDto> SalaryProposals           { get; set; } = new();
+    public List<HRCycleOutcomeCountDto> EmploymentActionProposals { get; set; } = new();
+    public List<HRCycleOutcomeCountDto> ImprovementPlans          { get; set; } = new();
+
+    /// <summary>Every record raised from this cycle's appraisals, across all four streams.</summary>
+    public int TotalRaised { get; set; }
+
+    /// <summary>How many of those are sitting on the workflow engine waiting for a decision.</summary>
+    public int AwaitingApproval { get; set; }
+}
+
 /// <summary>Matches the shape of <c>DepartmentProgressItem</c> in the Blazor client.</summary>
 public class HRCycleDepartmentProgressDto
 {
@@ -144,6 +190,27 @@ public class HRCycleAttentionItemDto
     public string?            GradeLabel       { get; set; }
     public int                DaysOverdue      { get; set; }
     public AppraisalSubStatus CurrentSubStatus { get; set; }
+}
+
+/// <summary>
+/// The result of nudging one stalled appraisal from the dashboard — who was told, and about what.
+/// </summary>
+public class HRCycleNudgeResultDto
+{
+    public Guid   AppraisalId  { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>The step the appraisal is stuck on, as shown on the dashboard.</summary>
+    public string StepName     { get; set; } = string.Empty;
+
+    /// <summary>Names of the people notified, so the sender can see who was actually reached.</summary>
+    public List<string> Recipients { get; set; } = new();
+
+    /// <summary>
+    /// How many notifications were written. Lower than <c>Recipients.Count</c> when someone
+    /// already has an identical unread nudge — those are skipped rather than piled up.
+    /// </summary>
+    public int NotificationsRaised { get; set; }
 }
 
 /// <summary>Matches the shape of <c>CycleActivityItem</c> in the Blazor client.</summary>

@@ -10,6 +10,22 @@ public static class Constants
         public const string Employee = "Employee";
         public const string ReadOnly = "ReadOnly";
 
+        /// <summary>
+        /// The HR module role.
+        ///
+        /// ⚠ This was seeded as "HR User" while every <c>[Authorize(Roles = "HR")]</c> attribute
+        /// across the HR controllers named a bare "HR" — a role no user could hold, so those
+        /// endpoints were reachable only by SuperAdmin/Admin while the same users passed the
+        /// permission-based medical endpoints. The seeded role is renamed to "HR" on startup
+        /// (see <c>DatabaseSeedingService.MigrateLegacyHrRoleNameAsync</c>); membership is by
+        /// role id, so nobody loses access in the rename. Use this constant rather than a
+        /// literal so the two cannot drift apart again.
+        /// </summary>
+        public const string Hr = "HR";
+
+        /// <summary>The pre-rename name, kept only so the migration and fallbacks can find it.</summary>
+        public const string LegacyHrUser = "HR User";
+
         // External users (customer/vendor/partner/citizen portal accounts)
         public const string ExternalUser = "ExternalUser";
 

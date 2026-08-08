@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,11 +13,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class AppraisalTemplatesController : ControllerBase
 {
     private readonly IAppraisalTemplateService _templateService;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<AppraisalTemplatesController> _logger;
 
-    public AppraisalTemplatesController(IAppraisalTemplateService templateService, ILogger<AppraisalTemplatesController> logger)
+    public AppraisalTemplatesController(
+        IAppraisalTemplateService templateService,
+        ICurrentUserService currentUser,
+        ILogger<AppraisalTemplatesController> logger)
     {
         _templateService = templateService;
+        _currentUser = currentUser;
         _logger = logger;
     }
 
@@ -191,6 +197,10 @@ public class AppraisalTemplatesController : ControllerBase
     {
         try
         {
+            // The service keys off the body's Id, so a mismatch would edit a different template.
+            if (id != updateDto.Id)
+                return BadRequest(new { message = "ID mismatch" });
+
             var result = await _templateService.UpdateAsync(updateDto, cancellationToken);
             return Ok(result);
         }
@@ -274,18 +284,25 @@ public class AppraisalTemplatesController : ControllerBase
     }
 
     // ── Approval workflow ───────────────────────────────────────────────────
+    // These four endpoints are thin pass-throughs to the generic workflow engine. Approval
+    // authority comes from the published AppraisalTemplate workflow definition — a role
+    // attribute here would silently override that configuration, so there is none. A caller
+    // who is not an approver for the current step gets 403 from the service.
 
-    private Guid GetEmployeeId()
-        => Guid.TryParse(User.FindFirst("employee_id")?.Value, out var id) ? id : Guid.Empty;
+    /// <summary>
+    /// The acting employee, used for the template's own SubmittedBy / ApprovedBy stamps.
+    /// The engine resolves the acting user separately, from the token.
+    /// </summary>
+    private Guid? GetEmployeeId() => _currentUser.EmployeeId;
 
-    /// <summary>Submit a template to HR for approval</summary>
+    /// <summary>Submit a template for approval, starting its workflow</summary>
     [HttpPost("{id:guid}/submit-for-approval")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> SubmitForApproval(Guid id, CancellationToken cancellationToken = default)
     {
         try
         {
-            var result = await _templateService.SubmitForApprovalAsync(id, GetEmployeeId(), cancellationToken);
+            var result = await _templateService.SubmitForApprovalAsync(id, GetEmployeeId() ?? Guid.Empty, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
@@ -297,18 +314,19 @@ public class AppraisalTemplatesController : ControllerBase
         }
     }
 
-    /// <summary>Approve a template that is pending approval (HR)</summary>
+    /// <summary>Approve the current workflow step of a pending template</summary>
     [HttpPost("{id:guid}/approve")]
-    [Authorize(Roles = "SuperAdmin,HR")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Approve(Guid id, CancellationToken cancellationToken = default)
     {
         try
         {
-            var result = await _templateService.ApproveAsync(id, GetEmployeeId(), cancellationToken);
+            var result = await _templateService.ApproveAsync(id, GetEmployeeId() ?? Guid.Empty, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         catch (Exception ex)
         {
@@ -317,23 +335,44 @@ public class AppraisalTemplatesController : ControllerBase
         }
     }
 
-    /// <summary>Reject a template that is pending approval (HR)</summary>
+    /// <summary>Reject a pending template at the current workflow step</summary>
     [HttpPost("{id:guid}/reject")]
-    [Authorize(Roles = "SuperAdmin,HR")]
     [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectAppraisalTemplateDto dto, CancellationToken cancellationToken = default)
     {
         try
         {
-            var result = await _templateService.RejectAsync(id, GetEmployeeId(), dto?.Reason, cancellationToken);
+            var result = await _templateService.RejectAsync(id, GetEmployeeId() ?? Guid.Empty, dto?.Reason, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error rejecting template {Id}", id);
             return StatusCode(500, "An error occurred while rejecting the template");
+        }
+    }
+
+    /// <summary>Recall a still-pending template back to Draft</summary>
+    [HttpPost("{id:guid}/recall")]
+    [ProducesResponseType(typeof(AppraisalTemplateDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Recall(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _templateService.RecallAsync(id, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return StatusCode(403, new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recalling template {Id}", id);
+            return StatusCode(500, "An error occurred while recalling the template");
         }
     }
 
@@ -390,6 +429,9 @@ public class AppraisalTemplatesController : ControllerBase
     {
         try
         {
+            if (sectionId != dto.Id)
+                return BadRequest(new { message = "ID mismatch" });
+
             var result = await _templateService.UpdateSectionAsync(templateId, dto, cancellationToken);
             return Ok(result);
         }
@@ -507,6 +549,9 @@ public class AppraisalTemplatesController : ControllerBase
     {
         try
         {
+            if (itemId != dto.Id)
+                return BadRequest(new { message = "ID mismatch" });
+
             var result = await _templateService.UpdateItemAsync(sectionId, dto, cancellationToken);
             return Ok(result);
         }

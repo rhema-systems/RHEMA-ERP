@@ -155,8 +155,14 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
 
         foreach (var criterion in effectiveConfig.Criteria)
         {
+            // TenantId has to be stamped explicitly on both the config and its grade ranges:
+            // the DbContext is registered without a tenant, so its auto-stamp is inert and the
+            // rows would go in with Guid.Empty, failing the FK to Tenants with SQL 547. This
+            // is the only write path for a criterion-config snapshot, so every generation ran
+            // into it.
             var config = new PerformanceAppraisalCriterionConfig
             {
+                TenantId = tenantId,
                 PerformanceAppraisalId = performanceAppraisalId,
                 TemplateItemId = criterion.TemplateItemId,
                 WeightUsed = criterion.Weight,
@@ -166,6 +172,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiTargetSource = criterion.KpiTargetSource,
                 GradeRanges = criterion.GradeRanges.Select(gr => new PerformanceAppraisalCriterionConfigGradeRange
                 {
+                    TenantId = tenantId,
                     GradeDefinitionId = gr.GradeDefinitionId,
                     LowScore = gr.LowScore,
                     HighScore = gr.HighScore

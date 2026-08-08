@@ -6806,8 +6806,59 @@ namespace ErpSystem.Web.Services
             return hasRoles && hasTenants;
         }
 
+        /// <summary>
+        /// Renames the legacy "HR User" role to "HR" so it matches what the HR controllers
+        /// actually authorize.
+        ///
+        /// Runs before the create-if-missing loop below: without it, changing the catalogue
+        /// entry would simply create a second, empty "HR" role and leave every existing HR
+        /// user sitting in the old one. Role membership is stored by role id, so renaming in
+        /// place keeps every assignment intact.
+        /// </summary>
+        private async Task MigrateLegacyHrRoleNameAsync()
+        {
+            var legacy = await _roleManager.FindByNameAsync(Constants.Roles.LegacyHrUser);
+            if (legacy == null) return;
+
+            var current = await _roleManager.FindByNameAsync(Constants.Roles.Hr);
+            if (current != null)
+            {
+                // Both exist — merging members is a data decision, not something to do
+                // silently on startup.
+                _logger.LogWarning(
+                    "Both '{Legacy}' and '{Current}' roles exist. Leaving them alone; assign users to '{Current}' and retire '{Legacy}' manually.",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr, Constants.Roles.Hr, Constants.Roles.LegacyHrUser);
+                return;
+            }
+
+            var result = await _roleManager.SetRoleNameAsync(legacy, Constants.Roles.Hr);
+            if (!result.Succeeded)
+            {
+                _logger.LogError("Failed to rename '{Legacy}' to '{Current}': {Errors}",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr,
+                    string.Join(", ", result.Errors.Select(e => e.Description)));
+                return;
+            }
+
+            // Identity keeps NormalizedName in step only when the role is saved through the manager.
+            var update = await _roleManager.UpdateAsync(legacy);
+            if (update.Succeeded)
+            {
+                _logger.LogInformation("Renamed role '{Legacy}' to '{Current}'; existing members keep their access.",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr);
+            }
+            else
+            {
+                _logger.LogError("Failed to persist the '{Legacy}' → '{Current}' rename: {Errors}",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr,
+                    string.Join(", ", update.Errors.Select(e => e.Description)));
+            }
+        }
+
         private async Task SeedRolesAsync()
         {
+            await MigrateLegacyHrRoleNameAsync();
+
             var roles = new[]
             {
                 new { Name = Constants.Roles.SuperAdmin, Description = "System Super Administrator with full access" },
@@ -6830,7 +6881,7 @@ namespace ErpSystem.Web.Services
                 new { Name = "Chief Accountant", Description = "Maker-checker approval role for bank deposits, returned cheques, and treasury settlement controls" },
                 new { Name = "Managing Director", Description = "Restricted executive approval role for exceptional and high-value finance transactions" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
-                new { Name = "HR User", Description = "User with access to HR module" },
+                new { Name = Constants.Roles.Hr, Description = "User with access to HR module" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
                 new { Name = "Procurement User", Description = "User with access to procurement module" },
@@ -7658,12 +7709,9 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 },
-                // "HR User" is the role this seeder actually creates; note the HR controllers'
-                // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded
-                // here. Both names are covered by HrPermissions.MedicalFallbackRoles.
                 // HR staff maintain occupational-health records but do not administer them:
                 // deleting a medical record stays with tenant administrators.
-                ["HR User"] = new[]
+                [Constants.Roles.Hr] = new[]
                 {
                     HrPermissions.ViewMedicalRecords,
                     HrPermissions.MaintainMedicalRecords

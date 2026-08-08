@@ -1064,13 +1064,22 @@ public enum SalaryReviewProposalType
     Bonus = 2
 }
 
-/// <summary>Lifecycle of a salary review proposal handed off to payroll/comp (Theme 11).</summary>
+/// <summary>
+/// Lifecycle of a salary review proposal handed off to payroll/comp (Theme 11).
+///
+/// <para>Proposed → PendingApproval (out on the workflow engine) → Approved | Rejected, and an
+/// approved proposal is marked Applied once payroll has made the change.</para>
+/// </summary>
 public enum SalaryReviewProposalStatus
 {
     Proposed = 1,
     Approved = 2,
     Rejected = 3,
-    Applied = 4
+    Applied = 4,
+
+    /// <summary>Submitted and out for approval on the workflow engine.</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 5
 }
 
 /// <summary>
@@ -1087,13 +1096,22 @@ public enum EmploymentActionType
     Recognition = 5
 }
 
-/// <summary>Lifecycle of an employment-action proposal raised from an appraisal recommendation.</summary>
+/// <summary>
+/// Lifecycle of an employment-action proposal raised from an appraisal recommendation.
+///
+/// <para>Proposed → PendingApproval (out on the workflow engine) → Approved | Rejected, and an
+/// approved proposal is marked Actioned once the owning module has created the real record.</para>
+/// </summary>
 public enum EmploymentActionProposalStatus
 {
     Proposed = 1,
     Approved = 2,
     Rejected = 3,
-    Actioned = 4
+    Actioned = 4,
+
+    /// <summary>Submitted and out for approval on the workflow engine.</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 5
 }
 
 public enum AppraisalCycleStatus
@@ -1486,6 +1504,16 @@ public enum CalibrationStatus
     Cancelled = 4
 }
 
+/// <summary>
+/// Lifecycle of a performance improvement plan.
+///
+/// <para><c>Draft</c> and <c>PendingApproval</c> were added when the PIP was put on the generic
+/// workflow engine. A PIP is an employment record served on a named employee, so it is written in
+/// draft, approved through a published <c>PerformanceImprovementPlan</c> workflow definition, and
+/// only then becomes <c>Active</c> — the engine owns those three states and nothing else may set
+/// them. Everything from <c>Active</c> onwards is the plan actually running, and stays a direct
+/// action on the record.</para>
+/// </summary>
 public enum PipStatus
 {
     [Description("Active")]
@@ -1501,7 +1529,15 @@ public enum PipStatus
     Unsuccessful = 4,
 
     [Description("Cancelled")]
-    Cancelled = 5
+    Cancelled = 5,
+
+    /// <summary>Being written. Not yet visible to the employee and not yet in force.</summary>
+    [Description("Draft")]
+    Draft = 6,
+
+    /// <summary>Out for approval on the workflow engine.</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 7
 }
 
 public enum PerformanceRating
@@ -6871,6 +6907,28 @@ public enum AppraisalNotificationType
     AutoLocked = 16,
     PeerEvaluationReminder = 17,
     ActionRequired = 18,
+
+    // ── Conversations, development plans and improvement plans ────────────────
+    // Added with the development/PIP/conversation slice. Stored as int, so new members are
+    // schema-safe; keep the existing numbering untouched.
+
+    /// <summary>A manager has put an appraisal conversation in the diary.</summary>
+    ConversationScheduled = 19,
+
+    /// <summary>A development plan has been activated and is now the employee's to work on.</summary>
+    DevelopmentPlanActivated = 20,
+
+    /// <summary>A manager has written feedback on a development plan.</summary>
+    DevelopmentFeedbackAdded = 21,
+
+    /// <summary>An improvement plan has been approved and is now in force.</summary>
+    PipOpened = 22,
+
+    /// <summary>A PIP review meeting has been scheduled.</summary>
+    PipMeetingScheduled = 23,
+
+    /// <summary>An improvement plan has been closed with an outcome.</summary>
+    PipOutcomeRecorded = 24,
 }
 
 /// <summary>Urgency level for in-app notifications.</summary>

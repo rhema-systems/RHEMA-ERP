@@ -170,6 +170,10 @@ public class EmployeeGoalsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating employee goal");
@@ -183,6 +187,10 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateEmployeeGoalDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
         try
         {
             var result = await _employeeGoalService.UpdateAsync(updateDto, cancellationToken);
@@ -191,6 +199,10 @@ public class EmployeeGoalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
         }
         catch (Exception ex)
         {
@@ -214,6 +226,10 @@ public class EmployeeGoalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (Exception ex)
         {
@@ -398,6 +414,34 @@ public class EmployeeGoalsController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Maps a business-rule rejection from the service onto 422 with the rule's own message.
+    ///
+    /// The service raises <see cref="InvalidOperationException"/> for rules the caller can act
+    /// on — the goal is locked, the cycle's goal cap is reached, the goal is not in a status
+    /// that accepts progress. Nothing caught these, so they fell into the generic handler and
+    /// came back as a 500 carrying a bare string; because the body was a string rather than
+    /// <c>{ message }</c>, the client could not read a message out of it either, and the user
+    /// got an unexplained failure on rules they hit routinely.
+    ///
+    /// 422 rather than 409 to match <see cref="WorkflowError"/> above, which already returns 422
+    /// for a locked goal — the same goal in the same state should not answer differently
+    /// depending on which endpoint was asked.
+    ///
+    /// Logged at warning, not error: the request was refused correctly and nobody needs paging.
+    ///
+    /// Caveat: the service's tenant guard raises the same exception type, so a token with no
+    /// tenant claim would also land here as a 422 rather than a fault. Left as-is because that
+    /// guard is unreachable for any authenticated caller (every token carries tenant_id) and
+    /// giving it a distinct type means touching the ~10 HR services that copy the same guard.
+    /// Worth doing if that refactor happens for another reason.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Employee goal rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
     // ── Progress entries ──────────────────────────────────────────────────
 
     /// <summary>Add a progress entry to a goal</summary>
@@ -414,6 +458,10 @@ public class EmployeeGoalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "adding a progress entry to");
         }
         catch (Exception ex)
         {

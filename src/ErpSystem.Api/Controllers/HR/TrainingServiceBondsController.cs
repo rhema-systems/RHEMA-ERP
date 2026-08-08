@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -54,7 +55,7 @@ public class TrainingServiceBondsController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<TrainingServiceBondDto>> Create([FromBody] CreateTrainingServiceBondDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -69,7 +70,7 @@ public class TrainingServiceBondsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<TrainingServiceBondDto>> Update(Guid id, [FromBody] UpdateTrainingServiceBondDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -92,7 +93,7 @@ public class TrainingServiceBondsController : ControllerBase
 
     /// <summary>HR records acceptance on the employee's behalf (e.g. signed offline).</summary>
     [HttpPost("accept-on-behalf")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<TrainingServiceBondDto>> AcceptOnBehalf([FromBody] AcceptTrainingServiceBondDto dto, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -101,7 +102,7 @@ public class TrainingServiceBondsController : ControllerBase
     }
 
     [HttpPost("record-exit")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<TrainingServiceBondDto>> RecordExit([FromBody] RecordBondExitDto dto, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -110,7 +111,7 @@ public class TrainingServiceBondsController : ControllerBase
     }
 
     [HttpPost("waive")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<TrainingServiceBondDto>> Waive([FromBody] WaiveTrainingServiceBondDto dto, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -119,7 +120,7 @@ public class TrainingServiceBondsController : ControllerBase
     }
 
     [HttpPost("settle")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<TrainingServiceBondDto>> Settle([FromBody] SettleTrainingServiceBondDto dto, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -128,7 +129,7 @@ public class TrainingServiceBondsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);

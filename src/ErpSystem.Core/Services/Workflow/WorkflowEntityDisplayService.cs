@@ -227,6 +227,52 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("AppraisalTemplate") || key == Normalize("APPRAISAL_TEMPLATE") || key == Normalize("Appraisal Template"))
+            {
+                var template = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.AppraisalTemplate>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "AppraisalTemplate";
+                info.EntityName = template?.TemplateName;
+                info.ActionUrl = $"/administration/hr/performance/templates/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("SalaryReviewProposal") || key == Normalize("SALARY_REVIEW_PROPOSAL") || key == Normalize("Salary Review Proposal"))
+            {
+                var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.SalaryReviewProposal>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "SalaryReviewProposal";
+                info.EntityName = proposal == null
+                    ? null
+                    : $"{proposal.ProposalType} — {proposal.Employee?.FullName}";
+                info.ActionUrl = $"/hr/performance/proposals/salary-review/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("EmploymentActionProposal") || key == Normalize("EMPLOYMENT_ACTION_PROPOSAL") || key == Normalize("Employment Action Proposal"))
+            {
+                var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.EmploymentActionProposal>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "EmploymentActionProposal";
+                info.EntityName = proposal == null
+                    ? null
+                    : $"{proposal.ActionType} — {proposal.Employee?.FullName}";
+                info.ActionUrl = $"/hr/performance/proposals/employment-action/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("PerformanceImprovementPlan") || key == Normalize("PERFORMANCE_IMPROVEMENT_PLAN") || key == Normalize("Performance Improvement Plan"))
+            {
+                var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "PerformanceImprovementPlan";
+                info.EntityName = plan == null
+                    ? null
+                    : $"{plan.PipNumber} — {plan.Employee?.FullName}";
+                info.ActionUrl = $"/hr/performance/pip/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
             {
                 info.EntityType = "TrainingNomination";

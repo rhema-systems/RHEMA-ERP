@@ -1,27 +1,48 @@
 using ErpSystem.Api.Models;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The PIP review meeting form — the record of each monitoring conversation held during a plan.
+///
+/// <para>Everything here is scoped by the plan the meeting belongs to, and entitlement is
+/// <see cref="PipAccess"/>'s: HR, the supervisor and the HR owner run the meetings; the employee
+/// can read them and add their own comment, which is the one write they own.</para>
+/// </summary>
 [ApiController]
 [Route("api/PipMeeting")]
 [Authorize]
 public class PipMeetingController : ControllerBase
 {
     private readonly IPerformanceImprovementPlanService _pipService;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<PipMeetingController> _logger;
 
     public PipMeetingController(
         IPerformanceImprovementPlanService pipService,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
         ILogger<PipMeetingController> logger)
     {
         _pipService = pipService;
+        _db         = db;
+        _currentUserService = currentUserService;
         _logger     = logger;
     }
+
+    private Task<bool> CanAccessAsync(Guid pipId, CancellationToken ct = default)
+        => PipAccess.CanAccessAsync(this, _db, _currentUserService, pipId, ct);
+
+    private Task<bool> CanManageAsync(Guid pipId, CancellationToken ct = default)
+        => PipAccess.CanManageAsync(this, _db, _currentUserService, pipId, ct);
 
     /// <summary>
     /// Load an existing meeting by ID (with PIP context).
@@ -31,6 +52,8 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetMeeting(Guid meetingId, [FromQuery] Guid pipId)
     {
+        if (!await CanAccessAsync(pipId)) return Forbid();
+
         try
         {
             var meetings = (await _pipService.GetReviewMeetingsAsync(pipId)).ToList();
@@ -69,6 +92,8 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Prepare([FromQuery] Guid pipId)
     {
+        if (!await CanManageAsync(pipId)) return Forbid();
+
         try
         {
             var pip      = await _pipService.GetByIdAsync(pipId);
@@ -119,13 +144,18 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Schedule([FromBody] ScheduleMeetingRequest req)
     {
+        if (!await CanManageAsync(req.PipId)) return Forbid();
+
         try
         {
             var createDto = new CreatePipReviewMeetingDto
             {
                 PipId         = req.PipId,
+                // Whoever books it holds it, unless they named someone else.
+                ConductedById = req.ConductedById == Guid.Empty
+                    ? _currentUserService.EmployeeId ?? Guid.Empty
+                    : req.ConductedById,
                 MeetingDate   = req.MeetingDate,
-                ConductedById = req.ConductedById,
                 ProgressNotes = string.Empty,
                 EmployeeAttended = true,
             };
@@ -135,7 +165,12 @@ public class PipMeetingController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning("PIP meeting rule rejected while scheduling: {Message}", ex.Message);
+            return UnprocessableEntity(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -152,16 +187,19 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateMeeting([FromBody] PipMeetingFormResponse model)
     {
+        if (model.PipId == Guid.Empty)
+            return BadRequest("PipId is required");
+        if (!await CanManageAsync(model.PipId)) return Forbid();
+
         try
         {
-            if (model.PipId == Guid.Empty)
-                return BadRequest("PipId is required");
-
             var createDto = new CreatePipReviewMeetingDto
             {
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
-                ConductedById    = model.ConductedById,
+                ConductedById    = model.ConductedById == Guid.Empty
+                    ? _currentUserService.EmployeeId ?? Guid.Empty
+                    : model.ConductedById,
                 ProgressNotes    = model.ProgressNotes,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
@@ -196,11 +234,14 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateMeeting(Guid id, [FromBody] PipMeetingFormResponse model)
     {
+        if (!await CanManageAsync(model.PipId)) return Forbid();
+
         try
         {
             var updateDto = new UpdatePipReviewMeetingDto
             {
                 Id               = id,
+                PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
                 ConductedById    = model.ConductedById,
                 ProgressNotes    = model.ProgressNotes,
@@ -236,11 +277,14 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> CompleteMeeting(Guid id, [FromBody] PipMeetingFormResponse model)
     {
+        if (!await CanManageAsync(model.PipId)) return Forbid();
+
         try
         {
             var updateDto = new UpdatePipReviewMeetingDto
             {
                 Id               = id,
+                PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
                 ConductedById    = model.ConductedById,
                 ProgressNotes    = model.ProgressNotes,
@@ -277,6 +321,8 @@ public class PipMeetingController : ControllerBase
     [ProducesResponseType(typeof(PipMeetingScheduleResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSchedule(Guid pipId)
     {
+        if (!await CanAccessAsync(pipId)) return Forbid();
+
         try
         {
             var meetings = (await _pipService.GetReviewMeetingsAsync(pipId))
@@ -298,7 +344,6 @@ public class PipMeetingController : ControllerBase
                     ProgressNotesPreview = m.ProgressNotes.Length > 120
                         ? m.ProgressNotes[..120] + "..."
                         : m.ProgressNotes,
-                    GoalsUpdatedCount    = 0,
                 }).ToList(),
             };
 
@@ -325,6 +370,12 @@ public class PipMeetingController : ControllerBase
             var meeting = await _pipService.GetReviewMeetingByIdAsync(meetingId);
             if (meeting == null)
                 return NotFound("Meeting not found");
+
+            // The employee's right of reply is the one write they own on their plan — but it is
+            // theirs, so it is gated on the plan like everything else rather than being open to
+            // any authenticated caller.
+            if (!await CanAccessAsync(meeting.PipId))
+                return Forbid();
 
             var updateDto = new UpdatePipReviewMeetingDto
             {

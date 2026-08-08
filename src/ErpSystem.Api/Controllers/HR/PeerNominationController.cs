@@ -20,6 +20,18 @@ public class PeerNominationController : ControllerBase
     }
 
     /// <summary>
+    /// Nomination rules — "already nominated", "maximum of N peer evaluators", "cannot nominate
+    /// the appraisee as their own peer", "nominations are locked" — are answered with 422 and
+    /// the rule's own message, matching the rest of the appraisal run, so a client can read
+    /// <c>.message</c> off a consistent body shape.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex)
+    {
+        _logger.LogWarning(ex, "Peer nomination rule rejected");
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
+    /// <summary>
     /// Get peer nomination by ID
     /// </summary>
     [HttpGet("{id:guid}")]
@@ -118,7 +130,7 @@ public class PeerNominationController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex);
         }
         catch (ArgumentException ex)
         {
@@ -154,7 +166,7 @@ public class PeerNominationController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex);
         }
         catch (ArgumentException ex)
         {
@@ -184,7 +196,7 @@ public class PeerNominationController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex);
         }
         catch (ArgumentException ex)
         {
@@ -212,7 +224,7 @@ public class PeerNominationController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex);
         }
         catch (ArgumentException ex)
         {

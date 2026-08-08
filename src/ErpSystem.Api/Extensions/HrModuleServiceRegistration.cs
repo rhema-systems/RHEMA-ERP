@@ -419,6 +419,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAppraisalCycleService, AppraisalCycleService>();
         services.AddScoped<IAppraisalCycleTargetService, AppraisalCycleTargetService>();
         services.AddScoped<IPeerNominationService, PeerNominationService>();
+        services.AddScoped<IPeerEvaluationService, PeerEvaluationService>();
         services.AddScoped<IAppraisalTemplateService, AppraisalTemplateService>();
         services.AddScoped<IGoalLibraryService, GoalLibraryService>();
         services.AddScoped<IAppraisalCycleTemplateService, AppraisalCycleTemplateService>();
@@ -451,6 +452,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAtRiskGoalsQueryService, AtRiskGoalsQueryService>();
         services.AddScoped<IGoalWorkflowCommandService, GoalWorkflowCommandService>();
         services.AddScoped<IGoalRiskSettingsProvider, GoalRiskSettingsProvider>();
+        services.AddScoped<IGoalRiskSettingsService, GoalRiskSettingsService>();
         services.AddScoped<IGoalRiskEvaluator, GoalRiskEvaluator>();
         services.AddScoped<ICheckInService, CheckInService>();
         services.AddScoped<IPerformanceJournalService, PerformanceJournalService>();

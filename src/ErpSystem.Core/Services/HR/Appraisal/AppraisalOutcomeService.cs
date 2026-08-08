@@ -84,12 +84,22 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         return items.Select(ToDto).ToList();
     }
 
-    public async Task<AppraisalOutcomeRecommendationDto> ProposeAsync(CreateAppraisalOutcomeRecommendationDto dto, Guid recommendedById, CancellationToken cancellationToken = default)
+    public async Task<AppraisalOutcomeRecommendationDto> ProposeAsync(
+        CreateAppraisalOutcomeRecommendationDto dto, Guid recommendedById, bool isPrivilegedActor, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var appraisal = await _appraisalRepository.GetByIdAsync(dto.PerformanceAppraisalId);
-        if (appraisal == null || appraisal.TenantId != tenantId)
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Include(a => a.Employee)
+            .FirstOrDefaultAsync(a => a.Id == dto.PerformanceAppraisalId && a.TenantId == tenantId, cancellationToken);
+        if (appraisal == null)
             throw new ArgumentException($"Performance appraisal with ID '{dto.PerformanceAppraisalId}' not found.");
+
+        // A recommendation is the front half of a promotion, a demotion or a termination — the
+        // handler turns an approved one into a real intake record. Anyone authenticated could
+        // previously raise one against anyone's appraisal.
+        if (!isPrivilegedActor && appraisal.Employee?.ManagerId != recommendedById)
+            throw new UnauthorizedAccessException(
+                "Only this employee's manager, or HR, can propose an outcome for their appraisal.");
 
         var entity = new AppraisalOutcomeRecommendation
         {
@@ -124,36 +134,68 @@ public class AppraisalOutcomeService : IAppraisalOutcomeService
         entity.ApprovedById = approverId == Guid.Empty ? null : approverId;
         entity.ApprovedDate = DateTime.UtcNow;
 
-        // Dispatch to the owning module to create the real downstream record.
-        var handler = _handlers.FirstOrDefault(h => h.Type == entity.RecommendationType);
-        if (handler != null)
-        {
-            try
-            {
-                var result = await handler.HandleAsync(entity, cancellationToken);
-                if (result.HasValue)
-                {
-                    entity.TargetEntityType = result.Value.TargetEntityType;
-                    entity.TargetEntityId = result.Value.TargetEntityId;
-                    entity.Status = RecommendationStatus.Actioned;
-                    entity.ActionedDate = DateTime.UtcNow;
-                }
-            }
-            catch (Exception ex)
-            {
-                // Leave Approved-but-not-Actioned so the worklist surfaces it for manual follow-up.
-                _logger.LogError(ex, "Handler for {Type} failed to action recommendation {Id}", entity.RecommendationType, id);
-            }
-        }
-        else
-        {
-            _logger.LogInformation("No handler registered for {Type}; recommendation {Id} approved but not auto-actioned.", entity.RecommendationType, id);
-        }
+        await DispatchAsync(entity, cancellationToken);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return ToDto(await GetEntityAsync(id, cancellationToken));
+    }
+
+    public async Task<AppraisalOutcomeRecommendationDto> RetryDispatchAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+
+        if (entity.Status != RecommendationStatus.Approved)
+            throw new InvalidOperationException(
+                entity.Status == RecommendationStatus.Actioned
+                    ? "This recommendation has already created its downstream record."
+                    : $"Only an approved recommendation can be dispatched. This one is {entity.Status}.");
+
+        await DispatchAsync(entity, cancellationToken);
+
+        if (entity.Status != RecommendationStatus.Actioned)
+            throw new InvalidOperationException(
+                "The owning module could not create the downstream record. Check the server log and action it there directly.");
+
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ToDto(await GetEntityAsync(id, cancellationToken));
+    }
+
+    /// <summary>
+    /// Hands the recommendation to the module that owns its type. A handler failure leaves the
+    /// row Approved-but-not-Actioned rather than throwing, so the approval still stands and the
+    /// worklist can surface it for a retry; the handlers reuse an existing downstream record, so
+    /// a retry cannot double up.
+    /// </summary>
+    private async Task DispatchAsync(AppraisalOutcomeRecommendation entity, CancellationToken cancellationToken)
+    {
+        var handler = _handlers.FirstOrDefault(h => h.Type == entity.RecommendationType);
+        if (handler == null)
+        {
+            _logger.LogInformation(
+                "No handler registered for {Type}; recommendation {Id} approved but not auto-actioned.",
+                entity.RecommendationType, entity.Id);
+            return;
+        }
+
+        try
+        {
+            var result = await handler.HandleAsync(entity, cancellationToken);
+            if (result.HasValue)
+            {
+                entity.TargetEntityType = result.Value.TargetEntityType;
+                entity.TargetEntityId = result.Value.TargetEntityId;
+                entity.Status = RecommendationStatus.Actioned;
+                entity.ActionedDate = DateTime.UtcNow;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Handler for {Type} failed to action recommendation {Id}", entity.RecommendationType, entity.Id);
+        }
     }
 
     public Task<AppraisalOutcomeRecommendationDto> RejectAsync(Guid id, Guid reviewerId, string? notes, CancellationToken cancellationToken = default)

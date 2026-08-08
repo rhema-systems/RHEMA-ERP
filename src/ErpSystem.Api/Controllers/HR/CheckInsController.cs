@@ -1,23 +1,99 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// One-to-ones and interim conversations held during a cycle, and the goal updates that come
+/// out of them. A goal update recorded here is applied to the goal itself, so flagging a goal
+/// at risk in a check-in puts it in the at-risk reports.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
 public class CheckInsController : ControllerBase
 {
     private readonly ICheckInService _checkInService;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<CheckInsController> _logger;
 
-    public CheckInsController(ICheckInService checkInService, ILogger<CheckInsController> logger)
+    public CheckInsController(
+        ICheckInService checkInService,
+        ICurrentUserService currentUserService,
+        ILogger<CheckInsController> logger)
     {
         _checkInService = checkInService;
+        _currentUserService = currentUserService;
         _logger = logger;
+    }
+
+    /// <summary>Check-ins the signed-in employee is the subject of.</summary>
+    [HttpGet("me")]
+    [ProducesResponseType(typeof(IEnumerable<CheckInDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetMine([FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        if (!TryGetEmployeeId(out var employeeId, out var problem)) return problem!;
+
+        try
+        {
+            var result = await _checkInService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving check-ins for employee {EmployeeId}", employeeId);
+            return StatusCode(500, "An error occurred while retrieving check-ins");
+        }
+    }
+
+    /// <summary>Check-ins the signed-in employee is conducting — the manager's list.</summary>
+    [HttpGet("me/conducting")]
+    [ProducesResponseType(typeof(IEnumerable<CheckInDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetMineAsConductor([FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        if (!TryGetEmployeeId(out var employeeId, out var problem)) return problem!;
+
+        try
+        {
+            var result = await _checkInService.GetByConductedByIdAsync(employeeId, cycleId, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving check-ins conducted by {EmployeeId}", employeeId);
+            return StatusCode(500, "An error occurred while retrieving check-ins");
+        }
+    }
+
+    private bool TryGetEmployeeId(out Guid employeeId, out IActionResult? problem)
+    {
+        var id = _currentUserService.EmployeeId;
+        if (id is null || id == Guid.Empty)
+        {
+            employeeId = Guid.Empty;
+            problem = BadRequest(new { message = "Your account is not linked to an employee record, so it cannot have check-ins." });
+            return false;
+        }
+
+        employeeId = id.Value;
+        problem = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Business rules are answered with 422 and the rule's own message — "check-ins are not
+    /// enabled for this appraisal cycle" is something a user hits, not a server fault.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning(ex, "Check-in rule rejected while {Action}", action);
+        return UnprocessableEntity(new { message = ex.Message });
     }
 
     /// <summary>Get check-ins with pagination</summary>
@@ -116,6 +192,16 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateCheckInDto createDto, CancellationToken cancellationToken = default)
     {
+        // Whoever schedules a check-in is normally the one holding it, and the client has no
+        // employee id of its own — the token is the only place it exists. An omitted (empty)
+        // ConductedById therefore resolves to the caller rather than failing the FK. An
+        // explicit id is honoured, so HR scheduling on someone else's behalf still works.
+        if (createDto.ConductedById == Guid.Empty)
+        {
+            if (!TryGetEmployeeId(out var conductorId, out var problem)) return problem!;
+            createDto.ConductedById = conductorId;
+        }
+
         try
         {
             var result = await _checkInService.CreateAsync(createDto, cancellationToken);
@@ -124,6 +210,10 @@ public class CheckInsController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating the check-in");
         }
         catch (Exception ex)
         {
@@ -138,6 +228,10 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCheckInDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service keys off the body's Id, so without this a mismatch silently edits another row.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "ID mismatch" });
+
         try
         {
             var result = await _checkInService.UpdateAsync(updateDto, cancellationToken);
@@ -194,7 +288,7 @@ public class CheckInsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BusinessRuleRejected(ex, "completing the check-in");
         }
         catch (Exception ex)
         {
@@ -254,6 +348,9 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateGoalUpdate(Guid checkInId, Guid updateId, [FromBody] UpdateCheckInGoalUpdateDto dto, CancellationToken cancellationToken = default)
     {
+        if (updateId != dto.Id)
+            return BadRequest(new { message = "ID mismatch" });
+
         try
         {
             var result = await _checkInService.UpdateGoalUpdateAsync(checkInId, dto, cancellationToken);

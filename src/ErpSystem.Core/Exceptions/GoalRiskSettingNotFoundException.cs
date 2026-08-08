@@ -1,20 +1,21 @@
 namespace ErpSystem.Core.Exceptions;
 
 /// <summary>
-/// Thrown by <see cref="ErpSystem.Core.Services.HR.Appraisal.GoalRiskSettingsProvider"/>
-/// when no active <c>GoalRiskSetting</c> record exists in the database.
+/// No longer thrown by anything, and kept only so that catching it still compiles.
 ///
-/// This indicates a data-configuration problem, not a user error.
-/// Callers should map this to HTTP 500 (Internal Server Error) or surface it
-/// as an operations alert — the application cannot evaluate goal risk until
-/// the database has a valid active record seeded.
+/// <c>GoalRiskSettingsProvider</c> used to raise this when a tenant had no active
+/// <c>GoalRiskSetting</c> row. Nothing seeds that table — the migration creates it empty,
+/// despite what the old message here claimed — so on any fresh tenant it took down every
+/// at-risk read: five Team Goals tabs plus the org-wide report, all 500. The provider now
+/// falls back to <c>GoalRiskSettingDefaults</c>, and HR sets its own thresholds through
+/// <c>IGoalRiskSettingsService</c>.
+///
+/// Safe to delete.
 /// </summary>
 public sealed class GoalRiskSettingNotFoundException : Exception
 {
     public GoalRiskSettingNotFoundException()
-        : base("No active GoalRiskSetting record was found. " +
-               "Ensure the GoalRiskSetting table contains exactly one row where IsActive = true. " +
-               "Run the database migration (which includes seed data) to resolve this.")
+        : base("No active GoalRiskSetting record was found.")
     { }
 
     public GoalRiskSettingNotFoundException(string message)

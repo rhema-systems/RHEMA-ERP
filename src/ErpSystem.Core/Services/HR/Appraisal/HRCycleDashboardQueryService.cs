@@ -23,6 +23,11 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
     private readonly IGenericRepository<CalibrationSession>      _calibSessionRepo;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepo;
     private readonly IGenericRepository<Employee>                _employeeRepo;
+    private readonly IGenericRepository<AppraisalOutcomeRecommendation> _recommendationRepo;
+    private readonly IGenericRepository<SalaryReviewProposal>    _salaryProposalRepo;
+    private readonly IGenericRepository<EmploymentActionProposal> _actionProposalRepo;
+    private readonly IGenericRepository<PerformanceImprovementPlan> _pipRepo;
+    private readonly IAppraisalNotificationService               _notificationService;
     private readonly ICurrentUserProvider                        _currentUserProvider;
     private readonly ILogger<HRCycleDashboardQueryService>       _logger;
 
@@ -40,6 +45,11 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         IGenericRepository<CalibrationSession>       calibSessionRepo,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepo,
         IGenericRepository<Employee>                 employeeRepo,
+        IGenericRepository<AppraisalOutcomeRecommendation> recommendationRepo,
+        IGenericRepository<SalaryReviewProposal>     salaryProposalRepo,
+        IGenericRepository<EmploymentActionProposal> actionProposalRepo,
+        IGenericRepository<PerformanceImprovementPlan> pipRepo,
+        IAppraisalNotificationService                notificationService,
         ICurrentUserProvider                         currentUserProvider,
         ILogger<HRCycleDashboardQueryService>        logger)
     {
@@ -49,6 +59,11 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         _calibSessionRepo = calibSessionRepo;
         _advanceLogRepo   = advanceLogRepo;
         _employeeRepo     = employeeRepo;
+        _recommendationRepo = recommendationRepo;
+        _salaryProposalRepo = salaryProposalRepo;
+        _actionProposalRepo = actionProposalRepo;
+        _pipRepo            = pipRepo;
+        _notificationService = notificationService;
         _currentUserProvider = currentUserProvider;
         _logger           = logger;
     }
@@ -105,12 +120,16 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 .GetQueryable(a => a.AppraisalCycleId == cycleId && a.TenantId == tenantId && !a.IsDeleted)
                 .Include(a => a.Employee)
                     .ThenInclude(e => e!.OrganizationUnit)
+                        .ThenInclude(u => u!.HeadEmployee)
+                .Include(a => a.Employee)
+                    .ThenInclude(e => e!.Position)
                 .Include(a => a.EvaluatorEvaluations)
                 .Include(a => a.PeerNominations)
                 .Include(a => a.Conversations)
                 .Include(a => a.HRReviews)
                 .Include(a => a.OverallGrade)
                 .Include(a => a.Goals)
+                .Include(a => a.Appeals)
                 .AsNoTracking()
                 .ToListAsync(ct);
 
@@ -143,28 +162,9 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 managerLookup = managers.ToDictionary(m => m.Id, m => m.FullName);
             }
 
-            // 6. Load position titles (from current EmployeePosition) ─────────────
-            // We derive position from the appraisal's Employee.PositionId via a
-            // separate query to avoid N+1 when all appraisals are already loaded.
-            var positionIds = appraisals
-                .Select(a => a.Employee?.PositionId)
-                .Where(id => id.HasValue)
-                .Select(id => id!.Value)
-                .Distinct()
-                .ToList();
-
-            var positionLookup = new Dictionary<Guid, string>();
-            if (positionIds.Count > 0)
-            {
-                var positions = await _employeeRepo
-                    .GetQueryable(e =>
-                        !e.IsDeleted && positionIds.Contains(e.PositionId))
-                    .Select(e => new { e.PositionId })
-                    .Distinct()
-                    .AsNoTracking()
-                    .ToListAsync(ct);
-                // We'll get position names from the EmployeePosition entity below
-            }
+            // 6. Position titles come from Employee.Position on the query above. They used to be
+            // read here by a query whose result was discarded — which is why every attention item
+            // came back with an empty Position — and which had no tenant predicate.
 
             // 7. Load recent manual-advance logs for the activity feed ────────────
             var appraisalIds = appraisals.Select(a => a.Id).ToHashSet();
@@ -210,6 +210,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 ScoredAppraisalCount = scoredCount,
                 AverageScore         = avgScore,
                 Recommendations    = BuildRecommendations(appraisals),
+                OutcomePipeline    = await BuildOutcomePipelineAsync(tenantId, appraisalIds, ct),
                 DepartmentBreakdown = BuildDepartmentBreakdown(appraisals, calibSessions,
                                          managerLookup, cycle.GoalSettingDeadline, today),
                 AttentionItems     = BuildAttentionItems(appraisals, settings, managerLookup, allGrades, cycle, today),
@@ -223,6 +224,161 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             _logger.LogError(ex, "Failed to build HR cycle dashboard for cycle {CycleId}", cycleId);
             throw;
         }
+    }
+
+    // ── NudgeAsync ────────────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<HRCycleNudgeResultDto> NudgeAsync(
+        Guid cycleId, Guid appraisalId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        var cycle = await _cycleRepo
+            .GetQueryable(c => c.Id == cycleId && c.TenantId == tenantId && !c.IsDeleted)
+            .Include(c => c.AppraisalSettings)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct);
+
+        if (cycle is null)
+            throw new ArgumentException($"Appraisal cycle '{cycleId}' was not found.");
+
+        var appraisal = await _appraisalRepo
+            .GetQueryable(a => a.Id == appraisalId && a.AppraisalCycleId == cycleId
+                               && a.TenantId == tenantId && !a.IsDeleted)
+            .Include(a => a.Employee)
+            .Include(a => a.EvaluatorEvaluations)
+                .ThenInclude(e => e.Evaluator)
+            .Include(a => a.PeerNominations)
+                .ThenInclude(n => n.PeerEmployee)
+            .Include(a => a.Conversations)
+            .Include(a => a.HRReviews)
+            .Include(a => a.Goals)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(ct);
+
+        if (appraisal is null)
+            throw new ArgumentException($"Appraisal '{appraisalId}' was not found in this cycle.");
+
+        var settings  = cycle.AppraisalSettings!;
+        var subStatus = AppraisalSubStatusResolver.Resolve(appraisal, settings);
+        var stepName  = SubStatusLabel(subStatus);
+
+        // Who can actually clear this step, and where they go to do it.
+        var recipients = new List<(Guid EmployeeId, string Name)>();
+        string navigationUrl;
+
+        switch (subStatus)
+        {
+            case AppraisalSubStatus.GoalSetting:
+                AddAppraisee();
+                navigationUrl = "/hr/performance/employee-goals";
+                break;
+
+            case AppraisalSubStatus.PeerNomination:
+                AddAppraisee();
+                navigationUrl = $"/hr/performance/appraisals/{appraisal.Id}";
+                break;
+
+            case AppraisalSubStatus.SelfEvaluation:
+                AddAppraisee();
+                navigationUrl = $"/hr/performance/appraisals/{appraisal.Id}/self-evaluation";
+                break;
+
+            case AppraisalSubStatus.PeerEvaluation:
+                // The peers with a form still open. Where the evaluation records have not been
+                // created yet, the approved nominees are the ones who owe it.
+                var outstanding = appraisal.EvaluatorEvaluations
+                    .Where(e => e.EvaluatorRole == EvaluatorRole.Peer && e.SubmittedDate == null)
+                    .Select(e => (e.EvaluatorId, e.Evaluator?.FullName ?? "Peer"))
+                    .ToList();
+
+                if (outstanding.Count == 0)
+                {
+                    outstanding = appraisal.PeerNominations
+                        .Where(n => n.NominationStatus == PeerNominationStatus.Approved)
+                        .Select(n => (n.PeerEmployeeId, n.PeerEmployee?.FullName ?? "Peer"))
+                        .ToList();
+                }
+
+                recipients.AddRange(outstanding);
+                navigationUrl = "/hr/performance/peer-reviews";
+                break;
+
+            case AppraisalSubStatus.ManagerEvaluation:
+            case AppraisalSubStatus.PendingConversation:
+                var managerId = appraisal.Employee?.ManagerId
+                                ?? appraisal.EvaluatorEvaluations
+                                    .FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager)?.EvaluatorId;
+
+                if (managerId is null || managerId == Guid.Empty)
+                    throw new InvalidOperationException(
+                        $"{appraisal.Employee?.FullName ?? "This employee"} has no manager on record, so there is nobody to nudge about the {stepName.ToLowerInvariant()}.");
+
+                var manager = await _employeeRepo
+                    .GetQueryable(e => e.Id == managerId.Value && e.TenantId == tenantId && !e.IsDeleted)
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(ct);
+
+                recipients.Add((managerId.Value, manager?.FullName ?? "Manager"));
+                navigationUrl = subStatus == AppraisalSubStatus.ManagerEvaluation
+                    ? $"/hr/performance/team-appraisals/{appraisal.Id}"
+                    : "/hr/performance/conversations";
+                break;
+
+            case AppraisalSubStatus.PendingAcknowledgment:
+                AddAppraisee();
+                navigationUrl = $"/hr/performance/appraisals/{appraisal.Id}";
+                break;
+
+            default:
+                // Calibration, HR review, appeals and the terminal states are HR's own work or
+                // are finished. Nudging would either notify nobody or chase the sender.
+                throw new InvalidOperationException(
+                    $"This appraisal is at '{stepName}', which is not a step an individual can be nudged about.");
+        }
+
+        recipients = recipients
+            .Where(r => r.EmployeeId != Guid.Empty)
+            .GroupBy(r => r.EmployeeId)
+            .Select(g => g.First())
+            .ToList();
+
+        if (recipients.Count == 0)
+            throw new InvalidOperationException(
+                $"Nobody is currently assigned to the {stepName.ToLowerInvariant()} on this appraisal.");
+
+        var subjectName = appraisal.Employee?.FullName ?? "an employee";
+        var requests = recipients.Select(r => new AppraisalNotificationRequest(
+            RecipientEmployeeId: r.EmployeeId,
+            Type: AppraisalNotificationType.ActionRequired,
+            Title: $"{stepName} outstanding — {cycle.CycleCode}",
+            Message: r.EmployeeId == appraisal.EmployeeId
+                ? $"Your {stepName.ToLowerInvariant()} for {cycle.CycleName} is still outstanding."
+                : $"The {stepName.ToLowerInvariant()} for {subjectName} in {cycle.CycleName} is still outstanding.",
+            CycleName: cycle.CycleName,
+            NavigationUrl: navigationUrl,
+            AppraisalId: appraisal.Id,
+            SubjectEmployeeName: subjectName,
+            Urgency: NotificationUrgency.Warning));
+
+        var raised = await _notificationService.RaiseAsync(requests, ct);
+
+        _logger.LogInformation(
+            "Nudged appraisal {AppraisalId} at step {Step}: {Raised} of {Recipients} notification(s) written",
+            appraisalId, subStatus, raised, recipients.Count);
+
+        return new HRCycleNudgeResultDto
+        {
+            AppraisalId         = appraisal.Id,
+            EmployeeName        = subjectName,
+            StepName            = stepName,
+            Recipients          = recipients.Select(r => r.Name).ToList(),
+            NotificationsRaised = raised,
+        };
+
+        void AddAppraisee() =>
+            recipients.Add((appraisal.EmployeeId, appraisal.Employee?.FullName ?? "Employee"));
     }
 
     // ── Section builders ──────────────────────────────────────────────────────
@@ -281,7 +437,6 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
                 case AppraisalSubStatus.Completed:
                     p.CompletedCount++;
-                    p.AcknowledgmentCompletedCount++;
                     break;
 
                 case AppraisalSubStatus.Closed:
@@ -387,38 +542,35 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         return result;
     }
 
+    /// <summary>
+    /// The grade histogram, plus the two headline figures that go with it.
+    ///
+    /// <para>⚠ Scored and graded are not the same population. An appraisal carries a grade only
+    /// when its score falls inside a configured grade range, so a tenant with no grade definitions
+    /// — or a score outside every band — is scored but ungraded. This used to key both figures off
+    /// the grade, which blanked the average score and the scored count on exactly those cycles.
+    /// The counters now follow the score; the histogram percentages stay over the graded
+    /// population so the slices still total 100%.</para>
+    /// </summary>
     private static List<HRCycleGradeDistributionItemDto> BuildGradeDistribution(
         List<PerformanceAppraisal>   appraisals,
         List<AppraisalGradeDefinition> grades,
         out int scoredCount,
         out decimal? average)
     {
-        var scored = appraisals.Where(a => a.OverallGradeDefinitionId.HasValue).ToList();
-        scoredCount = scored.Count;
-
-        if (scoredCount == 0)
-        {
-            average = null;
-            return grades.Select((g, i) => new HRCycleGradeDistributionItemDto
-            {
-                GradeDefinitionId = g.Id,
-                GradeName         = g.GradeName,
-                Color             = GradeColors[i % GradeColors.Length],
-                Count             = 0,
-                Percentage        = 0,
-            }).ToList();
-        }
-
         var withScores = appraisals.Where(a => a.OverallScore.HasValue).ToList();
+        scoredCount = withScores.Count;
         average = withScores.Count > 0
             ? Math.Round(withScores.Average(a => a.OverallScore!.Value), 2)
             : null;
 
-        var byGrade = scored
+        var byGrade = appraisals
+            .Where(a => a.OverallGradeDefinitionId.HasValue)
             .GroupBy(a => a.OverallGradeDefinitionId!.Value)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        int totalScored = scoredCount; // capture out-param before lambda
+        int totalGraded = byGrade.Values.Sum();
+
         return grades.Select((g, i) =>
         {
             int cnt = byGrade.GetValueOrDefault(g.Id, 0);
@@ -428,8 +580,8 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 GradeName         = g.GradeName,
                 Color             = GradeColors[i % GradeColors.Length],
                 Count             = cnt,
-                Percentage        = totalScored > 0
-                                    ? Math.Round((decimal)cnt / totalScored * 100m, 1)
+                Percentage        = totalGraded > 0
+                                    ? Math.Round((decimal)cnt / totalGraded * 100m, 1)
                                     : 0m,
             };
         }).ToList();
@@ -448,6 +600,109 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             TerminationCount = appraisals.Count(a => a.RecommendTermination),
         };
     }
+
+    /// <summary>
+    /// What the cycle's recommendations turned into, and how much of it is still waiting on an
+    /// approver.
+    ///
+    /// <para>The three downstream streams are found through their appraisal provenance
+    /// (<c>SourceAppraisalId</c> / <c>AppraisalId</c>), so a proposal or plan raised by hand
+    /// against an appraisal in this cycle is counted alongside the ones HR dispatched — which is
+    /// right: the question the card answers is what is outstanding for this cycle, not who
+    /// created it.</para>
+    /// </summary>
+    private async Task<HRCycleOutcomePipelineDto> BuildOutcomePipelineAsync(
+        Guid tenantId, HashSet<Guid> appraisalIds, CancellationToken ct)
+    {
+        var dto = new HRCycleOutcomePipelineDto();
+        if (appraisalIds.Count == 0) return dto;
+
+        var ids = appraisalIds.ToList();
+
+        // AsNoTracking goes before the projection: these Selects land on an enum, and the
+        // extension is constrained to a reference type.
+        var recommendations = await _recommendationRepo
+            .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted && ids.Contains(r.PerformanceAppraisalId))
+            .AsNoTracking()
+            .Select(r => new { r.Status, r.RecommendationType })
+            .ToListAsync(ct);
+
+        var salaryProposals = await _salaryProposalRepo
+            .GetQueryable(p => p.TenantId == tenantId && !p.IsDeleted
+                               && p.SourceAppraisalId != null && ids.Contains(p.SourceAppraisalId!.Value))
+            .AsNoTracking()
+            .Select(p => p.Status)
+            .ToListAsync(ct);
+
+        var actionProposals = await _actionProposalRepo
+            .GetQueryable(p => p.TenantId == tenantId && !p.IsDeleted
+                               && p.SourceAppraisalId != null && ids.Contains(p.SourceAppraisalId!.Value))
+            .AsNoTracking()
+            .Select(p => p.Status)
+            .ToListAsync(ct);
+
+        var plans = await _pipRepo
+            .GetQueryable(p => p.TenantId == tenantId && !p.IsDeleted
+                               && p.AppraisalId != null && ids.Contains(p.AppraisalId!.Value))
+            .AsNoTracking()
+            .Select(p => p.Status)
+            .ToListAsync(ct);
+
+        dto.Recommendations = CountByEnum(
+            recommendations.Select(r => r.Status),
+            _ => false);
+
+        dto.RecommendationTypes = CountByEnum(
+            recommendations.Select(r => r.RecommendationType),
+            _ => false,
+            includeEmpty: false);
+
+        dto.SalaryProposals = CountByEnum(
+            salaryProposals, s => s == SalaryReviewProposalStatus.PendingApproval);
+
+        dto.EmploymentActionProposals = CountByEnum(
+            actionProposals, s => s == EmploymentActionProposalStatus.PendingApproval);
+
+        dto.ImprovementPlans = CountByEnum(
+            plans, s => s == PipStatus.PendingApproval);
+
+        dto.TotalRaised = recommendations.Count + salaryProposals.Count + actionProposals.Count + plans.Count;
+        dto.AwaitingApproval =
+            dto.SalaryProposals.Where(b => b.AwaitingApproval).Sum(b => b.Count)
+            + dto.EmploymentActionProposals.Where(b => b.AwaitingApproval).Sum(b => b.Count)
+            + dto.ImprovementPlans.Where(b => b.AwaitingApproval).Sum(b => b.Count);
+
+        return dto;
+    }
+
+    /// <summary>
+    /// Buckets a set of enum values into one count per member, in declaration order. Members with
+    /// no rows are kept by default so a stream reads as a stable, comparable row of counters.
+    /// </summary>
+    private static List<HRCycleOutcomeCountDto> CountByEnum<TEnum>(
+        IEnumerable<TEnum> values,
+        Func<TEnum, bool> awaitingApproval,
+        bool includeEmpty = true)
+        where TEnum : struct, Enum
+    {
+        var counts = values
+            .GroupBy(v => v)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return Enum.GetValues<TEnum>()
+            .Select(member => new HRCycleOutcomeCountDto
+            {
+                Key              = member.ToString(),
+                Label            = Humanize(member.ToString()),
+                Count            = counts.GetValueOrDefault(member, 0),
+                AwaitingApproval = awaitingApproval(member),
+            })
+            .Where(b => includeEmpty || b.Count > 0)
+            .ToList();
+    }
+
+    private static string Humanize(string pascal) =>
+        System.Text.RegularExpressions.Regex.Replace(pascal, "(\\B[A-Z])", " $1");
 
     private static List<HRCycleDepartmentProgressDto> BuildDepartmentBreakdown(
         List<PerformanceAppraisal> appraisals,
@@ -484,10 +739,14 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             var scored   = unitAppraisals.Where(a => a.OverallScore.HasValue).ToList();
             decimal? avg = scored.Count > 0 ? Math.Round(scored.Average(a => a.OverallScore!.Value), 2) : null;
 
-            // Manager = head of the unit (look up ManagerId via any employee)
-            var headId      = grp.FirstOrDefault()?.Employee?.ManagerId;
-            var managerName = headId.HasValue && managerLookup.TryGetValue(headId.Value, out var mn)
-                              ? mn : null;
+            // Who to chase about this unit: its configured head if it has one. Falling back to
+            // the first appraisee's line manager is a guess — right in a unit that reports to one
+            // person, wrong in a mixed one — so it is only used when the unit has no head on file.
+            var head        = grp.First().Employee?.OrganizationUnit?.HeadEmployee;
+            var fallbackId  = grp.First().Employee?.ManagerId;
+            var managerName = head?.FullName
+                              ?? (fallbackId.HasValue && managerLookup.TryGetValue(fallbackId.Value, out var mn)
+                                  ? mn : null);
 
             result.Add(new HRCycleDepartmentProgressDto
             {
@@ -523,6 +782,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             if (a.Employee is null) continue;
 
             var deptName    = a.Employee.OrganizationUnit?.Name ?? string.Empty;
+            var position    = a.Employee.Position?.Title ?? string.Empty;
             var managerId   = a.Employee.ManagerId;
             var managerName = managerId.HasValue && managerLookup.TryGetValue(managerId.Value, out var mn) ? mn : string.Empty;
             var gradeLabel  = a.OverallGradeDefinitionId.HasValue && gradeMap.TryGetValue(a.OverallGradeDefinitionId.Value, out var gl) ? gl : null;
@@ -531,7 +791,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             // PIP recommendation
             if (a.RecommendPIP)
             {
-                items.Add(BuildItem(a, deptName, managerName, gradeLabel, subStatus,
+                items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                     AttentionReason.PIPrecommendation, "PIP Recommended",
                     "Employee has been recommended for a Performance Improvement Plan.",
                     AttentionSeverity.Critical));
@@ -540,7 +800,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             // Termination recommendation
             if (a.RecommendTermination)
             {
-                items.Add(BuildItem(a, deptName, managerName, gradeLabel, subStatus,
+                items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                     AttentionReason.TerminationRecommendation, "Termination Recommended",
                     "Employee has been recommended for termination.",
                     AttentionSeverity.Critical));
@@ -554,14 +814,14 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
 
                 if (appealOverdue)
                 {
-                    items.Add(BuildItem(a, deptName, managerName, gradeLabel, subStatus,
+                    items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                         AttentionReason.AppealOverdue, "Appeal Overdue",
                         "The appeal re-evaluation deadline has passed without resolution.",
                         AttentionSeverity.Critical));
                 }
                 else
                 {
-                    items.Add(BuildItem(a, deptName, managerName, gradeLabel, subStatus,
+                    items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                         AttentionReason.AppealFiled, "Appeal Filed",
                         $"Appeal status: {a.CurrentAppealStatus}.",
                         AttentionSeverity.Warning));
@@ -577,7 +837,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
                 {
                     AppraisalId      = a.Id,
                     EmployeeName     = a.Employee.FullName,
-                    Position         = string.Empty, // resolved below if possible
+                    Position         = position,
                     Department       = deptName,
                     ManagerName      = managerName,
                     Reason           = AttentionReason.OverdueAtStep,
@@ -595,7 +855,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             if (a.OverallScore.HasValue && a.OverallScore.Value < 40m
                 && a.Status is not (AppraisalStatus.Appealed or AppraisalStatus.Draft))
             {
-                items.Add(BuildItem(a, deptName, managerName, gradeLabel, subStatus,
+                items.Add(BuildItem(a, deptName, position, managerName, gradeLabel, subStatus,
                     AttentionReason.LowScore, "Low Score",
                     $"Overall score {a.OverallScore:F1} is below the 40-point threshold.",
                     AttentionSeverity.Warning));
@@ -652,32 +912,62 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
             });
         }
 
-        // Source 3: active or resolved appeals
-        var appealed = appraisals
-            .Where(a => a.HasAppeal && a.UpdatedAt.HasValue)
-            .OrderByDescending(a => a.UpdatedAt)
-            .Take(10);
-
-        foreach (var a in appealed)
+        // Source 3: appeals — filed, and resolved.
+        //
+        // ⚠ These used to be timestamped from the appraisal's own UpdatedAt, so any later edit
+        // moved the appeal to the top of the feed and a filing that was never resolved was
+        // reported at the wrong time. The appeal itself records both dates; use them, and emit
+        // the two events separately so the feed shows the filing and the verdict, not one row
+        // that changes its own meaning.
+        foreach (var a in appraisals)
         {
-            bool resolved = a.CurrentAppealStatus is AppraisalAppealStatus.Upheld
-                            or AppraisalAppealStatus.Rejected;
-            items.Add(new HRCycleActivityItemDto
+            foreach (var appeal in a.Appeals.Where(ap => !ap.IsDeleted).OrderByDescending(ap => ap.SubmittedDate).Take(10))
             {
-                Timestamp           = a.UpdatedAt!.Value,
-                Description         = resolved ? "Appeal resolved." : "Appeal submitted.",
-                SubjectEmployeeName = a.Employee?.FullName,
-                EventType           = resolved
-                                      ? AppraisalNotificationType.AppealResolved
-                                      : AppraisalNotificationType.AppealSubmitted,
-                AppraisalId         = a.Id,
-            });
+                items.Add(new HRCycleActivityItemDto
+                {
+                    Timestamp           = appeal.SubmittedDate,
+                    Description         = "Appeal filed against the appraisal outcome.",
+                    SubjectEmployeeName = a.Employee?.FullName,
+                    EventType           = AppraisalNotificationType.AppealSubmitted,
+                    AppraisalId         = a.Id,
+                });
+
+                if (appeal.ResolvedDate.HasValue)
+                {
+                    items.Add(new HRCycleActivityItemDto
+                    {
+                        Timestamp           = appeal.ResolvedDate.Value,
+                        Description         = $"Appeal resolved — {Humanize(appeal.Status.ToString()).ToLowerInvariant()}.",
+                        SubjectEmployeeName = a.Employee?.FullName,
+                        EventType           = AppraisalNotificationType.AppealResolved,
+                        AppraisalId         = a.Id,
+                    });
+                }
+            }
         }
 
+        var now = DateTime.UtcNow;
         return items
             .OrderByDescending(i => i.Timestamp)
             .Take(30)
+            .Select(i => { i.TimeAgo = DescribeAge(now, i.Timestamp); return i; })
             .ToList();
+    }
+
+    /// <summary>
+    /// How long ago an activity item happened, in words. Filled server-side because the DTO
+    /// carries the field and nothing was setting it, so every feed row rendered a blank.
+    /// </summary>
+    private static string DescribeAge(DateTime now, DateTime then)
+    {
+        var span = now - then;
+        if (span < TimeSpan.Zero)          return "just now";
+        if (span.TotalMinutes < 1)         return "just now";
+        if (span.TotalMinutes < 60)        return $"{(int)span.TotalMinutes} min ago";
+        if (span.TotalHours   < 24)        return $"{(int)span.TotalHours} hour{((int)span.TotalHours == 1 ? "" : "s")} ago";
+        if (span.TotalDays    < 31)        return $"{(int)span.TotalDays} day{((int)span.TotalDays == 1 ? "" : "s")} ago";
+        if (span.TotalDays    < 365)       return $"{(int)(span.TotalDays / 30)} month{((int)(span.TotalDays / 30) == 1 ? "" : "s")} ago";
+        return $"{(int)(span.TotalDays / 365)} year{((int)(span.TotalDays / 365) == 1 ? "" : "s")} ago";
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -685,6 +975,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
     private static HRCycleAttentionItemDto BuildItem(
         PerformanceAppraisal a,
         string deptName,
+        string position,
         string managerName,
         string? gradeLabel,
         AppraisalSubStatus subStatus,
@@ -697,7 +988,7 @@ public class HRCycleDashboardQueryService : IHRCycleDashboardQueryService
         {
             AppraisalId      = a.Id,
             EmployeeName     = a.Employee!.FullName,
-            Position         = string.Empty,
+            Position         = position,
             Department       = deptName,
             ManagerName      = managerName,
             Reason           = reason,

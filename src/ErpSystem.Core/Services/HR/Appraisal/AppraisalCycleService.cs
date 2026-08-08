@@ -28,6 +28,7 @@ public class AppraisalCycleService : IAppraisalCycleService
     private readonly IGenericRepository<AppraisalReviewEvent> _reviewEventRepository;
     private readonly IGenericRepository<CheckIn> _checkInRepository;
     private readonly IEffectiveAppraisalConfigurationService _effectiveConfigService;
+    private readonly IAppraisalNotificationService _notificationService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCycleService> _logger;
@@ -46,6 +47,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         IGenericRepository<AppraisalReviewEvent> reviewEventRepository,
         IGenericRepository<CheckIn> checkInRepository,
         IEffectiveAppraisalConfigurationService effectiveConfigService,
+        IAppraisalNotificationService notificationService,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCycleService> logger)
@@ -63,6 +65,7 @@ public class AppraisalCycleService : IAppraisalCycleService
         _reviewEventRepository = reviewEventRepository;
         _checkInRepository = checkInRepository;
         _effectiveConfigService = effectiveConfigService;
+        _notificationService = notificationService;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -346,12 +349,21 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new InvalidOperationException("End date must be after start date.");
         }
 
+        var settingsChanged = entity.AppraisalSettingsId != updateDto.AppraisalSettingsId;
+        if (settingsChanged)
+            await GetOwnedSettingsAsync(updateDto.AppraisalSettingsId);
+
         updateDto.UpdateEntity(entity);
 
         await _cycleRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Appraisal cycle updated successfully: {cycleId}", entity.Id);
+
+        // Switching settings profiles leaves the loaded navigation pointing at the old one,
+        // so the response would name the profile that was just replaced. Re-read instead.
+        if (settingsChanged)
+            return await GetByIdAsync(entity.Id, cancellationToken);
 
         return entity.ToDto();
     }
@@ -397,12 +409,18 @@ public class AppraisalCycleService : IAppraisalCycleService
 
             if (thisScopeEmployees.Any())
             {
+                // Only a cycle that is actually running reserves its people. A Draft appraises
+                // nobody, may never be opened at all, and blocking on one forced the user to go
+                // and delete somebody else's half-finished cycle before they could open theirs.
+                // Draft overlaps are still reported — as an advisory on the coverage preview —
+                // so the early warning survives without the hard block.
                 var siblingsQuery = _cycleRepository.GetQueryable()
                     .Where(c => c.TenantId == tenantId &&
                                 c.Id != entity.Id &&
                                 c.AppraisalType == entity.AppraisalType &&
                                 c.Year == entity.Year &&
-                                c.Status != AppraisalCycleStatus.Closed);
+                                (c.Status == AppraisalCycleStatus.Open ||
+                                 c.Status == AppraisalCycleStatus.InProgress));
 
                 var siblingCycles = await siblingsQuery.ToListAsync(cancellationToken);
 
@@ -440,7 +458,118 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         _logger.LogInformation("Appraisal cycle opened: {cycleId} by user {userId}", openDto.CycleId, openedById);
 
+        await NotifyCycleOpenedAsync(entity, cancellationToken);
+
         return true;
+    }
+
+    /// <summary>
+    /// Tells everyone in scope that the cycle is live and, when a goal-setting deadline is
+    /// configured, by when their goals are due.
+    ///
+    /// Best-effort: the cycle is already open and saved by the time this runs, so a failure
+    /// here is logged rather than thrown. Opening a cycle must not fail because a
+    /// notification could not be written.
+    /// </summary>
+    private async Task NotifyCycleOpenedAsync(AppraisalCycle cycle, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var recipients = (await GetEmployeesInScopeAsync(cycle.Id, cancellationToken)).ToList();
+            if (recipients.Count == 0) return;
+
+            var due = cycle.GoalSettingDeadline.HasValue
+                ? $" Goals are due by {cycle.GoalSettingDeadline.Value:dd MMM yyyy}."
+                : string.Empty;
+
+            var requests = recipients.Select(employeeId => new AppraisalNotificationRequest(
+                RecipientEmployeeId: employeeId,
+                Type: AppraisalNotificationType.ActionRequired,
+                Title: $"{cycle.CycleName} is open",
+                Message: $"The {cycle.AppraisalType} appraisal cycle {cycle.CycleCode} is now open.{due}",
+                CycleName: cycle.CycleName,
+                NavigationUrl: "/hr/performance/employee-goals",
+                Urgency: NotificationUrgency.Normal));
+
+            var raised = await _notificationService.RaiseAsync(requests, cancellationToken);
+            _logger.LogInformation("Cycle {CycleId} opened: notified {Count} of {Total} in-scope employees",
+                cycle.Id, raised, recipients.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Cycle {CycleId} was opened but its notifications could not be raised", cycle.Id);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SendDeadlineRemindersAsync(Guid cycleId, CancellationToken cancellationToken = default)
+    {
+        var cycle = await GetOwnedCycleAsync(cycleId);
+
+        if (cycle.Status == AppraisalCycleStatus.Draft)
+            throw new InvalidOperationException("Reminders can only be sent for a cycle that has been opened.");
+
+        // Risk bands are a tenant policy, held on the cycle's settings profile. Falling back
+        // to the DTO defaults keeps this working for a settings row saved before they existed.
+        var settings = await _settingsRepository.GetQueryable()
+            .FirstOrDefaultAsync(s => s.Id == cycle.AppraisalSettingsId && s.TenantId == cycle.TenantId, cancellationToken);
+        var highDays = settings is { DeadlineRiskHighDays: > 0 } ? settings.DeadlineRiskHighDays : 2;
+        var lowDays = settings is { DeadlineRiskLowDays: > 0 } ? settings.DeadlineRiskLowDays : 7;
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var phases = new (DateOnly? Deadline, string Phase, string NavigationUrl)[]
+        {
+            (cycle.GoalSettingDeadline,           "Goal setting",         "/hr/performance/employee-goals"),
+            (cycle.SelfEvaluationDeadline,        "Self-evaluation",      "/hr/performance"),
+            (cycle.PeerNominationDeadline,        "Peer nomination",      "/hr/performance"),
+            (cycle.PeerEvaluationDeadline,        "Peer evaluation",      "/hr/performance"),
+            (cycle.ManagerEvaluationDeadline,     "Manager evaluation",   "/hr/performance/team-goals"),
+            (cycle.EmployeeAcknowledgeDeadline,   "Acknowledgment",       "/hr/performance"),
+            (cycle.FinalConversationDeadline,     "Final conversation",   "/hr/performance"),
+        };
+
+        // Only phases that are live now: already past, or close enough to be worth a nudge.
+        // A deadline further out than the low-risk band is not news.
+        var actionable = phases
+            .Where(p => p.Deadline.HasValue)
+            .Select(p => (p.Phase, p.NavigationUrl, Deadline: p.Deadline!.Value,
+                          DaysRemaining: p.Deadline!.Value.DayNumber - today.DayNumber))
+            .Where(p => p.DaysRemaining <= lowDays)
+            .ToList();
+
+        if (actionable.Count == 0) return 0;
+
+        var recipients = (await GetEmployeesInScopeAsync(cycleId, cancellationToken)).ToList();
+        if (recipients.Count == 0) return 0;
+
+        var requests = new List<AppraisalNotificationRequest>();
+        foreach (var phase in actionable)
+        {
+            var (type, urgency, headline) = phase.DaysRemaining switch
+            {
+                < 0 => (AppraisalNotificationType.DeadlinePassed, NotificationUrgency.Urgent,
+                        $"{phase.Phase} is overdue"),
+                var d when d <= highDays => (AppraisalNotificationType.DeadlineImminent, NotificationUrgency.Urgent,
+                        $"{phase.Phase} closes {(d == 0 ? "today" : d == 1 ? "tomorrow" : $"in {d} days")}"),
+                var d => (AppraisalNotificationType.DeadlineApproaching, NotificationUrgency.Warning,
+                        $"{phase.Phase} closes in {d} days"),
+            };
+
+            requests.AddRange(recipients.Select(employeeId => new AppraisalNotificationRequest(
+                RecipientEmployeeId: employeeId,
+                Type: type,
+                Title: $"{headline} — {cycle.CycleCode}",
+                Message: $"The {phase.Phase.ToLowerInvariant()} deadline for {cycle.CycleName} " +
+                         $"{(phase.DaysRemaining < 0 ? "passed on" : "is")} {phase.Deadline:dd MMM yyyy}.",
+                CycleName: cycle.CycleName,
+                NavigationUrl: phase.NavigationUrl,
+                Urgency: urgency)));
+        }
+
+        var raised = await _notificationService.RaiseAsync(requests, cancellationToken);
+        _logger.LogInformation("Cycle {CycleId}: raised {Raised} deadline reminder(s) across {Phases} phase(s)",
+            cycleId, raised, actionable.Count);
+        return raised;
     }
 
     /// <summary>

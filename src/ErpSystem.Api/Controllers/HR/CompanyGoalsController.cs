@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -123,6 +124,10 @@ public class CompanyGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCompanyGoalDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
         try
         {
             var result = await _companyGoalService.UpdateAsync(updateDto, cancellationToken);
@@ -212,7 +217,7 @@ public class CompanyGoalsController : ControllerBase
     /// Requires cycleId. Supports search, priority, visibility and due-date filters.
     /// </summary>
     [HttpGet("dashboard/paged")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     [ProducesResponseType(typeof(PagedResult<CompanyGoalListItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDashboardPaged(
         [FromQuery] Guid cycleId,
@@ -243,7 +248,7 @@ public class CompanyGoalsController : ControllerBase
     /// Single projection query — does not load navigation collections.
     /// </summary>
     [HttpGet("dashboard/metrics")]
-    [Authorize(Roles = "HR,Admin,SuperAdmin")]
+    [Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
     [ProducesResponseType(typeof(CompanyGoalDashboardMetricsDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDashboardMetrics(
         [FromQuery] Guid cycleId,

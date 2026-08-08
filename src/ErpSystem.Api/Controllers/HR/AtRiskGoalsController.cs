@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -20,7 +21,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [Route("api/performance/goals-at-risk")]
 // This endpoint returns org-wide employee/goal/risk data with no manager scope, so it must be
 // gated to HR/Admin (there is no global fallback policy — without this it is reachable anonymously).
-[Authorize(Roles = "HR,Admin,SuperAdmin")]
+[Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
 public class AtRiskGoalsController : ControllerBase
 {
     private readonly IAtRiskGoalsQueryService        _atRiskService;

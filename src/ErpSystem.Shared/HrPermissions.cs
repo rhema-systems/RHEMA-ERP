@@ -44,17 +44,18 @@ public static class HrPermissions
     /// <c>HrPermissionRoleFallbackAuthorizationHandler</c>.
     /// </remarks>
     /// <remarks>
-    /// Both "HR" and "HR User" are listed deliberately: the seeder creates "HR User", while the
-    /// existing <c>[Authorize(Roles = "HR")]</c> attributes across the HR controllers reference a
-    /// bare "HR". Whichever a tenant actually assigned, medical access survives this change.
+    /// "HR User" was the seeded name before it was renamed to "HR"
+    /// (<c>DatabaseSeedingService.MigrateLegacyHrRoleNameAsync</c>). It stays listed so a
+    /// tenant that has not yet run the renaming startup keeps medical access; drop it once
+    /// every environment is known to be migrated.
     /// </remarks>
     public static readonly string[] MedicalFallbackRoles =
     {
-        "SuperAdmin",
-        "TenantAdmin",
+        Constants.Roles.SuperAdmin,
+        Constants.Roles.TenantAdmin,
         "Admin",
-        "HR",
-        "HR User"
+        Constants.Roles.Hr,
+        Constants.Roles.LegacyHrUser
     };
 
     public static readonly HrPermissionDefinition[] All =

@@ -207,10 +207,13 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             AppraisalNumber = entity.AppraisalNumber,
             EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee.FullName,
-            EmployeeNumber = entity.Employee.EmployeeNumber,
-            DepartmentName = entity.Employee.Department?.Name,
-            PositionTitle = entity.Employee.Position?.Title,
+            // Null-guarded for the same reason as the PIP mapper: a caller that maps a freshly
+            // written appraisal has no navigations loaded, and `POST api/PerformanceAppraisals`
+            // did exactly that — the create endpoint 500'd on a record it had just saved.
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
+            DepartmentName = entity.Employee?.Department?.Name,
+            PositionTitle = entity.Employee?.Position?.Title,
             Year = entity.Year,
             AppraisalCycleId = entity.AppraisalCycleId,
             AppraisalCycleCode = entity.AppraisalCycle?.CycleCode,
@@ -520,7 +523,10 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             PipNumber = entity.PipNumber,
             EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee.FullName,
+            // Null-guarded: a caller that maps a freshly written plan has no navigations loaded,
+            // and a blank name beats a NullReferenceException surfacing as a 500 on a save that
+            // in fact succeeded.
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
             AppraisalId = entity.AppraisalId,
             AppraisalNumber = entity.Appraisal?.AppraisalNumber,
             StartDate = entity.StartDate,
@@ -532,7 +538,7 @@ public static class AppraisalMappingExtensions
             SupportProvided = entity.SupportProvided ?? string.Empty,
             MeasurementCriteria = entity.MeasurementCriteria ?? string.Empty,
             SupervisorId = entity.SupervisorId,
-            SupervisorName = entity.Supervisor.FullName,
+            SupervisorName = entity.Supervisor?.FullName ?? string.Empty,
             HROwnerId = entity.HROwnerId,
             HROwnerName = entity.HROwner?.FullName,
             ReviewSchedule = entity.ReviewSchedule,
@@ -554,7 +560,10 @@ public static class AppraisalMappingExtensions
             AppraisalId = dto.AppraisalId,
             StartDate = dto.StartDate,
             EndDate = dto.EndDate,
-            Status = PipStatus.Active,
+            // Draft, not Active: a plan is approved through the workflow engine before it is in
+            // force. The service sets this too; keeping the mapper honest means no future caller
+            // can create a live plan by accident.
+            Status = PipStatus.Draft,
             PerformanceIssues = dto.PerformanceIssues,
             ExpectedStandards = dto.ExpectedStandards,
             ImprovementActions = dto.ImprovementActions,
@@ -641,7 +650,6 @@ public static class AppraisalMappingExtensions
         entity.IssuesDiscussed = dto.IssuesDiscussed;
         entity.ActionsAgreed = dto.ActionsAgreed;
         entity.EmployeeComments = dto.EmployeeComments;
-        entity.ConductedById = dto.ConductedById;
         entity.ConductedById = dto.ConductedById;
     }
 
@@ -1791,7 +1799,6 @@ public static class AppraisalMappingExtensions
         entity.SuccessCriteria = dto.SuccessCriteria;
         entity.Weight = dto.Weight;
         entity.Priority = dto.Priority;
-        entity.Status = dto.Status;
         entity.MeasurementType = dto.MeasurementType;
         entity.Period = dto.Period;
         entity.TargetValue = dto.TargetValue;
@@ -1801,8 +1808,13 @@ public static class AppraisalMappingExtensions
         entity.StartDate = dto.StartDate;
         entity.DueDate = dto.DueDate;
         entity.ProgressPercent = dto.ProgressPercent;
-        entity.SubmittedToManagerId = dto.SubmittedToManagerId;
-        entity.ManagerFeedback = dto.ManagerFeedback;
+
+        // Status, SubmittedToManagerId and ManagerFeedback are deliberately NOT copied from the
+        // update payload. They belong to the approval lifecycle, which IGoalWorkflowCommandService
+        // owns: it enforces the transition table, derives the target manager from the employee's HR
+        // record, and only lets the employee's direct manager approve or reject. Assigning them here
+        // let any caller PUT `status: "Approved"` onto their own draft and skip all of that.
+        // Everything above is goal content, which the owner may edit until the goal is locked.
     }
 
     public static List<EmployeeGoalDto> ToDtoList(this IEnumerable<EmployeeGoal> entities)
@@ -2057,8 +2069,19 @@ public static class AppraisalMappingExtensions
 
     public static EmployeeDevelopmentPlanDto ToDto(this EmployeeDevelopmentPlan entity)
     {
+        // Objectives are eagerly loaded by every read in DevelopmentPlanService and were then
+        // thrown away. The rollup is what a plan list is actually asking about.
+        var objectives = (entity.Objectives ?? new List<EmployeeDevelopmentObjective>())
+            .Where(o => !o.IsDeleted)
+            .ToList();
+
         return new EmployeeDevelopmentPlanDto
         {
+            ObjectiveCount = objectives.Count,
+            CompletedObjectiveCount = objectives.Count(o => o.ObjectiveStatus == DevelopmentObjectiveStatus.Completed),
+            AverageProgressPercent = objectives.Count == 0
+                ? 0m
+                : Math.Round(objectives.Average(o => o.ProgressPercent), 2),
             Id = entity.Id,
             TenantId = entity.TenantId,
             EmployeeId = entity.EmployeeId,
@@ -2409,14 +2432,17 @@ public static class AppraisalMappingExtensions
         entity.SessionName = dto.SessionName;
         entity.OrganizationLevelId = dto.OrganizationLevelId;
         entity.OrganizationUnitId = dto.OrganizationUnitId;
-        entity.Status = dto.Status;
         entity.ScheduledDate = dto.ScheduledDate;
-        entity.StartedDate = dto.StartedDate;
-        entity.CompletedDate = dto.CompletedDate;
-        entity.FacilitatedById = dto.FacilitatedById;
-        entity.CompletedById = dto.CompletedById;
         entity.Agenda = dto.Agenda;
         entity.MeetingNotes = dto.MeetingNotes;
+
+        // ⚠ Only reassign the facilitator when one is actually named. Opening a session records
+        // who opened it, and a later edit of the session's name or agenda does not mention the
+        // facilitator — so overwriting unconditionally silently blanked the record of who ran it.
+        if (dto.FacilitatedById.HasValue)
+            entity.FacilitatedById = dto.FacilitatedById;
+
+        // Status and the started/completed stamps are set only by the lifecycle endpoints.
     }
 
     public static List<CalibrationSessionDto> ToDtoList(this IEnumerable<CalibrationSession> entities)
@@ -2501,16 +2527,15 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>The session id and the adjuster are supplied by the service, from the route and the token.</summary>
     public static CalibrationRatingAdjustment ToEntity(this CreateCalibrationRatingAdjustmentDto dto)
     {
         return new CalibrationRatingAdjustment
         {
-            CalibrationSessionId = dto.CalibrationSessionId,
             PerformanceAppraisalId = dto.PerformanceAppraisalId,
             TemplateItemId = dto.TemplateItemId,
             OriginalScore = dto.OriginalScore,
             AdjustedScore = dto.AdjustedScore,
-            AdjustedById = dto.AdjustedById,
             AdjustmentDate = DateTime.UtcNow,
             Rationale = dto.Rationale
         };
@@ -2518,12 +2543,10 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateCalibrationRatingAdjustmentDto dto, CalibrationRatingAdjustment entity)
     {
-        entity.CalibrationSessionId = dto.CalibrationSessionId;
         entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
         entity.TemplateItemId = dto.TemplateItemId;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
-        entity.AdjustedById = dto.AdjustedById;
         entity.Rationale = dto.Rationale;
     }
 

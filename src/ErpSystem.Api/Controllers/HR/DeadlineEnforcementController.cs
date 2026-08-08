@@ -1,29 +1,39 @@
 using ErpSystem.Api.Models;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// HR's manual override on a stalled appraisal pipeline. Both actions are audited against the
+/// caller — the advancing officer is taken from the token, never from the request, because this
+/// is the record of who overrode a step someone else was supposed to complete.
+/// </summary>
 [ApiController]
 [Route("api/DeadlineEnforcement")]
-[Authorize(Roles = "HR,Admin,SuperAdmin")]
+[Authorize(Roles = Constants.Roles.Hr + ",Admin," + Constants.Roles.SuperAdmin)]
 public class DeadlineEnforcementController : ControllerBase
 {
     private readonly IAppraisalWorkflowService _workflowService;
     private readonly IPerformanceAppraisalService _appraisalService;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<DeadlineEnforcementController> _logger;
 
     public DeadlineEnforcementController(
         IAppraisalWorkflowService workflowService,
         IPerformanceAppraisalService appraisalService,
+        ICurrentUserService currentUserService,
         ILogger<DeadlineEnforcementController> logger)
     {
-        _workflowService  = workflowService;
-        _appraisalService = appraisalService;
-        _logger           = logger;
+        _workflowService    = workflowService;
+        _appraisalService   = appraisalService;
+        _currentUserService = currentUserService;
+        _logger             = logger;
     }
 
     /// <summary>
@@ -37,9 +47,11 @@ public class DeadlineEnforcementController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> EnforceDeadlines(Guid cycleId, CancellationToken ct = default)
     {
+        if (!TryGetEmployeeId(out var employeeId, out var problem)) return problem!;
+
         try
         {
-            var result = await _workflowService.AdvanceOverdueAppraisalsAsync(cycleId, GetEmployeeId(), ct);
+            var result = await _workflowService.AdvanceOverdueAppraisalsAsync(cycleId, employeeId, ct);
 
             _logger.LogInformation(
                 "Advance-overdue for cycle {CycleId}: autoLock={AutoLock}, evaluated={Evaluated}, advanced={Advanced}",
@@ -54,13 +66,32 @@ public class DeadlineEnforcementController : ControllerBase
         }
     }
 
-    private Guid GetEmployeeId()
-        => Guid.TryParse(User.FindFirst("employee_id")?.Value, out var id) ? id : Guid.Empty;
+    /// <summary>
+    /// The acting HR officer, from the token.
+    ///
+    /// ⚠ This used to read a raw <c>employee_id</c> claim and fall back to <c>Guid.Empty</c>,
+    /// so an override could be recorded against nobody — on the one action whose entire point is
+    /// the audit trail.
+    /// </summary>
+    private bool TryGetEmployeeId(out Guid employeeId, out IActionResult? problem)
+    {
+        var id = _currentUserService.EmployeeId;
+        if (id is null || id == Guid.Empty)
+        {
+            employeeId = Guid.Empty;
+            problem = BadRequest(new { message = "Your account is not linked to an employee record, so an override cannot be attributed to you." });
+            return false;
+        }
+
+        employeeId = id.Value;
+        problem = null;
+        return true;
+    }
 
     /// <summary>
     /// Manually advance an appraisal past a single stalled pipeline sub-step.
-    /// HR specifies the target sub-status (or omits it to advance the current blocking step),
-    /// provides a reason, and their employee ID for the audit log.
+    /// HR specifies the target sub-status (or omits it to advance the current blocking step) and
+    /// provides a reason; the advancing officer comes from the token.
     /// </summary>
     [HttpPost("advance/{appraisalId:guid}")]
     [ProducesResponseType(typeof(ManualAdvanceResult), StatusCodes.Status200OK)]
@@ -72,13 +103,15 @@ public class DeadlineEnforcementController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
+        if (!TryGetEmployeeId(out var employeeId, out var problem)) return problem!;
+
         try
         {
             var result = await _workflowService.ManuallyAdvanceStepAsync(
                 appraisalId,
                 req.TargetSubStatus,
                 req.Reason,
-                req.AdvancedByEmployeeId,
+                employeeId,
                 ct);
 
             if (!result.Success)

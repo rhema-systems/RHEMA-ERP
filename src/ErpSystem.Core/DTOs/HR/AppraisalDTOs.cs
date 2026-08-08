@@ -908,6 +908,12 @@ public class CompletePipDto
     [Required]
     [MaxLength(2000)]
     public string OutcomeNotes { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Required when the outcome is <see cref="PipOutcome.Extended"/>, ignored otherwise.
+    /// Extending pushes the end date out and leaves the plan running rather than closing it.
+    /// </summary>
+    public DateTime? NewEndDate { get; set; }
 }
 
 public class PipReviewMeetingDto : BaseDto
@@ -3409,6 +3415,23 @@ public class SalaryReviewProposalDto : BaseDto
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// Puts numbers on a compensation proposal before anyone approves it. The handler that raises
+/// the proposal has an appraisal, not a pay decision, so it can only record the intent — without
+/// this a merit increase could be approved and handed to payroll with no percentage on it.
+/// </summary>
+public class UpdateSalaryReviewProposalDto
+{
+    [Range(0, 100)]
+    public decimal? ProposedPercent { get; set; }
+
+    [Range(0, double.MaxValue)]
+    public decimal? ProposedAmount { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
 public class EmploymentActionProposalDto : BaseDto
 {
     public Guid EmployeeId { get; set; }
@@ -3417,6 +3440,13 @@ public class EmploymentActionProposalDto : BaseDto
     public string? AppraisalNumber { get; set; }
     public EmploymentActionType ActionType { get; set; }
     public EmploymentActionProposalStatus Status { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>Notes recorded alongside an employment-action proposal decision.</summary>
+public class UpdateEmploymentActionProposalDto
+{
+    [MaxLength(1000)]
     public string? Notes { get; set; }
 }
 
@@ -4246,7 +4276,6 @@ public class UpdateEmployeeGoalDto : UpdateDtoBase
     public int Weight { get; set; }
 
     public GoalPriority Priority { get; set; }
-    public GoalStatus Status { get; set; }
     public MeasurementType MeasurementType { get; set; }
     public GoalPeriod Period { get; set; } = GoalPeriod.FullCycle;
 
@@ -4271,10 +4300,10 @@ public class UpdateEmployeeGoalDto : UpdateDtoBase
     [Range(0, 100)]
     public decimal ProgressPercent { get; set; }
 
-    public Guid? SubmittedToManagerId { get; set; }
-
-    [MaxLength(1000)]
-    public string? ManagerFeedback { get; set; }
+    // No Status / SubmittedToManagerId / ManagerFeedback here on purpose. Those move only through
+    // the submit / approve / reject / lock commands on EmployeeGoalsController, which enforce the
+    // transition table and the direct-manager check. Accepting them on a plain edit made every one
+    // of those rules optional.
 }
 
 // ============================================================
@@ -4581,6 +4610,15 @@ public class EmployeeDevelopmentPlanDto : BaseDto
     public DateOnly? EndDate { get; set; }
     public DevelopmentPlanStatus PlanStatus { get; set; }
     public string? OverallNotes { get; set; }
+
+    // ── Objective rollup ──────────────────────────────────────────────────────
+    // A plan on its own says nothing about how it is going. The reads already load the
+    // objectives; these three carry what the list rows and tiles need without a second call.
+
+    public int ObjectiveCount { get; set; }
+    public int CompletedObjectiveCount { get; set; }
+    /// <summary>Mean progress across the plan's objectives; 0 when it has none.</summary>
+    public decimal AverageProgressPercent { get; set; }
 }
 
 public class CreateEmployeeDevelopmentPlanDto : CreateDtoBase
@@ -4956,6 +4994,12 @@ public class CreateCalibrationSessionDto : CreateDtoBase
     public string? Agenda { get; set; }
 }
 
+/// <summary>
+/// Edits the session's own particulars. Deliberately carries no lifecycle fields: status and the
+/// started/completed stamps belong to the open/start/complete endpoints, which enforce the order
+/// and record who acted. Accepting them here let a caller mark a session Completed — and so lift
+/// the calibration gate on every appraisal in it — with a plain PUT.
+/// </summary>
 public class UpdateCalibrationSessionDto : UpdateDtoBase
 {
     [Required]
@@ -4968,18 +5012,39 @@ public class UpdateCalibrationSessionDto : UpdateDtoBase
     public Guid? OrganizationLevelId { get; set; }
     public Guid? OrganizationUnitId { get; set; }
 
-    public CalibrationStatus Status { get; set; }
     public DateTime? ScheduledDate { get; set; }
-    public DateTime? StartedDate { get; set; }
-    public DateTime? CompletedDate { get; set; }
     public Guid? FacilitatedById { get; set; }
-    public Guid? CompletedById { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
 
     [MaxLength(4000)]
     public string? MeetingNotes { get; set; }
+}
+
+/// <summary>Notes recorded when a calibration session is closed.</summary>
+public class CompleteCalibrationSessionDto
+{
+    [MaxLength(4000)]
+    public string? MeetingNotes { get; set; }
+}
+
+/// <summary>Attendance mark for one participant.</summary>
+public class RecordCalibrationAttendanceDto
+{
+    public bool Attended { get; set; }
+}
+
+/// <summary>
+/// What committing a session actually did. <c>AppraisalsCalibrated</c> counts everyone in the
+/// session's scope — an employee the panel discussed and left alone is still calibrated, and
+/// would otherwise sit blocked behind the calibration gate forever.
+/// </summary>
+public class CalibrationApplyResultDto
+{
+    public int AdjustmentsApplied { get; set; }
+    public int ScoresChanged { get; set; }
+    public int AppraisalsCalibrated { get; set; }
 }
 
 // ============================================================
@@ -5047,11 +5112,16 @@ public class CalibrationRatingAdjustmentDto : BaseDto
     public string? Rationale { get; set; }
 }
 
+/// <summary>
+/// One panel decision. A null <see cref="TemplateItemId"/> adjusts the overall score directly;
+/// a populated one adjusts that criterion on the manager's evaluation and lets the overall score
+/// be recomputed from it.
+///
+/// <para>The adjuster is taken from the caller's token, never the payload — this is a signed
+/// audit trail of who moved someone's rating.</para>
+/// </summary>
 public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
 {
-    [Required]
-    public Guid CalibrationSessionId { get; set; }
-
     [Required]
     public Guid PerformanceAppraisalId { get; set; }
 
@@ -5062,9 +5132,6 @@ public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
 
     [Range(0, 100)]
     public decimal? AdjustedScore { get; set; }
-
-    [Required]
-    public Guid AdjustedById { get; set; }
 
     [MaxLength(2000)]
     public string? Rationale { get; set; }
@@ -5073,9 +5140,6 @@ public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
 public class UpdateCalibrationRatingAdjustmentDto : UpdateDtoBase
 {
     [Required]
-    public Guid CalibrationSessionId { get; set; }
-
-    [Required]
     public Guid PerformanceAppraisalId { get; set; }
 
     public Guid? TemplateItemId { get; set; }
@@ -5085,9 +5149,6 @@ public class UpdateCalibrationRatingAdjustmentDto : UpdateDtoBase
 
     [Range(0, 100)]
     public decimal? AdjustedScore { get; set; }
-
-    [Required]
-    public Guid AdjustedById { get; set; }
 
     [MaxLength(2000)]
     public string? Rationale { get; set; }
@@ -5323,13 +5384,25 @@ public class TeamGoalSummaryDto
 // CalibrationMatrixDto (calibration session grid view)
 // ============================================================
 
+/// <summary>
+/// The calibration grid: every appraisal in the session's scope — the cycle, narrowed to the
+/// session's organization unit (and its descendants) or level — not only the ones already
+/// adjusted. A panel has to see who it has *not* moved.
+/// </summary>
 public class CalibrationMatrixDto
 {
     public Guid SessionId { get; set; }
     public string SessionName { get; set; } = string.Empty;
+    public CalibrationStatus SessionStatus { get; set; }
     public string? OrganizationUnitName { get; set; }
+    public string? OrganizationLevelName { get; set; }
     public int TotalEmployees { get; set; }
+    /// <summary>How many rows carry at least one recorded adjustment.</summary>
     public int AdjustedCount { get; set; }
+    /// <summary>How many have already been committed through the calibration gate.</summary>
+    public int CalibratedCount { get; set; }
+    /// <summary>Mean of the scores as they currently stand, for spotting a skewed panel.</summary>
+    public decimal? AverageScore { get; set; }
     public List<CalibrationMatrixRowDto> Rows { get; set; } = new();
 }
 
@@ -5341,6 +5414,8 @@ public class CalibrationMatrixRowDto
     public string EmployeeNumber { get; set; } = string.Empty;
     public string? PositionName { get; set; }
     public string? DepartmentName { get; set; }
+    public AppraisalStatus AppraisalStatus { get; set; }
+    /// <summary>The manager's own evaluation total, before any calibration.</summary>
     public decimal? ManagerProposedScore { get; set; }
     public decimal? PreCalibrationScore { get; set; }
     public decimal? CalibratedScore { get; set; }
@@ -5400,6 +5475,28 @@ public class CoveragePreviewDto
 
     public List<EmployeeCoverageItemDto> Items { get; set; } = new();
     public List<TemplateCoverageBreakdownDto> TemplateBreakdown { get; set; } = new();
+
+    /// <summary>
+    /// Other cycles of the same type and year whose scope overlaps this one's.
+    ///
+    /// Advisory only — opening is refused solely by the Open / InProgress entries, because a
+    /// Draft cycle appraises nobody and may never be opened. Draft entries are reported here
+    /// so the clash is visible while there is still time to re-scope, rather than surfacing
+    /// as a refusal at the moment someone tries to open.
+    /// </summary>
+    public List<CycleScopeOverlapDto> ScopeOverlaps { get; set; } = new();
+}
+
+/// <summary>One other cycle competing for some of the same employees.</summary>
+public class CycleScopeOverlapDto
+{
+    public Guid CycleId { get; set; }
+    public string CycleCode { get; set; } = string.Empty;
+    public string CycleName { get; set; } = string.Empty;
+    public AppraisalCycleStatus Status { get; set; }
+    public int SharedEmployeeCount { get; set; }
+    /// <summary>True when this overlap would refuse an attempt to open the cycle.</summary>
+    public bool BlocksOpening { get; set; }
 }
 
 /// <summary>

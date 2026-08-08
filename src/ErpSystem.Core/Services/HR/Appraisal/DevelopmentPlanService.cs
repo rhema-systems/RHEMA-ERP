@@ -16,6 +16,7 @@ public class DevelopmentPlanService : IDevelopmentPlanService
     private readonly IGenericRepository<EmployeeDevelopmentPlan> _planRepository;
     private readonly IGenericRepository<EmployeeDevelopmentObjective> _objectiveRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IAppraisalNotificationService _notifications;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<DevelopmentPlanService> _logger;
 
@@ -23,14 +24,33 @@ public class DevelopmentPlanService : IDevelopmentPlanService
         IGenericRepository<EmployeeDevelopmentPlan> planRepository,
         IGenericRepository<EmployeeDevelopmentObjective> objectiveRepository,
         ICurrentUserProvider currentUserProvider,
+        IAppraisalNotificationService notifications,
         IUnitOfWork unitOfWork,
         ILogger<DevelopmentPlanService> logger)
     {
         _planRepository = planRepository;
         _objectiveRepository = objectiveRepository;
         _currentUserProvider = currentUserProvider;
+        _notifications = notifications;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Notifications are a side effect of work that is already saved, so a bad recipient must
+    /// never turn a successful change into a 500. Same best-effort pattern as the rest of the
+    /// appraisal services.
+    /// </summary>
+    private async Task NotifyQuietlyAsync(IEnumerable<AppraisalNotificationRequest> requests, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _notifications.RaiseAsync(requests, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to raise development plan notification(s); the originating action stands.");
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -124,9 +144,15 @@ public class DevelopmentPlanService : IDevelopmentPlanService
 
     public async Task<EmployeeDevelopmentPlanDto> CreateAsync(CreateEmployeeDevelopmentPlanDto createDto, CancellationToken cancellationToken = default)
     {
+        if (createDto.EndDate is DateOnly end && end < createDto.StartDate)
+            throw new InvalidOperationException("The plan's end date cannot be before its start date.");
+
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
-        entity.PlanStatus = DevelopmentPlanStatus.Active;
+        // The DTO's PlanStatus was overwritten here, so a plan a manager wanted to keep as a draft
+        // went live the moment it was saved. It defaults to Active; a caller asking for Draft
+        // gets Draft.
+        entity.PlanStatus = createDto.PlanStatus;
 
         await _planRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -164,11 +190,37 @@ public class DevelopmentPlanService : IDevelopmentPlanService
     {
         var entity = await GetOwnedPlanAsync(id);
 
+        if (entity.PlanStatus == status)
+            return true;
+        if (entity.PlanStatus == DevelopmentPlanStatus.Completed && status != DevelopmentPlanStatus.Active)
+            throw new InvalidOperationException("A completed plan can only be reopened by making it active again.");
+        if (status == DevelopmentPlanStatus.Draft && entity.PlanStatus != DevelopmentPlanStatus.Draft)
+            throw new InvalidOperationException("A plan that has been shared cannot be returned to draft. Put it on hold instead.");
+
+        var wasNotActive = entity.PlanStatus != DevelopmentPlanStatus.Active;
         entity.PlanStatus = status;
         await _planRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Development plan {Id} status updated to {Status}", id, status);
+
+        // Going live is the moment the plan becomes the employee's to work on, and is the one
+        // status change they need to hear about.
+        if (status == DevelopmentPlanStatus.Active && wasNotActive)
+        {
+            await NotifyQuietlyAsync(new[]
+            {
+                new AppraisalNotificationRequest(
+                    entity.EmployeeId,
+                    AppraisalNotificationType.DevelopmentPlanActivated,
+                    "Development plan active",
+                    string.IsNullOrWhiteSpace(entity.Title)
+                        ? "Your development plan is now active."
+                        : $"\"{entity.Title}\" is now active.",
+                    NavigationUrl: $"/hr/performance/development-plans/{entity.Id}")
+            }, cancellationToken);
+        }
+
         return true;
     }
 

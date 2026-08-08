@@ -1416,6 +1416,74 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = timesheet.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "APPRAISAL_TEMPLATE", "AppraisalTemplate", "Appraisal Template"))
+        {
+            var template = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.AppraisalTemplate>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Appraisal template not found");
+
+            context["templateName"] = template.TemplateName;
+            // The scope a template targets is what a routing rule keys on: a form written
+            // for one position is a smaller decision than one covering a whole org level.
+            context["organizationLevelId"] = template.OrganizationLevelId;
+            context["organizationUnitId"] = template.OrganizationUnitId;
+            context["positionId"] = template.PositionId;
+            context["isGlobalScope"] = template.OrganizationLevelId == null
+                                    && template.OrganizationUnitId == null
+                                    && template.PositionId == null;
+            context["isActive"] = template.IsActive;
+            context["status"] = template.ApprovalStatus.ToString();
+            context["submittedById"] = template.SubmittedById;
+        }
+
+        if (IsEntityType(entityTypeRecord, "SALARY_REVIEW_PROPOSAL", "SalaryReviewProposal", "Salary Review Proposal"))
+        {
+            var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.SalaryReviewProposal>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Salary review proposal not found");
+
+            // The size of the pay change is the routing threshold: a 3% merit increase and a
+            // 25% one are not the same decision.
+            context["employeeId"] = proposal.EmployeeId;
+            context["proposalType"] = proposal.ProposalType.ToString();
+            context["proposedPercent"] = proposal.ProposedPercent;
+            context["proposedAmount"] = proposal.ProposedAmount;
+            context["sourceAppraisalId"] = proposal.SourceAppraisalId;
+            context["status"] = proposal.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "EMPLOYMENT_ACTION_PROPOSAL", "EmploymentActionProposal", "Employment Action Proposal"))
+        {
+            var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.EmploymentActionProposal>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Employment action proposal not found");
+
+            // What kind of action it is carries the whole weight here — a recognition and a
+            // termination should not route to the same approver.
+            context["employeeId"] = proposal.EmployeeId;
+            context["actionType"] = proposal.ActionType.ToString();
+            context["sourceAppraisalId"] = proposal.SourceAppraisalId;
+            context["status"] = proposal.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "PERFORMANCE_IMPROVEMENT_PLAN", "PerformanceImprovementPlan", "Performance Improvement Plan", "PIP"))
+        {
+            var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Performance improvement plan not found");
+
+            // How long the plan runs is the routing threshold here — a two-week course correction
+            // and a six-month plan that could end in dismissal are not the same decision — along
+            // with whether an appraisal called for it or a manager raised it unprompted.
+            context["employeeId"] = plan.EmployeeId;
+            context["supervisorId"] = plan.SupervisorId;
+            context["hrOwnerId"] = plan.HROwnerId;
+            context["durationDays"] = (int)(plan.EndDate.Date - plan.StartDate.Date).TotalDays;
+            context["fromAppraisal"] = plan.AppraisalId != null;
+            context["sourceAppraisalId"] = plan.AppraisalId;
+            context["status"] = plan.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "TRAINING_NOMINATION", "TrainingNomination", "Training Nomination"))
         {
             var nomination = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingNomination>()

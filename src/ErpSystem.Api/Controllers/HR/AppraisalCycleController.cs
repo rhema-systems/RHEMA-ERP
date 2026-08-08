@@ -334,6 +334,37 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
+    /// Raise in-app deadline reminders for every phase of this cycle that is overdue or
+    /// closing soon, addressed to the employees in scope. Safe to run more than once —
+    /// an identical unread reminder is not duplicated.
+    /// </summary>
+    [HttpPost("{id:guid}/deadline-reminders")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SendDeadlineReminders(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var raised = await _cycleService.SendDeadlineRemindersAsync(id, cancellationToken);
+            return Ok(new { NotificationsRaised = raised });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending deadline reminders for cycle {CycleId}", id);
+            return StatusCode(500, "An error occurred while sending deadline reminders");
+        }
+    }
+
+    /// <summary>
     /// Get comprehensive progress metrics for an appraisal cycle
     /// </summary>
     [HttpGet("{id:guid}/progress")]
