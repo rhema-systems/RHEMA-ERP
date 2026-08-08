@@ -243,8 +243,9 @@ function Invoke-Preflight {
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
     Write-Output 'GUARD_COVERAGE|20260720181131_AddHRModule'
     Write-Output 'GUARD_COVERAGE|20260720193903_AddHRPerformanceModule'
-    # This migration only defines immutable-row trigger bodies. Its THROW statements
-    # are not executed while applying the migration and have no legacy-data precondition.
+    # These migrations only define immutable-row trigger bodies. Their THROW statements
+    # are not executed while applying the migrations and have no legacy-data precondition.
+    Write-Output 'GUARD_COVERAGE|20260807202000_AddQuantitySurveyConfigurationRegister'
     Write-Output 'GUARD_COVERAGE|20260808124500_AddProjectBoqApprovalPublication'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
