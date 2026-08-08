@@ -383,14 +383,23 @@ export default function SupplierApplicantPortalPage() {
                 {portal?.registrationNumber || 'Loading…'}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge>{portal?.status || 'Loading'}</Badge>
-              <Badge variant="outline">
-                Token {String(portal?.tokenStatus ?? '')}
-              </Badge>
-              <Badge variant="outline">
-                Payment {String(portal?.paymentStatus ?? '')}
-              </Badge>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Badge>{portal?.status || 'Loading'}</Badge>
+                <Badge variant="outline">
+                  Token {String(portal?.tokenStatus ?? '')}
+                </Badge>
+                <Badge variant="outline">
+                  Payment {String(portal?.paymentStatus ?? '')}
+                </Badge>
+              </div>
+              <Button
+                type="button"
+                disabled={busy || !portal?.canSubmit}
+                onClick={submit}
+              >
+                Submit for review
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -465,13 +474,6 @@ export default function SupplierApplicantPortalPage() {
                 <div className="flex gap-2 md:col-span-2">
                   <Button disabled={busy || !portal?.canEdit} onClick={save}>
                     Save application
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={busy || !portal?.canSubmit}
-                    onClick={submit}
-                  >
-                    Submit for review
                   </Button>
                 </div>
               </CardContent>

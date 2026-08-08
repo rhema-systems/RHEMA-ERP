@@ -100,7 +100,31 @@ describe('supplier applicant evidence uploads', () => {
     mocks.getSessionToken.mockReturnValue('restricted-session');
     mocks.portal.mockResolvedValue(portal);
     mocks.updateApplication.mockResolvedValue(portal);
+    mocks.submit.mockResolvedValue({ ...portal, status: 'Submitted' });
     mocks.uploadDocument.mockResolvedValue({});
+  });
+
+  it('keeps the submit action visible above every portal tab', async () => {
+    render(<SupplierApplicantPortalPage />);
+
+    await screen.findByText('REG-001');
+    const submitButton = screen.getByRole('button', {
+      name: 'Submit for review',
+    });
+    expect(submitButton).toBeVisible();
+    expect(
+      screen.getAllByRole('button', { name: 'Submit for review' })
+    ).toHaveLength(1);
+
+    for (const tabName of ['Documents', 'Status', 'Payment']) {
+      const tab = screen.getByRole('tab', { name: tabName });
+      fireEvent.mouseDown(tab, { button: 0, ctrlKey: false });
+      fireEvent.click(tab);
+      expect(submitButton).toBeVisible();
+    }
+
+    fireEvent.click(submitButton);
+    await waitFor(() => expect(mocks.submit).toHaveBeenCalledTimes(1));
   });
 
   it('rehydrates legacy wrapped application data and preserves fields it does not edit', async () => {

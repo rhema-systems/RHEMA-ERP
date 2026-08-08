@@ -261,6 +261,24 @@ public sealed class SupplierApplicantAccessSecurityTests
     }
 
     [Fact]
+    public async Task DocumentVerificationLetsUnexpectedFailuresReachCentralExceptionHandling()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.VerifyDocumentAsync(
+                registrationId, documentId, actorId))
+            .ThrowsAsync(new ApplicationException("control event failure"));
+        var controller = RegistrationController(registrations.Object, actorId);
+
+        var action = () => controller.VerifyDocument(registrationId, documentId);
+
+        await action.Should().ThrowAsync<ApplicationException>()
+            .WithMessage("control event failure");
+    }
+
+    [Fact]
     public void SharedAndSupplierUploadControllersUseTheSameControlledUploadService()
     {
         var sharedField = typeof(FileUploadController).GetFields(

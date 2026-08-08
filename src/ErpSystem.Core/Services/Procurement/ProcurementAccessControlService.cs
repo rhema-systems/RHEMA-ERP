@@ -648,7 +648,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
             {
                 EventKey = ProcurementControlEventKey.Create("access", _currentUser.TenantId, _currentUser.UserId,
-                    correlationId, permission.Code, request.SourceType, request.SourceReference),
+                    correlationId, permission.Code, request.SourceType, request.SourceReference, Guid.NewGuid()),
                 EventType = "AccessDecision",
                 Action = "EnforceCapability",
                 Result = decision.Allowed ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Denied,
