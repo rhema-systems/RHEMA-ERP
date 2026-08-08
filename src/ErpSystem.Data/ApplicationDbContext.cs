@@ -127,6 +127,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FixedAssetCategory> FixedAssetCategories { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<FixedAssetBookValue> FixedAssetBookValues { get; set; }
+    public DbSet<FixedAssetCapitalizationReversal> FixedAssetCapitalizationReversals { get; set; }
     public DbSet<AssetDisposal> AssetDisposals { get; set; }
     public DbSet<AssetTransfer> AssetTransfers { get; set; }
     public DbSet<AssetTransaction> AssetTransactions { get; set; }
@@ -3254,6 +3255,43 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FixedAssetCapitalizationReversal>(entity =>
+        {
+            entity.ToTable("FixedAssetCapitalizationReversals");
+            entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.OriginalPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId })
+                .IsUnique()
+                .HasFilter("[ReversalPostingEventId] IS NOT NULL");
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.RequestedByUserName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ReviewedByUserName).HasMaxLength(200);
+            entity.Property(e => e.ReviewComment).HasMaxLength(2000);
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.HasOne(e => e.FixedAsset)
+                .WithMany(asset => asset.CapitalizationReversals)
+                .HasForeignKey(e => e.FixedAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<FixedAssetBookValue>(entity =>
         {
             entity.ToTable("FixedAssetBookValues");
@@ -3261,6 +3299,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.BookClassification });
             entity.HasIndex(e => new { e.TenantId, e.CapitalizationPostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.CapitalizationJournalEntryId });
+            entity.HasIndex(e => new { e.TenantId, e.CapitalizationReversalPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.CapitalizationReversalJournalEntryId });
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.OpeningSource).HasMaxLength(50);
             entity.Property(e => e.SourceDocumentType).HasMaxLength(50);
@@ -3283,6 +3323,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<FinancePostingEvent>()
                 .WithMany()
                 .HasForeignKey(e => e.CapitalizationPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.CapitalizationReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.CapitalizationReversalPostingEventId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

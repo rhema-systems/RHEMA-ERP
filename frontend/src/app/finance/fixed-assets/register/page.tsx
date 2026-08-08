@@ -66,6 +66,10 @@ export default function FixedAssetRegisterPage() {
       WrittenOff: 'destructive',
       UnderConstruction: 'outline',
       OnHold: 'secondary',
+      Acquired: 'outline',
+      Capitalized: 'default',
+      PendingApproval: 'secondary',
+      Rejected: 'destructive',
     };
     return <Badge variant={variants[status] || 'default'}>{status}</Badge>;
   };

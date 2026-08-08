@@ -112,6 +112,19 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public DateTime? CapitalizedAt { get; set; }
 
+        /// <summary>
+        /// The latest compensating Finance event, when the current capitalization was reversed.
+        /// Original capitalization IDs deliberately remain above so register-to-GL lineage is not
+        /// destroyed; a later capitalization replaces the current-cycle fields while historical
+        /// request and AssetTransaction rows retain every earlier cycle.
+        /// </summary>
+        public Guid? CapitalizationReversalJournalEntryId { get; set; }
+        public Guid? CapitalizationReversalPostingEventId { get; set; }
+        public DateTime? CapitalizationReversedAt { get; set; }
+
+        [MaxLength(1000)]
+        public string? CapitalizationReversalReason { get; set; }
+
         // --- Integration (Link to Operations/Maintenance) ---
         
         public Guid? MaintenanceAssetId { get; set; }
@@ -129,5 +142,6 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public virtual ICollection<AssetDepreciationSchedule> DepreciationSchedules { get; set; } = new List<AssetDepreciationSchedule>();
         public virtual ICollection<AssetTransaction> Transactions { get; set; } = new List<AssetTransaction>();
         public virtual ICollection<AssetValuation> Valuations { get; set; } = new List<AssetValuation>();
+        public virtual ICollection<FixedAssetCapitalizationReversal> CapitalizationReversals { get; set; } = new List<FixedAssetCapitalizationReversal>();
     }
 }
