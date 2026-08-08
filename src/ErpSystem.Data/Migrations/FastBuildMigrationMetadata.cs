@@ -92,6 +92,7 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715205906_AddCentralDocumentManagement")] partial class AddCentralDocumentManagement { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715212107_AddEstateDocumentCentralDmsPublication")] partial class AddEstateDocumentCentralDmsPublication { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715230135_AddCentralDocumentMetadataValues")] partial class AddCentralDocumentMetadataValues { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260719120000_FixFinanceWorkflowConformance")] partial class FixFinanceWorkflowConformance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260720010326_AddRecurringJournalWorkflow")] partial class AddRecurringJournalWorkflow { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260720221046_AddProcurementPolicyDomain")] partial class AddProcurementPolicyDomain { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260721012643_AddProcurementAccessControls")] partial class AddProcurementAccessControls { }
