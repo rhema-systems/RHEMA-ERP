@@ -17,6 +17,18 @@ public static class FinanceAuditEvents
     public const string JournalReversalCreated = "Finance.JournalEntry.ReversalCreated";
     public const string JournalAttachmentLinked = "Finance.JournalEntry.AttachmentLinked";
     public const string JournalAttachmentUnlinked = "Finance.JournalEntry.AttachmentUnlinked";
+    public const string RecurringJournalTemplateCreated = "Finance.RecurringJournal.TemplateCreated";
+    public const string RecurringJournalTemplateUpdated = "Finance.RecurringJournal.TemplateUpdated";
+    public const string RecurringJournalTemplateSubmitted = "Finance.RecurringJournal.TemplateSubmitted";
+    public const string RecurringJournalTemplateApproved = "Finance.RecurringJournal.TemplateApproved";
+    public const string RecurringJournalTemplateRejected = "Finance.RecurringJournal.TemplateRejected";
+    public const string RecurringJournalTemplatePaused = "Finance.RecurringJournal.TemplatePaused";
+    public const string RecurringJournalTemplateResumed = "Finance.RecurringJournal.TemplateResumed";
+    public const string RecurringJournalOccurrenceGenerated = "Finance.RecurringJournal.OccurrenceGenerated";
+    public const string RecurringJournalOccurrenceApproved = "Finance.RecurringJournal.OccurrenceApproved";
+    public const string RecurringJournalOccurrenceRejected = "Finance.RecurringJournal.OccurrenceRejected";
+    public const string RecurringJournalOccurrencePosted = "Finance.RecurringJournal.OccurrencePosted";
+    public const string RecurringJournalGenerationFailed = "Finance.RecurringJournal.GenerationFailed";
 
     public const string PostingEventCreated = "Finance.PostingEvent.Created";
     public const string DuplicatePostingAttempt = "Finance.PostingEvent.DuplicateAttempt";
