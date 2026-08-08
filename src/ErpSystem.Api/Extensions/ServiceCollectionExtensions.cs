@@ -771,6 +771,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalEntryService, ErpSystem.Api.Services.Finance.GL.JournalEntryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchService, ErpSystem.Api.Services.Finance.GL.JournalBatchService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IJournalBatchSpreadsheetService, ErpSystem.Api.Services.Finance.GL.JournalBatchSpreadsheetService>();
+            // Recurring journals extend the existing GL posting pipeline. The
+            // processor is scoped because every run owns one EF unit of work;
+            // the hosted service below only creates scopes and never posts.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IRecurringJournalService, ErpSystem.Api.Services.Finance.GL.RecurringJournalService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.RecurringJournalGenerationProcessor>();
             services.AddScoped<ErpSystem.Core.Finance.IBusinessCalendarProvider, ErpSystem.Data.Services.PayrollBusinessCalendarProvider>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAuditService, ErpSystem.Api.Services.Finance.FinanceAuditService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccessScopeService, ErpSystem.Api.Services.Finance.Security.FinanceAccessScopeService>();
@@ -1163,6 +1168,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // lightweight host invokes it for every tenant at a controlled interval.
             services.AddScoped<ErpSystem.Api.Services.Finance.Fiscal.FinanceCloseAlertService>();
             services.AddHostedService<ErpSystem.Api.Services.Finance.Fiscal.FinanceCloseAlertBackgroundService>();
+
+            // Materialize due recurring-journal occurrences independently of a
+            // signed-in browser. Generated items remain Pending Approval, so
+            // automation cannot bypass Finance maker-checker controls.
+            services.AddHostedService<ErpSystem.Api.Services.Finance.GL.RecurringJournalBackgroundService>();
 
             // Tenant data retention (audit/security logs, notifications, EHC audit events)
             services.AddHostedService<ErpSystem.Api.Services.DataRetentionBackgroundService>();

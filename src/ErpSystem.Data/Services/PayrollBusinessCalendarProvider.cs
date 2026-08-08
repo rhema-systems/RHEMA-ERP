@@ -20,7 +20,11 @@ public sealed class PayrollBusinessCalendarProvider : IBusinessCalendarProvider
 
         var start = date.ToDateTime(TimeOnly.MinValue);
         var end = start.AddDays(1);
-        return !await _db.PayrollHolidays.AsNoTracking().AnyAsync(h =>
+        // Recurring-journal generation also runs from a background worker where no
+        // request-scoped tenant exists. Ignore the ambient query filter only after
+        // applying the explicit tenant predicate so one tenant's holiday cannot
+        // affect another tenant's accounting schedule.
+        return !await _db.PayrollHolidays.IgnoreQueryFilters().AsNoTracking().AnyAsync(h =>
             h.TenantId == tenantId && !h.IsDeleted && h.HolidayDate >= start && h.HolidayDate < end,
             cancellationToken);
     }
