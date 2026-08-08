@@ -428,6 +428,17 @@ export const navigationItems: NavItem[] = [
             icon: CreditCard,
           },
           { title: 'Receipts', href: '/finance/ar/receipts', icon: CreditCard },
+          {
+            title: 'Collection Follow-up',
+            href: '/finance/ar/collections',
+            icon: BellRing,
+            permissions: [
+              'Finance.AR.Collections.View',
+              'Finance.AR.Collections.Manage',
+              'Finance.Admin',
+            ],
+            accessMode: 'any',
+          },
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
           {
             title: 'Adjustment Journal',

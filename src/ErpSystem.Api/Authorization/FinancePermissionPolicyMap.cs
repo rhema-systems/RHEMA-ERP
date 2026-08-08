@@ -117,6 +117,7 @@ public static class FinancePermissionPolicyMap
             "Invoice" => ArInvoicePolicy(action),
             "Payment" => ArPaymentPolicy(action),
             "ArReports" => ReportPolicy(action),
+            "ArCollectionFollowUp" => ArCollectionFollowUpPolicy(action),
             "BankAccount" => ReadOrManage(action, methods, FinancePermissions.ManageBankAccounts),
             "BankReconciliation" => BankReconciliationPolicy(action),
             "BankingSettlement" => BankingSettlementPolicy(action),
@@ -240,6 +241,14 @@ public static class FinancePermissionPolicyMap
             "ReversePayment" => One(FinancePermissions.ReverseArPayments),
             "Create" or "Update" or "Allocate" or "Post" or "ClearPayment" or "BouncedPayment" or "CreateCreditNote" => One(FinancePermissions.ReceiveCustomerPayments),
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ReceiveCustomerPayments)
+        };
+
+    private static IReadOnlyList<string> ArCollectionFollowUpPolicy(string action)
+        => action switch
+        {
+            "GenerateTasks" or "CreateTask" or "UpdateTask" => One(FinancePermissions.ManageArCollections),
+            "RecordReminder" => One(FinancePermissions.RecordArCollectionReminders),
+            _ => One(FinancePermissions.ViewArCollections)
         };
 
     private static IReadOnlyList<string> BankReconciliationPolicy(string action)

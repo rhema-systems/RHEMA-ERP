@@ -179,6 +179,10 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutExecutionServiceTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
+    <!-- Keep FR-AR-009 in the default Finance regression suite. This project disables
+         implicit compile items, so omitting the explicit entry would silently build the
+         product code while reporting that no collection-follow-up tests were discovered. -->
+    <Compile Include="Services\Finance\ArCollectionFollowUpServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />

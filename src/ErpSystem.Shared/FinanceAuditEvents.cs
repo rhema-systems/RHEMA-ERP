@@ -123,6 +123,12 @@ public static class FinanceAuditEvents
     public const string ApProcurementReconciliationGenerated = "Finance.AP.ProcurementReconciliation.Generated";
     public const string ApProcurementReconciliationExported = "Finance.AP.ProcurementReconciliation.Exported";
     public const string ArUnappliedSettlementsGenerated = "Finance.AR.UnappliedSettlements.Generated";
+    public const string ArCollectionTasksGenerated = "Finance.AR.Collections.TasksGenerated";
+    public const string ArCollectionTaskCreated = "Finance.AR.Collections.TaskCreated";
+    public const string ArCollectionTaskUpdated = "Finance.AR.Collections.TaskUpdated";
+    public const string ArCollectionTaskAutoResolved = "Finance.AR.Collections.TaskAutoResolved";
+    public const string ArCollectionTaskReactivated = "Finance.AR.Collections.TaskReactivated";
+    public const string ArCollectionReminderRecorded = "Finance.AR.Collections.ReminderRecorded";
     public const string CashBankTransactionCaptured = "Finance.CashBankTransaction.Captured";
     public const string CashBankTransactionSubmitted = "Finance.CashBankTransaction.Submitted";
     public const string CashBankTransactionApproved = "Finance.CashBankTransaction.Approved";

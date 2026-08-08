@@ -133477,10 +133477,21 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("AssignedToId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CollectionContext")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<string>("CollectionStatus")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CompletedById")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -133519,6 +133530,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsPrimaryTask")
+                        .HasColumnType("bit");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -133536,6 +133550,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("OutstandingAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<Guid?>("ParentActivityId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
@@ -133549,6 +133566,20 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ReminderChannel")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ReminderRecipient")
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -133577,11 +133608,19 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("AssignedToId");
 
+                    b.HasIndex("CompletedById");
+
                     b.HasIndex("CustomerId");
 
                     b.HasIndex("InvoiceId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("ParentActivityId");
+
+                    b.HasIndex("TenantId", "InvoiceId", "CollectionContext")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [IsPrimaryTask] = 1 AND [InvoiceId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "CollectionContext", "CollectionStatus", "FollowUpDate");
 
                     b.ToTable("CollectionActivities", (string)null);
                 });
@@ -177870,6 +177909,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("AssignedToId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "CompletedBy")
+                        .WithMany()
+                        .HasForeignKey("CompletedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Sales.Customer", "Customer")
                         .WithMany()
                         .HasForeignKey("CustomerId")
@@ -177881,6 +177925,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("InvoiceId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Sales.CollectionActivity", "ParentActivity")
+                        .WithMany("History")
+                        .HasForeignKey("ParentActivityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -177889,9 +177938,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("AssignedTo");
 
+                    b.Navigation("CompletedBy");
+
                     b.Navigation("Customer");
 
                     b.Navigation("Invoice");
+
+                    b.Navigation("ParentActivity");
 
                     b.Navigation("Tenant");
                 });
@@ -182844,6 +182897,11 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.Campaign", b =>
                 {
                     b.Navigation("CampaignMembers");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.CollectionActivity", b =>
+                {
+                    b.Navigation("History");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.Competitor", b =>
