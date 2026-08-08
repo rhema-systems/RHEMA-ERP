@@ -52,6 +52,12 @@ public static class FinanceAuditEvents
     public const string BudgetReturnApproved = "Finance.BudgetReturn.Approved";
     public const string BudgetReturnRejected = "Finance.BudgetReturn.Rejected";
     public const string BudgetWorksheetSaved = "Finance.BudgetWorksheet.Saved";
+    public const string BudgetRevisionCreated = "Finance.BudgetRevision.Created";
+    public const string BudgetRevisionUpdated = "Finance.BudgetRevision.Updated";
+    public const string BudgetRevisionSubmitted = "Finance.BudgetRevision.SubmittedForApproval";
+    public const string BudgetRevisionApproved = "Finance.BudgetRevision.Approved";
+    public const string BudgetRevisionRejected = "Finance.BudgetRevision.Rejected";
+    public const string BudgetRevisionApplied = "Finance.BudgetRevision.AppliedToOfficialBudget";
 
     public const string SourceDocumentApproved = "Finance.SourceDocument.Approved";
     public const string SourceDocumentPosted = "Finance.SourceDocument.Posted";

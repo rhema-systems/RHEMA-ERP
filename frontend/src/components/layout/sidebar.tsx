@@ -536,6 +536,11 @@ export const navigationItems: NavItem[] = [
             href: '/finance/budgeting/my-returns',
             icon: FileText,
           },
+          {
+            title: 'Budget Revisions',
+            href: '/finance/budgeting/revisions',
+            icon: RefreshCw,
+          },
         ],
       },
       {

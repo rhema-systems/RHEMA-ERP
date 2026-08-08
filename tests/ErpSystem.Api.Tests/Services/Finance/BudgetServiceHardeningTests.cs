@@ -241,6 +241,96 @@ public class BudgetServiceHardeningTests
         result.IsOfficial.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task CreateRevisionAsync_RejectsAVirementThatDoesNotNetToZero()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var expense = CreateAccount(AccountType.Expense);
+        var revenue = CreateAccount(AccountType.Revenue);
+        var official = CreateScenario("Approved");
+        official.FiscalYearId = fiscalYear.Id;
+        official.IsActive = true;
+        var budgetReturn = CreateReturn(official.Id, CurrentUserId);
+        budgetReturn.Status = "Approved";
+        db.AddRange(fiscalYear, period, expense, revenue, official, budgetReturn);
+        db.BudgetEntries.Add(CreateEntry(budgetReturn.Id, expense.Id, period.Id, 100m));
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var request = CreateRevisionRequest(official.Id, period.Id, expense.Id, revenue.Id, -25m, 20m);
+
+        var act = () => service.CreateRevisionAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*exactly zero*");
+    }
+
+    [Fact]
+    public async Task ApplyRevisionAsync_CreatesAnImmutableOfficialSuccessorAndSupersedesSource()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var expense = CreateAccount(AccountType.Expense);
+        var revenue = CreateAccount(AccountType.Revenue);
+        var official = CreateScenario("Approved");
+        official.FiscalYearId = fiscalYear.Id;
+        official.Name = "FY2026 Original";
+        official.IsActive = true;
+        official.VersionNumber = 1;
+        var budgetReturn = CreateReturn(official.Id, CurrentUserId);
+        budgetReturn.Status = "Approved";
+        db.AddRange(fiscalYear, period, expense, revenue, official, budgetReturn);
+        db.BudgetEntries.AddRange(
+            CreateEntry(budgetReturn.Id, expense.Id, period.Id, 100m),
+            CreateEntry(budgetReturn.Id, revenue.Id, period.Id, 50m));
+
+        var revision = new BudgetRevision
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            RevisionNumber = "BR-2026-00001",
+            RevisionType = "Virement",
+            SourceScenarioId = official.Id,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            BoardResolutionReference = "TDC/BOARD/2026/047",
+            BoardResolutionDate = new DateTime(2026, 6, 25),
+            Justification = "Move approved funds to the higher-priority revenue activity.",
+            Status = "Approved",
+            SubmittedByUserId = Guid.NewGuid(),
+            ApprovedAt = DateTime.UtcNow,
+            RowVersion = new byte[8],
+            Lines = new List<BudgetRevisionLine>
+            {
+                CreateRevisionLine(expense.Id, period.Id, -25m),
+                CreateRevisionLine(revenue.Id, period.Id, 25m)
+            }
+        };
+        db.BudgetRevisions.Add(revision);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var result = await service.ApplyRevisionAsync(
+            revision.Id,
+            Convert.ToBase64String(revision.RowVersion));
+
+        result.Status.Should().Be("Applied");
+        result.ResultScenarioId.Should().NotBeNull();
+        official.IsActive.Should().BeFalse();
+        official.Status.Should().Be("Superseded");
+        var successor = await db.BudgetScenarios
+            .Include(item => item.BudgetReturns).ThenInclude(item => item.BudgetEntries)
+            .SingleAsync(item => item.Id == result.ResultScenarioId);
+        successor.IsActive.Should().BeTrue();
+        successor.ParentScenarioId.Should().Be(official.Id);
+        successor.VersionType.Should().Be("Virement");
+        successor.VersionNumber.Should().Be(2);
+        successor.BudgetReturns.Single().BudgetEntries.Sum(item => item.AmountBase).Should().Be(150m);
+        successor.BudgetReturns.Single().BudgetEntries.Single(item => item.AccountId == expense.Id).AmountBase.Should().Be(75m);
+        successor.BudgetReturns.Single().BudgetEntries.Single(item => item.AccountId == revenue.Id).AmountBase.Should().Be(75m);
+    }
+
     private ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -333,5 +423,37 @@ public class BudgetServiceHardeningTests
             Amount = amount,
             AmountBase = amount,
             RowVersion = new byte[8]
+        };
+
+    private CreateBudgetRevisionDto CreateRevisionRequest(
+        Guid scenarioId,
+        Guid periodId,
+        Guid releaseAccountId,
+        Guid increaseAccountId,
+        decimal release,
+        decimal increase) =>
+        new()
+        {
+            SourceScenarioId = scenarioId,
+            RevisionType = "Virement",
+            EffectiveDate = new DateTime(2026, 7, 1),
+            BoardResolutionReference = "TDC/BOARD/2026/047",
+            BoardResolutionDate = new DateTime(2026, 6, 25),
+            Justification = "Move approved funds to the higher-priority operational activity.",
+            Lines = new List<BudgetRevisionLineInputDto>
+            {
+                new() { AccountId = releaseAccountId, FiscalPeriodId = periodId, AdjustmentAmountBase = release },
+                new() { AccountId = increaseAccountId, FiscalPeriodId = periodId, AdjustmentAmountBase = increase }
+            }
+        };
+
+    private BudgetRevisionLine CreateRevisionLine(Guid accountId, Guid periodId, decimal adjustment) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            AccountId = accountId,
+            FiscalPeriodId = periodId,
+            AdjustmentAmountBase = adjustment
         };
 }

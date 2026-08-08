@@ -78,6 +78,7 @@ public static class FinanceDocumentTypes
     public const string AssetVerification = "AssetVerification";
     public const string AssetDisposal = "AssetDisposal";
     public const string LeaseJournal = "LeaseJournal";
+    public const string BudgetRevision = "BudgetRevision";
 }
 
 public static class SalesDocumentTypes
@@ -128,6 +129,7 @@ public static class DocumentSequenceDefaults
             Finance(tenantId, FinanceDocumentTypes.AssetVerification, "Fixed Asset Verification", "VRF-{YYYY}{MM}{DD}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Fixed asset verification sessions."),
             Finance(tenantId, FinanceDocumentTypes.AssetDisposal, "Fixed Asset Disposal", "DSP-{YYYY}{MM}{DD}-{####}", 4, DocumentSequenceResetPolicies.Monthly, false, "Fixed asset disposal requests."),
             Finance(tenantId, FinanceDocumentTypes.LeaseJournal, "Lease Journal", "LEASE-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Lease activation and payment journals."),
+            Finance(tenantId, FinanceDocumentTypes.BudgetRevision, "Budget Revision", "BR-{YYYY}-{#####}", 5, DocumentSequenceResetPolicies.Yearly, false, "Board-approved Finance budget virements and supplementary budgets."),
 
             Sales(tenantId, SalesDocumentTypes.Quote, "Sales Quote", "QT-{######}", 6, DocumentSequenceResetPolicies.Never, false, "Sales quotes."),
             Sales(tenantId, SalesDocumentTypes.SalesOrder, "Sales Order", "SO-{######}", 6, DocumentSequenceResetPolicies.Never, false, "Sales orders."),

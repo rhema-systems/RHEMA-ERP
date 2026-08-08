@@ -255,6 +255,10 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "CreateScenario" or "UpdateScenario" or "DeleteScenario" or "CreateReturn" or "OpenScenario" => One(FinancePermissions.MaintainBudgets),
+            "CreateRevision" or "UpdateRevision" => One(FinancePermissions.MaintainBudgetRevisions),
+            "SubmitRevision" => One(FinancePermissions.SubmitBudgetRevisions),
+            "ApplyRevision" => One(FinancePermissions.ApplyBudgetRevisions),
+            "GetRevisions" or "GetRevision" => One(FinancePermissions.ViewBudgetRevisions),
             "GetReturns" or "UpdateReturn" => One(FinancePermissions.AssignBudgetReturns),
             "BulkSaveEntries" => One(FinancePermissions.EditBudgetReturns),
             "SubmitReturn" or "RecallReturn" => One(FinancePermissions.SubmitBudgetReturns),
