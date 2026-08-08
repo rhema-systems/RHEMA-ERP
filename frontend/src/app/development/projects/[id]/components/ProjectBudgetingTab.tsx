@@ -167,6 +167,10 @@ const mapPackageToDraft = (projectPackage: ProjectPackageDto, baseCurrencyCode?:
 
 const mapBoqItemToDraft = (boqItem: ProjectBoqItemDto, baseCurrencyCode?: string): CreateProjectBoqItemDto => ({
   projectPackageId: boqItem.projectPackageId,
+  sectionCatalogEntryId: boqItem.sectionCatalogEntryId || undefined,
+  tradeCatalogEntryId: boqItem.tradeCatalogEntryId || undefined,
+  costCodeCatalogEntryId: boqItem.costCodeCatalogEntryId || undefined,
+  measurementCodeCatalogEntryId: boqItem.measurementCodeCatalogEntryId || undefined,
   lineNumber: boqItem.lineNumber || undefined,
   itemCode: boqItem.itemCode || undefined,
   itemType: boqItem.itemType,
@@ -350,6 +354,12 @@ export function ProjectBudgetingTab({
       return {
         Phase: linkedPackage?.projectPhaseId ? phaseLookup.get(linkedPackage.projectPhaseId) || linkedPackage.projectPhaseName || 'Unassigned phase' : linkedPackage?.projectPhaseName || 'Unassigned phase',
         'Work Component': item.packageCode ? `${item.packageCode} - ${item.packageName}` : item.packageName || 'Unassigned work component',
+        Section: item.sectionCode ? `${item.sectionCode} - ${item.sectionName || ''}`.trim() : '',
+        Trade: item.tradeCode ? `${item.tradeCode} - ${item.tradeName || ''}`.trim() : '',
+        'Cost Code': item.costCode ? `${item.costCode} - ${item.costCodeName || ''}`.trim() : '',
+        'Measurement Standard': item.measurementStandard || '',
+        'Measurement Code': item.measurementCode || '',
+        'Measurement Rule': item.measurementRule || '',
         'Item Code': item.itemCode || item.lineNumber || '',
         Description: item.description,
         Qty: item.quantity,
@@ -368,6 +378,12 @@ export function ProjectBudgetingTab({
     worksheet['!cols'] = [
       { wch: 24 },
       { wch: 28 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 48 },
       { wch: 18 },
       { wch: 40 },
       { wch: 10 },

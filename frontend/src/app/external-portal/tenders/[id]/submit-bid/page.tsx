@@ -1,12 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { ArrowLeft, ArrowRight, Save, Send, CheckCircle, AlertCircle, Package } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Save,
+  Send,
+  CheckCircle,
+  AlertCircle,
+  Package,
+} from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -17,7 +31,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   type CreateTenderBidDto,
   type CreateTenderBidItemDto,
-  type TenderBidDocumentDto
+  type TenderBidDocumentDto,
 } from '@/services/tenderBidService';
 
 // Import step components
@@ -25,6 +39,8 @@ import BidItemsStep from '@/components/external-portal/bid-submission/BidItemsSt
 import BidProposalsStep from '@/components/external-portal/bid-submission/BidProposalsStep';
 import BidDocumentsStep from '@/components/external-portal/bid-submission/BidDocumentsStep';
 import BidReviewStep from '@/components/external-portal/bid-submission/BidReviewStep';
+import { QuantitySurveyTenderBoqSubmissionPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqSubmissionPanel';
+import type { TenderBoqLine } from '@/services/quantity-survey-tender-boq.service';
 
 const STEPS = [
   { id: 1, name: 'Select Lots', description: 'Choose lots to bid for' },
@@ -41,14 +57,18 @@ type BidFormData = CreateTenderBidDto & {
 export default function SubmitBidPage() {
   const params = useParams();
   const router = useRouter();
-  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
+  const tenderId = Array.isArray(params?.id)
+    ? params.id[0]
+    : (params?.id ?? '');
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [createdBidId, setCreatedBidId] = useState<string | null>(null);
-  const [uploadedDocuments, setUploadedDocuments] = useState<TenderBidDocumentDto[]>([]);
+  const [uploadedDocuments, setUploadedDocuments] = useState<
+    TenderBidDocumentDto[]
+  >([]);
   const [showSubmitConfirmDialog, setShowSubmitConfirmDialog] = useState(false);
   const [selectedLotIds, setSelectedLotIds] = useState<string[]>([]);
 
@@ -64,6 +84,25 @@ export default function SubmitBidPage() {
     associationType: undefined,
     acceptedDeclaration: false,
   });
+
+  const applyTenderBoqLines = useCallback((lines: TenderBoqLine[]) => {
+    const byTenderItem = new Map(
+      lines.map((line) => [line.tenderItemId, line])
+    );
+    setBidData((current) => ({
+      ...current,
+      items: current.items.map((item) => {
+        const line = byTenderItem.get(item.tenderItemId);
+        return line
+          ? {
+              ...item,
+              offeredQuantity: line.offeredQuantity,
+              unitPrice: line.unitPrice,
+            }
+          : item;
+      }),
+    }));
+  }, []);
 
   useEffect(() => {
     if (tenderId) {
@@ -82,14 +121,17 @@ export default function SubmitBidPage() {
   useEffect(() => {
     if (tender && selectedLotIds.length > 0) {
       // Get all items from selected lots
-      const selectedLots = tender.lots?.filter(lot => selectedLotIds.includes(lot.id)) || [];
-      const itemsToInclude = selectedLots.flatMap(lot => lot.items || []);
+      const selectedLots =
+        tender.lots?.filter((lot) => selectedLotIds.includes(lot.id)) || [];
+      const itemsToInclude = selectedLots.flatMap((lot) => lot.items || []);
 
       // Only initialize items that don't already exist in bidData
       const newItems: CreateTenderBidItemDto[] = [];
 
-      itemsToInclude.forEach(item => {
-        const existingItem = bidData.items.find(bi => bi.tenderItemId === item.id);
+      itemsToInclude.forEach((item) => {
+        const existingItem = bidData.items.find(
+          (bi) => bi.tenderItemId === item.id
+        );
         if (existingItem) {
           // Keep existing item data
           newItems.push(existingItem);
@@ -109,9 +151,11 @@ export default function SubmitBidPage() {
       });
 
       // Only update if items have changed
-      if (JSON.stringify(newItems.map(i => i.tenderItemId).sort()) !==
-          JSON.stringify(bidData.items.map(i => i.tenderItemId).sort())) {
-        setBidData(prev => ({ ...prev, items: newItems }));
+      if (
+        JSON.stringify(newItems.map((i) => i.tenderItemId).sort()) !==
+        JSON.stringify(bidData.items.map((i) => i.tenderItemId).sort())
+      ) {
+        setBidData((prev) => ({ ...prev, items: newItems }));
       }
     }
   }, [selectedLotIds, tender]);
@@ -121,7 +165,7 @@ export default function SubmitBidPage() {
       const storedData = sessionStorage.getItem('bidInitiationData');
       if (storedData) {
         const initiationData = JSON.parse(storedData);
-        setBidData(prev => ({
+        setBidData((prev) => ({
           ...prev,
           associationType: initiationData.associationType,
           acceptedDeclaration: initiationData.acceptedDeclaration,
@@ -154,7 +198,7 @@ export default function SubmitBidPage() {
           warrantyTerms: draftBid.warrantyTerms || '',
           technicalProposal: draftBid.technicalProposal || '',
           commercialProposal: draftBid.commercialProposal || '',
-          items: draftItems.map(item => ({
+          items: draftItems.map((item) => ({
             tenderItemId: item.tenderItemId,
             offeredQuantity: item.offeredQuantity,
             unitPrice: item.unitPrice,
@@ -169,9 +213,11 @@ export default function SubmitBidPage() {
         // Extract selected lot IDs from the draft bid items
         // Map bid items back to their lot IDs by finding the tender items
         const selectedLotIdsFromDraft = new Set<string>();
-        draftItems.forEach(bidItem => {
+        draftItems.forEach((bidItem) => {
           // Find the tender item to get its lotId
-          const tenderItem = data.items?.find(ti => ti.id === bidItem.tenderItemId);
+          const tenderItem = data.items?.find(
+            (ti) => ti.id === bidItem.tenderItemId
+          );
           if (tenderItem?.lotId) {
             selectedLotIdsFromDraft.add(tenderItem.lotId);
           }
@@ -187,7 +233,7 @@ export default function SubmitBidPage() {
         }
 
         // If any item has pricing, move to step 3 (Proposals)
-        const hasPricing = draftItems.some(item => item.unitPrice > 0);
+        const hasPricing = draftItems.some((item) => item.unitPrice > 0);
         if (hasPricing) {
           startStep = 3;
         }
@@ -216,7 +262,7 @@ export default function SubmitBidPage() {
   };
 
   const updateBidData = (updates: Partial<BidFormData>) => {
-    setBidData(prev => ({ ...prev, ...updates }));
+    setBidData((prev) => ({ ...prev, ...updates }));
   };
 
   const validateStep = (step: number): boolean => {
@@ -232,8 +278,8 @@ export default function SubmitBidPage() {
           toast.error('Please add at least one bid item');
           return false;
         }
-        const hasInvalidItems = bidData.items.some(item => 
-          item.unitPrice <= 0 || item.offeredQuantity <= 0
+        const hasInvalidItems = bidData.items.some(
+          (item) => item.unitPrice <= 0 || item.offeredQuantity <= 0
         );
         if (hasInvalidItems) {
           toast.error('All items must have valid unit price and quantity');
@@ -243,20 +289,32 @@ export default function SubmitBidPage() {
 
       case 3: // Proposals
         // Check if technical proposal is provided (either as text or document)
-        const hasTechnicalProposalDoc = uploadedDocuments.some(doc => doc.documentType === 'TechnicalProposal');
-        const hasTechnicalProposalText = bidData.technicalProposal && bidData.technicalProposal.trim().length >= 100;
+        const hasTechnicalProposalDoc = uploadedDocuments.some(
+          (doc) => doc.documentType === 'TechnicalProposal'
+        );
+        const hasTechnicalProposalText =
+          bidData.technicalProposal &&
+          bidData.technicalProposal.trim().length >= 100;
 
         if (!hasTechnicalProposalDoc && !hasTechnicalProposalText) {
-          toast.error('Technical proposal is required (either upload a document or type at least 100 characters)');
+          toast.error(
+            'Technical proposal is required (either upload a document or type at least 100 characters)'
+          );
           return false;
         }
 
         // Check if commercial proposal is provided (either as text or document)
-        const hasCommercialProposalDoc = uploadedDocuments.some(doc => doc.documentType === 'CommercialProposal');
-        const hasCommercialProposalText = bidData.commercialProposal && bidData.commercialProposal.trim().length >= 100;
+        const hasCommercialProposalDoc = uploadedDocuments.some(
+          (doc) => doc.documentType === 'CommercialProposal'
+        );
+        const hasCommercialProposalText =
+          bidData.commercialProposal &&
+          bidData.commercialProposal.trim().length >= 100;
 
         if (!hasCommercialProposalDoc && !hasCommercialProposalText) {
-          toast.error('Commercial proposal is required (either upload a document or type at least 100 characters)');
+          toast.error(
+            'Commercial proposal is required (either upload a document or type at least 100 characters)'
+          );
           return false;
         }
 
@@ -267,10 +325,14 @@ export default function SubmitBidPage() {
         if (tender?.requiredDocuments) {
           try {
             const requirements = JSON.parse(tender.requiredDocuments);
-            const requiredDocs = requirements.filter((req: any) => req.isRequired);
+            const requiredDocs = requirements.filter(
+              (req: any) => req.isRequired
+            );
 
             for (const req of requiredDocs) {
-              const uploaded = uploadedDocuments.find(doc => doc.documentType === req.documentType);
+              const uploaded = uploadedDocuments.find(
+                (doc) => doc.documentType === req.documentType
+              );
               if (!uploaded) {
                 toast.error(`Required document missing: ${req.documentName}`);
                 return false;
@@ -301,18 +363,21 @@ export default function SubmitBidPage() {
         setSubmitting(true);
 
         // Create initial bid items from selected lots
-        const selectedLots = tender?.lots?.filter(lot => selectedLotIds.includes(lot.id)) || [];
-        const itemsToInclude = selectedLots.flatMap(lot => lot.items || []);
-        const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(item => ({
-          tenderItemId: item.id,
-          offeredQuantity: item.quantity,
-          unitPrice: 0,
-          deliveryDays: undefined,
-          specifications: '',
-          brand: '',
-          model: '',
-          technicalDetails: '',
-        }));
+        const selectedLots =
+          tender?.lots?.filter((lot) => selectedLotIds.includes(lot.id)) || [];
+        const itemsToInclude = selectedLots.flatMap((lot) => lot.items || []);
+        const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(
+          (item) => ({
+            tenderItemId: item.id,
+            offeredQuantity: item.quantity,
+            unitPrice: 0,
+            deliveryDays: undefined,
+            specifications: '',
+            brand: '',
+            model: '',
+            technicalDetails: '',
+          })
+        );
 
         const draftData = {
           ...bidData,
@@ -322,11 +387,15 @@ export default function SubmitBidPage() {
         // Create the bid as draft
         const createdBid = await tenderBidService.createBid(draftData);
         setCreatedBidId(createdBid.id);
-        setBidData(prev => ({ ...prev, items: initialItems }));
-        toast.success('Lot selection saved. You can now enter pricing details.');
+        setBidData((prev) => ({ ...prev, items: initialItems }));
+        toast.success(
+          'Lot selection saved. You can now enter pricing details.'
+        );
       } catch (error: any) {
         console.error('Error saving lot selection:', error);
-        toast.error(error.message || 'Failed to save lot selection. Please try again.');
+        toast.error(
+          error.message || 'Failed to save lot selection. Please try again.'
+        );
         return; // Don't proceed if save failed
       } finally {
         setSubmitting(false);
@@ -351,7 +420,7 @@ export default function SubmitBidPage() {
           warrantyTerms: bidData.warrantyTerms,
           technicalProposal: bidData.technicalProposal,
           commercialProposal: bidData.commercialProposal,
-          items: bidData.items.map(item => ({
+          items: bidData.items.map((item) => ({
             tenderItemId: item.tenderItemId,
             offeredQuantity: item.offeredQuantity,
             unitPrice: item.unitPrice,
@@ -367,18 +436,20 @@ export default function SubmitBidPage() {
         toast.success('Progress saved.');
       } catch (error: any) {
         console.error('Error auto-saving bid:', error);
-        toast.error(error.message || 'Failed to save progress. Please try again.');
+        toast.error(
+          error.message || 'Failed to save progress. Please try again.'
+        );
         return; // Don't proceed if save failed
       } finally {
         setSubmitting(false);
       }
     }
 
-    setCurrentStep(prev => Math.min(STEPS.length, prev + 1));
+    setCurrentStep((prev) => Math.min(STEPS.length, prev + 1));
   };
 
   const handlePrevious = () => {
-    setCurrentStep(prev => Math.max(1, prev - 1));
+    setCurrentStep((prev) => Math.max(1, prev - 1));
   };
 
   const handleSaveDraft = async () => {
@@ -394,18 +465,22 @@ export default function SubmitBidPage() {
 
         if (!createdBidId) {
           // Create initial bid items from selected lots
-          const selectedLots = tender?.lots?.filter(lot => selectedLotIds.includes(lot.id)) || [];
-          const itemsToInclude = selectedLots.flatMap(lot => lot.items || []);
-          const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(item => ({
-            tenderItemId: item.id,
-            offeredQuantity: item.quantity,
-            unitPrice: 0,
-            deliveryDays: undefined,
-            specifications: '',
-            brand: '',
-            model: '',
-            technicalDetails: '',
-          }));
+          const selectedLots =
+            tender?.lots?.filter((lot) => selectedLotIds.includes(lot.id)) ||
+            [];
+          const itemsToInclude = selectedLots.flatMap((lot) => lot.items || []);
+          const initialItems: CreateTenderBidItemDto[] = itemsToInclude.map(
+            (item) => ({
+              tenderItemId: item.id,
+              offeredQuantity: item.quantity,
+              unitPrice: 0,
+              deliveryDays: undefined,
+              specifications: '',
+              brand: '',
+              model: '',
+              technicalDetails: '',
+            })
+          );
 
           const draftData = {
             ...bidData,
@@ -414,7 +489,7 @@ export default function SubmitBidPage() {
 
           const createdBid = await tenderBidService.createBid(draftData);
           setCreatedBidId(createdBid.id);
-          setBidData(prev => ({ ...prev, items: initialItems }));
+          setBidData((prev) => ({ ...prev, items: initialItems }));
           toast.success('Lot selection saved as draft');
         } else {
           toast.success('Lot selection already saved');
@@ -436,7 +511,7 @@ export default function SubmitBidPage() {
           warrantyTerms: bidData.warrantyTerms,
           technicalProposal: bidData.technicalProposal,
           commercialProposal: bidData.commercialProposal,
-          items: bidData.items.map(item => ({
+          items: bidData.items.map((item) => ({
             tenderItemId: item.tenderItemId,
             offeredQuantity: item.offeredQuantity,
             unitPrice: item.unitPrice,
@@ -476,7 +551,7 @@ export default function SubmitBidPage() {
         documentType,
         file.name
       );
-      setUploadedDocuments(prev => [...prev, uploadedDoc]);
+      setUploadedDocuments((prev) => [...prev, uploadedDoc]);
     } catch (error) {
       console.error('Error uploading document:', error);
       throw error;
@@ -488,7 +563,9 @@ export default function SubmitBidPage() {
 
     try {
       await tenderBidService.deleteBidDocument(createdBidId, documentId);
-      setUploadedDocuments(prev => prev.filter(doc => doc.id !== documentId));
+      setUploadedDocuments((prev) =>
+        prev.filter((doc) => doc.id !== documentId)
+      );
     } catch (error) {
       console.error('Error deleting document:', error);
       throw error;
@@ -509,7 +586,9 @@ export default function SubmitBidPage() {
   const handleSubmitClick = () => {
     // Validate all steps including documents
     if (!validateStep(1) || !validateStep(2) || !validateStep(3)) {
-      toast.error('Please complete all required steps and upload required documents');
+      toast.error(
+        'Please complete all required steps and upload required documents'
+      );
       return;
     }
 
@@ -563,7 +642,10 @@ export default function SubmitBidPage() {
         <div className="text-center">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
           <p className="text-lg text-gray-600">Tender not found</p>
-          <Button onClick={() => router.push('/external-portal/tenders')} className="mt-4">
+          <Button
+            onClick={() => router.push('/external-portal/tenders')}
+            className="mt-4"
+          >
             Back to Tenders
           </Button>
         </div>
@@ -578,13 +660,18 @@ export default function SubmitBidPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => router.push(`/external-portal/tenders/${tenderId}`)}>
+          <Button
+            variant="ghost"
+            onClick={() => router.push(`/external-portal/tenders/${tenderId}`)}
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Tender
           </Button>
           <div>
             <h1 className="text-3xl font-bold">Submit Bid</h1>
-            <p className="text-gray-500">{tender.tenderNumber} - {tender.title}</p>
+            <p className="text-gray-500">
+              {tender.tenderNumber} - {tender.title}
+            </p>
           </div>
         </div>
       </div>
@@ -593,7 +680,9 @@ export default function SubmitBidPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between mb-2">
-            <CardTitle>Step {currentStep} of {STEPS.length}</CardTitle>
+            <CardTitle>
+              Step {currentStep} of {STEPS.length}
+            </CardTitle>
             <Badge>{STEPS[currentStep - 1].name}</Badge>
           </div>
           <Progress value={progress} className="h-2" />
@@ -607,8 +696,8 @@ export default function SubmitBidPage() {
                   step.id === currentStep
                     ? 'border-blue-500 bg-blue-50'
                     : step.id < currentStep
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200'
+                      ? 'border-green-500 bg-green-50'
+                      : 'border-gray-200'
                 }`}
               >
                 <div className="flex items-center justify-center mb-2">
@@ -641,7 +730,10 @@ export default function SubmitBidPage() {
           <Card>
             <CardHeader>
               <CardTitle>Select Lots to Bid For</CardTitle>
-              <CardDescription>Choose which lots you want to include in your bid. Each lot contains one or more items.</CardDescription>
+              <CardDescription>
+                Choose which lots you want to include in your bid. Each lot
+                contains one or more items.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {tender.lots && tender.lots.length > 0 ? (
@@ -649,7 +741,8 @@ export default function SubmitBidPage() {
                   <Alert>
                     <Package className="h-4 w-4" />
                     <AlertDescription>
-                      Select the lots you want to bid for. You must provide pricing for all items within each selected lot.
+                      Select the lots you want to bid for. You must provide
+                      pricing for all items within each selected lot.
                     </AlertDescription>
                   </Alert>
 
@@ -658,12 +751,14 @@ export default function SubmitBidPage() {
                       <div
                         key={lot.id}
                         className={`border rounded-lg overflow-hidden cursor-pointer transition-colors ${
-                          selectedLotIds.includes(lot.id) ? 'border-primary bg-primary/5' : 'hover:bg-accent'
+                          selectedLotIds.includes(lot.id)
+                            ? 'border-primary bg-primary/5'
+                            : 'hover:bg-accent'
                         }`}
                         onClick={() => {
-                          setSelectedLotIds(prev => {
+                          setSelectedLotIds((prev) => {
                             if (prev.includes(lot.id)) {
-                              return prev.filter(id => id !== lot.id);
+                              return prev.filter((id) => id !== lot.id);
                             } else {
                               return [...prev, lot.id];
                             }
@@ -676,9 +771,9 @@ export default function SubmitBidPage() {
                             id={lot.id}
                             checked={selectedLotIds.includes(lot.id)}
                             onCheckedChange={() => {
-                              setSelectedLotIds(prev => {
+                              setSelectedLotIds((prev) => {
                                 if (prev.includes(lot.id)) {
-                                  return prev.filter(id => id !== lot.id);
+                                  return prev.filter((id) => id !== lot.id);
                                 } else {
                                   return [...prev, lot.id];
                                 }
@@ -689,20 +784,35 @@ export default function SubmitBidPage() {
                           <div className="flex-1">
                             <Label htmlFor={lot.id} className="cursor-pointer">
                               <div className="font-medium text-base mb-1">
-                                <span className="text-blue-600 mr-2">[{lot.lotCode}]</span>
+                                <span className="text-blue-600 mr-2">
+                                  [{lot.lotCode}]
+                                </span>
                                 {lot.title}
                               </div>
                               {lot.description && (
-                                <div className="text-sm text-muted-foreground">{lot.description}</div>
+                                <div className="text-sm text-muted-foreground">
+                                  {lot.description}
+                                </div>
                               )}
                             </Label>
                           </div>
                           <div className="text-right">
                             {lot.estimatedValue && (
-                              <div className="font-medium text-sm">{lot.currency || 'USD'} {lot.estimatedValue.toLocaleString()}</div>
+                              <div className="font-medium text-sm">
+                                {lot.currency || 'USD'}{' '}
+                                {lot.estimatedValue.toLocaleString()}
+                              </div>
                             )}
-                            <Badge variant={selectedLotIds.includes(lot.id) ? 'default' : 'outline'}>
-                              {selectedLotIds.includes(lot.id) ? 'Selected' : 'Not Selected'}
+                            <Badge
+                              variant={
+                                selectedLotIds.includes(lot.id)
+                                  ? 'default'
+                                  : 'outline'
+                              }
+                            >
+                              {selectedLotIds.includes(lot.id)
+                                ? 'Selected'
+                                : 'Not Selected'}
                             </Badge>
                           </div>
                         </div>
@@ -714,13 +824,19 @@ export default function SubmitBidPage() {
                             </div>
                             <div className="space-y-1">
                               {lot.items.map((item, idx) => (
-                                <div key={item.id} className="text-sm flex justify-between items-center py-1 px-2 bg-muted/50 rounded">
+                                <div
+                                  key={item.id}
+                                  className="text-sm flex justify-between items-center py-1 px-2 bg-muted/50 rounded"
+                                >
                                   <span>
-                                    <span className="text-muted-foreground mr-1">{idx + 1}.</span>
+                                    <span className="text-muted-foreground mr-1">
+                                      {idx + 1}.
+                                    </span>
                                     {item.description}
                                   </span>
                                   <span className="text-muted-foreground">
-                                    {item.quantity} {item.unitOfMeasure || 'units'}
+                                    {item.quantity}{' '}
+                                    {item.unitOfMeasure || 'units'}
                                   </span>
                                 </div>
                               ))}
@@ -735,11 +851,15 @@ export default function SubmitBidPage() {
                     <Alert>
                       <CheckCircle className="h-4 w-4" />
                       <AlertDescription>
-                        {selectedLotIds.length} lot{selectedLotIds.length > 1 ? 's' : ''} selected with {
-                          tender.lots
-                            .filter(lot => selectedLotIds.includes(lot.id))
-                            .reduce((sum, lot) => sum + (lot.items?.length || 0), 0)
-                        } total item(s)
+                        {selectedLotIds.length} lot
+                        {selectedLotIds.length > 1 ? 's' : ''} selected with{' '}
+                        {tender.lots
+                          .filter((lot) => selectedLotIds.includes(lot.id))
+                          .reduce(
+                            (sum, lot) => sum + (lot.items?.length || 0),
+                            0
+                          )}{' '}
+                        total item(s)
                       </AlertDescription>
                     </Alert>
                   )}
@@ -759,13 +879,22 @@ export default function SubmitBidPage() {
         {/* Step 2: Bid Items */}
         {currentStep === 2 && (
           <>
-            {selectedLotIds.length > 0 && selectedLotIds.length < (tender.lots?.length || 0) && (
-              <Alert className="mb-4">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  You are bidding for {selectedLotIds.length} out of {tender.lots?.length || 0} lots. Only items from selected lots are shown below.
-                </AlertDescription>
-              </Alert>
+            {selectedLotIds.length > 0 &&
+              selectedLotIds.length < (tender.lots?.length || 0) && (
+                <Alert className="mb-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    You are bidding for {selectedLotIds.length} out of{' '}
+                    {tender.lots?.length || 0} lots. Only items from selected
+                    lots are shown below.
+                  </AlertDescription>
+                </Alert>
+              )}
+            {createdBidId && (
+              <QuantitySurveyTenderBoqSubmissionPanel
+                tenderBidId={createdBidId}
+                onCommitted={applyTenderBoqLines}
+              />
             )}
             <BidItemsStep
               tender={tender}
@@ -819,14 +948,22 @@ export default function SubmitBidPage() {
           <div className="flex items-center justify-between">
             <div>
               {currentStep > 1 && (
-                <Button variant="outline" onClick={handlePrevious} disabled={submitting}>
+                <Button
+                  variant="outline"
+                  onClick={handlePrevious}
+                  disabled={submitting}
+                >
                   <ArrowLeft className="h-4 w-4 mr-2" />
                   Previous
                 </Button>
               )}
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={handleSaveDraft} disabled={submitting}>
+              <Button
+                variant="outline"
+                onClick={handleSaveDraft}
+                disabled={submitting}
+              >
                 <Save className="h-4 w-4 mr-2" />
                 Save Draft
               </Button>

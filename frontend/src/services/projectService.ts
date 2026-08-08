@@ -1,9 +1,10 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function getAuthHeaders(isJson: boolean = true): HeadersInit {
-  const token = typeof window !== 'undefined'
-    ? localStorage.getItem('token') || localStorage.getItem('authToken')
-    : null;
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
 
   return {
     ...(isJson ? { 'Content-Type': 'application/json' } : {}),
@@ -2021,6 +2022,19 @@ export interface ProjectBoqItemDto {
   projectPackageId: string;
   packageCode?: string;
   packageName?: string;
+  sectionCatalogEntryId?: string;
+  sectionCode?: string;
+  sectionName?: string;
+  tradeCatalogEntryId?: string;
+  tradeCode?: string;
+  tradeName?: string;
+  costCodeCatalogEntryId?: string;
+  costCode?: string;
+  costCodeName?: string;
+  measurementCodeCatalogEntryId?: string;
+  measurementStandard?: string;
+  measurementCode?: string;
+  measurementRule?: string;
   lineNumber?: string;
   itemCode?: string;
   itemType: string;
@@ -2046,6 +2060,10 @@ export interface ProjectBoqItemDto {
 
 export interface CreateProjectBoqItemDto {
   projectPackageId: string;
+  sectionCatalogEntryId?: string;
+  tradeCatalogEntryId?: string;
+  costCodeCatalogEntryId?: string;
+  measurementCodeCatalogEntryId?: string;
   lineNumber?: string;
   itemCode?: string;
   itemType?: string;
@@ -2070,6 +2088,195 @@ export interface CreateProjectBoqItemDto {
 }
 
 export interface UpdateProjectBoqItemDto extends CreateProjectBoqItemDto {}
+
+export interface ProjectBoqClassificationOptionDto {
+  id: string;
+  catalogType: string;
+  code: string;
+  name: string;
+  description?: string;
+  standardCode?: string;
+  measurementRule?: string;
+  defaultUnitOfMeasure?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  sortOrder: number;
+}
+
+export interface ProjectBoqClassificationOptionsDto {
+  effectiveAtUtc: string;
+  sections: ProjectBoqClassificationOptionDto[];
+  trades: ProjectBoqClassificationOptionDto[];
+  costCodes: ProjectBoqClassificationOptionDto[];
+  measurementCodes: ProjectBoqClassificationOptionDto[];
+}
+
+export type QuantitySurveyBoqVersionType =
+  | 'Original'
+  | 'Tender'
+  | 'Approved'
+  | 'Revised'
+  | 'Remeasurement'
+  | 'TerminatedRepackaged'
+  | 'FinalAccount';
+
+export interface ProjectBoqVersionSummaryDto {
+  id: string;
+  projectId: string;
+  sourceVersionId?: string;
+  versionNumber: number;
+  versionType: QuantitySurveyBoqVersionType;
+  status: string;
+  approvalStatus: string;
+  workflowInstanceId?: string;
+  workflowDefinitionId?: string;
+  submittedById?: string;
+  submittedAt?: string;
+  approvedById?: string;
+  approvedAt?: string;
+  publishedById?: string;
+  publishedAt?: string;
+  rejectionReason?: string;
+  isPublished: boolean;
+  canCurrentUserApprove: boolean;
+  changeSummary: string;
+  snapshotHash: string;
+  lineCount: number;
+  snapshotAt: string;
+  createdBy?: string;
+  createdById?: string;
+}
+
+export interface ProjectBoqVersionWorkspaceDto {
+  projectId: string;
+  workingSetHash: string;
+  workingLineCount: number;
+  workflowRequired: boolean;
+  approvedVersionsImmutable: boolean;
+  currentPublishedVersionId?: string;
+  allowedVersionTypes: QuantitySurveyBoqVersionType[];
+  versions: ProjectBoqVersionSummaryDto[];
+}
+
+export interface CreateProjectBoqVersionDto {
+  versionType: QuantitySurveyBoqVersionType;
+  sourceVersionId?: string;
+  expectedWorkingSetHash: string;
+  changeSummary: string;
+}
+
+export interface ProjectBoqVersionLineDto {
+  id: string;
+  lineKey: string;
+  sourceBoqItemId?: string;
+  projectPackageId?: string;
+  packageCode?: string;
+  packageName?: string;
+  sectionCode?: string;
+  sectionName?: string;
+  tradeCode?: string;
+  tradeName?: string;
+  costCode?: string;
+  costCodeName?: string;
+  measurementStandard?: string;
+  measurementCode?: string;
+  measurementRule?: string;
+  lineNumber?: string;
+  itemCode?: string;
+  itemType: string;
+  description: string;
+  quantity: number;
+  unitOfMeasure?: string;
+  unitRate?: number;
+  lineAmount?: number;
+  currency: string;
+  sortOrder: number;
+}
+
+export interface ProjectBoqVersionDetailDto extends ProjectBoqVersionSummaryDto {
+  lines: ProjectBoqVersionLineDto[];
+}
+
+export interface ProjectBoqVersionLineComparisonDto {
+  lineKey: string;
+  changeType: 'Added' | 'Removed' | 'Changed' | 'Unchanged';
+  baselineLine?: ProjectBoqVersionLineDto;
+  comparisonLine?: ProjectBoqVersionLineDto;
+  quantityDelta: number;
+  unitRateDelta?: number;
+  amountDelta?: number;
+  changedFields: string[];
+}
+
+export interface ProjectBoqVersionCurrencyDeltaDto {
+  currency: string;
+  baselineAmount: number;
+  comparisonAmount: number;
+  deltaAmount: number;
+}
+
+export interface ProjectBoqVersionComparisonDto {
+  baseline: ProjectBoqVersionSummaryDto;
+  comparison: ProjectBoqVersionSummaryDto;
+  addedLineCount: number;
+  removedLineCount: number;
+  changedLineCount: number;
+  unchangedLineCount: number;
+  currencyTotals: ProjectBoqVersionCurrencyDeltaDto[];
+  lines: ProjectBoqVersionLineComparisonDto[];
+}
+
+export interface QuantitySurveyBoqImportIssueDto {
+  rowNumber?: number;
+  clientLineKey?: string;
+  field?: string;
+  severity: string;
+  code: string;
+  message: string;
+}
+
+export interface QuantitySurveyBoqImportLinePreviewDto {
+  rowNumber: number;
+  clientLineKey: string;
+  packageCode: string;
+  sectionCode?: string;
+  tradeCode?: string;
+  costCode?: string;
+  measurementStandard?: string;
+  measurementCode?: string;
+  lineNumber?: string;
+  itemCode?: string;
+  itemType: string;
+  description: string;
+  unitOfMeasure: string;
+  quantity: number;
+  unitRate?: number;
+  currency: string;
+  lineTotal?: number;
+}
+
+export interface QuantitySurveyBoqImportPreviewDto {
+  sessionId: string;
+  projectId: string;
+  previewToken: string;
+  status: string;
+  expiresAt: string;
+  lineCount: number;
+  errorCount: number;
+  centralDocumentRecordId?: string;
+  centralDocumentVersionId?: string;
+  lines: QuantitySurveyBoqImportLinePreviewDto[];
+  issues: QuantitySurveyBoqImportIssueDto[];
+}
+
+export interface QuantitySurveyBoqImportCommitResultDto {
+  sessionId: string;
+  projectId: string;
+  committedLineCount: number;
+  committedAt: string;
+  reconciledBy: string;
+  centralDocumentRecordId?: string;
+}
 
 export interface ProjectDetailDto extends ProjectDto {
   projectTypeId?: string;
@@ -2707,6 +2914,11 @@ export interface ProjectCatalogEntryDto {
   code: string;
   name: string;
   description?: string;
+  standardCode?: string;
+  measurementRule?: string;
+  defaultUnitOfMeasure?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   sortOrder: number;
   isActive: boolean;
 }
@@ -2716,6 +2928,11 @@ export interface CreateProjectCatalogEntryDto {
   code: string;
   name: string;
   description?: string;
+  standardCode?: string;
+  measurementRule?: string;
+  defaultUnitOfMeasure?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   sortOrder?: number;
   isActive?: boolean;
 }
@@ -3623,16 +3840,22 @@ class ProjectService {
   }): Promise<PagedResult<ProjectDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', String(params.page));
-    if (params?.pageSize) queryParams.append('pageSize', String(params.pageSize));
+    if (params?.pageSize)
+      queryParams.append('pageSize', String(params.pageSize));
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
-    if (params?.projectTypeId) queryParams.append('projectTypeId', params.projectTypeId);
-    if (params?.portfolioId) queryParams.append('portfolioId', params.portfolioId);
+    if (params?.projectTypeId)
+      queryParams.append('projectTypeId', params.projectTypeId);
+    if (params?.portfolioId)
+      queryParams.append('portfolioId', params.portfolioId);
     if (params?.programId) queryParams.append('programId', params.programId);
 
-    const response = await fetch(`${API_BASE_URL}/projects?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch projects');
     return response.json();
@@ -3656,369 +3879,578 @@ class ProjectService {
     const queryParams = new URLSearchParams();
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
-    if (params?.projectTypeId) queryParams.append('projectTypeId', params.projectTypeId);
+    if (params?.projectTypeId)
+      queryParams.append('projectTypeId', params.projectTypeId);
     if (params?.take) queryParams.append('take', String(params.take));
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/register?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/register?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project register report');
+    if (!response.ok)
+      throw new Error('Failed to fetch project register report');
     return response.json();
   }
 
-  async getTaskAgingReport(projectId?: string, take: number = 100): Promise<ProjectTaskAgingReportItemDto[]> {
+  async getTaskAgingReport(
+    projectId?: string,
+    take: number = 100
+  ): Promise<ProjectTaskAgingReportItemDto[]> {
     const queryParams = new URLSearchParams();
     if (projectId) queryParams.append('projectId', projectId);
     queryParams.append('take', String(take));
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/task-aging?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/task-aging?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch task aging report');
     return response.json();
   }
 
-  async getMilestoneTrackerReport(projectId?: string, take: number = 100): Promise<ProjectMilestoneTrackerReportItemDto[]> {
+  async getMilestoneTrackerReport(
+    projectId?: string,
+    take: number = 100
+  ): Promise<ProjectMilestoneTrackerReportItemDto[]> {
     const queryParams = new URLSearchParams();
     if (projectId) queryParams.append('projectId', projectId);
     queryParams.append('take', String(take));
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/milestones?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/milestones?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch milestone tracker report');
+    if (!response.ok)
+      throw new Error('Failed to fetch milestone tracker report');
     return response.json();
   }
 
-  async getBudgetActualReport(take: number = 200): Promise<ProjectBudgetActualReportItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/reports/budget-vs-actual?take=${take}`, {
-      headers: getAuthHeaders(),
-    });
+  async getBudgetActualReport(
+    take: number = 200
+  ): Promise<ProjectBudgetActualReportItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/budget-vs-actual?take=${take}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch budget vs actual report');
+    if (!response.ok)
+      throw new Error('Failed to fetch budget vs actual report');
     return response.json();
   }
 
-  async getRiskIssueSummaryReport(take: number = 200): Promise<ProjectRiskIssueSummaryReportItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/reports/risk-issue-summary?take=${take}`, {
-      headers: getAuthHeaders(),
-    });
+  async getRiskIssueSummaryReport(
+    take: number = 200
+  ): Promise<ProjectRiskIssueSummaryReportItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/risk-issue-summary?take=${take}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch risk and issue summary report');
+    if (!response.ok)
+      throw new Error('Failed to fetch risk and issue summary report');
     return response.json();
   }
 
-  async getPortfolioSummaryReport(take: number = 100): Promise<ProjectPortfolioSummaryReportItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/reports/portfolio-summary?take=${take}`, {
-      headers: getAuthHeaders(),
-    });
+  async getPortfolioSummaryReport(
+    take: number = 100
+  ): Promise<ProjectPortfolioSummaryReportItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/portfolio-summary?take=${take}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch portfolio summary report');
+    if (!response.ok)
+      throw new Error('Failed to fetch portfolio summary report');
     return response.json();
   }
 
-  async getProgramSummaryReport(portfolioId?: string, take: number = 100): Promise<ProjectProgramSummaryReportItemDto[]> {
+  async getProgramSummaryReport(
+    portfolioId?: string,
+    take: number = 100
+  ): Promise<ProjectProgramSummaryReportItemDto[]> {
     const queryParams = new URLSearchParams();
     if (portfolioId) queryParams.append('portfolioId', portfolioId);
     queryParams.append('take', String(take));
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/program-summary?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/program-summary?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch program summary report');
     return response.json();
   }
 
-  async getPerformanceAnalyticsReport(take: number = 200): Promise<ProjectPerformanceAnalyticsReportItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/reports/performance-analytics?take=${take}`, {
-      headers: getAuthHeaders(),
-    });
+  async getPerformanceAnalyticsReport(
+    take: number = 200
+  ): Promise<ProjectPerformanceAnalyticsReportItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/performance-analytics?take=${take}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch performance analytics report');
+    if (!response.ok)
+      throw new Error('Failed to fetch performance analytics report');
     return response.json();
   }
 
-  async getPortfolioPrioritizationReport(portfolioId?: string, take: number = 100): Promise<ProjectPortfolioPrioritizationReportItemDto[]> {
+  async getPortfolioPrioritizationReport(
+    portfolioId?: string,
+    take: number = 100
+  ): Promise<ProjectPortfolioPrioritizationReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (portfolioId) params.set('portfolioId', portfolioId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/portfolio-prioritization?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/portfolio-prioritization?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch portfolio prioritization report');
+    if (!response.ok)
+      throw new Error('Failed to fetch portfolio prioritization report');
     return response.json();
   }
 
-  async getDependencyWatchReport(portfolioId?: string, programId?: string, take: number = 100): Promise<ProjectDependencyWatchReportItemDto[]> {
+  async getDependencyWatchReport(
+    portfolioId?: string,
+    programId?: string,
+    take: number = 100
+  ): Promise<ProjectDependencyWatchReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (portfolioId) params.set('portfolioId', portfolioId);
     if (programId) params.set('programId', programId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/dependency-watch?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/dependency-watch?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch dependency watch report');
+    if (!response.ok)
+      throw new Error('Failed to fetch dependency watch report');
     return response.json();
   }
 
-  async getStrategicInitiativeReport(portfolioId?: string, take: number = 100): Promise<ProjectStrategicInitiativeReportItemDto[]> {
+  async getStrategicInitiativeReport(
+    portfolioId?: string,
+    take: number = 100
+  ): Promise<ProjectStrategicInitiativeReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (portfolioId) params.set('portfolioId', portfolioId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/strategic-initiatives?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/strategic-initiatives?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch strategic initiative report');
+    if (!response.ok)
+      throw new Error('Failed to fetch strategic initiative report');
     return response.json();
   }
 
-  async getMaterialReconciliationReport(take: number = 200, reconciliationStatus?: string): Promise<ProjectMaterialReconciliationReportItemDto[]> {
+  async getMaterialReconciliationReport(
+    take: number = 200,
+    reconciliationStatus?: string
+  ): Promise<ProjectMaterialReconciliationReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
-    if (reconciliationStatus) params.set('reconciliationStatus', reconciliationStatus);
+    if (reconciliationStatus)
+      params.set('reconciliationStatus', reconciliationStatus);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/material-reconciliation?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/material-reconciliation?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch material reconciliation report');
+    if (!response.ok)
+      throw new Error('Failed to fetch material reconciliation report');
     return response.json();
   }
 
-  async getMaterialCostLedgerReport(projectId?: string, take: number = 300, sourceDocumentType?: string, postingState?: string, isReversed?: boolean, exceptionsOnly?: boolean): Promise<ProjectMaterialCostEntryDto[]> {
+  async getMaterialCostLedgerReport(
+    projectId?: string,
+    take: number = 300,
+    sourceDocumentType?: string,
+    postingState?: string,
+    isReversed?: boolean,
+    exceptionsOnly?: boolean
+  ): Promise<ProjectMaterialCostEntryDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
-    if (sourceDocumentType) params.set('sourceDocumentType', sourceDocumentType);
+    if (sourceDocumentType)
+      params.set('sourceDocumentType', sourceDocumentType);
     if (postingState) params.set('postingState', postingState);
-    if (typeof isReversed === 'boolean') params.set('isReversed', String(isReversed));
-    if (typeof exceptionsOnly === 'boolean') params.set('exceptionsOnly', String(exceptionsOnly));
+    if (typeof isReversed === 'boolean')
+      params.set('isReversed', String(isReversed));
+    if (typeof exceptionsOnly === 'boolean')
+      params.set('exceptionsOnly', String(exceptionsOnly));
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/material-cost-ledger?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/material-cost-ledger?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch material cost ledger report');
+    if (!response.ok)
+      throw new Error('Failed to fetch material cost ledger report');
     return response.json();
   }
 
-  async getProcurementReconciliationReport(take: number = 200, reconciliationStatus?: string): Promise<ProjectProcurementReconciliationReportItemDto[]> {
+  async getProcurementReconciliationReport(
+    take: number = 200,
+    reconciliationStatus?: string
+  ): Promise<ProjectProcurementReconciliationReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
-    if (reconciliationStatus) params.set('reconciliationStatus', reconciliationStatus);
+    if (reconciliationStatus)
+      params.set('reconciliationStatus', reconciliationStatus);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/procurement-reconciliation?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/procurement-reconciliation?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch procurement reconciliation report');
+    if (!response.ok)
+      throw new Error('Failed to fetch procurement reconciliation report');
     return response.json();
   }
 
-  async getPhaseGateReadinessReport(projectId?: string, take: number = 250): Promise<ProjectPhaseGateReadinessReportItemDto[]> {
+  async getPhaseGateReadinessReport(
+    projectId?: string,
+    take: number = 250
+  ): Promise<ProjectPhaseGateReadinessReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/phase-gate-readiness?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/phase-gate-readiness?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch phase gate readiness report');
+    if (!response.ok)
+      throw new Error('Failed to fetch phase gate readiness report');
     return response.json();
   }
 
-  async getApprovalWatchReport(projectId?: string, take: number = 250): Promise<ProjectApprovalWatchReportItemDto[]> {
+  async getApprovalWatchReport(
+    projectId?: string,
+    take: number = 250
+  ): Promise<ProjectApprovalWatchReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/approval-watch?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/approval-watch?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch approval watch report');
     return response.json();
   }
 
-  async getCommercialAdministrationReport(projectId?: string, take: number = 200): Promise<ProjectCommercialAdministrationReportItemDto[]> {
+  async getCommercialAdministrationReport(
+    projectId?: string,
+    take: number = 200
+  ): Promise<ProjectCommercialAdministrationReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/construction-commercial?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/construction-commercial?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch construction commercial report');
+    if (!response.ok)
+      throw new Error('Failed to fetch construction commercial report');
     return response.json();
   }
 
-  async getPostHandoverWatchReport(projectId?: string, take: number = 200): Promise<ProjectPostHandoverWatchReportItemDto[]> {
+  async getPostHandoverWatchReport(
+    projectId?: string,
+    take: number = 200
+  ): Promise<ProjectPostHandoverWatchReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/post-handover-watch?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/post-handover-watch?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch post-handover watch report');
+    if (!response.ok)
+      throw new Error('Failed to fetch post-handover watch report');
     return response.json();
   }
 
-  async getDesignControlWatchReport(projectId?: string, take: number = 250): Promise<ProjectDesignControlReportItemDto[]> {
+  async getDesignControlWatchReport(
+    projectId?: string,
+    take: number = 250
+  ): Promise<ProjectDesignControlReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/design-control-watch?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/design-control-watch?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch design control watch report');
+    if (!response.ok)
+      throw new Error('Failed to fetch design control watch report');
     return response.json();
   }
 
-  async getSiteControlsWatchReport(projectId?: string, take: number = 250): Promise<ProjectSiteControlReportItemDto[]> {
+  async getSiteControlsWatchReport(
+    projectId?: string,
+    take: number = 250
+  ): Promise<ProjectSiteControlReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/site-controls-watch?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/site-controls-watch?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch site controls watch report');
+    if (!response.ok)
+      throw new Error('Failed to fetch site controls watch report');
     return response.json();
   }
 
-  async getUnitCommercializationWatchReport(projectId?: string, take: number = 250): Promise<ProjectUnitCommercializationReportItemDto[]> {
+  async getUnitCommercializationWatchReport(
+    projectId?: string,
+    take: number = 250
+  ): Promise<ProjectUnitCommercializationReportItemDto[]> {
     const params = new URLSearchParams();
     params.set('take', String(take));
     if (projectId) params.set('projectId', projectId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/unit-commercialization-watch?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/unit-commercialization-watch?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch unit commercialization watch report');
+    if (!response.ok)
+      throw new Error('Failed to fetch unit commercialization watch report');
     return response.json();
   }
 
-  async getResourceCapacityReport(startDate?: string, endDate?: string, userId?: string): Promise<ProjectResourceCapacityReportItemDto[]> {
+  async getResourceCapacityReport(
+    startDate?: string,
+    endDate?: string,
+    userId?: string
+  ): Promise<ProjectResourceCapacityReportItemDto[]> {
     const queryParams = new URLSearchParams();
     if (startDate) queryParams.append('startDate', startDate);
     if (endDate) queryParams.append('endDate', endDate);
     if (userId) queryParams.append('userId', userId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/resource-capacity?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/resource-capacity?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch resource capacity report');
+    if (!response.ok)
+      throw new Error('Failed to fetch resource capacity report');
     return response.json();
   }
 
-  async getResourceCapacityRecommendations(startDate?: string, endDate?: string, userId?: string): Promise<ProjectResourceCapacityRecommendationDto[]> {
+  async getResourceCapacityRecommendations(
+    startDate?: string,
+    endDate?: string,
+    userId?: string
+  ): Promise<ProjectResourceCapacityRecommendationDto[]> {
     const params = new URLSearchParams();
     if (startDate) params.set('startDate', startDate);
     if (endDate) params.set('endDate', endDate);
     if (userId) params.set('userId', userId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/resource-capacity-recommendations?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/resource-capacity-recommendations?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch resource capacity recommendations');
+    if (!response.ok)
+      throw new Error('Failed to fetch resource capacity recommendations');
     return response.json();
   }
 
-  async getResourceOptimizationSuggestions(startDate?: string, endDate?: string): Promise<ProjectResourceOptimizationSuggestionDto[]> {
+  async getResourceOptimizationSuggestions(
+    startDate?: string,
+    endDate?: string
+  ): Promise<ProjectResourceOptimizationSuggestionDto[]> {
     const params = new URLSearchParams();
     if (startDate) params.set('startDate', startDate);
     if (endDate) params.set('endDate', endDate);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/resource-optimization?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/resource-optimization?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch resource optimization suggestions');
+    if (!response.ok)
+      throw new Error('Failed to fetch resource optimization suggestions');
     return response.json();
   }
 
-  async getBillingSummaryReport(take: number = 200): Promise<ProjectBillingSummaryReportItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/reports/billing-summary?take=${take}`, {
-      headers: getAuthHeaders(),
-    });
+  async getBillingSummaryReport(
+    take: number = 200
+  ): Promise<ProjectBillingSummaryReportItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/billing-summary?take=${take}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch billing summary report');
     return response.json();
   }
 
-  async getInvoiceRequestQueueReport(take: number = 200, status?: string): Promise<ProjectInvoiceRequestQueueItemDto[]> {
+  async getInvoiceRequestQueueReport(
+    take: number = 200,
+    status?: string
+  ): Promise<ProjectInvoiceRequestQueueItemDto[]> {
     const params = new URLSearchParams({ take: take.toString() });
     if (status) params.set('status', status);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/invoice-request-queue?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/invoice-request-queue?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch invoice request queue');
     return response.json();
   }
 
-  async getWorkflowApprovalQueueReport(take: number = 200, entityType?: string): Promise<ProjectWorkflowApprovalQueueItemDto[]> {
+  async getWorkflowApprovalQueueReport(
+    take: number = 200,
+    entityType?: string
+  ): Promise<ProjectWorkflowApprovalQueueItemDto[]> {
     const params = new URLSearchParams({ take: take.toString() });
     if (entityType) params.set('entityType', entityType);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/workflow-approval-queue?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/workflow-approval-queue?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch workflow approval queue');
+    if (!response.ok)
+      throw new Error('Failed to fetch workflow approval queue');
     return response.json();
   }
 
-  async getExternalCollaborationReport(take: number = 200, collaborationState?: string): Promise<ProjectExternalCollaborationReportItemDto[]> {
+  async getExternalCollaborationReport(
+    take: number = 200,
+    collaborationState?: string
+  ): Promise<ProjectExternalCollaborationReportItemDto[]> {
     const params = new URLSearchParams({ take: take.toString() });
-    if (collaborationState) params.set('collaborationState', collaborationState);
+    if (collaborationState)
+      params.set('collaborationState', collaborationState);
 
-    const response = await fetch(`${API_BASE_URL}/projects/reports/external-collaboration?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/reports/external-collaboration?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch external collaboration report');
+    if (!response.ok)
+      throw new Error('Failed to fetch external collaboration report');
     return response.json();
   }
 
-  async getContractLookup(businessPartnerId?: string, search?: string): Promise<ProjectContractLookupDto[]> {
+  async getContractLookup(
+    businessPartnerId?: string,
+    search?: string
+  ): Promise<ProjectContractLookupDto[]> {
     const queryParams = new URLSearchParams();
-    if (businessPartnerId) queryParams.append('businessPartnerId', businessPartnerId);
+    if (businessPartnerId)
+      queryParams.append('businessPartnerId', businessPartnerId);
     if (search) queryParams.append('search', search);
 
-    const response = await fetch(`${API_BASE_URL}/projects/contracts/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/contracts/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch contract lookup');
     return response.json();
   }
 
-  async getContractMilestones(contractId: string): Promise<ProjectContractMilestoneLookupDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/contracts/${contractId}/milestones`, {
-      headers: getAuthHeaders(),
-    });
+  async getContractMilestones(
+    contractId: string
+  ): Promise<ProjectContractMilestoneLookupDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/contracts/${contractId}/milestones`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch contract milestones');
     return response.json();
@@ -4028,51 +4460,80 @@ class ProjectService {
     const queryParams = new URLSearchParams();
     if (search) queryParams.append('search', search);
 
-    const response = await fetch(`${API_BASE_URL}/projects/tenders/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/tenders/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch tender lookup');
     return response.json();
   }
 
-  async getProcurementPlanItemLookup(projectId: string, search?: string): Promise<ProjectProcurementPlanItemLookupDto[]> {
+  async getProcurementPlanItemLookup(
+    projectId: string,
+    search?: string
+  ): Promise<ProjectProcurementPlanItemLookupDto[]> {
     const queryParams = new URLSearchParams();
     if (search) queryParams.append('search', search);
 
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/procurement-plan-items/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/procurement-plan-items/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch procurement plan item lookup');
+    if (!response.ok)
+      throw new Error('Failed to fetch procurement plan item lookup');
     return response.json();
   }
 
-  async getPurchaseRequisitionLookup(projectId: string, search?: string): Promise<ProjectPurchaseRequisitionLookupDto[]> {
+  async getPurchaseRequisitionLookup(
+    projectId: string,
+    search?: string
+  ): Promise<ProjectPurchaseRequisitionLookupDto[]> {
     const queryParams = new URLSearchParams();
     if (search) queryParams.append('search', search);
 
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/purchase-requisitions/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/purchase-requisitions/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch purchase requisition lookup');
+    if (!response.ok)
+      throw new Error('Failed to fetch purchase requisition lookup');
     return response.json();
   }
 
-  async getPurchaseOrderLookup(projectId: string, search?: string): Promise<ProjectPurchaseOrderLookupDto[]> {
+  async getPurchaseOrderLookup(
+    projectId: string,
+    search?: string
+  ): Promise<ProjectPurchaseOrderLookupDto[]> {
     const queryParams = new URLSearchParams();
     if (search) queryParams.append('search', search);
 
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/purchase-orders/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/purchase-orders/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch purchase order lookup');
     return response.json();
   }
 
-  async lookupProjects(search?: string, status?: string, projectTypeId?: string, portfolioId?: string, programId?: string): Promise<ProjectLookupDto[]> {
+  async lookupProjects(
+    search?: string,
+    status?: string,
+    projectTypeId?: string,
+    portfolioId?: string,
+    programId?: string
+  ): Promise<ProjectLookupDto[]> {
     const queryParams = new URLSearchParams();
     if (search) queryParams.append('search', search);
     if (status) queryParams.append('status', status);
@@ -4080,22 +4541,31 @@ class ProjectService {
     if (portfolioId) queryParams.append('portfolioId', portfolioId);
     if (programId) queryParams.append('programId', programId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to lookup projects');
     return response.json();
   }
 
-  async lookupResources(search?: string, take: number = 50): Promise<ProjectResourceLookupDto[]> {
+  async lookupResources(
+    search?: string,
+    take: number = 50
+  ): Promise<ProjectResourceLookupDto[]> {
     const queryParams = new URLSearchParams();
     if (search) queryParams.append('search', search);
     queryParams.append('take', String(take));
 
-    const response = await fetch(`${API_BASE_URL}/projects/resources/lookup?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/resources/lookup?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to lookup resources');
     return response.json();
@@ -4120,29 +4590,44 @@ class ProjectService {
   }
 
   async getProjectLinkOptions(id: string): Promise<ProjectLinkOptionsDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${id}/link-options`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${id}/link-options`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project link options');
     return response.json();
   }
 
-  async getProjectDevelopmentProfile(id: string): Promise<ProjectDevelopmentProfileDto | null> {
-    const response = await fetch(`${API_BASE_URL}/projects/${id}/development-profile`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectDevelopmentProfile(
+    id: string
+  ): Promise<ProjectDevelopmentProfileDto | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${id}/development-profile`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project development profile');
+    if (!response.ok)
+      throw new Error('Failed to fetch project development profile');
     return response.json();
   }
 
-  async upsertProjectDevelopmentProfile(id: string, dto: UpsertProjectDevelopmentProfileDto): Promise<ProjectDevelopmentProfileDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${id}/development-profile`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async upsertProjectDevelopmentProfile(
+    id: string,
+    dto: UpsertProjectDevelopmentProfileDto
+  ): Promise<ProjectDevelopmentProfileDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${id}/development-profile`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4161,21 +4646,30 @@ class ProjectService {
     return response.json();
   }
 
-  async getProjectPhaseGateEvaluations(id: string): Promise<ProjectPhaseGateEvaluationDto[]> {
+  async getProjectPhaseGateEvaluations(
+    id: string
+  ): Promise<ProjectPhaseGateEvaluationDto[]> {
     const response = await fetch(`${API_BASE_URL}/projects/${id}/phase-gates`, {
       headers: getAuthHeaders(),
     });
 
-    if (!response.ok) throw new Error('Failed to fetch project phase gate evaluations');
+    if (!response.ok)
+      throw new Error('Failed to fetch project phase gate evaluations');
     return response.json();
   }
 
-  async addProjectPhase(projectId: string, dto: CreateProjectPhaseDto): Promise<ProjectPhaseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/phases`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectPhase(
+    projectId: string,
+    dto: CreateProjectPhaseDto
+  ): Promise<ProjectPhaseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/phases`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4185,7 +4679,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectPhase(phaseId: string, dto: UpdateProjectPhaseDto): Promise<ProjectPhaseDto> {
+  async updateProjectPhase(
+    phaseId: string,
+    dto: UpdateProjectPhaseDto
+  ): Promise<ProjectPhaseDto> {
     const response = await fetch(`${API_BASE_URL}/projects/phases/${phaseId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -4200,12 +4697,18 @@ class ProjectService {
     return response.json();
   }
 
-  async advanceProjectPhase(phaseId: string, dto: AdvanceProjectPhaseDto = {}): Promise<ProjectPhaseProgressionResultDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/phases/${phaseId}/advance`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async advanceProjectPhase(
+    phaseId: string,
+    dto: AdvanceProjectPhaseDto = {}
+  ): Promise<ProjectPhaseProgressionResultDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/phases/${phaseId}/advance`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4215,12 +4718,18 @@ class ProjectService {
     return response.json();
   }
 
-  async reorderProjectPhases(projectId: string, dto: ReorderProjectPhasesDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/phases/reorder`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async reorderProjectPhases(
+    projectId: string,
+    dto: ReorderProjectPhasesDto
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/phases/reorder`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4241,20 +4750,29 @@ class ProjectService {
   }
 
   async getProjectPackages(projectId: string): Promise<ProjectPackageDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/packages`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/packages`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project packages');
     return response.json();
   }
 
-  async addProjectPackage(projectId: string, dto: CreateProjectPackageDto): Promise<ProjectPackageDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/packages`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectPackage(
+    projectId: string,
+    dto: CreateProjectPackageDto
+  ): Promise<ProjectPackageDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/packages`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4264,12 +4782,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectPackage(packageId: string, dto: UpdateProjectPackageDto): Promise<ProjectPackageDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/packages/${packageId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectPackage(
+    packageId: string,
+    dto: UpdateProjectPackageDto
+  ): Promise<ProjectPackageDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/packages/${packageId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4280,10 +4804,13 @@ class ProjectService {
   }
 
   async deleteProjectPackage(packageId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/packages/${packageId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/packages/${packageId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4292,20 +4819,169 @@ class ProjectService {
   }
 
   async getProjectBoqItems(projectId: string): Promise<ProjectBoqItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/boq-items`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-items`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project BOQ items');
     return response.json();
   }
 
-  async addProjectBoqItem(projectId: string, dto: CreateProjectBoqItemDto): Promise<ProjectBoqItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/boq-items`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async getProjectBoqClassifications(
+    projectId: string,
+    effectiveAtUtc?: string
+  ): Promise<ProjectBoqClassificationOptionsDto> {
+    const params = new URLSearchParams();
+    if (effectiveAtUtc) params.set('effectiveAtUtc', effectiveAtUtc);
+    const query = params.toString();
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-classifications${query ? `?${query}` : ''}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok)
+      throw new Error('Failed to fetch project BOQ classification options');
+    return response.json();
+  }
+
+  async downloadProjectBoqImportTemplate(projectId: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-spreadsheet/template`,
+      {
+        headers: getAuthHeaders(false),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to download the BoQ import template'
+        )
+      );
+    return response.blob();
+  }
+
+  async exportProjectBoqWorkbook(projectId: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-spreadsheet/export`,
+      {
+        headers: getAuthHeaders(false),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to export the project BoQ'
+        )
+      );
+    return response.blob();
+  }
+
+  async previewProjectBoqImport(
+    projectId: string,
+    file: File
+  ): Promise<QuantitySurveyBoqImportPreviewDto> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-spreadsheet/preview`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(false),
+        body: formData,
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to validate the BoQ workbook'
+        )
+      );
+    return response.json();
+  }
+
+  async commitProjectBoqImport(
+    projectId: string,
+    sessionId: string,
+    previewToken: string,
+    idempotencyKey: string
+  ): Promise<QuantitySurveyBoqImportCommitResultDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-spreadsheet/sessions/${sessionId}/commit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          previewToken,
+          idempotencyKey,
+          reconciliationConfirmed: true,
+        }),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(response, 'Failed to post the staged BoQ')
+      );
+    return response.json();
+  }
+
+  async downloadProjectBoqValidationReport(
+    projectId: string,
+    sessionId: string
+  ): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-spreadsheet/sessions/${sessionId}/validation-report`,
+      {
+        headers: getAuthHeaders(false),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to download the validation report'
+        )
+      );
+    return response.blob();
+  }
+
+  private async readProblemMessage(
+    response: Response,
+    fallback: string
+  ): Promise<string> {
+    const contentType = response.headers.get('content-type') || '';
+    if (
+      contentType.includes('application/json') ||
+      contentType.includes('application/problem+json')
+    ) {
+      const problem = (await response.json().catch(() => null)) as {
+        detail?: string;
+        title?: string;
+      } | null;
+      return problem?.detail || problem?.title || fallback;
+    }
+    return (await response.text()).trim() || fallback;
+  }
+
+  async addProjectBoqItem(
+    projectId: string,
+    dto: CreateProjectBoqItemDto
+  ): Promise<ProjectBoqItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-items`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4315,12 +4991,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectBoqItem(boqItemId: string, dto: UpdateProjectBoqItemDto): Promise<ProjectBoqItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/boq-items/${boqItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectBoqItem(
+    boqItemId: string,
+    dto: UpdateProjectBoqItemDto
+  ): Promise<ProjectBoqItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/boq-items/${boqItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4331,10 +5013,13 @@ class ProjectService {
   }
 
   async deleteProjectBoqItem(boqItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/boq-items/${boqItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/boq-items/${boqItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4342,21 +5027,188 @@ class ProjectService {
     }
   }
 
-  async getApprovalRegister(projectId: string): Promise<ProjectApprovalRegisterItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/approval-register`, {
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) throw new Error('Failed to fetch project approval register');
+  async getProjectBoqVersionWorkspace(
+    projectId: string
+  ): Promise<ProjectBoqVersionWorkspaceDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-versions`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to load the BoQ version workspace'
+        )
+      );
     return response.json();
   }
 
-  async addApprovalRegisterItem(projectId: string, dto: CreateProjectApprovalRegisterItemDto): Promise<ProjectApprovalRegisterItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/approval-register`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
+  async getProjectBoqVersion(
+    projectId: string,
+    versionId: string
+  ): Promise<ProjectBoqVersionDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-versions/${versionId}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to load the BoQ version'
+        )
+      );
+    return response.json();
+  }
+
+  async createProjectBoqVersion(
+    projectId: string,
+    dto: CreateProjectBoqVersionDto
+  ): Promise<ProjectBoqVersionDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-versions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to create the BoQ version'
+        )
+      );
+    return response.json();
+  }
+
+  async submitProjectBoqVersion(
+    projectId: string,
+    versionId: string
+  ): Promise<ProjectBoqVersionDetailDto> {
+    return this.runProjectBoqWorkflowAction(
+      projectId,
+      versionId,
+      'submit',
+      undefined,
+      'Failed to submit the BoQ version'
+    );
+  }
+
+  async approveProjectBoqVersion(
+    projectId: string,
+    versionId: string,
+    comments?: string
+  ): Promise<ProjectBoqVersionDetailDto> {
+    return this.runProjectBoqWorkflowAction(
+      projectId,
+      versionId,
+      'approve',
+      { comments: comments?.trim() || undefined },
+      'Failed to approve the BoQ version'
+    );
+  }
+
+  async rejectProjectBoqVersion(
+    projectId: string,
+    versionId: string,
+    reason: string
+  ): Promise<ProjectBoqVersionDetailDto> {
+    return this.runProjectBoqWorkflowAction(
+      projectId,
+      versionId,
+      'reject',
+      { reason: reason.trim() },
+      'Failed to reject the BoQ version'
+    );
+  }
+
+  async recallProjectBoqVersion(
+    projectId: string,
+    versionId: string,
+    reason: string
+  ): Promise<ProjectBoqVersionDetailDto> {
+    return this.runProjectBoqWorkflowAction(
+      projectId,
+      versionId,
+      'recall',
+      { reason: reason.trim() },
+      'Failed to recall the BoQ version'
+    );
+  }
+
+  private async runProjectBoqWorkflowAction(
+    projectId: string,
+    versionId: string,
+    action: 'submit' | 'approve' | 'reject' | 'recall',
+    body: Record<string, string | undefined> | undefined,
+    fallback: string
+  ): Promise<ProjectBoqVersionDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-versions/${versionId}/${action}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }
+    );
+    if (!response.ok)
+      throw new Error(await this.readProblemMessage(response, fallback));
+    return response.json();
+  }
+
+  async compareProjectBoqVersions(
+    projectId: string,
+    baselineVersionId: string,
+    comparisonVersionId: string
+  ): Promise<ProjectBoqVersionComparisonDto> {
+    const params = new URLSearchParams({
+      baselineVersionId,
+      comparisonVersionId,
     });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-versions/compare?${params.toString()}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to compare the selected BoQ versions'
+        )
+      );
+    return response.json();
+  }
+
+  async getApprovalRegister(
+    projectId: string
+  ): Promise<ProjectApprovalRegisterItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/approval-register`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok)
+      throw new Error('Failed to fetch project approval register');
+    return response.json();
+  }
+
+  async addApprovalRegisterItem(
+    projectId: string,
+    dto: CreateProjectApprovalRegisterItemDto
+  ): Promise<ProjectApprovalRegisterItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/approval-register`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4366,48 +5218,72 @@ class ProjectService {
     return response.json();
   }
 
-  async updateApprovalRegisterItem(approvalRegisterItemId: string, dto: UpdateProjectApprovalRegisterItemDto): Promise<ProjectApprovalRegisterItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/approval-register/${approvalRegisterItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateApprovalRegisterItem(
+    approvalRegisterItemId: string,
+    dto: UpdateProjectApprovalRegisterItemDto
+  ): Promise<ProjectApprovalRegisterItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/approval-register/${approvalRegisterItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to update project approval register item');
+      throw new Error(
+        error || 'Failed to update project approval register item'
+      );
     }
 
     return response.json();
   }
 
-  async deleteApprovalRegisterItem(approvalRegisterItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/approval-register/${approvalRegisterItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteApprovalRegisterItem(
+    approvalRegisterItemId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/approval-register/${approvalRegisterItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to delete project approval register item');
+      throw new Error(
+        error || 'Failed to delete project approval register item'
+      );
     }
   }
 
   async getProjectDrawings(projectId: string): Promise<ProjectDrawingDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/drawings`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/drawings`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project drawings');
     return response.json();
   }
 
-  async addProjectDrawing(projectId: string, dto: CreateProjectDrawingDto): Promise<ProjectDrawingDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/drawings`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectDrawing(
+    projectId: string,
+    dto: CreateProjectDrawingDto
+  ): Promise<ProjectDrawingDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/drawings`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4417,12 +5293,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectDrawing(drawingId: string, dto: UpdateProjectDrawingDto): Promise<ProjectDrawingDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/drawings/${drawingId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectDrawing(
+    drawingId: string,
+    dto: UpdateProjectDrawingDto
+  ): Promise<ProjectDrawingDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/drawings/${drawingId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4433,10 +5315,13 @@ class ProjectService {
   }
 
   async deleteProjectDrawing(drawingId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/drawings/${drawingId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/drawings/${drawingId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4444,21 +5329,32 @@ class ProjectService {
     }
   }
 
-  async getProjectSubmittals(projectId: string): Promise<ProjectSubmittalDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/submittals`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectSubmittals(
+    projectId: string
+  ): Promise<ProjectSubmittalDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/submittals`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project submittals');
     return response.json();
   }
 
-  async addProjectSubmittal(projectId: string, dto: CreateProjectSubmittalDto): Promise<ProjectSubmittalDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/submittals`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectSubmittal(
+    projectId: string,
+    dto: CreateProjectSubmittalDto
+  ): Promise<ProjectSubmittalDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/submittals`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4468,12 +5364,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectSubmittal(submittalId: string, dto: UpdateProjectSubmittalDto): Promise<ProjectSubmittalDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/submittals/${submittalId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectSubmittal(
+    submittalId: string,
+    dto: UpdateProjectSubmittalDto
+  ): Promise<ProjectSubmittalDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/submittals/${submittalId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4484,10 +5386,13 @@ class ProjectService {
   }
 
   async deleteProjectSubmittal(submittalId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/submittals/${submittalId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/submittals/${submittalId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4504,7 +5409,10 @@ class ProjectService {
     return response.json();
   }
 
-  async addProjectRfi(projectId: string, dto: CreateProjectRfiDto): Promise<ProjectRfiDto> {
+  async addProjectRfi(
+    projectId: string,
+    dto: CreateProjectRfiDto
+  ): Promise<ProjectRfiDto> {
     const response = await fetch(`${API_BASE_URL}/projects/${projectId}/rfis`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -4519,7 +5427,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectRfi(rfiId: string, dto: UpdateProjectRfiDto): Promise<ProjectRfiDto> {
+  async updateProjectRfi(
+    rfiId: string,
+    dto: UpdateProjectRfiDto
+  ): Promise<ProjectRfiDto> {
     const response = await fetch(`${API_BASE_URL}/projects/rfis/${rfiId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -4546,21 +5457,33 @@ class ProjectService {
     }
   }
 
-  async getProjectSiteInstructions(projectId: string): Promise<ProjectSiteInstructionDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/site-instructions`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectSiteInstructions(
+    projectId: string
+  ): Promise<ProjectSiteInstructionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/site-instructions`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project site instructions');
+    if (!response.ok)
+      throw new Error('Failed to fetch project site instructions');
     return response.json();
   }
 
-  async addProjectSiteInstruction(projectId: string, dto: CreateProjectSiteInstructionDto): Promise<ProjectSiteInstructionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/site-instructions`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectSiteInstruction(
+    projectId: string,
+    dto: CreateProjectSiteInstructionDto
+  ): Promise<ProjectSiteInstructionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/site-instructions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4570,12 +5493,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectSiteInstruction(siteInstructionId: string, dto: UpdateProjectSiteInstructionDto): Promise<ProjectSiteInstructionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/site-instructions/${siteInstructionId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectSiteInstruction(
+    siteInstructionId: string,
+    dto: UpdateProjectSiteInstructionDto
+  ): Promise<ProjectSiteInstructionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/site-instructions/${siteInstructionId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4586,10 +5515,13 @@ class ProjectService {
   }
 
   async deleteProjectSiteInstruction(siteInstructionId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/site-instructions/${siteInstructionId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/site-instructions/${siteInstructionId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4597,21 +5529,33 @@ class ProjectService {
     }
   }
 
-  async getProjectVariationOrders(projectId: string): Promise<ProjectVariationOrderDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/variation-orders`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectVariationOrders(
+    projectId: string
+  ): Promise<ProjectVariationOrderDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/variation-orders`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project variation orders');
+    if (!response.ok)
+      throw new Error('Failed to fetch project variation orders');
     return response.json();
   }
 
-  async addProjectVariationOrder(projectId: string, dto: CreateProjectVariationOrderDto): Promise<ProjectVariationOrderDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/variation-orders`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectVariationOrder(
+    projectId: string,
+    dto: CreateProjectVariationOrderDto
+  ): Promise<ProjectVariationOrderDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/variation-orders`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4621,12 +5565,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectVariationOrder(variationOrderId: string, dto: UpdateProjectVariationOrderDto): Promise<ProjectVariationOrderDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/variation-orders/${variationOrderId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectVariationOrder(
+    variationOrderId: string,
+    dto: UpdateProjectVariationOrderDto
+  ): Promise<ProjectVariationOrderDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/variation-orders/${variationOrderId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4637,10 +5587,13 @@ class ProjectService {
   }
 
   async deleteProjectVariationOrder(variationOrderId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/variation-orders/${variationOrderId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/variation-orders/${variationOrderId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4648,21 +5601,33 @@ class ProjectService {
     }
   }
 
-  async getProjectInterimValuations(projectId: string): Promise<ProjectInterimValuationDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/interim-valuations`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectInterimValuations(
+    projectId: string
+  ): Promise<ProjectInterimValuationDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/interim-valuations`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project interim valuations');
+    if (!response.ok)
+      throw new Error('Failed to fetch project interim valuations');
     return response.json();
   }
 
-  async addProjectInterimValuation(projectId: string, dto: CreateProjectInterimValuationDto): Promise<ProjectInterimValuationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/interim-valuations`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectInterimValuation(
+    projectId: string,
+    dto: CreateProjectInterimValuationDto
+  ): Promise<ProjectInterimValuationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/interim-valuations`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4672,12 +5637,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectInterimValuation(interimValuationId: string, dto: UpdateProjectInterimValuationDto): Promise<ProjectInterimValuationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/interim-valuations/${interimValuationId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectInterimValuation(
+    interimValuationId: string,
+    dto: UpdateProjectInterimValuationDto
+  ): Promise<ProjectInterimValuationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/interim-valuations/${interimValuationId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4687,11 +5658,16 @@ class ProjectService {
     return response.json();
   }
 
-  async deleteProjectInterimValuation(interimValuationId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/interim-valuations/${interimValuationId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectInterimValuation(
+    interimValuationId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/interim-valuations/${interimValuationId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4699,21 +5675,33 @@ class ProjectService {
     }
   }
 
-  async getProjectPaymentCertificates(projectId: string): Promise<ProjectPaymentCertificateDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/payment-certificates`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectPaymentCertificates(
+    projectId: string
+  ): Promise<ProjectPaymentCertificateDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/payment-certificates`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project payment certificates');
+    if (!response.ok)
+      throw new Error('Failed to fetch project payment certificates');
     return response.json();
   }
 
-  async addProjectPaymentCertificate(projectId: string, dto: CreateProjectPaymentCertificateDto): Promise<ProjectPaymentCertificateDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/payment-certificates`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectPaymentCertificate(
+    projectId: string,
+    dto: CreateProjectPaymentCertificateDto
+  ): Promise<ProjectPaymentCertificateDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/payment-certificates`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4723,12 +5711,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectPaymentCertificate(paymentCertificateId: string, dto: UpdateProjectPaymentCertificateDto): Promise<ProjectPaymentCertificateDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/payment-certificates/${paymentCertificateId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectPaymentCertificate(
+    paymentCertificateId: string,
+    dto: UpdateProjectPaymentCertificateDto
+  ): Promise<ProjectPaymentCertificateDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/payment-certificates/${paymentCertificateId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4738,11 +5732,16 @@ class ProjectService {
     return response.json();
   }
 
-  async deleteProjectPaymentCertificate(paymentCertificateId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/payment-certificates/${paymentCertificateId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectPaymentCertificate(
+    paymentCertificateId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/payment-certificates/${paymentCertificateId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4750,72 +5749,112 @@ class ProjectService {
     }
   }
 
-  async getProjectExtensionOfTimeRequests(projectId: string): Promise<ProjectExtensionOfTimeDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/extension-of-time-requests`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectExtensionOfTimeRequests(
+    projectId: string
+  ): Promise<ProjectExtensionOfTimeDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/extension-of-time-requests`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project extension of time requests');
+    if (!response.ok)
+      throw new Error('Failed to fetch project extension of time requests');
     return response.json();
   }
 
-  async addProjectExtensionOfTimeRequest(projectId: string, dto: CreateProjectExtensionOfTimeDto): Promise<ProjectExtensionOfTimeDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/extension-of-time-requests`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectExtensionOfTimeRequest(
+    projectId: string,
+    dto: CreateProjectExtensionOfTimeDto
+  ): Promise<ProjectExtensionOfTimeDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/extension-of-time-requests`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to add project extension of time request');
+      throw new Error(
+        error || 'Failed to add project extension of time request'
+      );
     }
 
     return response.json();
   }
 
-  async updateProjectExtensionOfTimeRequest(extensionOfTimeId: string, dto: UpdateProjectExtensionOfTimeDto): Promise<ProjectExtensionOfTimeDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/extension-of-time-requests/${extensionOfTimeId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectExtensionOfTimeRequest(
+    extensionOfTimeId: string,
+    dto: UpdateProjectExtensionOfTimeDto
+  ): Promise<ProjectExtensionOfTimeDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/extension-of-time-requests/${extensionOfTimeId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to update project extension of time request');
+      throw new Error(
+        error || 'Failed to update project extension of time request'
+      );
     }
 
     return response.json();
   }
 
-  async deleteProjectExtensionOfTimeRequest(extensionOfTimeId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/extension-of-time-requests/${extensionOfTimeId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectExtensionOfTimeRequest(
+    extensionOfTimeId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/extension-of-time-requests/${extensionOfTimeId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to delete project extension of time request');
+      throw new Error(
+        error || 'Failed to delete project extension of time request'
+      );
     }
   }
 
-  async getProjectFinalAccount(projectId: string): Promise<ProjectFinalAccountDto | null> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/final-account`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectFinalAccount(
+    projectId: string
+  ): Promise<ProjectFinalAccountDto | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/final-account`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project final account');
     return response.json();
   }
 
-  async upsertProjectFinalAccount(projectId: string, dto: UpsertProjectFinalAccountDto): Promise<ProjectFinalAccountDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/final-account`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async upsertProjectFinalAccount(
+    projectId: string,
+    dto: UpsertProjectFinalAccountDto
+  ): Promise<ProjectFinalAccountDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/final-account`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4826,20 +5865,29 @@ class ProjectService {
   }
 
   async getProjectBuildings(projectId: string): Promise<ProjectBuildingDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/buildings`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/buildings`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project buildings');
     return response.json();
   }
 
-  async addProjectBuilding(projectId: string, dto: CreateProjectBuildingDto): Promise<ProjectBuildingDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/buildings`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectBuilding(
+    projectId: string,
+    dto: CreateProjectBuildingDto
+  ): Promise<ProjectBuildingDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/buildings`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4849,12 +5897,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectBuilding(buildingId: string, dto: UpdateProjectBuildingDto): Promise<ProjectBuildingDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/buildings/${buildingId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectBuilding(
+    buildingId: string,
+    dto: UpdateProjectBuildingDto
+  ): Promise<ProjectBuildingDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/buildings/${buildingId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4865,10 +5919,13 @@ class ProjectService {
   }
 
   async deleteProjectBuilding(buildingId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/buildings/${buildingId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/buildings/${buildingId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4877,20 +5934,29 @@ class ProjectService {
   }
 
   async getProjectFloors(projectId: string): Promise<ProjectFloorDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/floors`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/floors`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project floors');
     return response.json();
   }
 
-  async addProjectFloor(projectId: string, dto: CreateProjectFloorDto): Promise<ProjectFloorDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/floors`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectFloor(
+    projectId: string,
+    dto: CreateProjectFloorDto
+  ): Promise<ProjectFloorDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/floors`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4900,7 +5966,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectFloor(floorId: string, dto: UpdateProjectFloorDto): Promise<ProjectFloorDto> {
+  async updateProjectFloor(
+    floorId: string,
+    dto: UpdateProjectFloorDto
+  ): Promise<ProjectFloorDto> {
     const response = await fetch(`${API_BASE_URL}/projects/floors/${floorId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -4927,21 +5996,33 @@ class ProjectService {
     }
   }
 
-  async getProjectUnitReleaseBatches(projectId: string): Promise<ProjectUnitReleaseBatchDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-release-batches`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectUnitReleaseBatches(
+    projectId: string
+  ): Promise<ProjectUnitReleaseBatchDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/unit-release-batches`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project unit release batches');
+    if (!response.ok)
+      throw new Error('Failed to fetch project unit release batches');
     return response.json();
   }
 
-  async addProjectUnitReleaseBatch(projectId: string, dto: CreateProjectUnitReleaseBatchDto): Promise<ProjectUnitReleaseBatchDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-release-batches`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectUnitReleaseBatch(
+    projectId: string,
+    dto: CreateProjectUnitReleaseBatchDto
+  ): Promise<ProjectUnitReleaseBatchDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/unit-release-batches`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4951,12 +6032,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectUnitReleaseBatch(unitReleaseBatchId: string, dto: UpdateProjectUnitReleaseBatchDto): Promise<ProjectUnitReleaseBatchDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/unit-release-batches/${unitReleaseBatchId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectUnitReleaseBatch(
+    unitReleaseBatchId: string,
+    dto: UpdateProjectUnitReleaseBatchDto
+  ): Promise<ProjectUnitReleaseBatchDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/unit-release-batches/${unitReleaseBatchId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4966,11 +6053,16 @@ class ProjectService {
     return response.json();
   }
 
-  async deleteProjectUnitReleaseBatch(unitReleaseBatchId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/unit-release-batches/${unitReleaseBatchId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectUnitReleaseBatch(
+    unitReleaseBatchId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/unit-release-batches/${unitReleaseBatchId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -4978,21 +6070,33 @@ class ProjectService {
     }
   }
 
-  async getProjectUnitHandoverBatches(projectId: string): Promise<ProjectUnitHandoverBatchDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-handover-batches`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectUnitHandoverBatches(
+    projectId: string
+  ): Promise<ProjectUnitHandoverBatchDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/unit-handover-batches`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project unit handover batches');
+    if (!response.ok)
+      throw new Error('Failed to fetch project unit handover batches');
     return response.json();
   }
 
-  async addProjectUnitHandoverBatch(projectId: string, dto: CreateProjectUnitHandoverBatchDto): Promise<ProjectUnitHandoverBatchDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/unit-handover-batches`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectUnitHandoverBatch(
+    projectId: string,
+    dto: CreateProjectUnitHandoverBatchDto
+  ): Promise<ProjectUnitHandoverBatchDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/unit-handover-batches`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5002,12 +6106,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectUnitHandoverBatch(unitHandoverBatchId: string, dto: UpdateProjectUnitHandoverBatchDto): Promise<ProjectUnitHandoverBatchDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/unit-handover-batches/${unitHandoverBatchId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectUnitHandoverBatch(
+    unitHandoverBatchId: string,
+    dto: UpdateProjectUnitHandoverBatchDto
+  ): Promise<ProjectUnitHandoverBatchDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/unit-handover-batches/${unitHandoverBatchId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5017,11 +6127,16 @@ class ProjectService {
     return response.json();
   }
 
-  async deleteProjectUnitHandoverBatch(unitHandoverBatchId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/unit-handover-batches/${unitHandoverBatchId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectUnitHandoverBatch(
+    unitHandoverBatchId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/unit-handover-batches/${unitHandoverBatchId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5030,24 +6145,33 @@ class ProjectService {
   }
 
   async getProjectUnits(projectId: string): Promise<ProjectUnitDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/units`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/units`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project units');
     return response.json();
   }
 
-  async getReleasedProjectUnitsForSales(search?: string, take: number = 50): Promise<ProjectReleasedUnitSalesLookupDto[]> {
+  async getReleasedProjectUnitsForSales(
+    search?: string,
+    take: number = 50
+  ): Promise<ProjectReleasedUnitSalesLookupDto[]> {
     const params = new URLSearchParams();
     params.append('take', String(take));
     if (search?.trim()) {
       params.append('search', search.trim());
     }
 
-    const response = await fetch(`${API_BASE_URL}/projects/units/released-market?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/released-market?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       throw new Error('Failed to fetch released project units');
@@ -5056,12 +6180,18 @@ class ProjectService {
     return response.json();
   }
 
-  async addProjectUnit(projectId: string, dto: CreateProjectUnitDto): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/units`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectUnit(
+    projectId: string,
+    dto: CreateProjectUnitDto
+  ): Promise<ProjectUnitDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/units`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5071,7 +6201,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectUnit(unitId: string, dto: UpdateProjectUnitDto): Promise<ProjectUnitDto> {
+  async updateProjectUnit(
+    unitId: string,
+    dto: UpdateProjectUnitDto
+  ): Promise<ProjectUnitDto> {
     const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -5087,10 +6220,13 @@ class ProjectService {
   }
 
   async releaseProjectUnit(unitId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/release`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/release`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5101,10 +6237,13 @@ class ProjectService {
   }
 
   async withdrawProjectUnitRelease(unitId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/withdraw-release`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/withdraw-release`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5114,84 +6253,126 @@ class ProjectService {
     return response.json();
   }
 
-  async publishProjectUnitToEstate(unitId: string): Promise<EstateManagedAssetDto> {
+  async publishProjectUnitToEstate(
+    unitId: string
+  ): Promise<EstateManagedAssetDto> {
     // Estate/Project integration: Project triggers the handoff; Estate creates/updates the managed asset record.
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/publish-to-estate`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/publish-to-estate`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to publish project unit to Estate management');
+      throw new Error(
+        error || 'Failed to publish project unit to Estate management'
+      );
     }
 
     return response.json();
   }
 
-  async createSalesAgreementFromProjectUnit(unitId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/create-sales-agreement`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async createSalesAgreementFromProjectUnit(
+    unitId: string
+  ): Promise<ProjectUnitDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/create-sales-agreement`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create sales agreement from project unit');
+      throw new Error(
+        error || 'Failed to create sales agreement from project unit'
+      );
     }
 
     return response.json();
   }
 
-  async createLeaseAgreementFromProjectUnit(unitId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/create-lease-agreement`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async createLeaseAgreementFromProjectUnit(
+    unitId: string
+  ): Promise<ProjectUnitDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/create-lease-agreement`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create lease agreement from project unit');
+      throw new Error(
+        error || 'Failed to create lease agreement from project unit'
+      );
     }
 
     return response.json();
   }
 
-  async createSalesOrderFromProjectUnit(unitId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/create-sales-order`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async createSalesOrderFromProjectUnit(
+    unitId: string
+  ): Promise<ProjectUnitDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/create-sales-order`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create sales order from project unit');
+      throw new Error(
+        error || 'Failed to create sales order from project unit'
+      );
     }
 
     return response.json();
   }
 
-  async linkSalesAgreementToProjectUnit(unitId: string, salesAgreementId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/link-sales-agreement`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ salesAgreementId }),
-    });
+  async linkSalesAgreementToProjectUnit(
+    unitId: string,
+    salesAgreementId: string
+  ): Promise<ProjectUnitDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/link-sales-agreement`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ salesAgreementId }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to link sales agreement to project unit');
+      throw new Error(
+        error || 'Failed to link sales agreement to project unit'
+      );
     }
 
     return response.json();
   }
 
-  async linkSalesOrderToProjectUnit(unitId: string, salesOrderId: string): Promise<ProjectUnitDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/units/${unitId}/link-sales-order`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ salesOrderId }),
-    });
+  async linkSalesOrderToProjectUnit(
+    unitId: string,
+    salesOrderId: string
+  ): Promise<ProjectUnitDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/units/${unitId}/link-sales-order`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ salesOrderId }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5213,21 +6394,33 @@ class ProjectService {
     }
   }
 
-  async getCustomerVariations(projectId: string): Promise<ProjectCustomerVariationDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/customer-variations`, {
-      headers: getAuthHeaders(),
-    });
+  async getCustomerVariations(
+    projectId: string
+  ): Promise<ProjectCustomerVariationDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/customer-variations`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project customer variations');
+    if (!response.ok)
+      throw new Error('Failed to fetch project customer variations');
     return response.json();
   }
 
-  async addCustomerVariation(projectId: string, dto: CreateProjectCustomerVariationDto): Promise<ProjectCustomerVariationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/customer-variations`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addCustomerVariation(
+    projectId: string,
+    dto: CreateProjectCustomerVariationDto
+  ): Promise<ProjectCustomerVariationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/customer-variations`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5237,12 +6430,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateCustomerVariation(variationId: string, dto: UpdateProjectCustomerVariationDto): Promise<ProjectCustomerVariationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/customer-variations/${variationId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateCustomerVariation(
+    variationId: string,
+    dto: UpdateProjectCustomerVariationDto
+  ): Promise<ProjectCustomerVariationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/customer-variations/${variationId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5252,41 +6451,60 @@ class ProjectService {
     return response.json();
   }
 
-  async createCustomerVariationJobCard(variationId: string, dto: CreateProjectMaintenanceFollowThroughDto = {}): Promise<ProjectCustomerVariationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/customer-variations/${variationId}/create-job-card`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createCustomerVariationJobCard(
+    variationId: string,
+    dto: CreateProjectMaintenanceFollowThroughDto = {}
+  ): Promise<ProjectCustomerVariationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/customer-variations/${variationId}/create-job-card`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create job card from project customer variation');
+      throw new Error(
+        error || 'Failed to create job card from project customer variation'
+      );
     }
 
     return response.json();
   }
 
-  async createCustomerVariationWorkOrder(variationId: string, dto: CreateProjectMaintenanceFollowThroughDto = {}): Promise<ProjectCustomerVariationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/customer-variations/${variationId}/create-work-order`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createCustomerVariationWorkOrder(
+    variationId: string,
+    dto: CreateProjectMaintenanceFollowThroughDto = {}
+  ): Promise<ProjectCustomerVariationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/customer-variations/${variationId}/create-work-order`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create work order from project customer variation');
+      throw new Error(
+        error || 'Failed to create work order from project customer variation'
+      );
     }
 
     return response.json();
   }
 
   async deleteCustomerVariation(variationId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/customer-variations/${variationId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/customer-variations/${variationId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5294,21 +6512,33 @@ class ProjectService {
     }
   }
 
-  async getProjectCommissioningItems(projectId: string): Promise<ProjectCommissioningItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/commissioning`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectCommissioningItems(
+    projectId: string
+  ): Promise<ProjectCommissioningItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/commissioning`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project commissioning items');
+    if (!response.ok)
+      throw new Error('Failed to fetch project commissioning items');
     return response.json();
   }
 
-  async addProjectCommissioningItem(projectId: string, dto: CreateProjectCommissioningItemDto): Promise<ProjectCommissioningItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/commissioning`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectCommissioningItem(
+    projectId: string,
+    dto: CreateProjectCommissioningItemDto
+  ): Promise<ProjectCommissioningItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/commissioning`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5318,12 +6548,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectCommissioningItem(commissioningItemId: string, dto: UpdateProjectCommissioningItemDto): Promise<ProjectCommissioningItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/commissioning/${commissioningItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectCommissioningItem(
+    commissioningItemId: string,
+    dto: UpdateProjectCommissioningItemDto
+  ): Promise<ProjectCommissioningItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/commissioning/${commissioningItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5333,11 +6569,16 @@ class ProjectService {
     return response.json();
   }
 
-  async deleteProjectCommissioningItem(commissioningItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/commissioning/${commissioningItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectCommissioningItem(
+    commissioningItemId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/commissioning/${commissioningItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5345,21 +6586,32 @@ class ProjectService {
     }
   }
 
-  async getProjectHandoverItems(projectId: string): Promise<ProjectHandoverItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/handover-items`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectHandoverItems(
+    projectId: string
+  ): Promise<ProjectHandoverItemDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/handover-items`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project handover items');
     return response.json();
   }
 
-  async addProjectHandoverItem(projectId: string, dto: CreateProjectHandoverItemDto): Promise<ProjectHandoverItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/handover-items`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectHandoverItem(
+    projectId: string,
+    dto: CreateProjectHandoverItemDto
+  ): Promise<ProjectHandoverItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/handover-items`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5369,12 +6621,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectHandoverItem(handoverItemId: string, dto: UpdateProjectHandoverItemDto): Promise<ProjectHandoverItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/handover-items/${handoverItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectHandoverItem(
+    handoverItemId: string,
+    dto: UpdateProjectHandoverItemDto
+  ): Promise<ProjectHandoverItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/handover-items/${handoverItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5385,10 +6643,13 @@ class ProjectService {
   }
 
   async deleteProjectHandoverItem(handoverItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/handover-items/${handoverItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/handover-items/${handoverItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5397,20 +6658,29 @@ class ProjectService {
   }
 
   async getProjectSnagItems(projectId: string): Promise<ProjectSnagItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/snag-items`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/snag-items`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project snag items');
     return response.json();
   }
 
-  async addProjectSnagItem(projectId: string, dto: CreateProjectSnagItemDto): Promise<ProjectSnagItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/snag-items`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectSnagItem(
+    projectId: string,
+    dto: CreateProjectSnagItemDto
+  ): Promise<ProjectSnagItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/snag-items`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5420,12 +6690,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectSnagItem(snagItemId: string, dto: UpdateProjectSnagItemDto): Promise<ProjectSnagItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/snag-items/${snagItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectSnagItem(
+    snagItemId: string,
+    dto: UpdateProjectSnagItemDto
+  ): Promise<ProjectSnagItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/snag-items/${snagItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5436,10 +6712,13 @@ class ProjectService {
   }
 
   async deleteProjectSnagItem(snagItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/snag-items/${snagItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/snag-items/${snagItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5447,21 +6726,33 @@ class ProjectService {
     }
   }
 
-  async getProjectDefectLiabilityCases(projectId: string): Promise<ProjectDefectLiabilityCaseDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/defect-liability`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectDefectLiabilityCases(
+    projectId: string
+  ): Promise<ProjectDefectLiabilityCaseDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/defect-liability`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project defect liability cases');
+    if (!response.ok)
+      throw new Error('Failed to fetch project defect liability cases');
     return response.json();
   }
 
-  async addProjectDefectLiabilityCase(projectId: string, dto: CreateProjectDefectLiabilityCaseDto): Promise<ProjectDefectLiabilityCaseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/defect-liability`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addProjectDefectLiabilityCase(
+    projectId: string,
+    dto: CreateProjectDefectLiabilityCaseDto
+  ): Promise<ProjectDefectLiabilityCaseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/defect-liability`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5471,96 +6762,152 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectDefectLiabilityCase(defectLiabilityCaseId: string, dto: UpdateProjectDefectLiabilityCaseDto): Promise<ProjectDefectLiabilityCaseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectDefectLiabilityCase(
+    defectLiabilityCaseId: string,
+    dto: UpdateProjectDefectLiabilityCaseDto
+  ): Promise<ProjectDefectLiabilityCaseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to update project defect liability case');
+      throw new Error(
+        error || 'Failed to update project defect liability case'
+      );
     }
 
     return response.json();
   }
 
-  async createDefectLiabilityJobCard(defectLiabilityCaseId: string, dto: CreateProjectMaintenanceFollowThroughDto = {}): Promise<ProjectDefectLiabilityCaseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}/create-job-card`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createDefectLiabilityJobCard(
+    defectLiabilityCaseId: string,
+    dto: CreateProjectMaintenanceFollowThroughDto = {}
+  ): Promise<ProjectDefectLiabilityCaseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}/create-job-card`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create job card from project defect liability case');
+      throw new Error(
+        error || 'Failed to create job card from project defect liability case'
+      );
     }
 
     return response.json();
   }
 
-  async createDefectLiabilityWorkOrder(defectLiabilityCaseId: string, dto: CreateProjectMaintenanceFollowThroughDto = {}): Promise<ProjectDefectLiabilityCaseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}/create-work-order`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createDefectLiabilityWorkOrder(
+    defectLiabilityCaseId: string,
+    dto: CreateProjectMaintenanceFollowThroughDto = {}
+  ): Promise<ProjectDefectLiabilityCaseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}/create-work-order`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to create work order from project defect liability case');
+      throw new Error(
+        error ||
+          'Failed to create work order from project defect liability case'
+      );
     }
 
     return response.json();
   }
 
-  async deleteProjectDefectLiabilityCase(defectLiabilityCaseId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+  async deleteProjectDefectLiabilityCase(
+    defectLiabilityCaseId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/defect-liability/${defectLiabilityCaseId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to delete project defect liability case');
+      throw new Error(
+        error || 'Failed to delete project defect liability case'
+      );
     }
   }
 
-  async getCommercialSummary(projectId: string): Promise<ProjectCommercialSummaryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/commercial-summary`, {
-      headers: getAuthHeaders(),
-    });
+  async getCommercialSummary(
+    projectId: string
+  ): Promise<ProjectCommercialSummaryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/commercial-summary`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project commercial summary');
+    if (!response.ok)
+      throw new Error('Failed to fetch project commercial summary');
     return response.json();
   }
 
-  async getFinancialControlSummary(projectId: string): Promise<ProjectFinancialControlSummaryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/financial-control-summary`, {
-      headers: getAuthHeaders(),
-    });
+  async getFinancialControlSummary(
+    projectId: string
+  ): Promise<ProjectFinancialControlSummaryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/financial-control-summary`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project financial control summary');
+    if (!response.ok)
+      throw new Error('Failed to fetch project financial control summary');
     return response.json();
   }
 
-  async getIntegrationSummary(projectId: string): Promise<ProjectIntegrationSummaryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/integration-summary`, {
-      headers: getAuthHeaders(),
-    });
+  async getIntegrationSummary(
+    projectId: string
+  ): Promise<ProjectIntegrationSummaryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/integration-summary`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project integration summary');
+    if (!response.ok)
+      throw new Error('Failed to fetch project integration summary');
     return response.json();
   }
 
-  async getGovernanceSummary(projectId: string): Promise<ProjectGovernanceSummaryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/governance-summary`, {
-      headers: getAuthHeaders(),
-    });
+  async getGovernanceSummary(
+    projectId: string
+  ): Promise<ProjectGovernanceSummaryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/governance-summary`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project governance summary');
+    if (!response.ok)
+      throw new Error('Failed to fetch project governance summary');
     return response.json();
   }
 
@@ -5579,7 +6926,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProject(id: string, dto: UpdateProjectDto): Promise<ProjectDetailDto> {
+  async updateProject(
+    id: string,
+    dto: UpdateProjectDto
+  ): Promise<ProjectDetailDto> {
     const response = await fetch(`${API_BASE_URL}/projects/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -5619,7 +6969,11 @@ class ProjectService {
     }
   }
 
-  async rejectProject(id: string, reason: string, comments?: string): Promise<void> {
+  async rejectProject(
+    id: string,
+    reason: string,
+    comments?: string
+  ): Promise<void> {
     const response = await fetch(`${API_BASE_URL}/projects/${id}/reject`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -5633,20 +6987,29 @@ class ProjectService {
   }
 
   async getMembers(projectId: string): Promise<ProjectMemberDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/members`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/members`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project members');
     return response.json();
   }
 
-  async addMember(projectId: string, dto: AddProjectMemberDto): Promise<ProjectMemberDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/members`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addMember(
+    projectId: string,
+    dto: AddProjectMemberDto
+  ): Promise<ProjectMemberDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/members`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5657,10 +7020,13 @@ class ProjectService {
   }
 
   async removeMember(memberId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/members/${memberId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/members/${memberId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5668,12 +7034,18 @@ class ProjectService {
     }
   }
 
-  async addWorkItem(projectId: string, dto: CreateProjectWorkItemDto): Promise<ProjectWorkItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/work-items`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addWorkItem(
+    projectId: string,
+    dto: CreateProjectWorkItemDto
+  ): Promise<ProjectWorkItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/work-items`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5683,12 +7055,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateWorkItem(workItemId: string, dto: CreateProjectWorkItemDto): Promise<ProjectWorkItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/work-items/${workItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateWorkItem(
+    workItemId: string,
+    dto: CreateProjectWorkItemDto
+  ): Promise<ProjectWorkItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/work-items/${workItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5699,10 +7077,13 @@ class ProjectService {
   }
 
   async deleteWorkItem(workItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/work-items/${workItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/work-items/${workItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5710,12 +7091,18 @@ class ProjectService {
     }
   }
 
-  async reorderWorkItems(projectId: string, dto: ReorderProjectWorkItemsDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/work-items/reorder`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async reorderWorkItems(
+    projectId: string,
+    dto: ReorderProjectWorkItemsDto
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/work-items/reorder`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5723,12 +7110,18 @@ class ProjectService {
     }
   }
 
-  async addMilestone(projectId: string, dto: CreateProjectMilestoneDto): Promise<ProjectMilestoneDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/milestones`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addMilestone(
+    projectId: string,
+    dto: CreateProjectMilestoneDto
+  ): Promise<ProjectMilestoneDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/milestones`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5738,12 +7131,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateMilestone(milestoneId: string, dto: CreateProjectMilestoneDto): Promise<ProjectMilestoneDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/milestones/${milestoneId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateMilestone(
+    milestoneId: string,
+    dto: CreateProjectMilestoneDto
+  ): Promise<ProjectMilestoneDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/milestones/${milestoneId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5754,10 +7153,13 @@ class ProjectService {
   }
 
   async deleteMilestone(milestoneId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/milestones/${milestoneId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/milestones/${milestoneId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5765,21 +7167,33 @@ class ProjectService {
     }
   }
 
-  async getResourceAllocations(projectId: string): Promise<ProjectResourceAllocationDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/resource-allocations`, {
-      headers: getAuthHeaders(),
-    });
+  async getResourceAllocations(
+    projectId: string
+  ): Promise<ProjectResourceAllocationDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/resource-allocations`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project resource allocations');
+    if (!response.ok)
+      throw new Error('Failed to fetch project resource allocations');
     return response.json();
   }
 
-  async addResourceAllocation(projectId: string, dto: CreateProjectResourceAllocationDto): Promise<ProjectResourceAllocationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/resource-allocations`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addResourceAllocation(
+    projectId: string,
+    dto: CreateProjectResourceAllocationDto
+  ): Promise<ProjectResourceAllocationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/resource-allocations`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5789,12 +7203,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateResourceAllocation(allocationId: string, dto: CreateProjectResourceAllocationDto): Promise<ProjectResourceAllocationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateResourceAllocation(
+    allocationId: string,
+    dto: CreateProjectResourceAllocationDto
+  ): Promise<ProjectResourceAllocationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/resource-allocations/${allocationId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5804,11 +7224,16 @@ class ProjectService {
     return response.json();
   }
 
-  async approveResourceAllocation(allocationId: string): Promise<ProjectResourceAllocationDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async approveResourceAllocation(
+    allocationId: string
+  ): Promise<ProjectResourceAllocationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/resource-allocations/${allocationId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5818,12 +7243,18 @@ class ProjectService {
     return response.json();
   }
 
-  async substituteResourceAllocation(allocationId: string, dto: SubstituteProjectResourceAllocationDto): Promise<ProjectResourceSubstitutionResultDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}/substitute`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async substituteResourceAllocation(
+    allocationId: string,
+    dto: SubstituteProjectResourceAllocationDto
+  ): Promise<ProjectResourceSubstitutionResultDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/resource-allocations/${allocationId}/substitute`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5834,10 +7265,13 @@ class ProjectService {
   }
 
   async deleteResourceAllocation(allocationId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/resource-allocations/${allocationId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/resource-allocations/${allocationId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5845,12 +7279,18 @@ class ProjectService {
     }
   }
 
-  async addRisk(projectId: string, dto: CreateProjectRiskDto): Promise<ProjectRiskDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/risks`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addRisk(
+    projectId: string,
+    dto: CreateProjectRiskDto
+  ): Promise<ProjectRiskDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/risks`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5860,7 +7300,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateRisk(riskId: string, dto: CreateProjectRiskDto): Promise<ProjectRiskDto> {
+  async updateRisk(
+    riskId: string,
+    dto: CreateProjectRiskDto
+  ): Promise<ProjectRiskDto> {
     const response = await fetch(`${API_BASE_URL}/projects/risks/${riskId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -5887,12 +7330,18 @@ class ProjectService {
     }
   }
 
-  async addIssue(projectId: string, dto: CreateProjectIssueDto): Promise<ProjectIssueDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/issues`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addIssue(
+    projectId: string,
+    dto: CreateProjectIssueDto
+  ): Promise<ProjectIssueDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/issues`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5902,7 +7351,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateIssue(issueId: string, dto: CreateProjectIssueDto): Promise<ProjectIssueDto> {
+  async updateIssue(
+    issueId: string,
+    dto: CreateProjectIssueDto
+  ): Promise<ProjectIssueDto> {
     const response = await fetch(`${API_BASE_URL}/projects/issues/${issueId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -5929,12 +7381,18 @@ class ProjectService {
     }
   }
 
-  async addQualityCheckpoint(projectId: string, dto: CreateProjectQualityCheckpointDto): Promise<ProjectQualityCheckpointDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/quality-checkpoints`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addQualityCheckpoint(
+    projectId: string,
+    dto: CreateProjectQualityCheckpointDto
+  ): Promise<ProjectQualityCheckpointDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/quality-checkpoints`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5944,12 +7402,18 @@ class ProjectService {
     return response.json();
   }
 
-  async signOffQualityCheckpoint(checkpointId: string, comments?: string): Promise<ProjectQualityCheckpointDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/quality-checkpoints/${checkpointId}/sign-off`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async signOffQualityCheckpoint(
+    checkpointId: string,
+    comments?: string
+  ): Promise<ProjectQualityCheckpointDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/quality-checkpoints/${checkpointId}/sign-off`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5960,10 +7424,13 @@ class ProjectService {
   }
 
   async deleteQualityCheckpoint(checkpointId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/quality-checkpoints/${checkpointId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/quality-checkpoints/${checkpointId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5971,12 +7438,18 @@ class ProjectService {
     }
   }
 
-  async addNonConformance(projectId: string, dto: CreateProjectNonConformanceDto): Promise<ProjectNonConformanceDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/non-conformances`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addNonConformance(
+    projectId: string,
+    dto: CreateProjectNonConformanceDto
+  ): Promise<ProjectNonConformanceDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/non-conformances`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -5986,12 +7459,18 @@ class ProjectService {
     return response.json();
   }
 
-  async resolveNonConformance(nonConformanceId: string, comments?: string): Promise<ProjectNonConformanceDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/non-conformances/${nonConformanceId}/resolve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async resolveNonConformance(
+    nonConformanceId: string,
+    comments?: string
+  ): Promise<ProjectNonConformanceDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/non-conformances/${nonConformanceId}/resolve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6002,10 +7481,13 @@ class ProjectService {
   }
 
   async deleteNonConformance(nonConformanceId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/non-conformances/${nonConformanceId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/non-conformances/${nonConformanceId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6013,12 +7495,18 @@ class ProjectService {
     }
   }
 
-  async addChangeRequest(projectId: string, dto: CreateProjectChangeRequestDto): Promise<ProjectChangeRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/changes`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addChangeRequest(
+    projectId: string,
+    dto: CreateProjectChangeRequestDto
+  ): Promise<ProjectChangeRequestDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/changes`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6028,12 +7516,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateChangeRequest(changeId: string, dto: CreateProjectChangeRequestDto): Promise<ProjectChangeRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/changes/${changeId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateChangeRequest(
+    changeId: string,
+    dto: CreateProjectChangeRequestDto
+  ): Promise<ProjectChangeRequestDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/changes/${changeId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6044,10 +7538,13 @@ class ProjectService {
   }
 
   async deleteChangeRequest(changeId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/changes/${changeId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/changes/${changeId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6055,21 +7552,32 @@ class ProjectService {
     }
   }
 
-  async getBillingSchedules(projectId: string): Promise<ProjectBillingScheduleDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/billing-schedules`, {
-      headers: getAuthHeaders(),
-    });
+  async getBillingSchedules(
+    projectId: string
+  ): Promise<ProjectBillingScheduleDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/billing-schedules`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch billing schedules');
     return response.json();
   }
 
-  async addBillingSchedule(projectId: string, dto: CreateProjectBillingScheduleDto): Promise<ProjectBillingScheduleDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/billing-schedules`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addBillingSchedule(
+    projectId: string,
+    dto: CreateProjectBillingScheduleDto
+  ): Promise<ProjectBillingScheduleDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/billing-schedules`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6079,12 +7587,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateBillingSchedule(billingScheduleId: string, dto: CreateProjectBillingScheduleDto): Promise<ProjectBillingScheduleDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateBillingSchedule(
+    billingScheduleId: string,
+    dto: CreateProjectBillingScheduleDto
+  ): Promise<ProjectBillingScheduleDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6095,10 +7609,13 @@ class ProjectService {
   }
 
   async deleteBillingSchedule(billingScheduleId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6106,21 +7623,32 @@ class ProjectService {
     }
   }
 
-  async getInvoiceRequests(projectId: string): Promise<ProjectInvoiceRequestDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/invoice-requests`, {
-      headers: getAuthHeaders(),
-    });
+  async getInvoiceRequests(
+    projectId: string
+  ): Promise<ProjectInvoiceRequestDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/invoice-requests`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch invoice requests');
     return response.json();
   }
 
-  async createInvoiceRequest(projectId: string, dto: CreateProjectInvoiceRequestDto): Promise<ProjectInvoiceRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/invoice-requests`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createInvoiceRequest(
+    projectId: string,
+    dto: CreateProjectInvoiceRequestDto
+  ): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/invoice-requests`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6130,12 +7658,18 @@ class ProjectService {
     return response.json();
   }
 
-  async submitInvoiceRequest(invoiceRequestId: string, comments?: string): Promise<ProjectInvoiceRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async submitInvoiceRequest(
+    invoiceRequestId: string,
+    comments?: string
+  ): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6147,13 +7681,16 @@ class ProjectService {
 
   async sendInvoiceRequestToFinance(
     invoiceRequestId: string,
-    dto: UpdateProjectInvoiceRequestWorkflowDto = {},
+    dto: UpdateProjectInvoiceRequestWorkflowDto = {}
   ): Promise<ProjectInvoiceRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/send-to-finance`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/send-to-finance`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6165,13 +7702,16 @@ class ProjectService {
 
   async markInvoiceRequestInvoiced(
     invoiceRequestId: string,
-    dto: UpdateProjectInvoiceRequestWorkflowDto = {},
+    dto: UpdateProjectInvoiceRequestWorkflowDto = {}
   ): Promise<ProjectInvoiceRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/mark-invoiced`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/mark-invoiced`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6183,13 +7723,16 @@ class ProjectService {
 
   async markInvoiceRequestPaid(
     invoiceRequestId: string,
-    dto: UpdateProjectInvoiceRequestWorkflowDto = {},
+    dto: UpdateProjectInvoiceRequestWorkflowDto = {}
   ): Promise<ProjectInvoiceRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/mark-paid`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/invoice-requests/${invoiceRequestId}/mark-paid`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6199,12 +7742,18 @@ class ProjectService {
     return response.json();
   }
 
-  async generateInvoiceRequestFromSchedule(billingScheduleId: string, notes?: string): Promise<ProjectInvoiceRequestDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}/generate-invoice-request`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ notes }),
-    });
+  async generateInvoiceRequestFromSchedule(
+    billingScheduleId: string,
+    notes?: string
+  ): Promise<ProjectInvoiceRequestDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/billing-schedules/${billingScheduleId}/generate-invoice-request`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ notes }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6215,20 +7764,29 @@ class ProjectService {
   }
 
   async getDeliverables(projectId: string): Promise<ProjectDeliverableDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/deliverables`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/deliverables`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch deliverables');
     return response.json();
   }
 
-  async addDeliverable(projectId: string, dto: CreateProjectDeliverableDto): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/deliverables`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addDeliverable(
+    projectId: string,
+    dto: CreateProjectDeliverableDto
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/deliverables`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6238,12 +7796,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateDeliverable(deliverableId: string, dto: CreateProjectDeliverableDto): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateDeliverable(
+    deliverableId: string,
+    dto: CreateProjectDeliverableDto
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/deliverables/${deliverableId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6253,12 +7817,18 @@ class ProjectService {
     return response.json();
   }
 
-  async submitDeliverable(deliverableId: string, dto: SubmitProjectDeliverableDto): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async submitDeliverable(
+    deliverableId: string,
+    dto: SubmitProjectDeliverableDto
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/deliverables/${deliverableId}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6268,12 +7838,18 @@ class ProjectService {
     return response.json();
   }
 
-  async approveDeliverable(deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async approveDeliverable(
+    deliverableId: string,
+    comments?: string
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/deliverables/${deliverableId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6283,12 +7859,18 @@ class ProjectService {
     return response.json();
   }
 
-  async rejectDeliverable(deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async rejectDeliverable(
+    deliverableId: string,
+    comments?: string
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/deliverables/${deliverableId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6299,10 +7881,13 @@ class ProjectService {
   }
 
   async deleteDeliverable(deliverableId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/deliverables/${deliverableId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/deliverables/${deliverableId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6310,21 +7895,32 @@ class ProjectService {
     }
   }
 
-  async getTaskDependencies(projectId: string): Promise<ProjectTaskDependencyDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/task-dependencies`, {
-      headers: getAuthHeaders(),
-    });
+  async getTaskDependencies(
+    projectId: string
+  ): Promise<ProjectTaskDependencyDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/task-dependencies`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch task dependencies');
     return response.json();
   }
 
-  async addTaskDependency(projectId: string, dto: CreateProjectTaskDependencyDto): Promise<ProjectTaskDependencyDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/task-dependencies`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addTaskDependency(
+    projectId: string,
+    dto: CreateProjectTaskDependencyDto
+  ): Promise<ProjectTaskDependencyDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/task-dependencies`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6335,10 +7931,13 @@ class ProjectService {
   }
 
   async deleteTaskDependency(dependencyId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/task-dependencies/${dependencyId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/task-dependencies/${dependencyId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6346,21 +7945,30 @@ class ProjectService {
     }
   }
 
-  async getInterdependencies(projectId?: string, portfolioId?: string, programId?: string): Promise<ProjectInterdependencyDto[]> {
+  async getInterdependencies(
+    projectId?: string,
+    portfolioId?: string,
+    programId?: string
+  ): Promise<ProjectInterdependencyDto[]> {
     const params = new URLSearchParams();
     if (projectId) params.set('projectId', projectId);
     if (portfolioId) params.set('portfolioId', portfolioId);
     if (programId) params.set('programId', programId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/interdependencies?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/interdependencies?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch interdependencies');
     return response.json();
   }
 
-  async createInterdependency(dto: CreateProjectInterdependencyDto): Promise<ProjectInterdependencyDto> {
+  async createInterdependency(
+    dto: CreateProjectInterdependencyDto
+  ): Promise<ProjectInterdependencyDto> {
     const response = await fetch(`${API_BASE_URL}/projects/interdependencies`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -6375,12 +7983,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateInterdependency(id: string, dto: CreateProjectInterdependencyDto): Promise<ProjectInterdependencyDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/interdependencies/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateInterdependency(
+    id: string,
+    dto: CreateProjectInterdependencyDto
+  ): Promise<ProjectInterdependencyDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/interdependencies/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6391,10 +8005,13 @@ class ProjectService {
   }
 
   async deleteInterdependency(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/interdependencies/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/interdependencies/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6403,20 +8020,29 @@ class ProjectService {
   }
 
   async getBaselines(projectId: string): Promise<ProjectBaselineDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/baselines`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/baselines`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project baselines');
     return response.json();
   }
 
-  async createBaseline(projectId: string, dto: CreateProjectBaselineDto): Promise<ProjectBaselineDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/baselines`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createBaseline(
+    projectId: string,
+    dto: CreateProjectBaselineDto
+  ): Promise<ProjectBaselineDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/baselines`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6426,29 +8052,44 @@ class ProjectService {
     return response.json();
   }
 
-  async compareBaseline(baselineId: string): Promise<ProjectBaselineComparisonDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/baselines/${baselineId}/compare`, {
-      headers: getAuthHeaders(),
-    });
+  async compareBaseline(
+    baselineId: string
+  ): Promise<ProjectBaselineComparisonDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/baselines/${baselineId}/compare`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to compare project baseline');
     return response.json();
   }
 
-  async analyzeSchedule(projectId: string): Promise<ProjectScheduleAnalysisDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/schedule-analysis`, {
-      headers: getAuthHeaders(),
-    });
+  async analyzeSchedule(
+    projectId: string
+  ): Promise<ProjectScheduleAnalysisDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/schedule-analysis`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to analyze project schedule');
     return response.json();
   }
 
-  async recalculateSchedule(projectId: string): Promise<ProjectScheduleAnalysisDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/schedule-analysis/recalculate`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async recalculateSchedule(
+    projectId: string
+  ): Promise<ProjectScheduleAnalysisDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/schedule-analysis/recalculate`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6459,9 +8100,12 @@ class ProjectService {
   }
 
   async getTimesheets(projectId: string): Promise<ProjectTimesheetEntryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/timesheets`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/timesheets`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project timesheets');
     return response.json();
@@ -6469,44 +8113,70 @@ class ProjectService {
 
   async getMyTimesheets(status?: string): Promise<ProjectTimesheetEntryDto[]> {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/my/timesheets${query}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/my/timesheets${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch my timesheets');
     return response.json();
   }
 
-  async getTimesheetApprovalSummary(projectId?: string): Promise<ProjectApprovalQueueSummaryDto> {
-    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/approval-summary${query}`, {
-      headers: getAuthHeaders(),
-    });
+  async getTimesheetApprovalSummary(
+    projectId?: string
+  ): Promise<ProjectApprovalQueueSummaryDto> {
+    const query = projectId
+      ? `?projectId=${encodeURIComponent(projectId)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/approval-summary${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch timesheet approval summary');
+    if (!response.ok)
+      throw new Error('Failed to fetch timesheet approval summary');
     return response.json();
   }
 
-  async getTimesheetApprovalQueue(projectId?: string, status?: string, userId?: string, take: number = 200): Promise<ProjectTimesheetApprovalQueueItemDto[]> {
+  async getTimesheetApprovalQueue(
+    projectId?: string,
+    status?: string,
+    userId?: string,
+    take: number = 200
+  ): Promise<ProjectTimesheetApprovalQueueItemDto[]> {
     const params = new URLSearchParams({ take: take.toString() });
     if (projectId) params.set('projectId', projectId);
     if (status) params.set('status', status);
     if (userId) params.set('userId', userId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/approval-queue?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/approval-queue?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch timesheet approval queue');
+    if (!response.ok)
+      throw new Error('Failed to fetch timesheet approval queue');
     return response.json();
   }
 
-  async addTimesheet(projectId: string, dto: CreateProjectTimesheetEntryDto): Promise<ProjectTimesheetEntryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/timesheets`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addTimesheet(
+    projectId: string,
+    dto: CreateProjectTimesheetEntryDto
+  ): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/timesheets`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6516,12 +8186,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateTimesheet(entryId: string, dto: CreateProjectTimesheetEntryDto): Promise<ProjectTimesheetEntryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateTimesheet(
+    entryId: string,
+    dto: CreateProjectTimesheetEntryDto
+  ): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/${entryId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6532,10 +8208,13 @@ class ProjectService {
   }
 
   async submitTimesheet(entryId: string): Promise<ProjectTimesheetEntryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/${entryId}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6545,12 +8224,18 @@ class ProjectService {
     return response.json();
   }
 
-  async approveTimesheet(entryId: string, comments?: string): Promise<ProjectTimesheetEntryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async approveTimesheet(
+    entryId: string,
+    comments?: string
+  ): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/${entryId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6560,12 +8245,18 @@ class ProjectService {
     return response.json();
   }
 
-  async rejectTimesheet(entryId: string, comments?: string): Promise<ProjectTimesheetEntryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async rejectTimesheet(
+    entryId: string,
+    comments?: string
+  ): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/${entryId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6576,10 +8267,13 @@ class ProjectService {
   }
 
   async deleteTimesheet(entryId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/timesheets/${entryId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/timesheets/${entryId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6588,9 +8282,12 @@ class ProjectService {
   }
 
   async getExpenses(projectId: string): Promise<ProjectExpenseDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/expenses`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/expenses`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project expenses');
     return response.json();
@@ -6598,44 +8295,69 @@ class ProjectService {
 
   async getMyExpenses(status?: string): Promise<ProjectExpenseDto[]> {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/my/expenses${query}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/my/expenses${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch my project expenses');
     return response.json();
   }
 
-  async getExpenseApprovalSummary(projectId?: string): Promise<ProjectApprovalQueueSummaryDto> {
-    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/approval-summary${query}`, {
-      headers: getAuthHeaders(),
-    });
+  async getExpenseApprovalSummary(
+    projectId?: string
+  ): Promise<ProjectApprovalQueueSummaryDto> {
+    const query = projectId
+      ? `?projectId=${encodeURIComponent(projectId)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/approval-summary${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch expense approval summary');
+    if (!response.ok)
+      throw new Error('Failed to fetch expense approval summary');
     return response.json();
   }
 
-  async getExpenseApprovalQueue(projectId?: string, status?: string, userId?: string, take: number = 200): Promise<ProjectExpenseApprovalQueueItemDto[]> {
+  async getExpenseApprovalQueue(
+    projectId?: string,
+    status?: string,
+    userId?: string,
+    take: number = 200
+  ): Promise<ProjectExpenseApprovalQueueItemDto[]> {
     const params = new URLSearchParams({ take: take.toString() });
     if (projectId) params.set('projectId', projectId);
     if (status) params.set('status', status);
     if (userId) params.set('userId', userId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/approval-queue?${params.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/approval-queue?${params.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch expense approval queue');
     return response.json();
   }
 
-  async addExpense(projectId: string, dto: CreateProjectExpenseDto): Promise<ProjectExpenseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/expenses`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addExpense(
+    projectId: string,
+    dto: CreateProjectExpenseDto
+  ): Promise<ProjectExpenseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/expenses`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6645,12 +8367,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateExpense(expenseId: string, dto: CreateProjectExpenseDto): Promise<ProjectExpenseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateExpense(
+    expenseId: string,
+    dto: CreateProjectExpenseDto
+  ): Promise<ProjectExpenseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/${expenseId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6661,10 +8389,13 @@ class ProjectService {
   }
 
   async submitExpense(expenseId: string): Promise<ProjectExpenseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/${expenseId}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6674,12 +8405,18 @@ class ProjectService {
     return response.json();
   }
 
-  async approveExpense(expenseId: string, comments?: string): Promise<ProjectExpenseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async approveExpense(
+    expenseId: string,
+    comments?: string
+  ): Promise<ProjectExpenseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/${expenseId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6689,12 +8426,18 @@ class ProjectService {
     return response.json();
   }
 
-  async rejectExpense(expenseId: string, comments?: string): Promise<ProjectExpenseDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async rejectExpense(
+    expenseId: string,
+    comments?: string
+  ): Promise<ProjectExpenseDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/${expenseId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6705,10 +8448,13 @@ class ProjectService {
   }
 
   async deleteExpense(expenseId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/expenses/${expenseId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/expenses/${expenseId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6716,20 +8462,30 @@ class ProjectService {
     }
   }
 
-  async getRevenueRecognition(projectId: string): Promise<ProjectRevenueRecognitionDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/revenue-recognition`, {
-      headers: getAuthHeaders(),
-    });
+  async getRevenueRecognition(
+    projectId: string
+  ): Promise<ProjectRevenueRecognitionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/revenue-recognition`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch revenue recognition');
     return response.json();
   }
 
-  async generateRevenueRecognition(projectId: string): Promise<ProjectRevenueRecognitionDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/revenue-recognition/generate`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async generateRevenueRecognition(
+    projectId: string
+  ): Promise<ProjectRevenueRecognitionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/revenue-recognition/generate`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6739,21 +8495,33 @@ class ProjectService {
     return response.json();
   }
 
-  async getBudgetRevisions(projectId: string): Promise<ProjectBudgetRevisionDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/budget-revisions`, {
-      headers: getAuthHeaders(),
-    });
+  async getBudgetRevisions(
+    projectId: string
+  ): Promise<ProjectBudgetRevisionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/budget-revisions`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project budget revisions');
+    if (!response.ok)
+      throw new Error('Failed to fetch project budget revisions');
     return response.json();
   }
 
-  async createBudgetRevision(projectId: string, dto: CreateProjectBudgetRevisionDto): Promise<ProjectBudgetRevisionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/budget-revisions`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createBudgetRevision(
+    projectId: string,
+    dto: CreateProjectBudgetRevisionDto
+  ): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/budget-revisions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6763,11 +8531,16 @@ class ProjectService {
     return response.json();
   }
 
-  async submitBudgetRevision(revisionId: string): Promise<ProjectBudgetRevisionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/budget-revisions/${revisionId}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async submitBudgetRevision(
+    revisionId: string
+  ): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/budget-revisions/${revisionId}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6777,12 +8550,18 @@ class ProjectService {
     return response.json();
   }
 
-  async approveBudgetRevision(revisionId: string, comments?: string): Promise<ProjectBudgetRevisionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/budget-revisions/${revisionId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async approveBudgetRevision(
+    revisionId: string,
+    comments?: string
+  ): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/budget-revisions/${revisionId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6792,12 +8571,19 @@ class ProjectService {
     return response.json();
   }
 
-  async rejectBudgetRevision(revisionId: string, reason: string, comments?: string): Promise<ProjectBudgetRevisionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/budget-revisions/${revisionId}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ reason, comments }),
-    });
+  async rejectBudgetRevision(
+    revisionId: string,
+    reason: string,
+    comments?: string
+  ): Promise<ProjectBudgetRevisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/budget-revisions/${revisionId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ reason, comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6807,21 +8593,33 @@ class ProjectService {
     return response.json();
   }
 
-  async getForecastVersions(projectId: string): Promise<ProjectForecastVersionDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/forecast-versions`, {
-      headers: getAuthHeaders(),
-    });
+  async getForecastVersions(
+    projectId: string
+  ): Promise<ProjectForecastVersionDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/forecast-versions`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project forecast versions');
+    if (!response.ok)
+      throw new Error('Failed to fetch project forecast versions');
     return response.json();
   }
 
-  async createForecastVersion(projectId: string, dto: CreateProjectForecastVersionDto): Promise<ProjectForecastVersionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/forecast-versions`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createForecastVersion(
+    projectId: string,
+    dto: CreateProjectForecastVersionDto
+  ): Promise<ProjectForecastVersionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/forecast-versions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6831,11 +8629,16 @@ class ProjectService {
     return response.json();
   }
 
-  async activateForecastVersion(forecastVersionId: string): Promise<ProjectForecastVersionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/forecast-versions/${forecastVersionId}/activate`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+  async activateForecastVersion(
+    forecastVersionId: string
+  ): Promise<ProjectForecastVersionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/forecast-versions/${forecastVersionId}/activate`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6846,20 +8649,29 @@ class ProjectService {
   }
 
   async getAssetLinks(projectId: string): Promise<ProjectAssetLinkDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/asset-links`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/asset-links`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project asset links');
     return response.json();
   }
 
-  async addAssetLink(projectId: string, dto: CreateProjectAssetLinkDto): Promise<ProjectAssetLinkDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/asset-links`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addAssetLink(
+    projectId: string,
+    dto: CreateProjectAssetLinkDto
+  ): Promise<ProjectAssetLinkDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/asset-links`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6869,21 +8681,33 @@ class ProjectService {
     return response.json();
   }
 
-  async getExternalAccessPolicies(projectId: string): Promise<ProjectExternalAccessPolicyDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/external-access-policies`, {
-      headers: getAuthHeaders(),
-    });
+  async getExternalAccessPolicies(
+    projectId: string
+  ): Promise<ProjectExternalAccessPolicyDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/external-access-policies`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch external access policies');
+    if (!response.ok)
+      throw new Error('Failed to fetch external access policies');
     return response.json();
   }
 
-  async upsertExternalAccessPolicy(projectId: string, dto: CreateProjectExternalAccessPolicyDto): Promise<ProjectExternalAccessPolicyDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/external-access-policies`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async upsertExternalAccessPolicy(
+    projectId: string,
+    dto: CreateProjectExternalAccessPolicyDto
+  ): Promise<ProjectExternalAccessPolicyDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/external-access-policies`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6894,10 +8718,13 @@ class ProjectService {
   }
 
   async deleteExternalAccessPolicy(policyId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/external-access-policies/${policyId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external-access-policies/${policyId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -6906,208 +8733,362 @@ class ProjectService {
   }
 
   async getDecisions(projectId: string): Promise<ProjectDecisionDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/decisions`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/decisions`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!response.ok) throw new Error('Failed to fetch project decisions');
     return response.json();
   }
 
-  async addDecision(projectId: string, dto: CreateProjectDecisionDto): Promise<ProjectDecisionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/decisions`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to add project decision');
+  async addDecision(
+    projectId: string,
+    dto: CreateProjectDecisionDto
+  ): Promise<ProjectDecisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/decisions`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to add project decision'
+      );
     return response.json();
   }
 
-  async updateDecision(decisionId: string, dto: CreateProjectDecisionDto): Promise<ProjectDecisionDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/decisions/${decisionId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to update project decision');
+  async updateDecision(
+    decisionId: string,
+    dto: CreateProjectDecisionDto
+  ): Promise<ProjectDecisionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/decisions/${decisionId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to update project decision'
+      );
     return response.json();
   }
 
   async deleteDecision(decisionId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/decisions/${decisionId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to delete project decision');
+    const response = await fetch(
+      `${API_BASE_URL}/projects/decisions/${decisionId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to delete project decision'
+      );
   }
 
   async getMeetings(projectId: string): Promise<ProjectMeetingMinuteDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/meetings`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/meetings`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!response.ok) throw new Error('Failed to fetch project meetings');
     return response.json();
   }
 
-  async addMeeting(projectId: string, dto: CreateProjectMeetingMinuteDto): Promise<ProjectMeetingMinuteDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/meetings`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to add project meeting');
+  async addMeeting(
+    projectId: string,
+    dto: CreateProjectMeetingMinuteDto
+  ): Promise<ProjectMeetingMinuteDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/meetings`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to add project meeting'
+      );
     return response.json();
   }
 
-  async updateMeeting(meetingId: string, dto: CreateProjectMeetingMinuteDto): Promise<ProjectMeetingMinuteDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/meetings/${meetingId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to update project meeting');
+  async updateMeeting(
+    meetingId: string,
+    dto: CreateProjectMeetingMinuteDto
+  ): Promise<ProjectMeetingMinuteDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/meetings/${meetingId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to update project meeting'
+      );
     return response.json();
   }
 
   async deleteMeeting(meetingId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/meetings/${meetingId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to delete project meeting');
+    const response = await fetch(
+      `${API_BASE_URL}/projects/meetings/${meetingId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to delete project meeting'
+      );
   }
 
   async getActionItems(projectId: string): Promise<ProjectActionItemDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/action-items`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/action-items`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!response.ok) throw new Error('Failed to fetch project action items');
     return response.json();
   }
 
-  async addActionItem(projectId: string, dto: CreateProjectActionItemDto): Promise<ProjectActionItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/action-items`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to add project action item');
+  async addActionItem(
+    projectId: string,
+    dto: CreateProjectActionItemDto
+  ): Promise<ProjectActionItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/action-items`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to add project action item'
+      );
     return response.json();
   }
 
-  async updateActionItem(actionItemId: string, dto: CreateProjectActionItemDto): Promise<ProjectActionItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/action-items/${actionItemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to update project action item');
+  async updateActionItem(
+    actionItemId: string,
+    dto: CreateProjectActionItemDto
+  ): Promise<ProjectActionItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/action-items/${actionItemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to update project action item'
+      );
     return response.json();
   }
 
   async deleteActionItem(actionItemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/action-items/${actionItemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to delete project action item');
+    const response = await fetch(
+      `${API_BASE_URL}/projects/action-items/${actionItemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to delete project action item'
+      );
   }
 
-  async getLessonsLearned(projectId: string): Promise<ProjectLessonLearnedDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/lessons-learned`, {
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error('Failed to fetch project lessons learned');
+  async getLessonsLearned(
+    projectId: string
+  ): Promise<ProjectLessonLearnedDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/lessons-learned`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok)
+      throw new Error('Failed to fetch project lessons learned');
     return response.json();
   }
 
-  async addLessonLearned(projectId: string, dto: CreateProjectLessonLearnedDto): Promise<ProjectLessonLearnedDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/lessons-learned`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to add lesson learned');
+  async addLessonLearned(
+    projectId: string,
+    dto: CreateProjectLessonLearnedDto
+  ): Promise<ProjectLessonLearnedDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/lessons-learned`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to add lesson learned'
+      );
     return response.json();
   }
 
-  async updateLessonLearned(lessonId: string, dto: CreateProjectLessonLearnedDto): Promise<ProjectLessonLearnedDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/lessons-learned/${lessonId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to update lesson learned');
+  async updateLessonLearned(
+    lessonId: string,
+    dto: CreateProjectLessonLearnedDto
+  ): Promise<ProjectLessonLearnedDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/lessons-learned/${lessonId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to update lesson learned'
+      );
     return response.json();
   }
 
   async deleteLessonLearned(lessonId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/lessons-learned/${lessonId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to delete lesson learned');
+    const response = await fetch(
+      `${API_BASE_URL}/projects/lessons-learned/${lessonId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to delete lesson learned'
+      );
   }
 
   async getClosure(projectId: string): Promise<ProjectClosureDto | null> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/closure`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/closure`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!response.ok) throw new Error('Failed to fetch project closure');
     return response.json();
   }
 
-  async upsertClosure(projectId: string, dto: UpsertProjectClosureDto): Promise<ProjectClosureDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/closure`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to save project closure');
+  async upsertClosure(
+    projectId: string,
+    dto: UpsertProjectClosureDto
+  ): Promise<ProjectClosureDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/closure`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to save project closure'
+      );
     return response.json();
   }
 
   async submitClosure(projectId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/closure/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to submit project closure');
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/closure/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to submit project closure'
+      );
   }
 
   async approveClosure(closureId: string, comments?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/closure/${closureId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to approve project closure');
+    const response = await fetch(
+      `${API_BASE_URL}/projects/closure/${closureId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to approve project closure'
+      );
   }
 
-  async rejectClosure(closureId: string, reason: string, comments?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/closure/${closureId}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ reason, comments }),
-    });
-    if (!response.ok) throw new Error(await response.text() || 'Failed to reject project closure');
+  async rejectClosure(
+    closureId: string,
+    reason: string,
+    comments?: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/closure/${closureId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ reason, comments }),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || 'Failed to reject project closure'
+      );
   }
 
   async getAiInsights(projectId: string): Promise<ProjectAiInsightDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/ai-insights`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/ai-insights`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch AI insights');
     return response.json();
   }
 
-  async attachDocument(projectId: string, dto: AttachProjectDocumentDto): Promise<ProjectDocumentDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/documents`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async attachDocument(
+    projectId: string,
+    dto: AttachProjectDocumentDto
+  ): Promise<ProjectDocumentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/documents`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7120,7 +9101,10 @@ class ProjectService {
   async uploadProjectDocument(
     projectId: string,
     file: File,
-    metadata: Omit<AttachProjectDocumentDto, 'filePath' | 'publicUrl' | 'fileType' | 'fileSize'>,
+    metadata: Omit<
+      AttachProjectDocumentDto,
+      'filePath' | 'publicUrl' | 'fileType' | 'fileSize'
+    >
   ): Promise<ProjectDocumentDto> {
     const formData = new FormData();
     formData.append('file', file);
@@ -7148,10 +9132,13 @@ class ProjectService {
   }
 
   async deleteDocument(documentId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/documents/${documentId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/documents/${documentId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7159,12 +9146,18 @@ class ProjectService {
     }
   }
 
-  async addComment(projectId: string, dto: CreateProjectCommentDto): Promise<ProjectCommentDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/comments`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addComment(
+    projectId: string,
+    dto: CreateProjectCommentDto
+  ): Promise<ProjectCommentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/comments`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7175,29 +9168,43 @@ class ProjectService {
   }
 
   async getExternalProjects(): Promise<ProjectExternalSummaryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch external projects');
     return response.json();
   }
 
-  async getExternalProjectById(projectId: string): Promise<ProjectExternalDetailDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}`, {
-      headers: getAuthHeaders(),
-    });
+  async getExternalProjectById(
+    projectId: string
+  ): Promise<ProjectExternalDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch external project');
     return response.json();
   }
 
-  async addExternalProjectComment(projectId: string, dto: CreateProjectCommentDto): Promise<ProjectCommentDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/comments`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async addExternalProjectComment(
+    projectId: string,
+    dto: CreateProjectCommentDto
+  ): Promise<ProjectCommentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}/comments`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7210,13 +9217,16 @@ class ProjectService {
   async updateExternalProjectWorkItemProgress(
     projectId: string,
     workItemId: string,
-    dto: UpdateProjectWorkItemProgressDto,
+    dto: UpdateProjectWorkItemProgressDto
   ): Promise<ProjectWorkItemDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/work-items/${workItemId}/progress`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}/work-items/${workItemId}/progress`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7226,12 +9236,19 @@ class ProjectService {
     return response.json();
   }
 
-  async submitExternalDeliverable(projectId: string, deliverableId: string, dto: SubmitProjectDeliverableDto): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async submitExternalDeliverable(
+    projectId: string,
+    deliverableId: string,
+    dto: SubmitProjectDeliverableDto
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7241,12 +9258,19 @@ class ProjectService {
     return response.json();
   }
 
-  async approveExternalDeliverable(projectId: string, deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async approveExternalDeliverable(
+    projectId: string,
+    deliverableId: string,
+    comments?: string
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7256,12 +9280,19 @@ class ProjectService {
     return response.json();
   }
 
-  async rejectExternalDeliverable(projectId: string, deliverableId: string, comments?: string): Promise<ProjectDeliverableDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ comments }),
-    });
+  async rejectExternalDeliverable(
+    projectId: string,
+    deliverableId: string,
+    comments?: string
+  ): Promise<ProjectDeliverableDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}/deliverables/${deliverableId}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ comments }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7271,12 +9302,18 @@ class ProjectService {
     return response.json();
   }
 
-  async attachExternalProjectDocument(projectId: string, dto: AttachProjectDocumentDto): Promise<ProjectDocumentDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/external/my-projects/${projectId}/documents`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async attachExternalProjectDocument(
+    projectId: string,
+    dto: AttachProjectDocumentDto
+  ): Promise<ProjectDocumentDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/external/my-projects/${projectId}/documents`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7289,7 +9326,10 @@ class ProjectService {
   async uploadExternalProjectDocument(
     projectId: string,
     file: File,
-    metadata: Omit<AttachProjectDocumentDto, 'filePath' | 'publicUrl' | 'fileType' | 'fileSize'>,
+    metadata: Omit<
+      AttachProjectDocumentDto,
+      'filePath' | 'publicUrl' | 'fileType' | 'fileSize'
+    >
   ): Promise<ProjectDocumentDto> {
     const formData = new FormData();
     formData.append('file', file);
@@ -7318,20 +9358,29 @@ class ProjectService {
   }
 
   async getMobileSummary(): Promise<ProjectMobileSummaryDto> {
-    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/summary`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL.replace('/api', '')}/api/mobile/projects/summary`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch mobile project summary');
     return response.json();
   }
 
-  async submitMobileTimesheet(projectId: string, dto: CreateProjectTimesheetEntryDto): Promise<ProjectTimesheetEntryDto> {
-    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/timesheets`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async submitMobileTimesheet(
+    projectId: string,
+    dto: CreateProjectTimesheetEntryDto
+  ): Promise<ProjectTimesheetEntryDto> {
+    const response = await fetch(
+      `${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/timesheets`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7341,12 +9390,18 @@ class ProjectService {
     return response.json();
   }
 
-  async submitMobileExpense(projectId: string, dto: CreateProjectExpenseDto): Promise<ProjectExpenseDto> {
-    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/expenses`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async submitMobileExpense(
+    projectId: string,
+    dto: CreateProjectExpenseDto
+  ): Promise<ProjectExpenseDto> {
+    const response = await fetch(
+      `${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/expenses`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7356,12 +9411,19 @@ class ProjectService {
     return response.json();
   }
 
-  async updateMobileWorkItemProgress(projectId: string, workItemId: string, dto: UpdateProjectWorkItemProgressDto): Promise<ProjectWorkItemDto> {
-    const response = await fetch(`${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/work-items/${workItemId}/progress`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateMobileWorkItemProgress(
+    projectId: string,
+    workItemId: string,
+    dto: UpdateProjectWorkItemProgressDto
+  ): Promise<ProjectWorkItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL.replace('/api', '')}/api/mobile/projects/${projectId}/work-items/${workItemId}/progress`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7381,25 +9443,36 @@ class ProjectService {
   }
 
   async getMasterDataOverview(): Promise<ProjectMasterDataOverviewDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/master-data-overview`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/master-data-overview`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project master data overview');
+    if (!response.ok)
+      throw new Error('Failed to fetch project master data overview');
     return response.json();
   }
 
-  async getProjectUnitTypeTemplates(includeInactive: boolean = false): Promise<ProjectUnitTypeTemplateDto[]> {
+  async getProjectUnitTypeTemplates(
+    includeInactive: boolean = false
+  ): Promise<ProjectUnitTypeTemplateDto[]> {
     const query = includeInactive ? '?includeInactive=true' : '';
-    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types${query}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/unit-types${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project unit types');
     return response.json();
   }
 
-  async createProjectUnitTypeTemplate(dto: CreateProjectUnitTypeTemplateDto): Promise<ProjectUnitTypeTemplateDto> {
+  async createProjectUnitTypeTemplate(
+    dto: CreateProjectUnitTypeTemplateDto
+  ): Promise<ProjectUnitTypeTemplateDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -7414,12 +9487,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectUnitTypeTemplate(id: string, dto: CreateProjectUnitTypeTemplateDto): Promise<ProjectUnitTypeTemplateDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectUnitTypeTemplate(
+    id: string,
+    dto: CreateProjectUnitTypeTemplateDto
+  ): Promise<ProjectUnitTypeTemplateDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/unit-types/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7430,10 +9509,13 @@ class ProjectService {
   }
 
   async deleteProjectUnitTypeTemplate(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/unit-types/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/unit-types/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7441,16 +9523,24 @@ class ProjectService {
     }
   }
 
-  async getCatalogEntries(catalogType: string): Promise<ProjectCatalogEntryDto[]> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs?catalogType=${encodeURIComponent(catalogType)}`, {
-      headers: getAuthHeaders(),
-    });
+  async getCatalogEntries(
+    catalogType: string
+  ): Promise<ProjectCatalogEntryDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/catalogs?catalogType=${encodeURIComponent(catalogType)}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project catalog entries');
+    if (!response.ok)
+      throw new Error('Failed to fetch project catalog entries');
     return response.json();
   }
 
-  async createCatalogEntry(dto: CreateProjectCatalogEntryDto): Promise<ProjectCatalogEntryDto> {
+  async createCatalogEntry(
+    dto: CreateProjectCatalogEntryDto
+  ): Promise<ProjectCatalogEntryDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -7465,12 +9555,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateCatalogEntry(id: string, dto: CreateProjectCatalogEntryDto): Promise<ProjectCatalogEntryDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateCatalogEntry(
+    id: string,
+    dto: CreateProjectCatalogEntryDto
+  ): Promise<ProjectCatalogEntryDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/catalogs/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7481,10 +9577,13 @@ class ProjectService {
   }
 
   async deleteCatalogEntry(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/catalogs/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7493,11 +9592,16 @@ class ProjectService {
   }
 
   async seedCatalogDefaults(catalogType?: string): Promise<void> {
-    const query = catalogType ? `?catalogType=${encodeURIComponent(catalogType)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/admin/catalogs/seed-defaults${query}`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const query = catalogType
+      ? `?catalogType=${encodeURIComponent(catalogType)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/catalogs/seed-defaults${query}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7520,7 +9624,10 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectType(id: string, dto: CreateProjectTypeDto): Promise<ProjectTypeDto> {
+  async updateProjectType(
+    id: string,
+    dto: CreateProjectTypeDto
+  ): Promise<ProjectTypeDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/types/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
@@ -7556,7 +9663,9 @@ class ProjectService {
     return response.json();
   }
 
-  async createProjectPriority(dto: CreateProjectPriorityDto): Promise<ProjectPriorityDto> {
+  async createProjectPriority(
+    dto: CreateProjectPriorityDto
+  ): Promise<ProjectPriorityDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/priorities`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -7571,12 +9680,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectPriority(id: string, dto: CreateProjectPriorityDto): Promise<ProjectPriorityDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/priorities/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectPriority(
+    id: string,
+    dto: CreateProjectPriorityDto
+  ): Promise<ProjectPriorityDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/priorities/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7587,10 +9702,13 @@ class ProjectService {
   }
 
   async deleteProjectPriority(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/priorities/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/priorities/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7598,17 +9716,26 @@ class ProjectService {
     }
   }
 
-  async getProjectTemplates(projectTypeId?: string): Promise<ProjectTemplateDto[]> {
-    const query = projectTypeId ? `?projectTypeId=${encodeURIComponent(projectTypeId)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/admin/templates${query}`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectTemplates(
+    projectTypeId?: string
+  ): Promise<ProjectTemplateDto[]> {
+    const query = projectTypeId
+      ? `?projectTypeId=${encodeURIComponent(projectTypeId)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/templates${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project templates');
     return response.json();
   }
 
-  async createProjectTemplate(dto: CreateProjectTemplateDto): Promise<ProjectTemplateDto> {
+  async createProjectTemplate(
+    dto: CreateProjectTemplateDto
+  ): Promise<ProjectTemplateDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/templates`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -7623,12 +9750,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectTemplate(id: string, dto: CreateProjectTemplateDto): Promise<ProjectTemplateDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/templates/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectTemplate(
+    id: string,
+    dto: CreateProjectTemplateDto
+  ): Promise<ProjectTemplateDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/templates/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7639,10 +9772,13 @@ class ProjectService {
   }
 
   async deleteProjectTemplate(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/templates/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/templates/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7650,22 +9786,35 @@ class ProjectService {
     }
   }
 
-  async getProjectPhaseTemplates(projectTypeId?: string): Promise<ProjectPhaseTemplateDto[]> {
-    const query = projectTypeId ? `?projectTypeId=${encodeURIComponent(projectTypeId)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates${query}`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectPhaseTemplates(
+    projectTypeId?: string
+  ): Promise<ProjectPhaseTemplateDto[]> {
+    const query = projectTypeId
+      ? `?projectTypeId=${encodeURIComponent(projectTypeId)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/phase-templates${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project phase templates');
+    if (!response.ok)
+      throw new Error('Failed to fetch project phase templates');
     return response.json();
   }
 
-  async createProjectPhaseTemplate(dto: CreateProjectPhaseTemplateDto): Promise<ProjectPhaseTemplateDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createProjectPhaseTemplate(
+    dto: CreateProjectPhaseTemplateDto
+  ): Promise<ProjectPhaseTemplateDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/phase-templates`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7675,12 +9824,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectPhaseTemplate(id: string, dto: UpdateProjectPhaseTemplateDto): Promise<ProjectPhaseTemplateDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectPhaseTemplate(
+    id: string,
+    dto: UpdateProjectPhaseTemplateDto
+  ): Promise<ProjectPhaseTemplateDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/phase-templates/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7691,10 +9846,13 @@ class ProjectService {
   }
 
   async deleteProjectPhaseTemplate(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/phase-templates/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/phase-templates/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7702,22 +9860,35 @@ class ProjectService {
     }
   }
 
-  async getProjectStageGateRules(projectPhaseTemplateId?: string): Promise<ProjectStageGateRuleDto[]> {
-    const query = projectPhaseTemplateId ? `?projectPhaseTemplateId=${encodeURIComponent(projectPhaseTemplateId)}` : '';
-    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules${query}`, {
-      headers: getAuthHeaders(),
-    });
+  async getProjectStageGateRules(
+    projectPhaseTemplateId?: string
+  ): Promise<ProjectStageGateRuleDto[]> {
+    const query = projectPhaseTemplateId
+      ? `?projectPhaseTemplateId=${encodeURIComponent(projectPhaseTemplateId)}`
+      : '';
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/stage-gate-rules${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch project stage gate rules');
+    if (!response.ok)
+      throw new Error('Failed to fetch project stage gate rules');
     return response.json();
   }
 
-  async createProjectStageGateRule(dto: CreateProjectStageGateRuleDto): Promise<ProjectStageGateRuleDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async createProjectStageGateRule(
+    dto: CreateProjectStageGateRuleDto
+  ): Promise<ProjectStageGateRuleDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/stage-gate-rules`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7727,12 +9898,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProjectStageGateRule(id: string, dto: UpdateProjectStageGateRuleDto): Promise<ProjectStageGateRuleDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProjectStageGateRule(
+    id: string,
+    dto: UpdateProjectStageGateRuleDto
+  ): Promise<ProjectStageGateRuleDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/stage-gate-rules/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7743,10 +9920,13 @@ class ProjectService {
   }
 
   async deleteProjectStageGateRule(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/stage-gate-rules/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/stage-gate-rules/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7763,7 +9943,9 @@ class ProjectService {
     return response.json();
   }
 
-  async createPortfolio(dto: CreateProjectPortfolioDto): Promise<ProjectPortfolioDto> {
+  async createPortfolio(
+    dto: CreateProjectPortfolioDto
+  ): Promise<ProjectPortfolioDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -7778,12 +9960,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updatePortfolio(id: string, dto: CreateProjectPortfolioDto): Promise<ProjectPortfolioDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updatePortfolio(
+    id: string,
+    dto: CreateProjectPortfolioDto
+  ): Promise<ProjectPortfolioDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/portfolios/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7794,10 +9982,13 @@ class ProjectService {
   }
 
   async deletePortfolio(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/portfolios/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/portfolios/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7809,15 +10000,20 @@ class ProjectService {
     const queryParams = new URLSearchParams();
     if (portfolioId) queryParams.append('portfolioId', portfolioId);
 
-    const response = await fetch(`${API_BASE_URL}/projects/admin/programs?${queryParams.toString()}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/programs?${queryParams.toString()}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch project programs');
     return response.json();
   }
 
-  async createProgram(dto: CreateProjectProgramDto): Promise<ProjectProgramDto> {
+  async createProgram(
+    dto: CreateProjectProgramDto
+  ): Promise<ProjectProgramDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/programs`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -7832,12 +10028,18 @@ class ProjectService {
     return response.json();
   }
 
-  async updateProgram(id: string, dto: CreateProjectProgramDto): Promise<ProjectProgramDto> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/programs/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
-    });
+  async updateProgram(
+    id: string,
+    dto: CreateProjectProgramDto
+  ): Promise<ProjectProgramDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/programs/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7848,10 +10050,13 @@ class ProjectService {
   }
 
   async deleteProgram(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/projects/admin/programs/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/admin/programs/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -7868,7 +10073,9 @@ class ProjectService {
     return response.json();
   }
 
-  async updateSettings(dto: UpdateProjectManagementSettingsDto): Promise<ProjectManagementSettingsDto> {
+  async updateSettings(
+    dto: UpdateProjectManagementSettingsDto
+  ): Promise<ProjectManagementSettingsDto> {
     const response = await fetch(`${API_BASE_URL}/projects/admin/settings`, {
       method: 'PUT',
       headers: getAuthHeaders(),

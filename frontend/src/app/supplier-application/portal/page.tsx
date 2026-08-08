@@ -279,10 +279,11 @@ export default function SupplierApplicantPortalPage() {
         paymentReference: paymentReference || undefined,
         rowVersion: portal.tokenRowVersion,
       });
-      await load();
+      service.clearSession();
       toast.success(
-        'Payment submitted. Application access will unlock after trusted verification.'
+        'Payment submitted. Return here after the application token is sent following trusted verification.'
       );
+      router.replace('/supplier-application?tab=login&payment=pending');
     } catch (paymentError) {
       toast.error(
         paymentError instanceof Error ? paymentError.message : 'Payment failed.'

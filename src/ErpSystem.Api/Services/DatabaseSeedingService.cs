@@ -43,6 +43,8 @@ namespace ErpSystem.Web.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+        private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
+        private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
@@ -101,6 +103,8 @@ namespace ErpSystem.Web.Services
             IWebHostEnvironment environment,
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+            QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
+            QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
             ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
@@ -114,6 +118,8 @@ namespace ErpSystem.Web.Services
             _environment = environment;
             _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
+            _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
+            _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
@@ -192,6 +198,18 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring TDC access roles, permissions, committees, and Draft workflow templates are seeded...");
                     await _procurementAccessControlSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyConfigurationProfileSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring draft quantity-survey configuration profiles are seeded...");
+                    await _quantitySurveyConfigurationProfileSeeder.SeedAsync();
+                }
+
+                if (_quantitySurveyAccessControlSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring quantity-survey configuration permissions and roles are seeded...");
+                    await _quantitySurveyAccessControlSeeder.SeedAsync();
                 }
 
                 if (_procurementStatutoryReportSeeder is not null)

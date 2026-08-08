@@ -2,6 +2,8 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
@@ -80,6 +82,85 @@ public sealed class ProcurementSupplierApplicantAccessService :
         _unitOfWork.Repository<BusinessPartnerUser>();
     private IGenericRepository<UserTenant> UserTenants =>
         _unitOfWork.Repository<UserTenant>();
+
+    public async Task<SupplierApplicantVerificationPreparationDto>
+        PrepareVerificationChallengeAsync(
+            Guid tenantId,
+            ProcurementSupplierApplicantVerificationChannel channel,
+            string contact,
+            CancellationToken cancellationToken = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw Error("SUPPLIER_APPLICANT_TENANT_REQUIRED", "A tenant is required.", 400);
+
+        var normalizedContact = SupplierApplicantContactNormalizer.Normalize(channel, contact);
+        ValidateContact(channel, normalizedContact);
+        var contactHashes = SupplierApplicantContactNormalizer
+            .GetLookupAliases(channel, normalizedContact)
+            .Select(Hash)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var existingMatches = await Accesses.GetQueryable(item =>
+                item.TenantId == tenantId &&
+                !item.IsDeleted &&
+                contactHashes.Contains(item.VerifiedContactHashSha256) &&
+                item.Status != ProcurementSupplierApplicantAccessStatus.Rejected)
+            .Include(item => item.Registration)
+            .Include(item => item.Token)
+            .OrderByDescending(item => item.VerifiedAtUtc)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        if (existingMatches.Count > 1)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_AMBIGUOUS",
+                "This contact is linked to more than one supplier record. Contact procurement support before continuing.",
+                409);
+
+        var resumable = existingMatches.SingleOrDefault();
+        if (resumable is not null)
+        {
+            var registrationIsResumable =
+                string.Equals(resumable.Registration.Status, "Draft", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(resumable.Registration.Status, "MoreInfoRequired", StringComparison.OrdinalIgnoreCase);
+            var canResume =
+                resumable.Status == ProcurementSupplierApplicantAccessStatus.ApplicationInProgress &&
+                !resumable.TerminalAtUtc.HasValue &&
+                resumable.Token.Status != ProcurementSupplierOnboardingTokenStatus.Expired &&
+                registrationIsResumable;
+            if (!canResume)
+                throw Error(
+                    "SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED",
+                    "This contact is already assigned to a supplier or completed application. Sign in with the existing account or contact procurement support.",
+                    409);
+
+            return new SupplierApplicantVerificationPreparationDto
+            {
+                TenantId = tenantId,
+                Channel = channel,
+                NormalizedContact = normalizedContact,
+                MaskedContact = MaskContact(channel, normalizedContact),
+                ResumesExistingApplication = true
+            };
+        }
+
+        if (await FindConflictingIdentityAsync(
+                tenantId, channel, normalizedContact, cancellationToken) is not null)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED",
+                "This contact is already assigned to an ERP account. Sign in with that account or use a separate supplier contact.",
+                409);
+
+        return new SupplierApplicantVerificationPreparationDto
+        {
+            TenantId = tenantId,
+            Channel = channel,
+            NormalizedContact = normalizedContact,
+            MaskedContact = MaskContact(channel, normalizedContact),
+            ResumesExistingApplication = false
+        };
+    }
 
     public async Task<SupplierApplicantTokenIssueDto> CreateVerifiedApplicationAsync(
         VerifyAndIssueSupplierApplicantTokenRequest request,
@@ -817,7 +898,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         if (session.PaymentOnly)
             throw Error("SUPPLIER_APPLICANT_PAYMENT_REQUIRED",
                 "Payment or an approved exemption is required before submission.", 409);
-        await _registrationService.SubmitForReviewAsync(
+        await _registrationService.SubmitExternalApplicantForReviewAsync(
             session.RegistrationId,
             session.ApplicantActorId);
         var detail = await _registrationService.GetByIdAsync(session.RegistrationId)
@@ -1523,6 +1604,431 @@ public sealed class ProcurementSupplierApplicantAccessService :
             }).ToListAsync(cancellationToken);
     }
 
+    public async Task<SupplierApplicantContactCorrectionPreparationDto>
+        PrepareVerifiedContactCorrectionAsync(
+            Guid registrationId,
+            PrepareSupplierApplicantContactCorrectionRequest request,
+            Guid actorUserId,
+            string correlationId,
+            CancellationToken cancellationToken = default)
+    {
+        EnsureInternalTenant();
+        EnsureAuthenticatedActor(actorUserId);
+        await EnsureApprovalPermissionAsync(
+            registrationId, NormalizeCorrelation(correlationId), cancellationToken);
+
+        var contact = SupplierApplicantContactNormalizer.Normalize(
+            request.Channel, request.Contact);
+        ValidateContact(request.Channel, contact);
+        var access = await LoadAccessAsync(registrationId, cancellationToken);
+        EnsureContactCorrectionEligible(access);
+        await EnsureContactAvailableForCorrectionAsync(
+            access, request.Channel, contact, cancellationToken);
+
+        return new SupplierApplicantContactCorrectionPreparationDto
+        {
+            TenantId = access.TenantId,
+            Channel = request.Channel,
+            NormalizedContact = contact,
+            MaskedContact = MaskContact(request.Channel, contact)
+        };
+    }
+
+    public async Task<SupplierApplicantContactCorrectionResultDto>
+        CorrectVerifiedContactAndRetryAsync(
+            Guid registrationId,
+            CorrectSupplierApplicantVerifiedContactRequest request,
+            Guid actorUserId,
+            string correlationId,
+            CancellationToken cancellationToken = default)
+    {
+        var correlation = NormalizeCorrelation(correlationId);
+        var prepared = await PrepareVerifiedContactCorrectionAsync(
+            registrationId, request, actorUserId, correlation, cancellationToken);
+        var reason = request.Reason?.Trim() ?? string.Empty;
+        if (reason.Length is < 10 or > 500)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_CORRECTION_REASON_INVALID",
+                "Enter a correction reason between 10 and 500 characters.",
+                400);
+
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var access = await LoadAccessAsync(
+                    registrationId, cancellationToken, tracked: true);
+                EnsureContactCorrectionEligible(access);
+                await EnsureContactAvailableForCorrectionAsync(
+                    access,
+                    prepared.Channel,
+                    prepared.NormalizedContact,
+                    cancellationToken);
+                var auditReason = RedactContacts(
+                    reason,
+                    access.VerifiedContact,
+                    request.Contact,
+                    prepared.NormalizedContact);
+                var previousChannel = access.VerifiedChannel;
+                var previousContact = access.VerifiedContact;
+
+                access.VerifiedChannel = prepared.Channel;
+                access.VerifiedContact = prepared.NormalizedContact;
+                access.VerifiedContactMasked = prepared.MaskedContact;
+                access.VerifiedContactHashSha256 = Hash(prepared.NormalizedContact);
+                access.VerifiedAtUtc = DateTime.UtcNow;
+                access.LastNotificationFailure = null;
+                Touch(access);
+                Capture(access);
+                await Accesses.UpdateAsync(access);
+
+                var registration = access.Registration;
+                if (previousChannel != prepared.Channel)
+                {
+                    if (previousChannel ==
+                            ProcurementSupplierApplicantVerificationChannel.Email &&
+                        ContactMatches(
+                            previousChannel,
+                            registration.ApplicantEmail,
+                            previousContact))
+                        registration.ApplicantEmail = null;
+                    if (previousChannel ==
+                            ProcurementSupplierApplicantVerificationChannel.Sms &&
+                        ContactMatches(
+                            previousChannel,
+                            registration.ApplicantPhone,
+                            previousContact))
+                        registration.ApplicantPhone = null;
+                }
+                if (prepared.Channel ==
+                    ProcurementSupplierApplicantVerificationChannel.Email)
+                    registration.ApplicantEmail = prepared.NormalizedContact;
+                else
+                    registration.ApplicantPhone = prepared.NormalizedContact;
+                registration.RegistrationDataJson = UpdateRegistrationContactJson(
+                    registration.RegistrationDataJson,
+                    previousChannel,
+                    previousContact,
+                    prepared.Channel,
+                    prepared.NormalizedContact);
+                registration.UpdatedAt = DateTime.UtcNow;
+                registration.UpdatedBy = "Supplier Applicant Contact Recovery";
+                registration.LastModifiedById = actorUserId;
+                await Registrations.UpdateAsync(registration);
+
+                if (registration.BusinessPartnerId.HasValue)
+                {
+                    var businessPartner = await BusinessPartners.GetQueryable(item =>
+                            item.TenantId == access.TenantId &&
+                            item.Id == registration.BusinessPartnerId.Value &&
+                            !item.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw Error(
+                            "SUPPLIER_APPLICANT_BUSINESS_PARTNER_NOT_FOUND",
+                            "The approved business partner was not found in the current tenant.",
+                            409);
+                    if (previousChannel != prepared.Channel)
+                    {
+                        if (previousChannel ==
+                                ProcurementSupplierApplicantVerificationChannel.Email &&
+                            ContactMatches(
+                                previousChannel,
+                                businessPartner.PrimaryEmail,
+                                previousContact))
+                            businessPartner.PrimaryEmail = null;
+                        if (previousChannel ==
+                                ProcurementSupplierApplicantVerificationChannel.Sms &&
+                            ContactMatches(
+                                previousChannel,
+                                businessPartner.PrimaryPhone,
+                                previousContact))
+                            businessPartner.PrimaryPhone = null;
+                    }
+                    if (prepared.Channel ==
+                        ProcurementSupplierApplicantVerificationChannel.Email)
+                        businessPartner.PrimaryEmail = prepared.NormalizedContact;
+                    else
+                        businessPartner.PrimaryPhone = prepared.NormalizedContact;
+                    businessPartner.UpdatedAt = DateTime.UtcNow;
+                    businessPartner.UpdatedBy = actorUserId.ToString();
+                    businessPartner.LastModifiedById = actorUserId;
+                    await BusinessPartners.UpdateAsync(businessPartner);
+                }
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await RecordUserEventAsync(
+                    access,
+                    access.Token,
+                    "ApplicantVerifiedContactCorrected",
+                    ProcurementControlEventResult.Succeeded,
+                    new
+                    {
+                        Channel = prepared.Channel.ToString(),
+                        ContactChanged = true,
+                        ReverificationMethod = "OneTimePassword",
+                        CorrectedAtUtc = access.VerifiedAtUtc,
+                        ProvisioningRetryRequested = true
+                    },
+                    auditReason,
+                    correlation,
+                    cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        }, cancellationToken);
+
+        string? retryFailure = null;
+        var provisioningCorrelation = ChildCorrelation(
+            correlation, "provision", reservedCharacters: 6);
+        try
+        {
+            await RetryApprovedSupplierActivationAsync(
+                registrationId,
+                actorUserId,
+                provisioningCorrelation,
+                cancellationToken);
+        }
+        catch (ProcurementSupplierApplicantAccessException exception)
+        {
+            retryFailure = exception.Message;
+            var access = await LoadAccessAsync(registrationId, cancellationToken);
+            await RecordUserEventAsync(
+                access,
+                access.Token,
+                "ApplicantContactCorrectionProvisioningRetryFailed",
+                ProcurementControlEventResult.Failed,
+                new
+                {
+                    ContactCorrectionPersisted = true,
+                    FailureCode = exception.Code,
+                    RetryAvailable = true
+                },
+                "The verified contact was corrected, but supplier-account provisioning still requires recovery.",
+                ChildCorrelation(correlation, "provision-failed"),
+                cancellationToken);
+        }
+
+        var current = await LoadAccessAsync(registrationId, cancellationToken);
+        var delivered = current.Status ==
+            ProcurementSupplierApplicantAccessStatus.CredentialDelivered;
+        return new SupplierApplicantContactCorrectionResultDto
+        {
+            RegistrationId = registrationId,
+            MaskedContact = current.VerifiedContactMasked,
+            Status = current.Status,
+            ContactCorrected = true,
+            ProvisioningRetried = true,
+            CredentialDelivered = delivered,
+            Message = delivered
+                ? "The verified supplier contact was corrected and temporary credentials were sent."
+                : retryFailure is null
+                    ? "The verified supplier contact was corrected, but credential delivery still requires Retry."
+                    : $"The verified supplier contact was corrected. {retryFailure}"
+        };
+    }
+
+    private async Task EnsureContactAvailableForCorrectionAsync(
+        ProcurementSupplierApplicantAccess access,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string contact,
+        CancellationToken cancellationToken)
+    {
+        if (channel == access.VerifiedChannel && string.Equals(
+                contact,
+                SupplierApplicantContactNormalizer.Normalize(
+                    access.VerifiedChannel, access.VerifiedContact),
+                StringComparison.OrdinalIgnoreCase))
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_UNCHANGED",
+                "Enter a different supplier contact before requesting verification.",
+                409);
+        if (await FindConflictingIdentityAsync(
+                access.TenantId, channel, contact, cancellationToken) is not null)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED",
+                "This contact is already assigned to an ERP account. Use a separate supplier contact.",
+                409);
+
+        var aliases = SupplierApplicantContactNormalizer
+            .GetLookupAliases(channel, contact)
+            .Select(Hash)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var conflict = await Accesses.GetQueryable(item =>
+                item.TenantId == access.TenantId &&
+                item.Id != access.Id &&
+                !item.IsDeleted &&
+                aliases.Contains(item.VerifiedContactHashSha256) &&
+                item.Status != ProcurementSupplierApplicantAccessStatus.Rejected)
+            .AnyAsync(cancellationToken);
+        if (conflict)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_IN_USE",
+                "This contact is already assigned to another supplier application.",
+                409);
+    }
+
+    private static void EnsureContactCorrectionEligible(
+        ProcurementSupplierApplicantAccess access)
+    {
+        if (!string.Equals(
+                access.Registration.Status,
+                "Approved",
+                StringComparison.OrdinalIgnoreCase) ||
+            !access.Registration.BusinessPartnerId.HasValue)
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_CORRECTION_NOT_APPROVED",
+                "Verified-contact correction is available only for an approved supplier application.",
+                409);
+        if (access.ApprovedUserId.HasValue ||
+            access.Status is not (
+                ProcurementSupplierApplicantAccessStatus.ApprovedPendingCredentialDelivery or
+                ProcurementSupplierApplicantAccessStatus.ActivationFailed))
+            throw Error(
+                "SUPPLIER_APPLICANT_CONTACT_CORRECTION_NOT_ALLOWED",
+                "The verified contact can be corrected only before a supplier login has been provisioned.",
+                409);
+    }
+
+    private static string UpdateRegistrationContactJson(
+        string? json,
+        ProcurementSupplierApplicantVerificationChannel previousChannel,
+        string previousContact,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string contact)
+    {
+        JsonObject root;
+        try
+        {
+            root = string.IsNullOrWhiteSpace(json)
+                ? new JsonObject()
+                : JsonNode.Parse(json) as JsonObject
+                  ?? throw new JsonException("The registration data must be a JSON object.");
+        }
+        catch (JsonException)
+        {
+            throw Error(
+                "SUPPLIER_APPLICANT_REGISTRATION_DATA_INVALID",
+                "The approved registration data cannot be safely updated. Correct its invalid JSON before retrying.",
+                409);
+        }
+
+        UpdateRegistrationContactObject(
+            root, previousChannel, previousContact, channel, contact);
+        var nestedProperty = root
+            .Select(item => item.Key)
+            .FirstOrDefault(item => string.Equals(
+                item, "registrationData", StringComparison.OrdinalIgnoreCase));
+        if (nestedProperty is not null && root[nestedProperty] is JsonObject nested)
+        {
+            UpdateRegistrationContactObject(
+                nested, previousChannel, previousContact, channel, contact);
+        }
+        else if (nestedProperty is not null &&
+                 root[nestedProperty] is JsonValue nestedValue &&
+                 nestedValue.TryGetValue<string>(out var nestedJson) &&
+                 !string.IsNullOrWhiteSpace(nestedJson))
+        {
+            try
+            {
+                if (JsonNode.Parse(nestedJson) is JsonObject nestedObject)
+                {
+                    UpdateRegistrationContactObject(
+                        nestedObject,
+                        previousChannel,
+                        previousContact,
+                        channel,
+                        contact);
+                    root[nestedProperty] = nestedObject.ToJsonString(JsonOptions);
+                }
+            }
+            catch (JsonException)
+            {
+                throw Error(
+                    "SUPPLIER_APPLICANT_REGISTRATION_DATA_INVALID",
+                    "The approved registration data contains invalid nested JSON and cannot be safely updated.",
+                    409);
+            }
+        }
+        return root.ToJsonString(JsonOptions);
+    }
+
+    private static void UpdateRegistrationContactObject(
+        JsonObject root,
+        ProcurementSupplierApplicantVerificationChannel previousChannel,
+        string previousContact,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string contact)
+    {
+        var previousPropertyName = previousChannel ==
+            ProcurementSupplierApplicantVerificationChannel.Email
+            ? "email"
+            : "phone";
+        var previousProperty = root
+            .Select(item => item.Key)
+            .FirstOrDefault(item => string.Equals(
+                item, previousPropertyName, StringComparison.OrdinalIgnoreCase));
+        if (previousChannel != channel &&
+            previousProperty is not null &&
+            root[previousProperty] is JsonValue previousValue &&
+            previousValue.TryGetValue<string>(out var recordedPreviousContact) &&
+            ContactMatches(
+                previousChannel,
+                recordedPreviousContact,
+                previousContact))
+            root[previousProperty] = null;
+
+        var propertyName = channel ==
+            ProcurementSupplierApplicantVerificationChannel.Email
+            ? "email"
+            : "phone";
+        var existingProperty = root
+            .Select(item => item.Key)
+            .FirstOrDefault(item => string.Equals(
+                item, propertyName, StringComparison.OrdinalIgnoreCase));
+        root[existingProperty ?? propertyName] = contact;
+    }
+
+    private static bool ContactMatches(
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string? candidate,
+        string expected)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return false;
+        return string.Equals(
+            SupplierApplicantContactNormalizer.Normalize(channel, candidate),
+            SupplierApplicantContactNormalizer.Normalize(channel, expected),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string RedactContacts(
+        string reason,
+        params string?[] contacts)
+    {
+        var redacted = reason;
+        foreach (var contact in contacts
+                     .Where(item => !string.IsNullOrWhiteSpace(item))
+                     .Select(item => item!.Trim())
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            redacted = Regex.Replace(
+                redacted,
+                Regex.Escape(contact),
+                "[redacted contact]",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(100));
+        }
+        return redacted;
+    }
+
     private async Task DeliverCredentialAsync(
         ProcurementSupplierApplicantAccess access,
         string temporaryPassword,
@@ -2075,6 +2581,16 @@ public sealed class ProcurementSupplierApplicantAccessService :
             throw Error("SUPPLIER_APPLICANT_CORRELATION_INVALID",
                 "A correlation ID between 8 and 100 characters is required.", 400);
         return normalized;
+    }
+
+    private static string ChildCorrelation(
+        string parent,
+        string suffix,
+        int reservedCharacters = 0)
+    {
+        var normalized = NormalizeCorrelation(parent);
+        var maxParentLength = 100 - suffix.Length - 1 - reservedCharacters;
+        return $"{normalized[..Math.Min(normalized.Length, maxParentLength)]}-{suffix}";
     }
 
     private static string Trim(string value, int length) =>

@@ -8195,6 +8195,7 @@ public partial class ProjectSetupService : IProjectSetupService
     {
         EnsureAdministrationAccess();
         var normalizedCatalogType = NormalizeCatalogType(catalogType);
+        EnsureGenericCatalogType(normalizedCatalogType);
         return (await _projectCatalogRepository.GetByCatalogTypeAsync(normalizedCatalogType)).Select(MapToDto);
     }
 
@@ -8202,7 +8203,16 @@ public partial class ProjectSetupService : IProjectSetupService
     {
         EnsureAdministrationAccess();
         var normalizedCatalogType = NormalizeCatalogType(dto.CatalogType);
+        EnsureGenericCatalogType(normalizedCatalogType);
+        return await CreateCatalogEntryInternalAsync(dto, normalizedCatalogType);
+    }
+
+    private async Task<ProjectCatalogEntryDto> CreateCatalogEntryInternalAsync(
+        CreateProjectCatalogEntryDto dto,
+        string normalizedCatalogType)
+    {
         var normalizedCode = NormalizeCatalogCode(dto.Code);
+        var metadata = NormalizeCatalogMetadata(normalizedCatalogType, dto);
         if (await _projectCatalogRepository.GetByCodeAsync(normalizedCatalogType, normalizedCode) != null)
         {
             throw new InvalidOperationException($"A project catalog entry with code '{normalizedCode}' already exists in '{normalizedCatalogType}'.");
@@ -8215,6 +8225,11 @@ public partial class ProjectSetupService : IProjectSetupService
             Code = normalizedCode,
             Name = NormalizeCatalogName(dto.Name),
             Description = dto.Description?.Trim(),
+            StandardCode = metadata.StandardCode,
+            MeasurementRule = metadata.MeasurementRule,
+            DefaultUnitOfMeasure = metadata.DefaultUnitOfMeasure,
+            EffectiveFrom = metadata.EffectiveFrom,
+            EffectiveTo = metadata.EffectiveTo,
             SortOrder = dto.SortOrder,
             IsActive = dto.IsActive,
             CreatedBy = _currentUserProvider.Username,
@@ -8230,10 +8245,26 @@ public partial class ProjectSetupService : IProjectSetupService
     {
         EnsureAdministrationAccess();
         var entity = await _projectCatalogRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Project catalog entry with ID {id} not found");
+        EnsureGenericCatalogType(entity.CatalogType);
         var normalizedCatalogType = NormalizeCatalogType(dto.CatalogType);
+        EnsureGenericCatalogType(normalizedCatalogType);
+        return await UpdateCatalogEntryInternalAsync(entity, dto, normalizedCatalogType);
+    }
+
+    private async Task<ProjectCatalogEntryDto> UpdateCatalogEntryInternalAsync(
+        ProjectCatalogEntry entity,
+        CreateProjectCatalogEntryDto dto,
+        string normalizedCatalogType)
+    {
+        if (!string.Equals(entity.CatalogType, normalizedCatalogType, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("A project catalog entry cannot be moved to another catalog type. Create a new entry in the target catalog instead.");
+        }
+
         var normalizedCode = NormalizeCatalogCode(dto.Code);
+        var metadata = NormalizeCatalogMetadata(normalizedCatalogType, dto);
         var existing = await _projectCatalogRepository.GetByCodeAsync(normalizedCatalogType, normalizedCode);
-        if (existing != null && existing.Id != id)
+        if (existing != null && existing.Id != entity.Id)
         {
             throw new InvalidOperationException($"A project catalog entry with code '{normalizedCode}' already exists in '{normalizedCatalogType}'.");
         }
@@ -8242,6 +8273,11 @@ public partial class ProjectSetupService : IProjectSetupService
         entity.Code = normalizedCode;
         entity.Name = NormalizeCatalogName(dto.Name);
         entity.Description = dto.Description?.Trim();
+        entity.StandardCode = metadata.StandardCode;
+        entity.MeasurementRule = metadata.MeasurementRule;
+        entity.DefaultUnitOfMeasure = metadata.DefaultUnitOfMeasure;
+        entity.EffectiveFrom = metadata.EffectiveFrom;
+        entity.EffectiveTo = metadata.EffectiveTo;
         entity.SortOrder = dto.SortOrder;
         entity.IsActive = dto.IsActive;
         entity.UpdatedBy = _currentUserProvider.Username;
@@ -8255,6 +8291,8 @@ public partial class ProjectSetupService : IProjectSetupService
     public async Task DeleteCatalogEntryAsync(Guid id)
     {
         EnsureAdministrationAccess();
+        var entity = await _projectCatalogRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Project catalog entry with ID {id} not found");
+        EnsureGenericCatalogType(entity.CatalogType);
         await _projectCatalogRepository.DeleteAsync(id);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -8263,8 +8301,13 @@ public partial class ProjectSetupService : IProjectSetupService
     {
         EnsureAdministrationAccess();
         var catalogGroups = string.IsNullOrWhiteSpace(catalogType)
-            ? ProjectCatalogDefaults.GetRecommendedCatalogs()
+            ? ProjectCatalogDefaults.GetRecommendedCatalogs().Where(group => !ProjectCatalogDefaults.IsQuantitySurveyCatalogType(group.Key)).ToList()
             : [ProjectCatalogDefaults.GetRecommendedCatalog(catalogType)];
+
+        if (catalogGroups.Any(group => ProjectCatalogDefaults.IsQuantitySurveyCatalogType(group.Key)))
+        {
+            throw new InvalidOperationException("Quantity-survey catalogues must be loaded from a tenant-approved TDC or licensed standards source; unapproved bundled defaults are not available.");
+        }
 
         foreach (var group in catalogGroups)
         {
@@ -8294,6 +8337,94 @@ public partial class ProjectSetupService : IProjectSetupService
         }
 
         await _unitOfWork.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<ProjectCatalogEntryDto>> GetQuantitySurveyCatalogEntriesAsync(
+        string? catalogType = null,
+        string? search = null,
+        string? standardCode = null,
+        DateTime? effectiveAt = null,
+        bool includeInactive = true)
+    {
+        EnsureInternalCatalogAccess();
+
+        var normalizedCatalogType = string.IsNullOrWhiteSpace(catalogType)
+            ? null
+            : NormalizeQuantitySurveyCatalogType(catalogType);
+        var normalizedStandard = NormalizeOptionalCatalogValue(standardCode);
+        var normalizedSearch = NormalizeOptionalCatalogValue(search);
+        var asOf = NormalizeOptionalUtc(effectiveAt);
+
+        var entries = normalizedCatalogType == null
+            ? await _projectCatalogRepository.GetAllAsync()
+            : await _projectCatalogRepository.GetByCatalogTypeAsync(normalizedCatalogType);
+
+        return entries
+            .Where(entry => ProjectCatalogDefaults.IsQuantitySurveyCatalogType(entry.CatalogType))
+            .Where(entry => includeInactive || entry.IsActive)
+            .Where(entry => normalizedStandard == null || string.Equals(entry.StandardCode, normalizedStandard, StringComparison.OrdinalIgnoreCase))
+            .Where(entry => normalizedSearch == null
+                || entry.Code.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase)
+                || entry.Name.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase)
+                || (entry.Description?.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (entry.MeasurementRule?.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Where(entry => !asOf.HasValue
+                || ((!entry.EffectiveFrom.HasValue || entry.EffectiveFrom.Value <= asOf.Value)
+                    && (!entry.EffectiveTo.HasValue || entry.EffectiveTo.Value >= asOf.Value)))
+            .Select(MapToDto)
+            .ToList();
+    }
+
+    public async Task<ProjectCatalogEntryDto> CreateQuantitySurveyCatalogEntryAsync(CreateProjectCatalogEntryDto dto)
+    {
+        EnsureInternalCatalogAccess();
+        var normalizedCatalogType = NormalizeQuantitySurveyCatalogType(dto.CatalogType);
+        return await CreateCatalogEntryInternalAsync(dto, normalizedCatalogType);
+    }
+
+    public async Task<ProjectCatalogEntryDto> UpdateQuantitySurveyCatalogEntryAsync(Guid id, CreateProjectCatalogEntryDto dto)
+    {
+        EnsureInternalCatalogAccess();
+        var entity = await _projectCatalogRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Project catalog entry with ID {id} not found");
+        if (!ProjectCatalogDefaults.IsQuantitySurveyCatalogType(entity.CatalogType))
+        {
+            throw new InvalidOperationException("The selected record is not a quantity-survey catalog entry.");
+        }
+
+        var normalizedCatalogType = NormalizeQuantitySurveyCatalogType(dto.CatalogType);
+        return await UpdateCatalogEntryInternalAsync(entity, dto, normalizedCatalogType);
+    }
+
+    public async Task DeleteQuantitySurveyCatalogEntryAsync(Guid id)
+    {
+        EnsureInternalCatalogAccess();
+        var entity = await _projectCatalogRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Project catalog entry with ID {id} not found");
+        if (!ProjectCatalogDefaults.IsQuantitySurveyCatalogType(entity.CatalogType))
+        {
+            throw new InvalidOperationException("The selected record is not a quantity-survey catalog entry.");
+        }
+
+        await _projectCatalogRepository.DeleteAsync(id);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<ProjectCatalogLookupOptionDto>> GetQuantitySurveyUnitOfMeasureOptionsAsync()
+    {
+        EnsureInternalCatalogAccess();
+        var units = await _unitOfWork.Repository<UnitOfMeasure>().FindAsync(unit =>
+            unit.TenantId == _currentUserProvider.TenantId
+            && unit.IsActive
+            && !unit.IsDeleted);
+
+        return units
+            .OrderBy(unit => unit.SortOrder)
+            .ThenBy(unit => unit.Code)
+            .Select(unit => new ProjectCatalogLookupOptionDto
+            {
+                Code = unit.Code,
+                Name = unit.Name
+            })
+            .ToList();
     }
 
     public async Task<IEnumerable<ProjectTypeDto>> GetProjectTypesAsync()
@@ -8531,6 +8662,14 @@ public partial class ProjectSetupService : IProjectSetupService
         throw new UnauthorizedAccessException("You do not have permission to administer project setup.");
     }
 
+    private void EnsureInternalCatalogAccess()
+    {
+        if (!_currentUserProvider.IsAuthenticated || _currentUserProvider.IsExternalUser)
+        {
+            throw new UnauthorizedAccessException("Only authenticated internal users can access quantity-survey catalogues.");
+        }
+    }
+
     private async Task EnsureDefaultPrioritiesAsync()
     {
         if ((await _projectPriorityRepository.GetAllAsync()).Any()) return;
@@ -8547,6 +8686,11 @@ public partial class ProjectSetupService : IProjectSetupService
         Code = entity.Code,
         Name = entity.Name,
         Description = entity.Description,
+        StandardCode = entity.StandardCode,
+        MeasurementRule = entity.MeasurementRule,
+        DefaultUnitOfMeasure = entity.DefaultUnitOfMeasure,
+        EffectiveFrom = entity.EffectiveFrom,
+        EffectiveTo = entity.EffectiveTo,
         SortOrder = entity.SortOrder,
         IsActive = entity.IsActive
     };
@@ -8561,6 +8705,59 @@ public partial class ProjectSetupService : IProjectSetupService
             ? throw new InvalidOperationException("Project catalog name is required.")
             : name.Trim();
 
+    private static (
+        string? StandardCode,
+        string? MeasurementRule,
+        string? DefaultUnitOfMeasure,
+        DateTime? EffectiveFrom,
+        DateTime? EffectiveTo) NormalizeCatalogMetadata(
+            string catalogType,
+            CreateProjectCatalogEntryDto dto)
+    {
+        var effectiveFrom = NormalizeOptionalUtc(dto.EffectiveFrom);
+        var effectiveTo = NormalizeOptionalUtc(dto.EffectiveTo);
+        if (ProjectCatalogDefaults.IsQuantitySurveyCatalogType(catalogType) && !effectiveFrom.HasValue)
+        {
+            throw new InvalidOperationException("An effective-from date is required for a quantity-survey catalogue entry.");
+        }
+
+        if (effectiveFrom.HasValue && effectiveTo.HasValue && effectiveTo.Value < effectiveFrom.Value)
+        {
+            throw new InvalidOperationException("Project catalog effective-to date cannot be earlier than its effective-from date.");
+        }
+
+        var standardCode = NormalizeOptionalCatalogValue(dto.StandardCode);
+        if (string.Equals(catalogType, ProjectCatalogDefaults.QuantitySurveyMeasurementCodes, StringComparison.OrdinalIgnoreCase))
+        {
+            if (standardCode == null
+                || !Enum.TryParse<QuantitySurveyBoqStandard>(standardCode, ignoreCase: true, out var standard))
+            {
+                throw new InvalidOperationException("A QS measurement code must select a supported measurement standard.");
+            }
+
+            standardCode = standard.ToString();
+        }
+
+        return (
+            standardCode,
+            NormalizeOptionalCatalogValue(dto.MeasurementRule),
+            NormalizeOptionalCatalogValue(dto.DefaultUnitOfMeasure),
+            effectiveFrom,
+            effectiveTo);
+    }
+
+    private static DateTime? NormalizeOptionalUtc(DateTime? value)
+        => value switch
+        {
+            null => null,
+            { Kind: DateTimeKind.Utc } utc => utc,
+            { Kind: DateTimeKind.Local } local => local.ToUniversalTime(),
+            { } unspecified => DateTime.SpecifyKind(unspecified, DateTimeKind.Utc)
+        };
+
+    private static string? NormalizeOptionalCatalogValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private static string NormalizeCatalogType(string catalogType)
     {
         var normalized = ProjectCatalogDefaults.NormalizeCatalogType(catalogType);
@@ -8570,6 +8767,25 @@ public partial class ProjectSetupService : IProjectSetupService
         }
 
         return normalized;
+    }
+
+    private static string NormalizeQuantitySurveyCatalogType(string catalogType)
+    {
+        var normalized = NormalizeCatalogType(catalogType);
+        if (!ProjectCatalogDefaults.IsQuantitySurveyCatalogType(normalized))
+        {
+            throw new InvalidOperationException($"Project catalog type '{catalogType}' is not a quantity-survey catalogue.");
+        }
+
+        return normalized;
+    }
+
+    private static void EnsureGenericCatalogType(string catalogType)
+    {
+        if (ProjectCatalogDefaults.IsQuantitySurveyCatalogType(catalogType))
+        {
+            throw new InvalidOperationException("Quantity-survey catalogues are available only through the governed quantity-survey catalogue API.");
+        }
     }
 
     private static bool IsActiveProjectStatus(string status)

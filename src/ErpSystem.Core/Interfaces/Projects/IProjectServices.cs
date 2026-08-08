@@ -28,9 +28,19 @@ public interface IProjectService
     Task<ProjectPackageDto> UpdateProjectPackageAsync(Guid packageId, UpdateProjectPackageDto dto);
     Task DeleteProjectPackageAsync(Guid packageId);
     Task<IEnumerable<ProjectBoqItemDto>> GetProjectBoqItemsAsync(Guid projectId);
+    Task<ProjectBoqClassificationOptionsDto> GetProjectBoqClassificationOptionsAsync(Guid projectId, DateTime? effectiveAtUtc = null);
     Task<ProjectBoqItemDto> AddProjectBoqItemAsync(Guid projectId, CreateProjectBoqItemDto dto);
     Task<ProjectBoqItemDto> UpdateProjectBoqItemAsync(Guid boqItemId, UpdateProjectBoqItemDto dto);
     Task DeleteProjectBoqItemAsync(Guid boqItemId);
+    Task<ProjectBoqVersionWorkspaceDto> GetProjectBoqVersionWorkspaceAsync(Guid projectId);
+    Task<ProjectBoqVersionDetailDto> GetProjectBoqVersionAsync(Guid projectId, Guid versionId);
+    Task<ProjectBoqVersionDetailDto> GetPublishedProjectBoqVersionAsync(Guid projectId);
+    Task<ProjectBoqVersionDetailDto> CreateProjectBoqVersionAsync(Guid projectId, CreateProjectBoqVersionDto dto, string correlationId);
+    Task<ProjectBoqVersionDetailDto> SubmitProjectBoqVersionAsync(Guid projectId, Guid versionId, Guid userId, string correlationId);
+    Task<ProjectBoqVersionDetailDto> ApproveProjectBoqVersionAsync(Guid projectId, Guid versionId, Guid userId, string? comments, string correlationId);
+    Task<ProjectBoqVersionDetailDto> RejectProjectBoqVersionAsync(Guid projectId, Guid versionId, Guid userId, string reason, string correlationId);
+    Task<ProjectBoqVersionDetailDto> RecallProjectBoqVersionAsync(Guid projectId, Guid versionId, Guid userId, string reason, string correlationId);
+    Task<ProjectBoqVersionComparisonDto> CompareProjectBoqVersionsAsync(Guid projectId, Guid baselineVersionId, Guid comparisonVersionId);
     Task<IEnumerable<ProjectApprovalRegisterItemDto>> GetApprovalRegisterAsync(Guid projectId);
     Task<ProjectApprovalRegisterItemDto> AddApprovalRegisterItemAsync(Guid projectId, CreateProjectApprovalRegisterItemDto dto);
     Task<ProjectApprovalRegisterItemDto> UpdateApprovalRegisterItemAsync(Guid approvalRegisterItemId, UpdateProjectApprovalRegisterItemDto dto);
@@ -341,6 +351,16 @@ public interface IProjectSetupService
     Task<ProjectCatalogEntryDto> UpdateCatalogEntryAsync(Guid id, CreateProjectCatalogEntryDto dto);
     Task DeleteCatalogEntryAsync(Guid id);
     Task SeedCatalogDefaultsAsync(string? catalogType = null);
+    Task<IEnumerable<ProjectCatalogEntryDto>> GetQuantitySurveyCatalogEntriesAsync(
+        string? catalogType = null,
+        string? search = null,
+        string? standardCode = null,
+        DateTime? effectiveAt = null,
+        bool includeInactive = true);
+    Task<ProjectCatalogEntryDto> CreateQuantitySurveyCatalogEntryAsync(CreateProjectCatalogEntryDto dto);
+    Task<ProjectCatalogEntryDto> UpdateQuantitySurveyCatalogEntryAsync(Guid id, CreateProjectCatalogEntryDto dto);
+    Task DeleteQuantitySurveyCatalogEntryAsync(Guid id);
+    Task<IEnumerable<ProjectCatalogLookupOptionDto>> GetQuantitySurveyUnitOfMeasureOptionsAsync();
     Task<IEnumerable<ProjectTypeDto>> GetProjectTypesAsync();
     Task<ProjectTypeDto> CreateProjectTypeAsync(CreateProjectTypeDto dto);
     Task<ProjectTypeDto> UpdateProjectTypeAsync(Guid id, CreateProjectTypeDto dto);

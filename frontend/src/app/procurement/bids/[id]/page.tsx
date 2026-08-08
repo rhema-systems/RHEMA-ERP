@@ -3,17 +3,52 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, FileText, Package, Upload, Award, MessageSquare, Clock, XCircle, CheckCircle2, CheckCircle, Download, DollarSign, AlertCircle } from 'lucide-react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ArrowLeft,
+  FileText,
+  Package,
+  Upload,
+  Award,
+  MessageSquare,
+  Clock,
+  XCircle,
+  CheckCircle2,
+  CheckCircle,
+  Download,
+  DollarSign,
+  AlertCircle,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
-import { evaluationTemplateService, type EvaluationTemplate } from '@/services/evaluationTemplateService';
-import { type TenderBidDetailDto, type TenderPaymentDto } from '@/services/tenderBidService';
+import {
+  evaluationTemplateService,
+  type EvaluationTemplate,
+} from '@/services/evaluationTemplateService';
+import {
+  type TenderBidDetailDto,
+  type TenderPaymentDto,
+} from '@/services/tenderBidService';
 import { format } from 'date-fns';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
+import { useAuth } from '@/hooks/use-auth';
 
 // Interface for criteria scores stored in evaluationCriteriaJson
 interface CriteriaScore {
@@ -27,9 +62,10 @@ interface CriteriaScore {
 }
 
 export default function BidDetailPage() {
+  const { hasPermission } = useAuth();
   const params = useParams();
   const router = useRouter();
-  const bidId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
+  const bidId = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
 
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [payments, setPayments] = useState<TenderPaymentDto[]>([]);
@@ -38,6 +74,7 @@ export default function BidDetailPage() {
   const [opening, setOpening] = useState(false);
   const [showOpenDialog, setShowOpenDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const canVetTenderBoq = hasPermission('quantity-survey.transactions.approve');
 
   useEffect(() => {
     if (bidId) {
@@ -54,7 +91,9 @@ export default function BidDetailPage() {
       // Load evaluation template if assigned
       if (data.evaluationTemplateId) {
         try {
-          const templateData = await evaluationTemplateService.getById(data.evaluationTemplateId);
+          const templateData = await evaluationTemplateService.getById(
+            data.evaluationTemplateId
+          );
           setTemplate(templateData);
         } catch (templateError) {
           console.error('Error loading evaluation template:', templateError);
@@ -94,16 +133,37 @@ export default function BidDetailPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
-      'Submitted': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
-      'Opened': { variant: 'default', className: 'bg-purple-100 text-purple-800' },
-      'UnderEvaluation': { variant: 'default', className: 'bg-yellow-100 text-yellow-800' },
-      'Accepted': { variant: 'default', className: 'bg-green-100 text-green-800' },
-      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
-      'Withdrawn': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
+    const statusConfig: Record<
+      string,
+      {
+        variant: 'default' | 'secondary' | 'destructive' | 'outline';
+        className: string;
+      }
+    > = {
+      Submitted: { variant: 'default', className: 'bg-blue-100 text-blue-800' },
+      Opened: {
+        variant: 'default',
+        className: 'bg-purple-100 text-purple-800',
+      },
+      UnderEvaluation: {
+        variant: 'default',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      Accepted: {
+        variant: 'default',
+        className: 'bg-green-100 text-green-800',
+      },
+      Rejected: {
+        variant: 'destructive',
+        className: 'bg-red-100 text-red-800',
+      },
+      Withdrawn: { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
     };
 
-    const config = statusConfig[status] || { variant: 'outline' as const, className: '' };
+    const config = statusConfig[status] || {
+      variant: 'outline' as const,
+      className: '',
+    };
     return (
       <Badge variant={config.variant} className={config.className}>
         {status}
@@ -142,7 +202,10 @@ export default function BidDetailPage() {
         <div className="text-center">
           <XCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
           <p className="text-lg text-gray-600">Bid not found</p>
-          <Button onClick={() => router.push('/procurement/bids')} className="mt-4">
+          <Button
+            onClick={() => router.push('/procurement/bids')}
+            className="mt-4"
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Bids
           </Button>
@@ -156,7 +219,10 @@ export default function BidDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => router.push('/procurement/bids')}>
+          <Button
+            variant="ghost"
+            onClick={() => router.push('/procurement/bids')}
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
@@ -180,42 +246,62 @@ export default function BidDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Total Bid Amount</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Total Bid Amount
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatCurrency(bid.totalBidAmount, bid.currency)}</p>
+            <p className="text-2xl font-bold">
+              {formatCurrency(bid.totalBidAmount, bid.currency)}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Total Score</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Total Score
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{bid.totalScore !== undefined && bid.totalScore !== null ? `${bid.totalScore.toFixed(2)}%` : 'Not Evaluated'}</p>
+            <p className="text-2xl font-bold">
+              {bid.totalScore !== undefined && bid.totalScore !== null
+                ? `${bid.totalScore.toFixed(2)}%`
+                : 'Not Evaluated'}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Rank</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Rank
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{bid.rank ? `#${bid.rank}` : 'N/A'}</p>
+            <p className="text-2xl font-bold">
+              {bid.rank ? `#${bid.rank}` : 'N/A'}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Compliance</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Compliance
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {bid.isCompliant ? (
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-6 w-6 text-green-500" />
-                <span className="text-lg font-semibold text-green-700">Compliant</span>
+                <span className="text-lg font-semibold text-green-700">
+                  Compliant
+                </span>
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <XCircle className="h-6 w-6 text-red-500" />
-                <span className="text-lg font-semibold text-red-700">Non-Compliant</span>
+                <span className="text-lg font-semibold text-red-700">
+                  Non-Compliant
+                </span>
               </div>
             )}
           </CardContent>
@@ -223,15 +309,24 @@ export default function BidDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-4"
+      >
+        <TabsList
+          className={`grid w-full ${canVetTenderBoq ? 'grid-cols-7' : 'grid-cols-6'}`}
+        >
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
             Overview
           </TabsTrigger>
           <TabsTrigger value="items">
             <Package className="h-4 w-4 mr-2" />
-            Lots ({new Set(bid.items?.map(item => item.lotCode).filter(Boolean)).size || 0})
+            Lots (
+            {new Set(bid.items?.map((item) => item.lotCode).filter(Boolean))
+              .size || 0}
+            )
           </TabsTrigger>
           <TabsTrigger value="proposals">
             <FileText className="h-4 w-4 mr-2" />
@@ -239,8 +334,20 @@ export default function BidDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">
             <Upload className="h-4 w-4 mr-2" />
-            Documents ({bid.documents?.filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal').length || 0})
+            Documents (
+            {bid.documents?.filter(
+              (doc) =>
+                doc.documentType !== 'TechnicalProposal' &&
+                doc.documentType !== 'CommercialProposal'
+            ).length || 0}
+            )
           </TabsTrigger>
+          {canVetTenderBoq && (
+            <TabsTrigger value="qs-boq">
+              <FileText className="h-4 w-4 mr-2" />
+              QS BoQ
+            </TabsTrigger>
+          )}
           <TabsTrigger value="evaluation">
             <Award className="h-4 w-4 mr-2" />
             Evaluation ({bid.evaluations?.length || 0})
@@ -277,7 +384,9 @@ export default function BidDetailPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Total Bid Amount</p>
-                <p className="font-semibold">{formatCurrency(bid.totalBidAmount, bid.currency)}</p>
+                <p className="font-semibold">
+                  {formatCurrency(bid.totalBidAmount, bid.currency)}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Submitted Date</p>
@@ -285,12 +394,19 @@ export default function BidDetailPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Delivery Days</p>
-                <p className="font-semibold">{bid.deliveryDays ? `${bid.deliveryDays} days` : 'N/A'}</p>
+                <p className="font-semibold">
+                  {bid.deliveryDays ? `${bid.deliveryDays} days` : 'N/A'}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Compliance Status</p>
                 {bid.isCompliant ? (
-                  <Badge variant="default" className="bg-green-100 text-green-800">Compliant</Badge>
+                  <Badge
+                    variant="default"
+                    className="bg-green-100 text-green-800"
+                  >
+                    Compliant
+                  </Badge>
                 ) : (
                   <Badge variant="destructive">Non-Compliant</Badge>
                 )}
@@ -298,10 +414,22 @@ export default function BidDetailPage() {
               <div>
                 <p className="text-sm text-gray-500">Lots Bidded</p>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {[...new Set(bid.items?.map(item => item.lotCode).filter(Boolean))].map((lotCode) => (
-                    <Badge key={lotCode} variant="outline" className="font-mono">{lotCode}</Badge>
+                  {[
+                    ...new Set(
+                      bid.items?.map((item) => item.lotCode).filter(Boolean)
+                    ),
+                  ].map((lotCode) => (
+                    <Badge
+                      key={lotCode}
+                      variant="outline"
+                      className="font-mono"
+                    >
+                      {lotCode}
+                    </Badge>
                   ))}
-                  {(!bid.items || bid.items.length === 0) && <span className="text-gray-500">None</span>}
+                  {(!bid.items || bid.items.length === 0) && (
+                    <span className="text-gray-500">None</span>
+                  )}
                 </div>
               </div>
               {bid.paymentTerms && (
@@ -344,7 +472,9 @@ export default function BidDetailPage() {
           {!bid.isCompliant && bid.nonComplianceReasons && (
             <Card className="border-red-200 bg-red-50">
               <CardHeader>
-                <CardTitle className="text-red-800">Non-Compliance Reasons</CardTitle>
+                <CardTitle className="text-red-800">
+                  Non-Compliance Reasons
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-red-700">{bid.nonComplianceReasons}</p>
@@ -361,27 +491,58 @@ export default function BidDetailPage() {
                   <Badge variant="outline">{template.templateName}</Badge>
                 </CardTitle>
                 <CardDescription>
-                  Scoring Method: {template.scoringMethod} | Passing Score: {template.passingScore}%
-                  {bid.evaluations && bid.evaluations.filter(e => e.status === 'Submitted').length > 0 && (
-                    <span className="ml-2">| {bid.evaluations.filter(e => e.status === 'Submitted').length} evaluator(s)</span>
-                  )}
+                  Scoring Method: {template.scoringMethod} | Passing Score:{' '}
+                  {template.passingScore}%
+                  {bid.evaluations &&
+                    bid.evaluations.filter((e) => e.status === 'Submitted')
+                      .length > 0 && (
+                      <span className="ml-2">
+                        |{' '}
+                        {
+                          bid.evaluations.filter(
+                            (e) => e.status === 'Submitted'
+                          ).length
+                        }{' '}
+                        evaluator(s)
+                      </span>
+                    )}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {(() => {
                   // Calculate average scores from all submitted evaluations
-                  const submittedEvaluations = bid.evaluations?.filter(e => e.status === 'Submitted' && e.evaluationCriteriaJson) || [];
-                  const aggregatedScores: Record<string, { totalScore: number; count: number; maxScore: number; weight: number }> = {};
+                  const submittedEvaluations =
+                    bid.evaluations?.filter(
+                      (e) =>
+                        e.status === 'Submitted' && e.evaluationCriteriaJson
+                    ) || [];
+                  const aggregatedScores: Record<
+                    string,
+                    {
+                      totalScore: number;
+                      count: number;
+                      maxScore: number;
+                      weight: number;
+                    }
+                  > = {};
 
                   // Parse all evaluation criteria and aggregate
-                  submittedEvaluations.forEach(evaluation => {
+                  submittedEvaluations.forEach((evaluation) => {
                     try {
-                      const scores: CriteriaScore[] = JSON.parse(evaluation.evaluationCriteriaJson || '[]');
-                      scores.forEach(score => {
+                      const scores: CriteriaScore[] = JSON.parse(
+                        evaluation.evaluationCriteriaJson || '[]'
+                      );
+                      scores.forEach((score) => {
                         if (!aggregatedScores[score.criterionId]) {
-                          aggregatedScores[score.criterionId] = { totalScore: 0, count: 0, maxScore: score.maxScore, weight: score.weight };
+                          aggregatedScores[score.criterionId] = {
+                            totalScore: 0,
+                            count: 0,
+                            maxScore: score.maxScore,
+                            weight: score.weight,
+                          };
                         }
-                        aggregatedScores[score.criterionId].totalScore += score.score;
+                        aggregatedScores[score.criterionId].totalScore +=
+                          score.score;
                         aggregatedScores[score.criterionId].count += 1;
                       });
                     } catch (e) {
@@ -391,9 +552,15 @@ export default function BidDetailPage() {
 
                   const hasScores = Object.keys(aggregatedScores).length > 0;
                   const colors = [
-                    'text-blue-600', 'text-green-600', 'text-orange-600',
-                    'text-purple-600', 'text-red-600', 'text-cyan-600',
-                    'text-pink-600', 'text-indigo-600', 'text-teal-600'
+                    'text-blue-600',
+                    'text-green-600',
+                    'text-orange-600',
+                    'text-purple-600',
+                    'text-red-600',
+                    'text-cyan-600',
+                    'text-pink-600',
+                    'text-indigo-600',
+                    'text-teal-600',
                   ];
 
                   return (
@@ -402,32 +569,57 @@ export default function BidDetailPage() {
                         ?.sort((a, b) => a.displayOrder - b.displayOrder)
                         .map((criterion, index) => {
                           const colorClass = colors[index % colors.length];
-                          const scoreData = aggregatedScores[criterion.evaluationCriterionId];
-                          const avgScore = scoreData ? (scoreData.totalScore / scoreData.count) : null;
+                          const scoreData =
+                            aggregatedScores[criterion.evaluationCriterionId];
+                          const avgScore = scoreData
+                            ? scoreData.totalScore / scoreData.count
+                            : null;
 
                           return (
-                            <div key={criterion.evaluationCriterionId} className="p-3 bg-gray-50 rounded-lg">
+                            <div
+                              key={criterion.evaluationCriterionId}
+                              className="p-3 bg-gray-50 rounded-lg"
+                            >
                               <div className="flex items-center justify-between mb-1">
-                                <p className="text-sm font-medium text-gray-700">{criterion.criterionName}</p>
+                                <p className="text-sm font-medium text-gray-700">
+                                  {criterion.criterionName}
+                                </p>
                                 {criterion.isMandatory && (
-                                  <Badge variant="destructive" className="text-xs">Required</Badge>
+                                  <Badge
+                                    variant="destructive"
+                                    className="text-xs"
+                                  >
+                                    Required
+                                  </Badge>
                                 )}
                               </div>
                               {avgScore !== null ? (
                                 <div className="flex items-baseline gap-1 mb-1">
-                                  <span className={`text-xl font-bold ${colorClass}`}>
+                                  <span
+                                    className={`text-xl font-bold ${colorClass}`}
+                                  >
                                     {avgScore.toFixed(1)}
                                   </span>
-                                  <span className="text-sm text-gray-400">/ {criterion.maxScore}</span>
+                                  <span className="text-sm text-gray-400">
+                                    / {criterion.maxScore}
+                                  </span>
                                 </div>
                               ) : (
-                                <p className="text-sm text-gray-400 mb-1">Not scored</p>
+                                <p className="text-sm text-gray-400 mb-1">
+                                  Not scored
+                                </p>
                               )}
                               <div className="flex items-center justify-between">
-                                <span className="text-xs text-gray-500">Weight: {criterion.weight}%</span>
+                                <span className="text-xs text-gray-500">
+                                  Weight: {criterion.weight}%
+                                </span>
                                 {avgScore !== null && (
                                   <span className="text-xs text-gray-500">
-                                    {((avgScore / criterion.maxScore) * criterion.weight).toFixed(1)}% weighted
+                                    {(
+                                      (avgScore / criterion.maxScore) *
+                                      criterion.weight
+                                    ).toFixed(1)}
+                                    % weighted
                                   </span>
                                 )}
                               </div>
@@ -441,13 +633,19 @@ export default function BidDetailPage() {
                   <div className="mt-4 pt-4 border-t flex items-center justify-between">
                     <span className="text-sm font-medium">Total Score</span>
                     <div className="flex items-center gap-2">
-                      <span className={`text-2xl font-bold ${
-                        bid.totalScore >= template.passingScore ? 'text-green-600' : 'text-red-600'
-                      }`}>
+                      <span
+                        className={`text-2xl font-bold ${
+                          bid.totalScore >= template.passingScore
+                            ? 'text-green-600'
+                            : 'text-red-600'
+                        }`}
+                      >
                         {bid.totalScore.toFixed(2)}%
                       </span>
                       {bid.totalScore >= template.passingScore ? (
-                        <Badge variant="default" className="bg-green-600">Pass</Badge>
+                        <Badge variant="default" className="bg-green-600">
+                          Pass
+                        </Badge>
                       ) : (
                         <Badge variant="destructive">Fail</Badge>
                       )}
@@ -457,7 +655,11 @@ export default function BidDetailPage() {
                 {bid.evaluatedByName && (
                   <div className="mt-4 pt-4 border-t">
                     <p className="text-sm text-gray-500">
-                      Evaluated by <span className="font-semibold">{bid.evaluatedByName}</span> on {formatDate(bid.evaluatedDate)}
+                      Evaluated by{' '}
+                      <span className="font-semibold">
+                        {bid.evaluatedByName}
+                      </span>{' '}
+                      on {formatDate(bid.evaluatedDate)}
                     </p>
                     {bid.evaluationNotes && (
                       <p className="mt-2 text-sm">{bid.evaluationNotes}</p>
@@ -479,7 +681,8 @@ export default function BidDetailPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-yellow-700">
-                  This tender has an evaluation template assigned but it could not be loaded.
+                  This tender has an evaluation template assigned but it could
+                  not be loaded.
                 </p>
               </CardContent>
             </Card>
@@ -492,35 +695,55 @@ export default function BidDetailPage() {
             <CardHeader>
               <CardTitle>Bid Lots</CardTitle>
               <CardDescription>
-                {new Set(bid.items?.map(item => item.lotCode).filter(Boolean)).size || 0} lot(s), {bid.items?.length || 0} item(s)
+                {new Set(bid.items?.map((item) => item.lotCode).filter(Boolean))
+                  .size || 0}{' '}
+                lot(s), {bid.items?.length || 0} item(s)
               </CardDescription>
             </CardHeader>
             <CardContent>
               {!bid.items || bid.items.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No lots in this bid</p>
+                <p className="text-center py-8 text-gray-500">
+                  No lots in this bid
+                </p>
               ) : (
                 <>
                   {/* Group items by lot */}
                   {(() => {
-                    const lotGroups = bid.items.reduce((acc, item) => {
-                      const lotCode = item.lotCode || 'Unassigned';
-                      if (!acc[lotCode]) {
-                        acc[lotCode] = [];
-                      }
-                      acc[lotCode].push(item);
-                      return acc;
-                    }, {} as Record<string, typeof bid.items>);
+                    const lotGroups = bid.items.reduce(
+                      (acc, item) => {
+                        const lotCode = item.lotCode || 'Unassigned';
+                        if (!acc[lotCode]) {
+                          acc[lotCode] = [];
+                        }
+                        acc[lotCode].push(item);
+                        return acc;
+                      },
+                      {} as Record<string, typeof bid.items>
+                    );
 
                     return Object.entries(lotGroups).map(([lotCode, items]) => (
-                      <div key={lotCode} className="mb-6 border rounded-lg overflow-hidden">
+                      <div
+                        key={lotCode}
+                        className="mb-6 border rounded-lg overflow-hidden"
+                      >
                         {/* Lot Header */}
                         <div className="bg-gray-50 px-4 py-3 border-b flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="font-mono">{lotCode}</Badge>
-                            <span className="text-sm text-gray-600">{items.length} item(s)</span>
+                            <Badge variant="outline" className="font-mono">
+                              {lotCode}
+                            </Badge>
+                            <span className="text-sm text-gray-600">
+                              {items.length} item(s)
+                            </span>
                           </div>
                           <div className="font-bold text-green-600">
-                            {formatCurrency(items.reduce((sum, item) => sum + item.totalPrice, 0), bid.currency)}
+                            {formatCurrency(
+                              items.reduce(
+                                (sum, item) => sum + item.totalPrice,
+                                0
+                              ),
+                              bid.currency
+                            )}
                           </div>
                         </div>
                         {/* Lot Items */}
@@ -543,26 +766,51 @@ export default function BidDetailPage() {
                                 <TableCell>{index + 1}</TableCell>
                                 <TableCell>
                                   <div>
-                                    <p className="font-medium">{item.tenderItemDescription}</p>
+                                    <p className="font-medium">
+                                      {item.tenderItemDescription}
+                                    </p>
                                     {item.specifications && (
-                                      <p className="text-sm text-gray-500 whitespace-pre-wrap">{item.specifications}</p>
+                                      <p className="text-sm text-gray-500 whitespace-pre-wrap">
+                                        {item.specifications}
+                                      </p>
                                     )}
                                   </div>
                                 </TableCell>
                                 <TableCell>
                                   {item.requestedQuantity}
-                                  {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
+                                  {item.unitOfMeasure && (
+                                    <span className="text-gray-500 text-sm ml-1">
+                                      {item.unitOfMeasure}
+                                    </span>
+                                  )}
                                 </TableCell>
                                 <TableCell className="font-semibold">
                                   {item.offeredQuantity}
-                                  {item.unitOfMeasure && <span className="text-gray-500 text-sm ml-1">{item.unitOfMeasure}</span>}
+                                  {item.unitOfMeasure && (
+                                    <span className="text-gray-500 text-sm ml-1">
+                                      {item.unitOfMeasure}
+                                    </span>
+                                  )}
                                 </TableCell>
-                                <TableCell>{formatCurrency(item.unitPrice, bid.currency)}</TableCell>
-                                <TableCell className="font-semibold">{formatCurrency(item.totalPrice, bid.currency)}</TableCell>
                                 <TableCell>
-                                  {item.brand || item.model ? `${item.brand || ''} ${item.model || ''}`.trim() : '-'}
+                                  {formatCurrency(item.unitPrice, bid.currency)}
                                 </TableCell>
-                                <TableCell>{item.deliveryDays ? `${item.deliveryDays} days` : '-'}</TableCell>
+                                <TableCell className="font-semibold">
+                                  {formatCurrency(
+                                    item.totalPrice,
+                                    bid.currency
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {item.brand || item.model
+                                    ? `${item.brand || ''} ${item.model || ''}`.trim()
+                                    : '-'}
+                                </TableCell>
+                                <TableCell>
+                                  {item.deliveryDays
+                                    ? `${item.deliveryDays} days`
+                                    : '-'}
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -574,7 +822,9 @@ export default function BidDetailPage() {
                   <div className="flex justify-end">
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 min-w-64 max-w-md">
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-lg font-medium whitespace-nowrap">Total Bid Amount:</span>
+                        <span className="text-lg font-medium whitespace-nowrap">
+                          Total Bid Amount:
+                        </span>
                         <span className="text-2xl font-bold text-blue-600 break-all text-right">
                           {formatCurrency(bid.totalBidAmount, bid.currency)}
                         </span>
@@ -598,31 +848,49 @@ export default function BidDetailPage() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-yellow-800">
                     <Clock className="h-5 w-5" />
-                    <span className="font-medium">Documents will be available after the bid is opened</span>
+                    <span className="font-medium">
+                      Documents will be available after the bid is opened
+                    </span>
                   </div>
                 </div>
-              ) : bid.documents?.find(doc => doc.documentType === 'TechnicalProposal') ? (
+              ) : bid.documents?.find(
+                  (doc) => doc.documentType === 'TechnicalProposal'
+                ) ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <CheckCircle className="h-5 w-5 text-green-600" />
-                    <span className="font-medium text-green-700">Technical Proposal Uploaded</span>
+                    <span className="font-medium text-green-700">
+                      Technical Proposal Uploaded
+                    </span>
                   </div>
                   {(() => {
-                    const doc = bid.documents.find(doc => doc.documentType === 'TechnicalProposal');
+                    const doc = bid.documents.find(
+                      (doc) => doc.documentType === 'TechnicalProposal'
+                    );
                     return doc ? (
                       <div className="bg-gray-50 border rounded-lg p-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <p className="font-medium">{doc.documentName}</p>
-                            <p className="text-sm text-gray-500 font-mono">{doc.fileName || doc.documentName}</p>
+                            <p className="text-sm text-gray-500 font-mono">
+                              {doc.fileName || doc.documentName}
+                            </p>
                             <p className="text-sm text-gray-500 mt-1">
-                              Uploaded: {formatDate(doc.uploadedAt || doc.uploadedDate)} • Size: {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
+                              Uploaded:{' '}
+                              {formatDate(doc.uploadedAt || doc.uploadedDate)} •
+                              Size: {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
                             </p>
                           </div>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => tenderBidService.downloadBidDocument(bid.id, doc.id, doc.documentName)}
+                            onClick={() =>
+                              tenderBidService.downloadBidDocument(
+                                bid.id,
+                                doc.id,
+                                doc.documentName
+                              )
+                            }
                           >
                             <Download className="h-4 w-4 mr-2" />
                             Download
@@ -637,7 +905,9 @@ export default function BidDetailPage() {
                   <p className="whitespace-pre-wrap">{bid.technicalProposal}</p>
                 </div>
               ) : (
-                <p className="text-center py-8 text-gray-500">No technical proposal provided</p>
+                <p className="text-center py-8 text-gray-500">
+                  No technical proposal provided
+                </p>
               )}
             </CardContent>
           </Card>
@@ -651,31 +921,49 @@ export default function BidDetailPage() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-yellow-800">
                     <Clock className="h-5 w-5" />
-                    <span className="font-medium">Documents will be available after the bid is opened</span>
+                    <span className="font-medium">
+                      Documents will be available after the bid is opened
+                    </span>
                   </div>
                 </div>
-              ) : bid.documents?.find(doc => doc.documentType === 'CommercialProposal') ? (
+              ) : bid.documents?.find(
+                  (doc) => doc.documentType === 'CommercialProposal'
+                ) ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <CheckCircle className="h-5 w-5 text-green-600" />
-                    <span className="font-medium text-green-700">Commercial Proposal Uploaded</span>
+                    <span className="font-medium text-green-700">
+                      Commercial Proposal Uploaded
+                    </span>
                   </div>
                   {(() => {
-                    const doc = bid.documents.find(doc => doc.documentType === 'CommercialProposal');
+                    const doc = bid.documents.find(
+                      (doc) => doc.documentType === 'CommercialProposal'
+                    );
                     return doc ? (
                       <div className="bg-gray-50 border rounded-lg p-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <p className="font-medium">{doc.documentName}</p>
-                            <p className="text-sm text-gray-500 font-mono">{doc.fileName || doc.documentName}</p>
+                            <p className="text-sm text-gray-500 font-mono">
+                              {doc.fileName || doc.documentName}
+                            </p>
                             <p className="text-sm text-gray-500 mt-1">
-                              Uploaded: {formatDate(doc.uploadedAt || doc.uploadedDate)} • Size: {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
+                              Uploaded:{' '}
+                              {formatDate(doc.uploadedAt || doc.uploadedDate)} •
+                              Size: {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
                             </p>
                           </div>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => tenderBidService.downloadBidDocument(bid.id, doc.id, doc.documentName)}
+                            onClick={() =>
+                              tenderBidService.downloadBidDocument(
+                                bid.id,
+                                doc.id,
+                                doc.documentName
+                              )
+                            }
                           >
                             <Download className="h-4 w-4 mr-2" />
                             Download
@@ -687,14 +975,24 @@ export default function BidDetailPage() {
                 </div>
               ) : bid.commercialProposal ? (
                 <div className="bg-gray-50 border rounded-lg p-4">
-                  <p className="whitespace-pre-wrap">{bid.commercialProposal}</p>
+                  <p className="whitespace-pre-wrap">
+                    {bid.commercialProposal}
+                  </p>
                 </div>
               ) : (
-                <p className="text-center py-8 text-gray-500">No commercial proposal provided</p>
+                <p className="text-center py-8 text-gray-500">
+                  No commercial proposal provided
+                </p>
               )}
             </CardContent>
           </Card>
         </TabsContent>
+
+        {canVetTenderBoq && (
+          <TabsContent value="qs-boq" className="space-y-4">
+            <QuantitySurveyTenderBoqVettingPanel tenderBidId={bidId} />
+          </TabsContent>
+        )}
 
         {/* Documents Tab */}
         <TabsContent value="documents" className="space-y-4">
@@ -702,7 +1000,12 @@ export default function BidDetailPage() {
             <CardHeader>
               <CardTitle>Required Documents</CardTitle>
               <CardDescription>
-                {bid.documents?.filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal').length || 0} document(s)
+                {bid.documents?.filter(
+                  (doc) =>
+                    doc.documentType !== 'TechnicalProposal' &&
+                    doc.documentType !== 'CommercialProposal'
+                ).length || 0}{' '}
+                document(s)
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -710,11 +1013,20 @@ export default function BidDetailPage() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-yellow-800">
                     <Clock className="h-5 w-5" />
-                    <span className="font-medium">Documents will be available after the bid is opened</span>
+                    <span className="font-medium">
+                      Documents will be available after the bid is opened
+                    </span>
                   </div>
                 </div>
-              ) : !bid.documents || bid.documents.filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal').length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No required documents uploaded</p>
+              ) : !bid.documents ||
+                bid.documents.filter(
+                  (doc) =>
+                    doc.documentType !== 'TechnicalProposal' &&
+                    doc.documentType !== 'CommercialProposal'
+                ).length === 0 ? (
+                <p className="text-center py-8 text-gray-500">
+                  No required documents uploaded
+                </p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -727,17 +1039,31 @@ export default function BidDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {bid.documents
-                      .filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal')
+                      .filter(
+                        (doc) =>
+                          doc.documentType !== 'TechnicalProposal' &&
+                          doc.documentType !== 'CommercialProposal'
+                      )
                       .map((doc) => (
                         <TableRow key={doc.id}>
-                          <TableCell><Badge variant="outline">{doc.documentType}</Badge></TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{doc.documentType}</Badge>
+                          </TableCell>
                           <TableCell>{doc.documentName}</TableCell>
-                          <TableCell>{((doc.fileSize ?? 0) / 1024).toFixed(2)} KB</TableCell>
+                          <TableCell>
+                            {((doc.fileSize ?? 0) / 1024).toFixed(2)} KB
+                          </TableCell>
                           <TableCell>
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => tenderBidService.downloadBidDocument(bid.id, doc.id, doc.documentName)}
+                              onClick={() =>
+                                tenderBidService.downloadBidDocument(
+                                  bid.id,
+                                  doc.id,
+                                  doc.documentName
+                                )
+                              }
                             >
                               <Download className="h-4 w-4 mr-2" />
                               Download
@@ -759,10 +1085,16 @@ export default function BidDetailPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Evaluations</CardTitle>
-                  <CardDescription>{bid.evaluations?.length || 0} evaluation(s)</CardDescription>
+                  <CardDescription>
+                    {bid.evaluations?.length || 0} evaluation(s)
+                  </CardDescription>
                 </div>
                 <Button
-                  onClick={() => router.push(`/procurement/evaluations/create?bidId=${bidId}`)}
+                  onClick={() =>
+                    router.push(
+                      `/procurement/evaluations/create?bidId=${bidId}`
+                    )
+                  }
                   className="gap-2"
                 >
                   <Award className="h-4 w-4" />
@@ -776,7 +1108,11 @@ export default function BidDetailPage() {
                   <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-500 mb-4">No evaluations yet</p>
                   <Button
-                    onClick={() => router.push(`/procurement/evaluations/create?bidId=${bidId}`)}
+                    onClick={() =>
+                      router.push(
+                        `/procurement/evaluations/create?bidId=${bidId}`
+                      )
+                    }
                     variant="outline"
                   >
                     <Award className="h-4 w-4 mr-2" />
@@ -790,21 +1126,35 @@ export default function BidDetailPage() {
                       <CardHeader className="pb-2 pt-3 px-4">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <CardTitle className="text-sm font-semibold">{evaluation.evaluatorName || 'Unknown Evaluator'}</CardTitle>
-                            <CardDescription className="text-xs">{formatDate(evaluation.evaluationDate)}</CardDescription>
+                            <CardTitle className="text-sm font-semibold">
+                              {evaluation.evaluatorName || 'Unknown Evaluator'}
+                            </CardTitle>
+                            <CardDescription className="text-xs">
+                              {formatDate(evaluation.evaluationDate)}
+                            </CardDescription>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Badge
-                              variant={evaluation.status === 'Submitted' ? 'default' : 'outline'}
+                              variant={
+                                evaluation.status === 'Submitted'
+                                  ? 'default'
+                                  : 'outline'
+                              }
                               className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
                             >
-                              {evaluation.status === 'Submitted' ? 'Completed' : evaluation.status}
+                              {evaluation.status === 'Submitted'
+                                ? 'Completed'
+                                : evaluation.status}
                             </Badge>
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-7 px-2 text-xs"
-                              onClick={() => router.push(`/procurement/evaluations/${evaluation.id}`)}
+                              onClick={() =>
+                                router.push(
+                                  `/procurement/evaluations/${evaluation.id}`
+                                )
+                              }
                             >
                               View
                             </Button>
@@ -816,64 +1166,105 @@ export default function BidDetailPage() {
                         {evaluation.evaluationCriteriaJson ? (
                           (() => {
                             try {
-                              const criteriaScores: CriteriaScore[] = JSON.parse(evaluation.evaluationCriteriaJson);
+                              const criteriaScores: CriteriaScore[] =
+                                JSON.parse(evaluation.evaluationCriteriaJson);
                               const colors = [
-                                'text-blue-600', 'text-green-600', 'text-orange-600',
-                                'text-purple-600', 'text-red-600', 'text-cyan-600',
-                                'text-pink-600', 'text-indigo-600', 'text-teal-600'
+                                'text-blue-600',
+                                'text-green-600',
+                                'text-orange-600',
+                                'text-purple-600',
+                                'text-red-600',
+                                'text-cyan-600',
+                                'text-pink-600',
+                                'text-indigo-600',
+                                'text-teal-600',
                               ];
                               return (
                                 <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                                   {criteriaScores.map((criteria, index) => (
                                     <div key={criteria.criterionId}>
-                                      <p className="text-xs text-gray-500">{criteria.criterionName}</p>
+                                      <p className="text-xs text-gray-500">
+                                        {criteria.criterionName}
+                                      </p>
                                       <div className="flex items-baseline gap-1">
-                                        <p className={`text-sm font-bold ${colors[index % colors.length]}`}>
+                                        <p
+                                          className={`text-sm font-bold ${colors[index % colors.length]}`}
+                                        >
                                           {criteria.score}
                                         </p>
-                                        <span className="text-xs text-gray-400">/ {criteria.maxScore}</span>
+                                        <span className="text-xs text-gray-400">
+                                          / {criteria.maxScore}
+                                        </span>
                                       </div>
                                       <p className="text-xs text-gray-400">
-                                        Weighted: {criteria.weightedScore.toFixed(1)}%
+                                        Weighted:{' '}
+                                        {criteria.weightedScore.toFixed(1)}%
                                       </p>
                                     </div>
                                   ))}
                                   <div className="border-l pl-2">
-                                    <p className="text-xs text-gray-500 font-medium">Total</p>
+                                    <p className="text-xs text-gray-500 font-medium">
+                                      Total
+                                    </p>
                                     <p className="text-sm font-bold text-indigo-600">
-                                      {evaluation.totalScore !== undefined && evaluation.totalScore !== null
+                                      {evaluation.totalScore !== undefined &&
+                                      evaluation.totalScore !== null
                                         ? `${evaluation.totalScore.toFixed(1)}%`
-                                        : criteriaScores.reduce((sum, c) => sum + c.weightedScore, 0).toFixed(1) + '%'
-                                      }
+                                        : criteriaScores
+                                            .reduce(
+                                              (sum, c) => sum + c.weightedScore,
+                                              0
+                                            )
+                                            .toFixed(1) + '%'}
                                     </p>
                                   </div>
                                 </div>
                               );
                             } catch {
-                              return <p className="text-xs text-gray-500">Could not parse evaluation criteria</p>;
+                              return (
+                                <p className="text-xs text-gray-500">
+                                  Could not parse evaluation criteria
+                                </p>
+                              );
                             }
                           })()
                         ) : (
-                          <p className="text-xs text-gray-500">No detailed criteria scores available</p>
+                          <p className="text-xs text-gray-500">
+                            No detailed criteria scores available
+                          </p>
                         )}
-                        {(evaluation.technicalComments || evaluation.commercialComments || evaluation.recommendation) && (
+                        {(evaluation.technicalComments ||
+                          evaluation.commercialComments ||
+                          evaluation.recommendation) && (
                           <div className="text-xs space-y-1 pt-1 border-t">
                             {evaluation.technicalComments && (
                               <div>
-                                <p className="font-medium text-gray-600">Technical:</p>
-                                <p className="text-gray-700 line-clamp-2">{evaluation.technicalComments}</p>
+                                <p className="font-medium text-gray-600">
+                                  Technical:
+                                </p>
+                                <p className="text-gray-700 line-clamp-2">
+                                  {evaluation.technicalComments}
+                                </p>
                               </div>
                             )}
                             {evaluation.commercialComments && (
                               <div>
-                                <p className="font-medium text-gray-600">Commercial:</p>
-                                <p className="text-gray-700 line-clamp-2">{evaluation.commercialComments}</p>
+                                <p className="font-medium text-gray-600">
+                                  Commercial:
+                                </p>
+                                <p className="text-gray-700 line-clamp-2">
+                                  {evaluation.commercialComments}
+                                </p>
                               </div>
                             )}
                             {evaluation.recommendation && (
                               <div className="bg-blue-50 p-2 rounded">
-                                <p className="font-medium text-blue-900">Recommendation:</p>
-                                <p className="text-blue-800 line-clamp-2">{evaluation.recommendation}</p>
+                                <p className="font-medium text-blue-900">
+                                  Recommendation:
+                                </p>
+                                <p className="text-blue-800 line-clamp-2">
+                                  {evaluation.recommendation}
+                                </p>
                               </div>
                             )}
                           </div>
@@ -892,11 +1283,15 @@ export default function BidDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Interviews</CardTitle>
-              <CardDescription>{bid.interviews?.length || 0} interview(s)</CardDescription>
+              <CardDescription>
+                {bid.interviews?.length || 0} interview(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!bid.interviews || bid.interviews.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No interviews scheduled</p>
+                <p className="text-center py-8 text-gray-500">
+                  No interviews scheduled
+                </p>
               ) : (
                 <div className="space-y-4">
                   {bid.interviews.map((interview) => (
@@ -904,10 +1299,20 @@ export default function BidDetailPage() {
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div>
-                            <CardTitle className="text-base">Interview</CardTitle>
-                            <CardDescription>{formatDate(interview.interviewDate)}</CardDescription>
+                            <CardTitle className="text-base">
+                              Interview
+                            </CardTitle>
+                            <CardDescription>
+                              {formatDate(interview.interviewDate)}
+                            </CardDescription>
                           </div>
-                          <Badge variant={interview.status === 'Completed' ? 'default' : 'outline'}>
+                          <Badge
+                            variant={
+                              interview.status === 'Completed'
+                                ? 'default'
+                                : 'outline'
+                            }
+                          >
                             {interview.status}
                           </Badge>
                         </div>
@@ -921,8 +1326,12 @@ export default function BidDetailPage() {
                         )}
                         {interview.interviewerNames && (
                           <div>
-                            <p className="text-sm text-gray-500">Interviewers</p>
-                            <p className="font-medium">{interview.interviewerNames}</p>
+                            <p className="text-sm text-gray-500">
+                              Interviewers
+                            </p>
+                            <p className="font-medium">
+                              {interview.interviewerNames}
+                            </p>
                           </div>
                         )}
                         {interview.notes && (
@@ -933,8 +1342,12 @@ export default function BidDetailPage() {
                         )}
                         {interview.outcome && (
                           <div className="bg-blue-50 p-3 rounded-lg">
-                            <p className="text-sm font-medium text-blue-900">Outcome:</p>
-                            <p className="text-sm mt-1 text-blue-800">{interview.outcome}</p>
+                            <p className="text-sm font-medium text-blue-900">
+                              Outcome:
+                            </p>
+                            <p className="text-sm mt-1 text-blue-800">
+                              {interview.outcome}
+                            </p>
                           </div>
                         )}
                       </CardContent>

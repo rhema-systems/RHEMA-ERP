@@ -234,4 +234,42 @@ describe('supplier applicant evidence uploads', () => {
     expect(screen.getByRole('tab', { name: 'Documents' })).toBeDisabled();
     expect(screen.getByRole('tab', { name: 'Status' })).toBeDisabled();
   });
+
+  it('returns to token login after a payment is recorded', async () => {
+    mocks.portal.mockReset();
+    mocks.portal.mockResolvedValue({
+      ...portal,
+      tokenStatus: 'AwaitingPayment',
+      paymentStatus: 'Pending',
+      feeMode: 'Paid',
+      totalAmount: 100,
+      canEdit: false,
+      canSubmit: false,
+      paymentOnly: true,
+    });
+    mocks.paymentMethods.mockResolvedValue([
+      {
+        id: 'method-1',
+        code: 'MOMO',
+        name: 'Mobile Money',
+        requiresReference: true,
+        isPostingReady: true,
+      },
+    ]);
+    mocks.recordPayment.mockResolvedValue({});
+
+    render(<SupplierApplicantPortalPage />);
+
+    const button = await screen.findByRole('button', {
+      name: 'Record configured payment',
+    });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+
+    await waitFor(() => expect(mocks.recordPayment).toHaveBeenCalledTimes(1));
+    expect(mocks.clearSession).toHaveBeenCalledTimes(1);
+    expect(mocks.router.replace).toHaveBeenCalledWith(
+      '/supplier-application?tab=login&payment=pending'
+    );
+  });
 });

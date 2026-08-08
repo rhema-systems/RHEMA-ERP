@@ -42,6 +42,10 @@ public sealed class SupplierApplicantAccessSecurityTests
             .Should().Be("InternalOnly");
         Policy(controller, nameof(SupplierApplicantAccessController.RetryActivation))
             .Should().Be("InternalOnly");
+        Policy(controller, nameof(SupplierApplicantAccessController.RequestContactCorrectionChallenge))
+            .Should().Be("InternalOnly");
+        Policy(controller, nameof(SupplierApplicantAccessController.ConfirmContactCorrection))
+            .Should().Be("InternalOnly");
 
         controller.GetMethod(nameof(SupplierApplicantAccessController.StartSession))!
             .GetCustomAttribute<AllowAnonymousAttribute>().Should().NotBeNull();

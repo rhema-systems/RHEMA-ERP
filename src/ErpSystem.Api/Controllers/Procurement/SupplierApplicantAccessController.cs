@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Cryptography;
 using System.Security.Claims;
+using System.Text;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.Otp;
 using ErpSystem.Api.Services.Sms;
@@ -81,8 +83,15 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             var tenant = await ResolveTenantAsync(request.TenantCode);
             await EnsureCaptchaAsync(tenant.Id, request.RecaptchaToken, cancellationToken);
             var channel = ParseChannel(request.Channel);
-            var contact = NormalizeContact(channel, request.Contact);
-            ValidateContact(channel, contact);
+            // Reject ERP-account/completed-application conflicts before sending an
+            // OTP. An unfinished application is deliberately allowed: successful
+            // verification resumes it without creating another registration.
+            var preparation = await _applicantAccess.PrepareVerificationChallengeAsync(
+                tenant.Id,
+                channel,
+                request.Contact,
+                cancellationToken);
+            var contact = preparation.NormalizedContact;
             var code = await _otp.CreateOtpAsync(
                 tenant.Id,
                 OtpPurpose.SupplierApplicantVerification,
@@ -113,9 +122,12 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             return Accepted(new
             {
                 success = true,
-                message = "A verification code was sent through the selected channel.",
+                message = preparation.ResumesExistingApplication
+                    ? "A verification code was sent. Verify it to resume the unfinished application; no duplicate application will be created."
+                    : "A verification code was sent through the selected channel.",
                 channel = channel.ToString(),
-                maskedContact = MaskContact(channel, contact)
+                maskedContact = preparation.MaskedContact,
+                resumesExistingApplication = preparation.ResumesExistingApplication
             });
         }
         catch (Exception exception)
@@ -727,6 +739,130 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         }
     }
 
+    [HttpPost("admin/registrations/{registrationId:guid}/contact-correction/challenges")]
+    [Authorize(Policy = "InternalOnly")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> RequestContactCorrectionChallenge(
+        Guid registrationId,
+        [FromBody] SupplierApplicantContactCorrectionChallengeRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var actorUserId = AuthenticatedUserId();
+            var channel = ParseChannel(request.Channel);
+            var prepared = await _applicantAccess.PrepareVerifiedContactCorrectionAsync(
+                registrationId,
+                new PrepareSupplierApplicantContactCorrectionRequest
+                {
+                    Channel = channel,
+                    Contact = request.Contact
+                },
+                actorUserId,
+                Correlation("contact-correction-challenge"),
+                cancellationToken);
+            var code = await _otp.CreateOtpAsync(
+                prepared.TenantId,
+                OtpPurpose.SupplierApplicantContactCorrection,
+                prepared.Channel == ProcurementSupplierApplicantVerificationChannel.Email
+                    ? OtpChannel.Email
+                    : OtpChannel.Sms,
+                ContactCorrectionOtpTarget(
+                    registrationId,
+                    prepared.Channel,
+                    prepared.NormalizedContact),
+                TimeSpan.FromMinutes(10),
+                maxAttempts: 5,
+                cancellationToken);
+            if (prepared.Channel ==
+                ProcurementSupplierApplicantVerificationChannel.Email)
+            {
+                await _notifications.SendEmailAsync(
+                    prepared.NormalizedContact,
+                    "Supplier contact correction verification code",
+                    $"<p>Your supplier contact correction verification code is " +
+                    $"<strong>{code}</strong>. It expires in 10 minutes.</p>",
+                    isHtml: true);
+            }
+            else
+            {
+                await _sms.SendAsync(
+                    prepared.TenantId,
+                    prepared.NormalizedContact,
+                    $"Your supplier contact correction verification code is {code}. " +
+                    "It expires in 10 minutes.",
+                    cancellationToken);
+            }
+
+            return Accepted(new
+            {
+                message = "A verification code was sent to the proposed supplier contact.",
+                channel = prepared.Channel.ToString(),
+                maskedContact = prepared.MaskedContact
+            });
+        }
+        catch (Exception exception)
+        {
+            return Problem(exception);
+        }
+    }
+
+    [HttpPost("admin/registrations/{registrationId:guid}/contact-correction/confirm")]
+    [Authorize(Policy = "InternalOnly")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> ConfirmContactCorrection(
+        Guid registrationId,
+        [FromBody] SupplierApplicantContactCorrectionConfirmRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var actorUserId = AuthenticatedUserId();
+            var channel = ParseChannel(request.Channel);
+            var correction = new CorrectSupplierApplicantVerifiedContactRequest
+            {
+                Channel = channel,
+                Contact = request.Contact,
+                Reason = request.Reason
+            };
+            var prepared = await _applicantAccess.PrepareVerifiedContactCorrectionAsync(
+                registrationId,
+                correction,
+                actorUserId,
+                Correlation("contact-correction-verify"),
+                cancellationToken);
+            var verification = await _otp.VerifyOtpAsync(
+                prepared.TenantId,
+                OtpPurpose.SupplierApplicantContactCorrection,
+                prepared.Channel == ProcurementSupplierApplicantVerificationChannel.Email
+                    ? OtpChannel.Email
+                    : OtpChannel.Sms,
+                ContactCorrectionOtpTarget(
+                    registrationId,
+                    prepared.Channel,
+                    prepared.NormalizedContact),
+                request.OtpCode,
+                consumeOnSuccess: true,
+                cancellationToken);
+            if (!verification.Success)
+                throw new ProcurementSupplierApplicantAccessException(
+                    "SUPPLIER_APPLICANT_CONTACT_CORRECTION_OTP_INVALID",
+                    verification.FailureReason ?? "The verification code is invalid.",
+                    StatusCodes.Status401Unauthorized);
+
+            return Ok(await _applicantAccess.CorrectVerifiedContactAndRetryAsync(
+                registrationId,
+                correction,
+                actorUserId,
+                Correlation("contact-correction-confirm"),
+                cancellationToken));
+        }
+        catch (Exception exception)
+        {
+            return Problem(exception);
+        }
+    }
+
     private Guid AuthenticatedUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -890,6 +1026,20 @@ public sealed class SupplierApplicantAccessController : ControllerBase
         }
         return contact.Length <= 4 ? "****" : $"***{contact[^4..]}";
     }
+
+    internal static string ContactCorrectionOtpTarget(
+        Guid registrationId,
+        ProcurementSupplierApplicantVerificationChannel channel,
+        string normalizedContact)
+    {
+        var contactHash = Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes(normalizedContact)))
+            .ToLowerInvariant();
+        // OtpService treats targets containing '@' as opaque email-like keys,
+        // so this full registration/contact scope survives target normalization.
+        return $"supplier-contact-correction+{registrationId:N}+{(int)channel}+" +
+               $"{contactHash}@otp.invalid";
+    }
 }
 
 public class SupplierApplicantVerificationChallengeRequest
@@ -919,6 +1069,25 @@ public sealed class SupplierApplicantVerifyAndIssueRequest :
         ProcurementSupplierRegistrationCategory.Goods;
 
     public Guid? RetainedRegistrationId { get; set; }
+}
+
+public class SupplierApplicantContactCorrectionChallengeRequest
+{
+    [Required, StringLength(10)]
+    public string Channel { get; set; } = "Email";
+
+    [Required, StringLength(200)]
+    public string Contact { get; set; } = string.Empty;
+}
+
+public sealed class SupplierApplicantContactCorrectionConfirmRequest :
+    SupplierApplicantContactCorrectionChallengeRequest
+{
+    [Required, StringLength(6, MinimumLength = 6)]
+    public string OtpCode { get; set; } = string.Empty;
+
+    [Required, StringLength(500, MinimumLength = 10)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 public sealed class SupplierApplicantLoginRequest

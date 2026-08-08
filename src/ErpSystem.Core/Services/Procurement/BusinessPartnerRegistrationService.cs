@@ -339,7 +339,16 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         var registrations = await _registrationRepository.GetRejectedRegistrationsAsync();
         return registrations.Select(MapToDto);
     }
-    public async Task SubmitForReviewAsync(Guid id, Guid userId)
+    public Task SubmitForReviewAsync(Guid id, Guid userId) =>
+        SubmitForReviewCoreAsync(id, userId, userId);
+
+    public Task SubmitExternalApplicantForReviewAsync(Guid id, Guid applicantActorId) =>
+        SubmitForReviewCoreAsync(id, applicantActorId, changedByUserId: null);
+
+    private async Task SubmitForReviewCoreAsync(
+        Guid id,
+        Guid actionActorId,
+        Guid? changedByUserId)
     {
         var registration = await _registrationRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Registration with ID {id} not found");
         if (registration.Status != "Draft" && registration.Status != "MoreInfoRequired")
@@ -390,11 +399,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         await _evidencePackService.BindAndValidateRegistrationAsync(
             id,
-            userId,
+            actionActorId,
             $"supplier-registration-submit-{id:N}",
             CancellationToken.None);
 
-        await _registrationRepository.UpdateStatusAsync(id, "Submitted", userId, "Submitted for review");
+        await _registrationRepository.UpdateStatusAsync(
+            id, "Submitted", changedByUserId, "Submitted by verified supplier applicant");
 
         // Publish events for admin-configurable notification topics (best-effort).
         try
@@ -417,7 +427,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 Activity = "Submitted",
                 Audience = "Supplier",
                 EntityId = registration.Id,
-                TriggeredByUserId = userId,
+                TriggeredByUserId = changedByUserId,
                 Data = data
             });
 
@@ -428,7 +438,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 Activity = "Submitted",
                 Audience = "Internal",
                 EntityId = registration.Id,
-                TriggeredByUserId = userId,
+                TriggeredByUserId = changedByUserId,
                 Data = data
             });
         }
@@ -438,7 +448,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         // Send in-app notification to the applicant
-        if (_notificationService != null && registration.CreatedById.HasValue)
+        if (_notificationService != null && changedByUserId.HasValue &&
+            registration.CreatedById.HasValue)
         {
             try
             {
@@ -453,7 +464,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                     EntityId = id,
                     ActionUrl = $"/register/business-partner/status/{id}"
                 };
-                await _notificationService.CreateNotificationAsync(notificationDto, userId, registration.TenantId);
+                await _notificationService.CreateNotificationAsync(
+                    notificationDto, changedByUserId.Value, registration.TenantId);
                 _logger.LogInformation("Submission notification sent to user {UserId} for registration {RegistrationId}",
                     registration.CreatedById.Value, id);
             }
@@ -464,43 +476,25 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             }
         }
 
-        // Create in-app notification and queue email (fire-and-forget)
-        if (_notificationService != null && registration.CreatedById.HasValue)
+        // External applicant identities are not ERP Users, so do not create an
+        // in-app notification for them. Email delivery remains independent.
+        if (_notificationService != null &&
+            !string.IsNullOrEmpty(registration.ApplicantEmail))
         {
             try
             {
-                // 1. Create in-app notification with friendly message
-                var inAppNotificationDto = new CreateNotificationDto
-                {
-                    RecipientId = registration.CreatedById.Value,
-                    Type = "InApp",
-                    Title = "Registration Submitted Successfully",
-                    Message = $"Your business partner registration (Application #{registration.RegistrationNumber}) has been submitted and is now under review.",
-                    Priority = "Normal",
-                    EntityType = "BusinessPartnerRegistration",
-                    EntityId = id,
-                    ActionUrl = $"/external-portal/business-partner"
-                };
-                await _notificationService.CreateNotificationAsync(inAppNotificationDto, userId, registration.TenantId);
+                var emailSubject = "Business Partner Registration Submitted";
+                var emailBody = GenerateRegistrationSubmittedEmailBody(
+                    registration.ApplicantName, registration.RegistrationNumber);
+                await _notificationService.SendEmailAsync(
+                    registration.ApplicantEmail,
+                    emailSubject,
+                    emailBody,
+                    isHtml: true);
 
-                // 2. Send email notification
-                if (!string.IsNullOrEmpty(registration.ApplicantEmail))
-                {
-                    var emailSubject = "Business Partner Registration Submitted";
-                    var emailBody = GenerateRegistrationSubmittedEmailBody(registration.ApplicantName, registration.RegistrationNumber);
-
-                    await _notificationService.SendEmailAsync(
-                        registration.ApplicantEmail,
-                        emailSubject,
-                        emailBody,
-                        isHtml: true
-                    );
-
-                    _logger.LogInformation("Registration submitted email sent to {Email} for application {ApplicationNumber}",
-                        registration.ApplicantEmail, registration.RegistrationNumber);
-                }
-
-                _logger.LogInformation("Notifications created for registration submission {ApplicationNumber}", registration.RegistrationNumber);
+                _logger.LogInformation(
+                    "Registration submitted email sent for application {ApplicationNumber}",
+                    registration.RegistrationNumber);
             }
             catch (Exception ex)
             {

@@ -2659,7 +2659,12 @@ export const navigationItems: NavItem[] = [
         title: 'Projects',
         href: '/administration/project-management',
         icon: Briefcase,
-        permissions: ['admin.project-management'],
+        permissions: [
+          'admin.project-management',
+          'quantity-survey.configuration.read',
+          'quantity-survey.workspace.read',
+        ],
+        accessMode: 'any',
         children: [
           {
             title: 'Overview',
@@ -2695,6 +2700,24 @@ export const navigationItems: NavItem[] = [
             title: 'Settings',
             href: '/administration/project-management/settings',
             icon: Settings,
+          },
+          {
+            title: 'Quantity Survey Policy',
+            href: '/administration/project-management/quantity-survey-config',
+            icon: ShieldCheck,
+            permissions: ['quantity-survey.configuration.read'],
+          },
+          {
+            title: 'Quantity Survey Catalogues',
+            href: '/administration/project-management/quantity-survey-catalogues',
+            icon: Package,
+            permissions: ['quantity-survey.configuration.read'],
+          },
+          {
+            title: 'Quantity Survey Rate Library',
+            href: '/administration/project-management/quantity-survey-rate-library',
+            icon: BarChart3,
+            permissions: ['quantity-survey.workspace.read'],
           },
         ],
       },

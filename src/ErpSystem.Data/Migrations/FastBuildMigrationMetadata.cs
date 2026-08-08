@@ -170,3 +170,5 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806010613_TDC0706SharedAuditGovernance")] partial class TDC0706SharedAuditGovernance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806082400_TDC0809HrIdentityReconciliation")] partial class TDC0809HrIdentityReconciliation { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806091039_TDC0808ProcurementCentralDmsAdoption")] partial class TDC0808ProcurementCentralDmsAdoption { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260808143557_AddQuantitySurveyTenderBoqSubmissions")] partial class AddQuantitySurveyTenderBoqSubmissions { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260808155330_AddQuantitySurveyRateLibrary")] partial class AddQuantitySurveyRateLibrary { }

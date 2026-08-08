@@ -18,6 +18,12 @@ public static class ControlledFileUploadCategories
     public const string FinanceCloseEvidence =
         "finance-close-evidence";
 
+    public const string QuantitySurveyBoqImport =
+        "quantity-survey-boq-import";
+
+    public const string QuantitySurveyTenderBoqSubmission =
+        "quantity-survey-tender-boq-submission";
+
     // HR document families. Every one of these is personal data — CVs, identity
     // documents, sick-note certificates, disciplinary evidence, medical exam
     // results — so they are all private (see LocalFileStorageService's "hr-"
@@ -49,6 +55,8 @@ public static class ControlledFileUploadCategories
                 SupplierRegistrationEvidence,
                 DocumentManagement,
                 FinanceCloseEvidence,
+                QuantitySurveyBoqImport,
+                QuantitySurveyTenderBoqSubmission,
                 HrCandidateCv,
                 HrCandidateDocuments,
                 HrCandidatePhotos,
