@@ -196,6 +196,59 @@ public sealed class ProcurementSupplierEvidencePackServiceTests
             .ThrowAsync<ProcurementSupplierEvidencePackAuthorizationException>();
     }
 
+    [Fact]
+    public async Task ExternalApplicantBindingUsesTenantSystemAuditPrincipal()
+    {
+        await using var fixture = new Fixture();
+        var pack = fixture.PublishedPack(
+            "TDC-GOODS", ProcurementSupplierRegistrationCategory.Goods,
+            version: 1, effectiveFrom: DateTime.UtcNow.AddDays(-1));
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationNumber = "REG-EXTERNAL",
+            ApplicantName = "External Applicant",
+            PartnerType = "Supplier",
+            RegistrationCategory = ProcurementSupplierRegistrationCategory.Goods,
+            Status = "Draft",
+            CreatedById = fixture.UserId
+        };
+        var document = new BusinessPartnerRegistrationDocument
+        {
+            Id = Guid.NewGuid(),
+            TenantId = fixture.TenantId,
+            RegistrationId = registration.Id,
+            DocumentType = "Tax Clearance Certificate",
+            DocumentName = "tax-clearance.pdf",
+            DocumentPath = "evidence/tax-clearance.pdf",
+            FileSize = 1024,
+            MimeType = "application/pdf",
+            EvidenceRequirementCode = "GRA-CLEARANCE",
+            IssuedAtUtc = DateTime.UtcNow.AddDays(-10),
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(90),
+            ChecksumSha256 = new string('a', 64)
+        };
+        fixture.Context.AddRange(pack, registration, document);
+        await fixture.Context.SaveChangesAsync();
+        fixture.SetExternal(true);
+
+        var result = await fixture.Service.BindAndValidateRegistrationAsync(
+            registration.Id, fixture.UserId, "external-bind");
+
+        result.IsBound.Should().BeTrue();
+        fixture.ControlEvents.Verify(service => service.RecordSystemAsync(
+            fixture.TenantId,
+            "supplier-controls@tdc.test",
+            It.Is<ProcurementControlEventWriteRequest>(request =>
+                request.Action == "RegistrationPackBound" &&
+                request.SourceId == registration.Id),
+            It.IsAny<CancellationToken>()), Times.Once);
+        fixture.ControlEvents.Verify(service => service.RecordAsync(
+            It.IsAny<ProcurementControlEventWriteRequest>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Guid _tenantId;
@@ -299,11 +352,18 @@ public sealed class ProcurementSupplierEvidencePackServiceTests
                         InitiatedById = userId,
                         Status = WorkflowInstanceStatus.InProgress
                     });
-            var events = new ProcurementControlEventService(
-                _unitOfWork, current.Object,
-                NullLogger<ProcurementControlEventService>.Instance);
+            ControlEvents = new Mock<IProcurementControlEventService>();
+            ControlEvents.Setup(service => service.RecordAsync(
+                    It.IsAny<ProcurementControlEventWriteRequest>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementControlEventDto());
+            ControlEvents.Setup(service => service.RecordSystemAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(),
+                    It.IsAny<ProcurementControlEventWriteRequest>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementControlEventDto());
             Service = new ProcurementSupplierEvidencePackService(
-                _unitOfWork, current.Object, access.Object, sod.Object, events,
+                _unitOfWork, current.Object, access.Object, sod.Object, ControlEvents.Object,
                 workflow.Object, Mock.Of<INotificationTopicPublisher>(),
                 NullLogger<ProcurementSupplierEvidencePackService>.Instance);
         }
@@ -313,6 +373,7 @@ public sealed class ProcurementSupplierEvidencePackServiceTests
         public ApplicationDbContext Context { get; }
         public ProcurementConfigurationProfile Profile { get; }
         public WorkflowDefinition Workflow { get; }
+        public Mock<IProcurementControlEventService> ControlEvents { get; }
         public ProcurementSupplierEvidencePackService Service { get; }
 
         public void SwitchTenant(Guid tenantId) => _tenantId = tenantId;

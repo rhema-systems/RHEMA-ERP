@@ -34,6 +34,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
     private readonly IUnitOfWork _unitOfWork;
     private readonly IProcurementSupplierOnboardingTokenService _tokenService;
     private readonly IBusinessPartnerRegistrationService _registrationService;
+    private readonly IProcurementSupplierApplicantContactCorrectionStore
+        _contactCorrectionStore;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementAccessControlService _accessControl;
     private readonly ICurrentUserProvider _currentUser;
@@ -48,6 +50,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         IUnitOfWork unitOfWork,
         IProcurementSupplierOnboardingTokenService tokenService,
         IBusinessPartnerRegistrationService registrationService,
+        IProcurementSupplierApplicantContactCorrectionStore contactCorrectionStore,
         IProcurementControlEventService controlEvents,
         IProcurementAccessControlService accessControl,
         ICurrentUserProvider currentUser,
@@ -61,6 +64,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         _unitOfWork = unitOfWork;
         _tokenService = tokenService;
         _registrationService = registrationService;
+        _contactCorrectionStore = contactCorrectionStore;
         _controlEvents = controlEvents;
         _accessControl = accessControl;
         _currentUser = currentUser;
@@ -1761,7 +1765,26 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     await BusinessPartners.UpdateAsync(businessPartner);
                 }
 
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                if (!_contactCorrectionStore.HasRequiredTransaction)
+                    throw new InvalidOperationException(
+                        "Verified supplier-contact correction requires an active database transaction.");
+
+                await _contactCorrectionStore
+                    .SetVerifiedContactCorrectionContextAsync(
+                        access.Id,
+                        actorUserId,
+                        access.VerifiedContactHashSha256,
+                        cancellationToken);
+                try
+                {
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                finally
+                {
+                    await _contactCorrectionStore
+                        .ClearVerifiedContactCorrectionContextAsync(
+                            CancellationToken.None);
+                }
                 await RecordUserEventAsync(
                     access,
                     access.Token,

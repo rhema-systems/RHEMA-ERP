@@ -37,7 +37,7 @@ public class SystemExceptionLogConfiguration : IEntityTypeConfiguration<SystemEx
         builder.Property(x => x.Username).HasMaxLength(200);
         builder.Property(x => x.ResolutionNotes).HasMaxLength(2000);
 
-        builder.HasIndex(x => new { x.TenantId, x.Fingerprint }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.Fingerprint });
         builder.HasIndex(x => new { x.TenantId, x.CreatedAt });
         builder.HasIndex(x => new { x.TenantId, x.LastOccurredAt });
         builder.HasIndex(x => new { x.TenantId, x.Level, x.CreatedAt });

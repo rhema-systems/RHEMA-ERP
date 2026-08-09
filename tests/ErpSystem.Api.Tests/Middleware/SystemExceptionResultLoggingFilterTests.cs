@@ -18,6 +18,63 @@ namespace ErpSystem.Api.Tests.Middleware;
 public sealed class SystemExceptionResultLoggingFilterTests
 {
     [Fact]
+    public async Task CapturedHandledExceptionIsPersistedWithDiagnosticDetail()
+    {
+        var tenantId = Guid.NewGuid();
+        var repository = new Mock<IGenericRepository<SystemExceptionLog>>();
+        repository.Setup(value => value.FirstOrDefaultAsync(
+                It.IsAny<System.Linq.Expressions.Expression<Func<SystemExceptionLog, bool>>>() ))
+            .ReturnsAsync((SystemExceptionLog?)null);
+        repository.Setup(value => value.AddAsync(It.IsAny<SystemExceptionLog>()))
+            .ReturnsAsync((SystemExceptionLog value) => value);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(value => value.Repository<SystemExceptionLog>())
+            .Returns(repository.Object);
+        unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(value => value.TenantId).Returns(tenantId);
+        var provider = new ServiceCollection()
+            .AddSingleton(unitOfWork.Object)
+            .AddSingleton(currentUser.Object)
+            .BuildServiceProvider();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            TraceIdentifier = "handled-trace-1"
+        };
+        http.Request.Method = HttpMethods.Post;
+        http.Request.Path = "/api/procurement/supplier-applicant-access/portal/submit";
+        http.Items[SystemExceptionResultLoggingFilter.HandledExceptionItemKey] =
+            new InvalidOperationException("Supplier binding failed for token=secret-value.");
+        var actionContext = new ActionContext(
+            http, new RouteData(), new ActionDescriptor { DisplayName = "Submit supplier" });
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status500InternalServerError,
+            Detail = "The supplier applicant request could not be completed."
+        };
+        var result = new ObjectResult(problem) { StatusCode = problem.Status };
+        var filters = new List<IFilterMetadata>();
+        var executing = new ResultExecutingContext(
+            actionContext, filters, result, new object());
+        var filter = new SystemExceptionResultLoggingFilter(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SystemExceptionResultLoggingFilter>.Instance);
+
+        await filter.OnResultExecutionAsync(executing, () =>
+            Task.FromResult(new ResultExecutedContext(
+                actionContext, filters, result, new object())));
+
+        repository.Verify(value => value.AddAsync(It.Is<SystemExceptionLog>(entry =>
+            entry.ExceptionType == typeof(InvalidOperationException).FullName &&
+            entry.ShortMessage.Contains("token=[REDACTED]") &&
+            entry.FullMessage != null &&
+            entry.FullMessage.Contains("Handled exception") &&
+            !entry.FullMessage.Contains("secret-value"))), Times.Once);
+    }
+
+    [Fact]
     public async Task AutomaticValidationProblemIsPersistedForTenantAudit()
     {
         var tenantId = Guid.NewGuid();
@@ -91,6 +148,11 @@ public sealed class SystemExceptionResultLoggingFilterTests
             entry.FullMessage != null &&
             entry.FullMessage.Contains("token=[REDACTED]") &&
             !entry.FullMessage.Contains("plain-secret"))), Times.Once);
+        repository.Verify(value => value.FirstOrDefaultAsync(
+            It.IsAny<System.Linq.Expressions.Expression<Func<SystemExceptionLog, bool>>>()),
+            Times.Never);
+        repository.Verify(value => value.UpdateAsync(It.IsAny<SystemExceptionLog>()),
+            Times.Never);
         unitOfWork.Verify(value => value.SaveChangesAsync(
             It.IsAny<CancellationToken>()), Times.Once);
     }

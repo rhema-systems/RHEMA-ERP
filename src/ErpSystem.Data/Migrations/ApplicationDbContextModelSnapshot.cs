@@ -141876,8 +141876,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "CreatedAt");
 
-                    b.HasIndex("TenantId", "Fingerprint")
-                        .IsUnique();
+                    b.HasIndex("TenantId", "Fingerprint");
 
                     b.HasIndex("TenantId", "LastOccurredAt");
 
