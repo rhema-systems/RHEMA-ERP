@@ -1775,16 +1775,10 @@ public sealed class ProcurementSupplierApplicantAccessService :
                         actorUserId,
                         access.VerifiedContactHashSha256,
                         cancellationToken);
-                try
-                {
-                    await _unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-                finally
-                {
-                    await _contactCorrectionStore
-                        .ClearVerifiedContactCorrectionContextAsync(
-                            CancellationToken.None);
-                }
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _contactCorrectionStore
+                    .ClearVerifiedContactCorrectionContextAsync(
+                        CancellationToken.None);
                 await RecordUserEventAsync(
                     access,
                     access.Token,
@@ -1806,7 +1800,39 @@ public sealed class ProcurementSupplierApplicantAccessService :
             catch
             {
                 if (_unitOfWork.HasActiveTransaction)
-                    await _unitOfWork.RollbackAsync(cancellationToken);
+                {
+                    try
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        // Preserve the original persistence exception for the
+                        // central ProblemDetails/error-log pipeline. A trigger
+                        // may already have aborted the SQL transaction.
+                        _logger.LogCritical(
+                            rollbackException,
+                            "Could not explicitly roll back supplier contact correction for registration {RegistrationId}",
+                            registrationId);
+                    }
+                }
+                try
+                {
+                    // SQL Server aborts a transaction when the protection
+                    // trigger rejects an update. Clear the connection-scoped
+                    // capability only after rollback so a failed save cannot
+                    // leave it on the scoped connection.
+                    await _contactCorrectionStore
+                        .ClearVerifiedContactCorrectionContextAsync(
+                            CancellationToken.None);
+                }
+                catch (Exception cleanupException)
+                {
+                    _logger.LogCritical(
+                        cleanupException,
+                        "Could not clear the supplier contact-correction database context for registration {RegistrationId}",
+                        registrationId);
+                }
                 _unitOfWork.ClearTrackedChanges();
                 throw;
             }
