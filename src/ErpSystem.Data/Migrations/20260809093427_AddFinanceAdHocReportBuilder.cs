@@ -44,9 +44,9 @@ public partial class AddFinanceAdHocReportBuilder : Migration
             {
                 table.PrimaryKey("PK_FinanceAdHocReportDefinitions", x => x.Id);
                 table.ForeignKey(
-                    name: "FK_FinanceAdHocReportDefinitions_AspNetUsers_OwnerUserId",
+                    name: "FK_FinanceAdHocReportDefinitions_Users_OwnerUserId",
                     column: x => x.OwnerUserId,
-                    principalTable: "AspNetUsers",
+                    principalTable: "Users",
                     principalColumn: "Id");
                 table.ForeignKey(
                     name: "FK_FinanceAdHocReportDefinitions_Reports_ReportId",
