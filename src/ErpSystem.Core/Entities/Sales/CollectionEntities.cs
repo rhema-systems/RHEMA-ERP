@@ -6,6 +6,47 @@ using ErpSystem.Core.Entities.Finance;
 namespace ErpSystem.Core.Entities.Sales;
 
 /// <summary>
+/// Controlled values shared by the Sales collection screens and the Finance AR
+/// follow-up workspace. Keeping the values beside the existing aggregate avoids
+/// two modules persisting subtly different status/type strings in the same table.
+/// </summary>
+public static class CollectionActivityValues
+{
+    public const string SalesContext = "Sales";
+    public const string FinanceArContext = "FinanceAR";
+
+    public const string FollowUpTaskType = "FollowUpTask";
+    public const string ReminderType = "Reminder";
+
+    public const string PendingStatus = "Pending";
+    public const string InProgressStatus = "InProgress";
+    public const string PromiseToPayStatus = "PromiseToPay";
+    public const string EscalatedStatus = "Escalated";
+    public const string ResolvedStatus = "Resolved";
+    public const string WrittenOffStatus = "WrittenOff";
+
+    public static readonly IReadOnlySet<string> TaskStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        PendingStatus,
+        InProgressStatus,
+        PromiseToPayStatus,
+        EscalatedStatus,
+        ResolvedStatus,
+        WrittenOffStatus
+    };
+
+    public static readonly IReadOnlySet<string> ReminderChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Email",
+        "SMS",
+        "Letter",
+        "Phone",
+        "Visit",
+        "Internal"
+    };
+}
+
+/// <summary>
 /// Collection Activity — tracking calls, emails, and follow-ups for overdue invoices.
 /// Ported from EzFMC Collections module.
 /// </summary>
@@ -23,6 +64,25 @@ public class CollectionActivity : BusinessEntity
 
     [StringLength(50)]
     public string ActivityType { get; set; } = "Call"; // Call, Email, Letter, Visit, LegalNotice
+
+    /// <summary>
+    /// Identifies the operational surface that owns this activity. Existing
+    /// Sales collection records remain valid, while Finance AR can safely query
+    /// only its controlled work items from the shared collection aggregate.
+    /// </summary>
+    [Required]
+    [StringLength(30)]
+    public string CollectionContext { get; set; } = CollectionActivityValues.SalesContext;
+
+    /// <summary>
+    /// The durable task at the head of a Finance collection case. Reminder and
+    /// contact-history rows point back to this task instead of overwriting it.
+    /// </summary>
+    public bool IsPrimaryTask { get; set; }
+
+    public Guid? ParentActivityId { get; set; }
+    public virtual CollectionActivity? ParentActivity { get; set; }
+    public virtual ICollection<CollectionActivity> History { get; set; } = new List<CollectionActivity>();
 
     [StringLength(2000)]
     public string? Description { get; set; }
@@ -47,8 +107,30 @@ public class CollectionActivity : BusinessEntity
     public Guid? AssignedToId { get; set; }
     public virtual ApplicationUser? AssignedTo { get; set; }
 
+    /// <summary>
+    /// Channel and recipient are retained as evidence of a prepared or recorded
+    /// reminder. Finance deliberately records external reminders without assuming
+    /// that an email/SMS provider is configured in every TDC environment.
+    /// </summary>
+    [StringLength(20)]
+    public string? ReminderChannel { get; set; }
+
+    [StringLength(250)]
+    public string? ReminderRecipient { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
+    public Guid? CompletedById { get; set; }
+    public virtual ApplicationUser? CompletedBy { get; set; }
+
     [StringLength(2000)]
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// Optimistic concurrency protects task assignment and collection outcomes
+    /// when two officers update the same overdue exposure at the same time.
+    /// </summary>
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     // Multi-tenant
     public Guid TenantId { get; set; }

@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using Microsoft.Data.SqlClient;
@@ -104,12 +105,80 @@ public class FinanceDataSeeder
             await SeedTransactionDocumentMappingsAsync(tenantId, baseDate);
             await _context.SaveChangesAsync();
 
+            // 12. Seed collection follow-up examples only when posted overdue AR
+            // evidence already exists. A fresh database normally has no posted AR
+            // exposure yet, so this remains a safe no-op until representative demo
+            // transactions have been loaded and the settlement projection rebuilt.
+            await SeedArCollectionFollowUpDemoAsync(tenantId);
+            await _context.SaveChangesAsync();
+
             _logger.LogInformation("Finance data seeding completed successfully!");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error occurred while seeding finance data");
             throw;
+        }
+    }
+
+    private async Task SeedArCollectionFollowUpDemoAsync(Guid tenantId)
+    {
+        var assignee = await _context.Users.AsNoTracking()
+            .Where(user => user.IsActive && user.TenantId == tenantId)
+            .OrderBy(user => user.CreatedAt)
+            .Select(user => new { user.Id, user.UserName })
+            .FirstOrDefaultAsync();
+        if (assignee == null)
+            return;
+
+        var candidates = await _context.SubledgerSettlementBalances.AsNoTracking()
+            .Where(balance =>
+                balance.TenantId == tenantId &&
+                !balance.IsDeleted &&
+                balance.SourceModule == SubledgerSettlementModules.AccountsReceivable &&
+                balance.OutstandingAmount > 0 &&
+                balance.DueDate.HasValue &&
+                balance.DueDate.Value.Date < DateTime.UtcNow.Date)
+            .OrderBy(balance => balance.DueDate)
+            .Take(2)
+            .ToListAsync();
+
+        foreach (var exposure in candidates)
+        {
+            var alreadyExists = await _context.CollectionActivities.IgnoreQueryFilters().AnyAsync(activity =>
+                activity.TenantId == tenantId &&
+                !activity.IsDeleted &&
+                activity.CollectionContext == CollectionActivityValues.FinanceArContext &&
+                activity.IsPrimaryTask &&
+                activity.InvoiceId == exposure.SourceDocumentId);
+            if (alreadyExists)
+                continue;
+
+            var now = DateTime.UtcNow;
+            var demoReference = $"ARCOL-DEMO-{exposure.SourceDocumentNumber}";
+            _context.CollectionActivities.Add(new CollectionActivity
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                ReferenceNumber = demoReference[..Math.Min(50, demoReference.Length)],
+                CollectionContext = CollectionActivityValues.FinanceArContext,
+                IsPrimaryTask = true,
+                CustomerId = exposure.CounterpartyId,
+                InvoiceId = exposure.SourceDocumentId,
+                Subject = $"Follow up overdue invoice {exposure.SourceDocumentNumber}",
+                ActivityType = CollectionActivityValues.FollowUpTaskType,
+                Description = "Seeded demonstration task backed by posted AR settlement evidence.",
+                ActivityDate = now,
+                FollowUpDate = now.Date.AddDays(1),
+                CollectionStatus = CollectionActivityValues.PendingStatus,
+                OutstandingAmount = exposure.OutstandingAmount,
+                AssignedToId = assignee.Id,
+                Priority = 5,
+                Notes = "Use this task to demonstrate assignment, reminders, promises to pay, and collection history.",
+                CreatedAt = now,
+                CreatedBy = assignee.UserName ?? "System",
+                CreatedById = assignee.Id
+            });
         }
     }
 

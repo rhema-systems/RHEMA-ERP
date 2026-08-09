@@ -1930,6 +1930,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<CollectionActivity>(entity =>
         {
             entity.ToTable("CollectionActivities");
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            // A posted invoice may have many calls/reminders, but Finance must have
+            // only one durable primary work item for that exposure. The filtered
+            // SQL Server index makes bulk generation idempotent under concurrency.
+            entity.HasIndex(e => new { e.TenantId, e.InvoiceId, e.CollectionContext })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsPrimaryTask] = 1 AND [InvoiceId] IS NOT NULL");
+            entity.HasIndex(e => new { e.TenantId, e.CollectionContext, e.CollectionStatus, e.FollowUpDate });
             entity.HasOne(e => e.Customer)
                 .WithMany()
                 .HasForeignKey(e => e.CustomerId)
@@ -1941,6 +1949,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.AssignedTo)
                 .WithMany()
                 .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CompletedBy)
+                .WithMany()
+                .HasForeignKey(e => e.CompletedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ParentActivity)
+                .WithMany(e => e.History)
+                .HasForeignKey(e => e.ParentActivityId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()

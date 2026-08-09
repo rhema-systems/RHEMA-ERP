@@ -76,6 +76,9 @@ public static class FinancePermissions
     public const string VoidArInvoices = "Finance.AR.Invoices.Void";
     public const string ReceiveCustomerPayments = "Finance.AR.Payments.Receive";
     public const string ReverseArPayments = "Finance.AR.Payments.Reverse";
+    public const string ViewArCollections = "Finance.AR.Collections.View";
+    public const string ManageArCollections = "Finance.AR.Collections.Manage";
+    public const string RecordArCollectionReminders = "Finance.AR.Collections.Reminders.Record";
 
     public const string ManageBankAccounts = "Finance.BankAccounts.Manage";
     public const string RecordCashBankTransactions = "Finance.CashBank.Transactions.Record";
@@ -193,6 +196,9 @@ public static class FinancePermissions
         new(VoidArInvoices, "Void AR Invoices", "Void customer invoices with reversal controls.", CategoryAccountsReceivable),
         new(ReceiveCustomerPayments, "Receive Customer Payments", "Record, allocate, clear, bounce, and credit customer payments.", CategoryAccountsReceivable),
         new(ReverseArPayments, "Reverse AR Payments", "Reverse posted customer receipts through controlled compensating journals.", CategoryAccountsReceivable),
+        new(ViewArCollections, "View AR Collections", "View overdue AR exposures, collection work queues, promises, and follow-up history.", CategoryAccountsReceivable),
+        new(ManageArCollections, "Manage AR Collections", "Generate, assign, prioritize, and resolve controlled AR collection tasks.", CategoryAccountsReceivable),
+        new(RecordArCollectionReminders, "Record AR Collection Reminders", "Prepare and record customer reminders and collection-contact evidence.", CategoryAccountsReceivable),
 
         new(ManageBankAccounts, "Manage Bank Accounts", "Create, update, delete, and configure bank accounts.", CategoryCashBank),
         new(RecordCashBankTransactions, "Record Cash/Bank Transactions", "Record cash receipts, payments, and transfers.", CategoryCashBank),

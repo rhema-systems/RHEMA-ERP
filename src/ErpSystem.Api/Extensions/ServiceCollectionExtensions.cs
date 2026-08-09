@@ -797,6 +797,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAllocationService, ErpSystem.Api.Services.Finance.UnitAccounting.AllocationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApReportsService, ErpSystem.Api.Services.Finance.AP.ApReportsService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IArReportsService, ErpSystem.Api.Services.Finance.AR.ArReportsService>();
+            // Finance collections reuse the existing Sales collection aggregate but
+            // source balances exclusively from the posted AR settlement projection.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IArCollectionFollowUpService, ErpSystem.Api.Services.Finance.AR.ArCollectionFollowUpService>();
             // Customer account endpoints use the Finance AR source model and settlement projection.
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICustomerService, ErpSystem.Api.Services.Finance.AR.CustomerService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetReportsService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetReportsService>();
