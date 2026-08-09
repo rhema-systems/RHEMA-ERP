@@ -71,6 +71,11 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public Guid? CapitalizationPostingEventId { get; set; }
 
+        // Current-cycle reversal lineage is retained beside the original capitalization evidence.
+        public Guid? CapitalizationReversalJournalEntryId { get; set; }
+        public Guid? CapitalizationReversalPostingEventId { get; set; }
+        public DateTime? CapitalizationReversedAt { get; set; }
+
         [MaxLength(50)]
         public string? SourceDocumentType { get; set; }
 

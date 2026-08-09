@@ -76,6 +76,14 @@ function formatMoney(value?: number, currency = 'GHS') {
   }).format(value);
 }
 
+function formatDate(value?: string) {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
+}
+
 function sourceLabel(sourceType: EstateManagedAssetSourceType) {
   if (sourceType === EstateManagedAssetSourceType.LandAcquisition)
     return 'Land acquisition';
@@ -163,9 +171,7 @@ function DetailRow({
 export default function EstateLandManagementPage() {
   const { hasAnyRole, hasPermission } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
-  const canMarkProjectReady = hasPermission(
-    'estate.land.project-readiness'
-  );
+  const canMarkProjectReady = hasPermission('estate.land.project-readiness');
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -279,9 +285,7 @@ export default function EstateLandManagementPage() {
         ...acquisitionItems.map((item) => `acquisition:${item.id}`),
       ];
       setSelectedKey((current) =>
-        current && nextKeys.includes(current)
-          ? current
-          : (nextKeys[0] ?? null)
+        current && nextKeys.includes(current) ? current : (nextKeys[0] ?? null)
       );
     } catch (error) {
       console.error('Failed to load land records', error);
@@ -300,11 +304,10 @@ export default function EstateLandManagementPage() {
       record.type === 'acquisition' ||
       record.asset.sourceType === EstateManagedAssetSourceType.LandAcquisition
   ).length;
-  const verifiedCount = records.filter(
-    (record) =>
-      record.type === 'asset'
-        ? record.asset.boundaryVerified
-        : acquisitionBoundaryVerified(record.acquisition)
+  const verifiedCount = records.filter((record) =>
+    record.type === 'asset'
+      ? record.asset.boundaryVerified
+      : acquisitionBoundaryVerified(record.acquisition)
   ).length;
   const selectedAsset = selected?.type === 'asset' ? selected.asset : null;
   const saleListingDisabledReason = !selectedAsset
@@ -322,18 +325,18 @@ export default function EstateLandManagementPage() {
               ? 'Verify every demarcation first.'
               : undefined;
   const saleListingLabel =
-    selectedAsset?.isPublishedToExternalPortal &&
-    (selectedAsset.externalListingType === 'Sale' ||
-      selectedAsset.externalListingType === 'SaleAndRent')
-      ? 'View Sale Listing'
-      : 'List Land for Sale';
+    selectedAsset?.externalListingType !== 'None'
+      ? 'View Portal Listing'
+      : 'Send to Portal Listings';
 
   const markAssetProjectReady = async (asset: EstateManagedAsset) => {
     const key = `asset:${asset.id}`;
     try {
       setMarkingReadyKey(key);
       await estateLandManagementService.markReadyForProjectManagement(asset.id);
-      toast.success('Whole land is demarcated and ready for project management.');
+      toast.success(
+        'Whole land is demarcated and ready for project management.'
+      );
       await loadLandRecords(search);
     } catch (error: any) {
       toast.error(error?.message || 'Unable to make land ready.');
@@ -611,7 +614,7 @@ export default function EstateLandManagementPage() {
                     ? `${selected.asset.assetCode} - ${sourceLabel(selected.asset.sourceType)}`
                     : selected?.type === 'acquisition'
                       ? `${selected.acquisition.currentStage} - ${selected.acquisition.status}`
-                    : 'Project management can pull from records shown here.'}
+                      : 'Project management can pull from records shown here.'}
                 </CardDescription>
               </div>
               {selected?.type === 'acquisition' ? (
@@ -630,7 +633,8 @@ export default function EstateLandManagementPage() {
                     variant="outline"
                     disabled={
                       !acquisitionReadyForLandBank(selected.acquisition) ||
-                      markingReadyKey === `acquisition:${selected.acquisition.id}`
+                      markingReadyKey ===
+                        `acquisition:${selected.acquisition.id}`
                     }
                     onClick={() =>
                       void publishAcquisitionToLandBank(selected.acquisition)
@@ -702,6 +706,7 @@ export default function EstateLandManagementPage() {
                       disabled={
                         !canMarkProjectReady ||
                         selected.asset.isPublishedToExternalPortal ||
+                        selected.asset.externalListingType !== 'None' ||
                         !selected.asset.boundaryVerified ||
                         selected.asset.demarcationCount === 0 ||
                         selected.asset.verifiedDemarcationCount !==
@@ -712,7 +717,8 @@ export default function EstateLandManagementPage() {
                       title={
                         !canMarkProjectReady
                           ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
-                          : selected.asset.isPublishedToExternalPortal
+                          : selected.asset.isPublishedToExternalPortal ||
+                              selected.asset.externalListingType !== 'None'
                             ? 'Withdraw the active external land listing before marking this land ready for a project.'
                             : !selected.asset.boundaryVerified
                               ? 'Verify the main cadastral boundary first.'
@@ -733,9 +739,7 @@ export default function EstateLandManagementPage() {
                     </Button>
                   )}
                 </div>
-              ) : selected ? (
-                null
-              ) : null}
+              ) : selected ? null : null}
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -847,7 +851,7 @@ export default function EstateLandManagementPage() {
                           <span>
                             {owner.isCurrentOwner
                               ? 'Current owner'
-                              : `${owner.ownershipStartDate} - ${owner.ownershipEndDate || 'Not recorded'}`}
+                              : `${formatDate(owner.ownershipStartDate)} - ${formatDate(owner.ownershipEndDate)}`}
                           </span>
                         </div>
                       ))}

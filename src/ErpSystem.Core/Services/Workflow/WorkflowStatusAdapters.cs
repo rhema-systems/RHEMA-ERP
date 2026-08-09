@@ -115,6 +115,8 @@ public sealed class LegalProcedureWorkflowStatusAdapter : IWorkflowStatusAdapter
     public IReadOnlyCollection<string> EntityTypes { get; } = new[]
     {
         "LegalProcedure",
+        "LegalOpinionAdvisory",
+        "LegalExternalCounsel",
         "LegalMortgage",
         "LegalMortgageInPrinciple",
         "LegalCourtProcess",
@@ -177,9 +179,13 @@ public sealed class EstateFacilitiesWorkflowStatusAdapter : IWorkflowStatusAdapt
         "EstatePropertyManagementLease",
         "EstatePropertyManagementTenantOccupant",
         "EstatePropertyManagementBillingServiceCharge",
+        "EstatePropertyManagementGroundRent",
+        "EstatePropertyManagementListingApplication",
         "EstatePropertyManagementOccupancyAvailability",
         "EstatePropertyManagementMoveInMoveOutHandover",
         "EstatePropertyManagementDocumentRecordIndex",
+        "EstateFacilityPropertySite",
+        "EstateFacilityLease",
         "EstateFacilityMaintenance",
         "EstateFacilityComplaint",
         "EstateFacilityServiceProvider",

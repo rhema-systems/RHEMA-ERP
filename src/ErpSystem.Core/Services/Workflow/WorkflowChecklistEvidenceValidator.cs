@@ -53,9 +53,18 @@ public static class WorkflowChecklistEvidenceValidator
         IEnumerable<WorkflowTaskAttachmentDto> attachments)
     {
         var key = NormalizeKey(item.Id, item.Name);
+        var documentName = NormalizeDocumentName(item.DocumentName);
         return attachments
             .Where(attachment =>
-                string.Equals(NormalizeKey(attachment.ChecklistItemId, attachment.RequirementKey), key, StringComparison.OrdinalIgnoreCase))
+                string.Equals(
+                    NormalizeKey(attachment.ChecklistItemId, attachment.RequirementKey),
+                    key,
+                    StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(documentName) &&
+                 string.Equals(
+                     NormalizeDocumentName(attachment.DocumentName),
+                     documentName,
+                     StringComparison.OrdinalIgnoreCase)))
             .ToList();
     }
 
@@ -65,4 +74,7 @@ public static class WorkflowChecklistEvidenceValidator
             ? id.Trim()
             : (name ?? string.Empty).Trim();
     }
+
+    private static string NormalizeDocumentName(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
 }

@@ -4,9 +4,7 @@ import { workflowApiService } from './workflow-api.service';
 import {
   WorkflowApprovalType,
   WorkflowAssignmentType,
-  type WorkflowDocumentRequirementDto,
   WorkflowFieldType,
-  type WorkflowQualityCheckDto,
   WorkflowRejectionHandling,
   WorkflowStepType,
 } from '@/types/workflow';
@@ -97,6 +95,7 @@ export interface WorkspaceData {
   values: Record<string, string | boolean>;
   stageInputsComplete: boolean;
   missingInputs: string[];
+  documentRequirements: LandAcquisitionStageDocumentRequirement[];
 }
 
 export interface LandAcquisitionStageSummary {
@@ -144,6 +143,17 @@ export interface EstateManagedAsset {
   valuationAmount?: number;
   currency: string;
   notes?: string;
+}
+
+export interface HrLocationLookup {
+  id: string;
+  name: string;
+  code?: string;
+  locationLevelId: string;
+  levelName?: string;
+  parentLocationId?: string;
+  parentLocationName?: string;
+  isActive: boolean;
 }
 
 interface MaybeApiResponse<T> {
@@ -199,9 +209,9 @@ export const ACQUISITION_STAGES: LandAcquisitionStageDefinition[] = [
   stage(0, 'Parcel Identification', 'parcel-identification', '/LandParcel/ParcelIdentificationView', 'Identify the land parcel, intended use, location, size, and opening notes.', 'Submit for Suitability Approval', 'Return Identification', 'Estate Officer', 8),
   stage(1, 'Suitability Approval', 'suitability-approval', '/LandParcel/SuitabilityApprovalView', 'Review planning fit, access, environmental constraints, and acquisition suitability.', 'Approve Suitability', 'Reject Suitability', 'Estate Manager', 12),
   stage(2, 'Cadastral Survey', 'cadastral-survey', '/LandParcel/CadastralSurvey', 'Capture cadastral survey plan, coordinates, demarcation details, and survey documents.', 'Submit for Survey Verification', 'Return Survey', 'Survey Officer', 24),
-  stage(3, 'Cadastral Survey Verification', 'cadastral-verification', '/LandParcel/CadastralSurveyVerifcation', 'Verify cadastral match, boundary consistency, encumbrances, and survey overlap checks.', 'Approve Survey Verification', 'Reject Survey Verification', 'Senior Surveyor', 16),
+  stage(3, 'Cadastral Survey Verification', 'cadastral-verification', '/LandParcel/CadastralSurveyVerifcation', 'Review the submitted survey plan and saved demarcated boundary before approval.', 'Approve Survey Verification', 'Reject Survey Verification', 'Senior Surveyor', 16),
   stage(4, 'Ownership Classification', 'ownership-classification', '/LandParcel/OwnershipClassification', 'Classify ownership as stool, family, private, state, allodial, or mixed interest.', 'Submit for Ownership Verification', 'Return Classification', 'Legal Officer', 8),
-  stage(5, 'Ownership Verification', 'ownership-verification', '/LandParcel/OwnershipVerification', 'Verify title documents, identity, searches, authority to sell, and ownership history.', 'Approve Ownership Verification', 'Reject Ownership Verification', 'Legal Manager', 24, 'POST', 5),
+  stage(5, 'Ownership Verification', 'ownership-verification', '/LandParcel/OwnershipVerification', 'Compare ownership and cadastral boundaries, clear overlaps and encumbrances, and verify title, identity, searches, authority to sell, and ownership history.', 'Approve Ownership Verification', 'Reject Ownership Verification', 'Legal Manager', 24, 'POST', 5),
   stage(6, 'Agreement Negotiation', 'agreement-negotiation', '/LandParcel/AgreementNegotiation', 'Record offers, counteroffers, negotiated value, conditions, and negotiation notes.', 'Submit for Agreement Approval', 'Return Negotiation', 'Acquisition Committee', 32, 'POST', 6),
   stage(7, 'Agreement Approval', 'agreement-approval', '/LandParcel/AgreementApproval', 'Approve negotiated agreement terms before land instrument execution.', 'Approve Agreement', 'Reject Agreement', 'Executive Approver', 16, 'POST', 7),
   stage(8, 'Land Instrument Execution', 'execution', '/LandParcel/Execution', 'Capture execution details for the conveyance, assignment, lease, or acquisition instrument.', 'Submit Executed Instrument', 'Return Execution', 'Legal Officer', 16, 'GET', 8),
@@ -234,7 +244,7 @@ const createWorkflowStepId = (): string => {
   });
 };
 
-const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
+export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
   0: {
     documents: [
       { key: 'planning-evidence', name: 'Planning Evidence', type: 'Planning' },
@@ -249,9 +259,28 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
       tf('projectReference', 'Project Reference'),
       tf('parcelLocation', 'Location'),
       tf('estimatedSize', 'Estimated Size', WorkflowFieldType.Number),
+      tf('coordinates', 'Coordinates'),
       tf('vendorName', 'Vendor / Owner'),
-      tf('acquisitionType', 'Acquisition Type', WorkflowFieldType.Select, true, ['Direct Purchase', 'Assignment', 'Leasehold', 'Conveyance']),
+      tf('acquisitionType', 'Acquisition Type', WorkflowFieldType.Select, true, ['Purchase', 'Lease', 'Compulsory Acquisition', 'Government']),
       tf('intendedUse', 'Intended Use', WorkflowFieldType.TextArea),
+      tf('openingNotes', 'Opening Notes', WorkflowFieldType.TextArea),
+      tf('inspectionDate', 'Inspection Date', WorkflowFieldType.Date),
+      tf('inspectionOfficer', 'Inspection Officer'),
+      tf('soilType', 'Soil Type', WorkflowFieldType.Select, true, ['Sandy', 'Clay', 'Loamy', 'Rocky', 'Mixed']),
+      tf('topography', 'Topography', WorkflowFieldType.Select, true, ['Flat', 'Gentle Slope', 'Steep Slope', 'Hilly']),
+      tf('hasAccessRoad', 'Has Access Road', WorkflowFieldType.Boolean),
+      tf('hasUtilities', 'Has Utilities', WorkflowFieldType.Boolean),
+      tf('siteAccessRoute', 'Site Access Route'),
+      tf('drainageCondition', 'Drainage Condition', WorkflowFieldType.Select, true, ['Good', 'Fair', 'Poor', 'Requires Drainage Works']),
+      tf('existingDevelopment', 'Existing Development / Occupation', WorkflowFieldType.TextArea),
+      tf('zoningClassification', 'Zoning Classification'),
+      tf('planningSchemeReference', 'Planning Scheme Reference'),
+      tf('isFloodProne', 'Flood Prone', WorkflowFieldType.Boolean),
+      tf('planningCompatible', 'Planning Compatible', WorkflowFieldType.Boolean),
+      tf('accessConfirmed', 'Access Confirmed', WorkflowFieldType.Boolean),
+      tf('environmentalClearance', 'Environmental Clearance', WorkflowFieldType.Boolean),
+      tf('utilityAvailability', 'Utility Availability', WorkflowFieldType.Boolean),
+      tf('encumbranceObserved', 'Encumbrance Observed On Site', WorkflowFieldType.Boolean),
     ],
   },
   1: {
@@ -265,17 +294,8 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
       { name: 'Planning compatibility determined', description: 'Zoning, environmental clearance, and planning compatibility have been reviewed.' },
     ],
     fields: [
-      tf('inspectionDate', 'Inspection Date', WorkflowFieldType.Date),
-      tf('inspectionOfficer', 'Inspection Officer'),
-      tf('soilType', 'Soil Type', WorkflowFieldType.Select, true, ['Laterite', 'Clay', 'Sandy', 'Rocky', 'Mixed']),
-      tf('topography', 'Topography', WorkflowFieldType.Select, true, ['Flat', 'Gentle Slope', 'Steep Slope', 'Undulating']),
-      tf('zoningClassification', 'Zoning Classification'),
-      tf('planningCompatible', 'Planning Compatible', WorkflowFieldType.Boolean),
-      tf('accessConfirmed', 'Access Confirmed', WorkflowFieldType.Boolean),
-      tf('environmentalClearance', 'Environmental Clearance', WorkflowFieldType.Boolean),
-      tf('utilityAvailability', 'Utility Availability', WorkflowFieldType.Boolean),
-      tf('isFloodProne', 'Flood Prone', WorkflowFieldType.Boolean, false),
-      tf('approvalNotes', 'Assessment Recommendation', WorkflowFieldType.TextArea),
+      tf('assessmentRecommendation', 'Assessment Recommendation', WorkflowFieldType.Select, true, ['Proceed to Cadastral Survey', 'Return for More Information', 'Reject Site']),
+      tf('approvalNotes', 'Physical Assessment Notes', WorkflowFieldType.TextArea),
     ],
   },
   2: {
@@ -322,19 +342,9 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
   3: {
     documents: [
       { key: 'survey-verification-report', name: 'Survey Verification Report', type: 'Verification' },
-      { key: 'overlap-clearance', name: 'Overlap Clearance Evidence', type: 'Clearance' },
     ],
-    checklist: [
-      { name: 'Cadastral match confirmed', description: 'Submitted survey matches the parcel and acquisition record.' },
-      { name: 'Boundary and overlap cleared', description: 'Boundary consistency and overlap checks have been completed.' },
-    ],
-    fields: [
-      tf('cadastralMatch', 'Cadastral Match', WorkflowFieldType.Boolean),
-      tf('overlapCleared', 'Overlap Cleared', WorkflowFieldType.Boolean),
-      tf('boundaryConfirmed', 'Boundary Confirmed', WorkflowFieldType.Boolean),
-      tf('verificationReference', 'Verification Reference'),
-      tf('verificationNotes', 'Verification Notes', WorkflowFieldType.TextArea),
-    ],
+    checklist: [],
+    fields: [],
   },
   4: {
     documents: [
@@ -359,17 +369,20 @@ const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequirement> = {
   5: {
     documents: [
       { key: 'title-search-report', name: 'Title Search Report', type: 'Search' },
+      { key: 'overlap-clearance', name: 'Overlap Clearance Evidence', type: 'Clearance' },
       { key: 'authority-to-sell', name: 'Authority to Sell', type: 'Authority' },
       { key: 'property-file', name: 'Property File', type: 'Property File' },
     ],
     checklist: [
       { name: 'Title search completed', description: 'Title search is complete and search reference is recorded.' },
+      { name: 'Ownership boundary and overlap cleared', description: 'Ownership or title boundaries have been compared with the cadastral survey and any overlap has been cleared.' },
       { name: 'Identity and authority verified', description: 'Owner identity and authority to sell have been verified.' },
     ],
     fields: [
       tf('titleSearchCompleted', 'Title Search Completed', WorkflowFieldType.Boolean),
       tf('ownerIdentityVerified', 'Owner Identity Verified', WorkflowFieldType.Boolean),
       tf('authorityToSellVerified', 'Authority To Sell Verified', WorkflowFieldType.Boolean),
+      tf('overlapCleared', 'Ownership / Title Overlap Cleared', WorkflowFieldType.Boolean),
       tf('searchReference', 'Search Reference'),
       tf('verificationNotes', 'Verification Notes', WorkflowFieldType.TextArea),
     ],
@@ -621,6 +634,34 @@ function unwrapBoard(response: MaybeApiResponse<LandAcquisitionBoard | LandAcqui
 }
 
 export class EstateAcquisitionService {
+  async getActiveHrLocations(): Promise<HrLocationLookup[]> {
+    const [response, levelsResponse] = await Promise.all([
+      apiService.get<MaybeApiResponse<HrLocationLookup[]> | HrLocationLookup[]>(
+        '/Location'
+      ),
+      apiService.get<
+        MaybeApiResponse<Array<{ id: string; name: string }>> |
+          Array<{ id: string; name: string }>
+      >('/LocationLevel'),
+    ]);
+    const locations = Array.isArray(response)
+      ? response
+      : response.data || [];
+    const levels = Array.isArray(levelsResponse)
+      ? levelsResponse
+      : levelsResponse.data || [];
+    const levelNames = new Map(levels.map((level) => [level.id, level.name]));
+
+    return locations
+      .filter((location) => location.isActive !== false)
+      .map((location) => ({
+        ...location,
+        levelName:
+          location.levelName || levelNames.get(location.locationLevelId),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
   async getAcquisitionWorkflowBoard(): Promise<LandAcquisitionBoard> {
     const response = await apiService.get<MaybeApiResponse<LandAcquisitionBoard | LandAcquisitionStage[]>>('/estate/land-acquisitions/workflow-board');
     const board = unwrapBoard(response);
@@ -692,6 +733,7 @@ export class EstateAcquisitionService {
       values: data.values || {},
       stageInputsComplete: data.stageInputsComplete === true,
       missingInputs: data.missingInputs || [],
+      documentRequirements: data.documentRequirements || [],
     };
   }
 
@@ -707,6 +749,7 @@ export class EstateAcquisitionService {
       values: data.values || {},
       stageInputsComplete: data.stageInputsComplete === true,
       missingInputs: data.missingInputs || [],
+      documentRequirements: data.documentRequirements || [],
     };
   }
 
@@ -729,68 +772,10 @@ export class EstateAcquisitionService {
   }
 
   async getActiveWorkflowDocumentRequirements(): Promise<Record<number, LandAcquisitionStageDocumentRequirement[]>> {
-    try {
-      const definitions = await workflowApiService.getWorkflowDefinitions({
-        page: 1,
-        pageSize: 5,
-        sortBy: 'CreatedAt',
-        sortDescending: true,
-        entityType: 'LandAcquisition',
-        isActive: true,
-      });
-
-      const definition =
-        definitions.data.find((item) => item.isActive && item.entityType === 'LandAcquisition') ||
-        definitions.data[0];
-
-      if (!definition) return {};
-
-      const detail = await workflowApiService.getWorkflowDefinition(definition.id);
-      const workflowRequirements = (detail.steps || []).reduce<Record<number, LandAcquisitionStageDocumentRequirement[]>>(
-        (acc, step) => {
-          const taskRequirements = (step.configuration?.taskConfig?.documentRequirements || [])
-            .filter((item: WorkflowDocumentRequirementDto) => item.documentName?.trim() || item.requirementKey?.trim())
-            .map((item: WorkflowDocumentRequirementDto, index: number) => ({
-              id: item.id || `${step.id}-document-${index + 1}`,
-              requirementKey: item.requirementKey?.trim() || `${step.id}-document-${index + 1}`,
-              documentName: item.documentName?.trim() || `Document ${index + 1}`,
-              documentType: item.documentType?.trim() || undefined,
-              isRequired: item.isRequired !== false,
-            }));
-          const qualityRequirements = (step.configuration?.qualityConfig?.qualityChecks || [])
-            .filter((item: WorkflowQualityCheckDto) => item.requiresDocument && (item.documentName?.trim() || item.name?.trim()))
-            .map((item: WorkflowQualityCheckDto, index: number) => ({
-              id: item.id || `${step.id}-check-document-${index + 1}`,
-              requirementKey: item.id || `${step.id}-check-document-${index + 1}`,
-              documentName: item.documentName?.trim() || item.name.trim(),
-              documentType: item.documentType?.trim() || undefined,
-              isRequired: item.isRequired !== false,
-            }));
-          const requirements = [...taskRequirements, ...qualityRequirements]
-            .filter((item, index, all) =>
-              all.findIndex((candidate) =>
-                candidate.documentName.toLowerCase() === item.documentName.toLowerCase()
-              ) === index
-            );
-
-          const stageDefinition = ACQUISITION_STAGES.find((stage) =>
-            stage.title.toLowerCase() === step.name.toLowerCase()
-          );
-          const stageOrder = stageDefinition?.order ?? (step.order > 0 ? step.order - 1 : step.order);
-
-          if (requirements.length > 0 && stageOrder >= 0) {
-            acc[stageOrder] = requirements;
-          }
-
-          return acc;
-        },
-        {}
-      );
-
-      return workflowRequirements;
-    } catch {
-      return {};
-    }
+    const response = await apiService.get<MaybeApiResponse<Record<number, LandAcquisitionStageDocumentRequirement[]>>>(
+      '/estate/land-acquisitions/active-document-requirements'
+    );
+    return response.data ?? (response as unknown as Record<number, LandAcquisitionStageDocumentRequirement[]>);
   }
 
   async uploadDocument(acquisitionId: string, procedureId: number, file: File, documentType: string, documentName?: string): Promise<LandAcquisitionDocument> {
@@ -883,24 +868,13 @@ export class EstateAcquisitionService {
             instructions: `Attach all required documents for ${item.title}: ${requirements.documents.map((doc) => doc.name).join(', ')}.`,
           },
           qualityConfig: {
-            qualityChecks: [
-              ...requirements.documents.map((doc) => ({
-                id: `${item.workspaceKind}-${doc.key}`,
-                name: `Attach ${doc.name}`,
-                description: `Upload ${doc.name} before ${item.title} can be approved.`,
-                isRequired: true,
-                requiresDocument: true,
-                documentType: doc.type,
-                documentName: doc.name,
-              })),
-              ...requirements.checklist.map((check, index) => ({
+            qualityChecks: requirements.checklist.map((check, index) => ({
                 id: `${item.workspaceKind}-check-${index + 1}`,
                 name: check.name,
                 description: check.description,
                 isRequired: true,
                 requiresDocument: false,
               })),
-            ],
           },
           formFields: requirements.fields.map((field) => ({
             name: field.name,
@@ -923,7 +897,7 @@ export class EstateAcquisitionService {
     }));
 
     const payload: CreateWorkflowDefinitionAdminDto = {
-      name: 'Land Acquisition Procedure - Documents and Checklists',
+      name: 'Land Acquisition Procedure',
       description: 'Estate land acquisition procedure routed through RHEMA workflow roles, assignments, stage documents, and checklist evidence.',
       entityType: 'LandAcquisition',
       isActive: true,

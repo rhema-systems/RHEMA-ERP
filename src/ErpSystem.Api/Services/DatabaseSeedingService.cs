@@ -81,6 +81,19 @@ namespace ErpSystem.Web.Services
                     "Independent final payment authorization before posting, clearing, or settlement finalization.")
             };
 
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> BudgetRevisionApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Finance Manager Review",
+                    new[] { "Finance Manager" },
+                    "Confirms the virement or supplementary-budget arithmetic, available balances, effective date, and supporting Board resolution."),
+                new(
+                    "Managing Director Final Authority",
+                    new[] { "Managing Director" },
+                    "Records TDC executive authority against the cited Board resolution before Finance may create the successor official budget.")
+            };
+
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
 
         private sealed record FinanceWorkflowSeedSpec(
@@ -406,10 +419,14 @@ namespace ErpSystem.Web.Services
                 {
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
-                        var approvalStages = spec.EntityCode is
-                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
-                            ? FinancePaymentApprovalStages
-                            : FinanceApprovalStages;
+                        var approvalStages = spec.EntityCode switch
+                        {
+                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException" => FinancePaymentApprovalStages,
+                            // TDC budget changes are governed separately from routine
+                            // accounting approvals because FR-BG-012 requires Board authority.
+                            "BudgetRevision" => BudgetRevisionApprovalStages,
+                            _ => FinanceApprovalStages
+                        };
 
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
@@ -775,6 +792,8 @@ namespace ErpSystem.Web.Services
                     "Budget scenario approval before locking, activation, or archival."),
                 new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
                     "Department budget worksheet approval workflow before consolidation."),
+                new("BudgetRevision", "Budget Revision", typeof(BudgetRevision).FullName, "Budget Revision Board Approval",
+                    "TDC virement and supplementary-budget approval supported by a Board resolution before a successor official budget can be applied."),
                 new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",
                     "Unit accounting journal approval before posting quantity balances."),
                 new("UnitAccountBudget", "Unit Budget", typeof(UnitAccountBudget).FullName, "Unit Budget Approval",
@@ -6536,6 +6555,7 @@ namespace ErpSystem.Web.Services
                 "External", "User", defaultTenant.Id, Constants.Roles.ExternalUser, AuthenticationProvider.Local);
 
             await SeedLandAcquisitionTestUsersAsync(defaultTenant);
+            await EnsurePropertyManagementTestRoleAssignmentsAsync();
 
             await CreateTestUserAsync("finance.clerk", "finance.clerk@default.com", "Finance123!",
                 "Ama", "Mensah", defaultTenant.Id, "Finance Clerk", AuthenticationProvider.Local);
@@ -6706,6 +6726,35 @@ namespace ErpSystem.Web.Services
                 }
             }
         }
+
+        private async Task EnsurePropertyManagementTestRoleAssignmentsAsync()
+        {
+            var assignments = new[]
+            {
+                new { Username = "estate.officer1", Role = PropertyManagementRoles.Officer },
+                new { Username = "estate.officer2", Role = PropertyManagementRoles.Supervisor },
+                new { Username = "estate.manager", Role = PropertyManagementRoles.Manager }
+            };
+
+            foreach (var assignment in assignments)
+            {
+                var user = await _userManager.FindByNameAsync(assignment.Username);
+                if (user == null || await _userManager.IsInRoleAsync(user, assignment.Role))
+                {
+                    continue;
+                }
+
+                var result = await _userManager.AddToRoleAsync(user, assignment.Role);
+                if (!result.Succeeded)
+                {
+                    _logger.LogError(
+                        "Failed to assign Property Management role {Role} to {Username}: {Errors}",
+                        assignment.Role,
+                        assignment.Username,
+                        string.Join(", ", result.Errors.Select(error => error.Description)));
+                }
+            }
+        }
         
         public async Task SeedMaintenanceE2ETestDataAsync()
         {
@@ -6873,6 +6922,9 @@ namespace ErpSystem.Web.Services
                 new { Name = "Marketing User", Description = "User with access to marketing module" },
                 new { Name = "Estate Officer", Description = "Captures and submits land identification records" },
                 new { Name = "Estate Manager", Description = "Reviews land suitability assessments" },
+                new { Name = PropertyManagementRoles.Officer, Description = "Handles Property Management intake, handoffs, and customer updates" },
+                new { Name = PropertyManagementRoles.Supervisor, Description = "Reviews Property Management availability and commercial terms" },
+                new { Name = PropertyManagementRoles.Manager, Description = "Approves Property Management requests and operating decisions" },
                 new { Name = "Survey Officer", Description = "Captures cadastral survey and demarcation records" },
                 new { Name = "Senior Surveyor", Description = "Verifies cadastral surveys" },
                 new { Name = "Legal Officer", Description = "Handles ownership classification and instrument execution" },
@@ -7351,6 +7403,13 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            .Concat(PropertyManagementPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             .Concat(HrPermissions.All.Select(permission => new
             {
                 permission.Name,
@@ -7400,9 +7459,16 @@ namespace ErpSystem.Web.Services
             var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
-                    .Concat(HrPermissions.AllNames).ToArray(),
+                    .Concat(PropertyManagementPermissions.AllNames)
+                    .Concat(HrPermissions.AllNames)
+                    .ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
-                    .Concat(HrPermissions.AllNames).ToArray(),
+                    .Concat(PropertyManagementPermissions.AllNames)
+                    .Concat(HrPermissions.AllNames)
+                    .ToArray(),
+                [PropertyManagementRoles.Officer] = PropertyManagementPermissions.OfficerNames,
+                [PropertyManagementRoles.Supervisor] = PropertyManagementPermissions.SupervisorNames,
+                [PropertyManagementRoles.Manager] = PropertyManagementPermissions.ManagerNames,
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -7585,6 +7651,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Banking.Deposits.Submit",
                     "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
+                    "Finance.Reports.Schedules.View",
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Request",
                     "Finance.Workflow.Submit",
@@ -7630,6 +7697,11 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodReopen",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export",
+                    // Finance Managers own the operational schedule lifecycle;
+                    // pinned templates and immutable executions preserve control.
+                    "Finance.Reports.Schedules.View",
+                    "Finance.Reports.Schedules.Manage",
+                    "Finance.Reports.Schedules.Run",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
@@ -7638,7 +7710,8 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Approve",
-                    "Finance.Budgeting.Lock"
+                    "Finance.Budgeting.Lock",
+                    "Finance.BudgetRevisions.Read"
                 },
                 ["Chief Accountant"] = new[]
                 {
@@ -7669,7 +7742,10 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
-                    "Finance.Reports.Run"
+                    "Finance.Reports.Run",
+                    "Finance.Reports.Schedules.View",
+                    "Finance.Reports.Schedules.Manage",
+                    "Finance.Reports.Schedules.Run"
                 },
                 ["Managing Director"] = new[]
                 {
@@ -7678,11 +7754,13 @@ namespace ErpSystem.Web.Services
                     // administer transactions merely because they hold final authority.
                     "Finance.Read",
                     "Finance.AP.Payments.Approve",
+                    "Finance.BudgetRevisions.Read",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Reports.Run",
-                    "Finance.Reports.Export"
+                    "Finance.Reports.Export",
+                    "Finance.Reports.Schedules.View"
                 },
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
@@ -7692,7 +7770,10 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
-                    "Finance.BudgetReturns.Submit"
+                    "Finance.BudgetReturns.Submit",
+                    "Finance.BudgetRevisions.Read",
+                    "Finance.BudgetRevisions.Write",
+                    "Finance.BudgetRevisions.Submit"
                 },
                 // "HR User" is the role this seeder actually creates; note the HR controllers'
                 // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded

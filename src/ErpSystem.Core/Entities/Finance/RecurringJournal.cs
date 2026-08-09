@@ -41,6 +41,16 @@ public sealed class RecurringJournalTemplate : TenantEntity
     public RecurringJournalReversalRule ReversalRule { get; set; }
     public int? ReversalDayOffset { get; set; }
     public Guid? OwnerUserId { get; set; }
+    /// <summary>
+    /// Submission and review evidence belongs to the versioned template so TDC can
+    /// prove who proposed and independently activated the standing instruction.
+    /// These fields must not be inferred from mutable workflow history.
+    /// </summary>
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? SubmittedByUserId { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    [MaxLength(1000)] public string? ReviewComment { get; set; }
     public DateTime? ActivatedAt { get; set; }
     public Guid? ActivatedByUserId { get; set; }
     public int ConsecutiveFailureCount { get; set; }
@@ -78,6 +88,18 @@ public sealed class RecurringJournalOccurrence : TenantEntity
     public Guid? WorkflowInstanceId { get; set; }
     public int AttemptCount { get; set; }
     public DateTime? GeneratedAt { get; set; }
+    /// <summary>
+    /// Occurrence review/posting evidence is stored on the immutable generated
+    /// occurrence. Template approval authorises the standing instruction; it does
+    /// not remove the independent review required for each accounting event.
+    /// </summary>
+    public DateTime? ReviewedAt { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    [MaxLength(1000)] public string? ReviewComment { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public Guid? PostedByUserId { get; set; }
+    public DateOnly? ReversalDueDate { get; set; }
+    public DateTime? ReversedAt { get; set; }
     [MaxLength(2000)] public string? ErrorMessage { get; set; }
     [MaxLength(1000)] public string? AdjustmentExplanation { get; set; }
     [Column(TypeName = "nvarchar(max)")] public string TemplateSnapshotJson { get; set; } = "{}";

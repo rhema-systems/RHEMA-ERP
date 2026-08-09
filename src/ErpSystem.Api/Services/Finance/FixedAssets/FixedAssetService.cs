@@ -21,6 +21,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IWorkflowService? _workflowService;
+        private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
 
         public FixedAssetService(
         ApplicationDbContext context,
@@ -28,7 +29,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         IAccountingBookService? accountingBookService = null,
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
-        IWorkflowService? workflowService = null)
+        IWorkflowService? workflowService = null,
+        IFinanceReversalPolicyService? financeReversalPolicyService = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -36,6 +38,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
+        _financeReversalPolicyService = financeReversalPolicyService;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -333,6 +336,10 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             JournalEntryId = asset.JournalEntryId,
             PostingEventId = asset.PostingEventId,
             CapitalizedAt = asset.CapitalizedAt,
+            CapitalizationReversalJournalEntryId = asset.CapitalizationReversalJournalEntryId,
+            CapitalizationReversalPostingEventId = asset.CapitalizationReversalPostingEventId,
+            CapitalizationReversedAt = asset.CapitalizationReversedAt,
+            CapitalizationReversalReason = asset.CapitalizationReversalReason,
             MaintenanceAssetId = asset.MaintenanceAssetId,
             SerialNumber = asset.SerialNumber,
             CreatedAt = asset.CreatedAt,
@@ -375,6 +382,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             CapitalizationDate = value.CapitalizationDate,
             CapitalizationJournalEntryId = value.CapitalizationJournalEntryId,
             CapitalizationPostingEventId = value.CapitalizationPostingEventId,
+            CapitalizationReversalJournalEntryId = value.CapitalizationReversalJournalEntryId,
+            CapitalizationReversalPostingEventId = value.CapitalizationReversalPostingEventId,
+            CapitalizationReversedAt = value.CapitalizationReversedAt,
             SourceDocumentType = value.SourceDocumentType,
             SourceDocumentId = value.SourceDocumentId,
             SourceDocumentLineId = value.SourceDocumentLineId
@@ -419,7 +429,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         {
             _context.AccountingBooks.Add(fallbackBook);
             await _context.SaveChangesAsync();
-            _context.ChangeTracker.Clear();
+            // Do not clear the shared tracker here. This helper runs inside asset acquisition and
+            // capitalization workflows; clearing it detaches the caller's FixedAsset immediately
+            // before register/book values are updated, producing a successful response without a
+            // persisted register change. The saved fallback book can safely remain tracked for the
+            // remainder of the unit of work.
         }
 
         return new List<AccountingBook> { fallbackBook };
@@ -1412,11 +1426,21 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 throw new InvalidOperationException("Fixed asset capitalization amount must be greater than zero.");
             }
 
+            // The posting engine intentionally treats a source/action pair as immutable and
+            // idempotent. After an approved reversal a corrected capitalization therefore uses a
+            // new cycle document id; otherwise the original, already-reversed event would be
+            // returned as a duplicate and the corrected cost would never reach the ledger.
+            var isCorrectedCapitalization = asset.CapitalizationReversalPostingEventId.HasValue;
+            var postingSourceDocumentType = isCorrectedCapitalization
+                ? "FixedAssetCapitalizationCycle"
+                : "FixedAsset";
+            var postingSourceDocumentId = isCorrectedCapitalization ? Guid.NewGuid() : asset.Id;
+
             var request = new FinancePostingRequestDto
             {
                 SourceModule = "FA",
-                SourceDocumentType = "FixedAsset",
-                SourceDocumentId = asset.Id,
+                SourceDocumentType = postingSourceDocumentType,
+                SourceDocumentId = postingSourceDocumentId,
                 SourceDocumentTenantId = asset.TenantId,
                 PostingAction = "Capitalize",
                 SourceDocumentReference = dto.Reference ?? asset.AssetCode,
@@ -1425,7 +1449,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 JournalType = "Fixed Asset Capitalization",
                 BookClassification = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
-                IdempotencyKey = $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize",
+                IdempotencyKey = isCorrectedCapitalization
+                    ? $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize:{postingSourceDocumentId:N}"
+                    : $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize",
                 ReturnExistingOnDuplicate = true,
                 Lines = new[]
                 {
@@ -1461,6 +1487,20 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             };
 
             var postingResult = await _financePostingEngine.PostAsync(request);
+
+            // The central posting engine clears the DbContext tracker when it recovers from a
+            // concurrent/idempotent insert race. That recovery is correct for the ledger, but it
+            // means the asset loaded before PostAsync may now be detached. Rehydrate it before
+            // applying register changes so callers never receive a successful DTO while the
+            // persisted fixed-asset register remains unchanged (FR-GL-010 / FIN-LIM-0030).
+            if (_context.Entry(asset).State == EntityState.Detached)
+            {
+                asset = await _context.FixedAssets
+                    .Include(item => item.BookValues)
+                    .SingleAsync(item =>
+                        item.TenantId == TenantId && item.Id == id && !item.IsDeleted);
+            }
+
             var functionalCost = RoundMoney(postingResult.TotalDebitAmount);
             await ApplyCapitalizationAsync(
                 asset,
@@ -1512,6 +1552,266 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 comment: dto.Reason);
             throw;
         }
+    }
+
+    public async Task<FixedAssetCapitalizationReversalDto> RequestCapitalizationReversalAsync(
+        Guid id,
+        RequestFixedAssetCapitalizationReversalDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        if (_financeReversalPolicyService == null)
+            throw new InvalidOperationException("Finance reversal policy is not configured for fixed assets.");
+        if (CurrentUserGuid == Guid.Empty)
+            throw new InvalidOperationException("A resolved user identity is required to request a capitalization reversal.");
+
+        var asset = await LoadAssetForCapitalizationReversalAsync(id, cancellationToken);
+        EnsureDirectCapitalizationCanBeReversed(asset);
+        await EnsureNoDownstreamAssetAccountingAsync(asset, cancellationToken);
+
+        var pendingExists = await _context.FixedAssetCapitalizationReversals.AnyAsync(item =>
+            item.TenantId == TenantId &&
+            item.FixedAssetId == asset.Id &&
+            item.Status != FixedAssetCapitalizationReversalStatuses.Rejected &&
+            item.Status != FixedAssetCapitalizationReversalStatuses.Posted &&
+            !item.IsDeleted,
+            cancellationToken);
+        if (pendingExists)
+            throw new InvalidOperationException("This asset already has a capitalization reversal awaiting review or posting.");
+
+        var policy = await _financeReversalPolicyService.ResolveAsync(
+            asset.CapitalizationDate ?? asset.PurchaseDate,
+            dto.Reason,
+            dto.ReversalDate,
+            cancellationToken);
+        var impactAssessment = dto.ImpactAssessment?.Trim() ?? string.Empty;
+        if (impactAssessment.Length < 20)
+            throw new ArgumentException("The capitalization reversal impact assessment must contain at least 20 characters.", nameof(dto));
+
+        var request = new FixedAssetCapitalizationReversal
+        {
+            TenantId = TenantId,
+            FixedAssetId = asset.Id,
+            OriginalPostingEventId = asset.PostingEventId!.Value,
+            OriginalJournalEntryId = asset.JournalEntryId!.Value,
+            Status = FixedAssetCapitalizationReversalStatuses.PendingApproval,
+            Reason = policy.Reason,
+            ImpactAssessment = impactAssessment,
+            RequestedReversalDate = policy.ReversalDate,
+            RequestedByUserId = CurrentUserGuid,
+            RequestedByUserName = UserName,
+            RequestedAt = DateTime.UtcNow,
+            CreatedBy = UserName,
+            CreatedById = CurrentUserGuid
+        };
+        _context.FixedAssetCapitalizationReversals.Add(request);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FixedAssetCapitalizationReversalRequested,
+            asset,
+            beforeValues: new { asset.Status, asset.AcquisitionCost, asset.NetBookValue, asset.PostingEventId },
+            afterValues: MapCapitalizationReversalToDto(request, asset),
+            reason: policy.Reason,
+            comment: impactAssessment);
+
+        return MapCapitalizationReversalToDto(request, asset);
+    }
+
+    public async Task<FixedAssetCapitalizationReversalDto> ReviewCapitalizationReversalAsync(
+        Guid id,
+        Guid requestId,
+        ReviewFixedAssetCapitalizationReversalDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        if (CurrentUserGuid == Guid.Empty)
+            throw new InvalidOperationException("A resolved user identity is required to review a capitalization reversal.");
+
+        var request = await _context.FixedAssetCapitalizationReversals
+            .Include(item => item.FixedAsset)
+                .ThenInclude(asset => asset.BookValues)
+            .SingleOrDefaultAsync(item =>
+                item.TenantId == TenantId && item.Id == requestId && item.FixedAssetId == id && !item.IsDeleted,
+                cancellationToken)
+            ?? throw new KeyNotFoundException("Fixed asset capitalization reversal request was not found.");
+        if (request.Status != FixedAssetCapitalizationReversalStatuses.PendingApproval)
+            throw new InvalidOperationException("Only a capitalization reversal awaiting approval can be reviewed.");
+        if (request.RequestedByUserId == CurrentUserGuid)
+            throw new InvalidOperationException("The reversal requester cannot review the same request.");
+
+        var reviewComment = dto.ReviewComment?.Trim() ?? string.Empty;
+        if (reviewComment.Length < 20)
+            throw new ArgumentException("The capitalization reversal review comment must contain at least 20 characters.", nameof(dto));
+
+        // Approval is a fresh control decision, not a rubber stamp of the maker's earlier view.
+        // Re-running the lifecycle checks prevents approval after depreciation, valuation or
+        // disposal activity has made a simple capitalization reversal unsafe.
+        if (dto.Approved)
+            await EnsureNoDownstreamAssetAccountingAsync(request.FixedAsset, cancellationToken);
+
+        request.Status = dto.Approved
+            ? FixedAssetCapitalizationReversalStatuses.Approved
+            : FixedAssetCapitalizationReversalStatuses.Rejected;
+        request.ReviewedByUserId = CurrentUserGuid;
+        request.ReviewedByUserName = UserName;
+        request.ReviewedAt = DateTime.UtcNow;
+        request.ReviewComment = reviewComment;
+        request.UpdatedAt = DateTime.UtcNow;
+        request.UpdatedBy = UserName;
+        request.LastModifiedById = CurrentUserGuid;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordFixedAssetAuditAsync(
+            dto.Approved
+                ? FinanceAuditEvents.FixedAssetCapitalizationReversalApproved
+                : FinanceAuditEvents.FixedAssetCapitalizationReversalRejected,
+            request.FixedAsset,
+            beforeValues: new { Status = FixedAssetCapitalizationReversalStatuses.PendingApproval },
+            afterValues: new { request.Status, request.ReviewedByUserName, request.ReviewedAt },
+            reason: request.Reason,
+            comment: reviewComment);
+        return MapCapitalizationReversalToDto(request, request.FixedAsset);
+    }
+
+    public async Task<FixedAssetCapitalizationReversalDto> PostCapitalizationReversalAsync(
+        Guid id,
+        Guid requestId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_financePostingEngine == null || _financeReversalPolicyService == null)
+            throw new InvalidOperationException("Finance posting and reversal policy services are required for capitalization reversal.");
+
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = _context.Database.IsRelational() && _context.Database.CurrentTransaction == null
+                ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var request = await _context.FixedAssetCapitalizationReversals
+                    .Include(item => item.FixedAsset)
+                        .ThenInclude(asset => asset.BookValues)
+                    .SingleOrDefaultAsync(item =>
+                        item.TenantId == TenantId && item.Id == requestId && item.FixedAssetId == id && !item.IsDeleted,
+                        cancellationToken)
+                    ?? throw new KeyNotFoundException("Fixed asset capitalization reversal request was not found.");
+                if (request.Status == FixedAssetCapitalizationReversalStatuses.Posted)
+                    return MapCapitalizationReversalToDto(request, request.FixedAsset);
+                if (request.Status != FixedAssetCapitalizationReversalStatuses.Approved)
+                    throw new InvalidOperationException("Only an independently approved capitalization reversal can be posted.");
+
+                EnsureDirectCapitalizationCanBeReversed(request.FixedAsset);
+                await EnsureNoDownstreamAssetAccountingAsync(request.FixedAsset, cancellationToken);
+                var policy = await _financeReversalPolicyService.ResolveAsync(
+                    request.FixedAsset.CapitalizationDate ?? request.FixedAsset.PurchaseDate,
+                    request.Reason,
+                    request.RequestedReversalDate,
+                    cancellationToken);
+                var plan = await _financePostingEngine.GetReversalPlanAsync(
+                    request.OriginalPostingEventId,
+                    policy.Reason,
+                    policy.ReversalDate,
+                    cancellationToken);
+                var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                {
+                    SourceModule = "FA",
+                    SourceDocumentType = "FixedAssetCapitalizationReversal",
+                    SourceDocumentId = request.Id,
+                    SourceDocumentTenantId = request.TenantId,
+                    PostingAction = "Reverse",
+                    SourceDocumentReference = request.FixedAsset.AssetCode,
+                    Description = $"Reverse fixed asset capitalization - {request.FixedAsset.AssetCode}",
+                    PostingDate = plan.ReversalDate,
+                    JournalType = "Fixed Asset Capitalization Reversal",
+                    BookClassification = "IFRS",
+                    FunctionalCurrencyCode = request.FixedAsset.FunctionalCurrencyCode,
+                    ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+                    ReversalReason = policy.Reason,
+                    // ReversalType is a compact, indexed journal classification (20 characters
+                    // maximum); the full business explanation remains in ReversalReason and the
+                    // maker-checker request's impact assessment.
+                    ReversalType = "FA Capitalization",
+                    IdempotencyKey = $"FA:FixedAsset:{request.TenantId:N}:{request.FixedAssetId:N}:CapitalizationReverse:{request.Id:N}",
+                    ReturnExistingOnDuplicate = true,
+                    Lines = plan.ReversalLines
+                }, cancellationToken);
+
+                // The posting engine may clear the shared DbContext tracker while resolving an
+                // idempotency race (for example, two operators posting the approved request at
+                // nearly the same time). Rehydrate the maker-checker request and its asset before
+                // changing the register; otherwise the journal could post successfully while the
+                // detached asset/request changes are never persisted. If the competing caller has
+                // already completed the request, return that posted evidence instead of creating a
+                // second negative register movement.
+                if (_context.Entry(request).State == EntityState.Detached ||
+                    _context.Entry(request.FixedAsset).State == EntityState.Detached)
+                {
+                    request = await _context.FixedAssetCapitalizationReversals
+                        .Include(item => item.FixedAsset)
+                            .ThenInclude(asset => asset.BookValues)
+                        .SingleAsync(item =>
+                            item.TenantId == TenantId &&
+                            item.Id == requestId &&
+                            item.FixedAssetId == id &&
+                            !item.IsDeleted,
+                            cancellationToken);
+
+                    if (request.Status == FixedAssetCapitalizationReversalStatuses.Posted)
+                    {
+                        if (transaction != null)
+                            await transaction.CommitAsync(cancellationToken);
+                        return MapCapitalizationReversalToDto(request, request.FixedAsset);
+                    }
+                }
+
+                ApplyCapitalizationReversal(
+                    request.FixedAsset,
+                    posting.JournalEntryId,
+                    posting.PostingEventId,
+                    posting.PostingDate,
+                    policy.Reason,
+                    request);
+                await _context.SaveChangesAsync(cancellationToken);
+                // The audit event is written before committing the surrounding transaction so a
+                // successful journal can never exist without its maker-checker/register evidence.
+                await RecordFixedAssetAuditAsync(
+                    FinanceAuditEvents.FixedAssetCapitalizationReversed,
+                    request.FixedAsset,
+                    postingEventId: posting.PostingEventId,
+                    journalEntryId: posting.JournalEntryId,
+                    beforeValues: new { request.OriginalPostingEventId, request.OriginalJournalEntryId },
+                    afterValues: new { request.Status, posting.PostingEventId, posting.JournalEntryId, posting.PostingDate },
+                    reason: policy.Reason,
+                    comment: request.ImpactAssessment);
+                if (transaction != null)
+                    await transaction.CommitAsync(cancellationToken);
+                return MapCapitalizationReversalToDto(request, request.FixedAsset);
+            }
+            catch
+            {
+                if (transaction != null)
+                    await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        });
+    }
+
+    public async Task<IReadOnlyList<FixedAssetCapitalizationReversalDto>> GetCapitalizationReversalsAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var asset = await _context.FixedAssets
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == id && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("Fixed asset not found.");
+        var requests = await _context.FixedAssetCapitalizationReversals
+            .AsNoTracking()
+            .Where(item => item.TenantId == TenantId && item.FixedAssetId == id && !item.IsDeleted)
+            .OrderByDescending(item => item.RequestedAt)
+            .ToListAsync(cancellationToken);
+        return requests.Select(item => MapCapitalizationReversalToDto(item, asset)).ToList();
     }
 
     public async Task RecordApInvoiceCapitalizationAsync(
@@ -1667,6 +1967,99 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         _context.ChangeTracker.Clear();
     }
 
+    public async Task ValidateApInvoiceCapitalizationReversalAsync(
+        Guid vendorInvoiceId,
+        CancellationToken cancellationToken = default)
+    {
+        var assetIds = await _context.Set<VendorInvoiceLineItem>()
+            .AsNoTracking()
+            .Where(line =>
+                line.TenantId == TenantId &&
+                line.VendorInvoiceId == vendorInvoiceId &&
+                line.FixedAssetId.HasValue &&
+                line.CapitalizationPostingEventId.HasValue &&
+                !line.IsDeleted)
+            .Select(line => line.FixedAssetId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        foreach (var assetId in assetIds)
+        {
+            var asset = await LoadAssetForCapitalizationReversalAsync(assetId, cancellationToken);
+            if (!string.Equals(asset.SourceDocumentType, "VendorInvoice", StringComparison.OrdinalIgnoreCase) ||
+                asset.SourceDocumentId != vendorInvoiceId)
+            {
+                throw new InvalidOperationException("An AP fixed asset line is not linked to the invoice capitalization being reversed.");
+            }
+
+            await EnsureNoDownstreamAssetAccountingAsync(asset, cancellationToken);
+        }
+    }
+
+    public async Task RecordApInvoiceCapitalizationReversalAsync(
+        Guid vendorInvoiceId,
+        Guid reversalJournalEntryId,
+        Guid reversalPostingEventId,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var lines = await _context.Set<VendorInvoiceLineItem>()
+            .Where(line =>
+                line.TenantId == TenantId &&
+                line.VendorInvoiceId == vendorInvoiceId &&
+                line.FixedAssetId.HasValue &&
+                line.CapitalizationPostingEventId.HasValue &&
+                !line.IsDeleted)
+            .OrderBy(line => line.Id)
+            .ToListAsync(cancellationToken);
+        if (lines.Count == 0)
+            return;
+
+        foreach (var line in lines)
+        {
+            if (line.CapitalizationReversalPostingEventId.HasValue)
+            {
+                if (line.CapitalizationReversalPostingEventId == reversalPostingEventId)
+                    continue;
+                throw new InvalidOperationException("An AP fixed asset line is already linked to a different capitalization reversal.");
+            }
+
+            var asset = await LoadAssetForCapitalizationReversalAsync(line.FixedAssetId!.Value, cancellationToken);
+            await EnsureNoDownstreamAssetAccountingAsync(asset, cancellationToken);
+            ApplyCapitalizationReversal(
+                asset,
+                reversalJournalEntryId,
+                reversalPostingEventId,
+                DateTime.UtcNow.Date,
+                reason.Trim(),
+                request: null);
+
+            line.CapitalizationReversalJournalEntryId = reversalJournalEntryId;
+            line.CapitalizationReversalPostingEventId = reversalPostingEventId;
+            line.CapitalizationReversedAt = DateTime.UtcNow;
+            line.UpdatedAt = DateTime.UtcNow;
+            line.UpdatedBy = UserName;
+
+            await RecordFixedAssetAuditAsync(
+                FinanceAuditEvents.FixedAssetCapitalizationReversed,
+                asset,
+                postingEventId: reversalPostingEventId,
+                journalEntryId: reversalJournalEntryId,
+                beforeValues: new
+                {
+                    VendorInvoiceId = vendorInvoiceId,
+                    VendorInvoiceLineId = line.Id,
+                    OriginalPostingEventId = line.CapitalizationPostingEventId,
+                    OriginalJournalEntryId = line.CapitalizationJournalEntryId
+                },
+                afterValues: new { reversalPostingEventId, reversalJournalEntryId, asset.Status, asset.NetBookValue },
+                reason: reason,
+                comment: "AP invoice reversal removed the related cost from the fixed asset register without posting a duplicate asset journal.");
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task ApplyCapitalizationAsync(
         FixedAsset asset,
         FixedAssetCategory category,
@@ -1716,6 +2109,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         asset.JournalEntryId = journalEntryId;
         asset.PostingEventId = postingEventId;
         asset.CapitalizedAt = DateTime.UtcNow;
+        // A corrected capitalization starts a new current cycle. The prior cycle remains fully
+        // evidenced by its reversal request, posting event and immutable AssetTransaction rows.
+        asset.CapitalizationReversalJournalEntryId = null;
+        asset.CapitalizationReversalPostingEventId = null;
+        asset.CapitalizationReversedAt = null;
+        asset.CapitalizationReversalReason = null;
         asset.Status = asset.Status == FixedAssetStatus.Active
             ? FixedAssetStatus.Active
             : FixedAssetStatus.Capitalized;
@@ -1737,6 +2136,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             bookValue.CapitalizationDate = capitalizationDate.Date;
             bookValue.CapitalizationJournalEntryId = journalEntryId;
             bookValue.CapitalizationPostingEventId = postingEventId;
+            bookValue.CapitalizationReversalJournalEntryId = null;
+            bookValue.CapitalizationReversalPostingEventId = null;
+            bookValue.CapitalizationReversedAt = null;
             bookValue.SourceDocumentType = sourceDocumentType;
             bookValue.SourceDocumentId = sourceDocumentId;
             bookValue.SourceDocumentLineId = sourceDocumentLineId;
@@ -1909,9 +2311,173 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
     }
 
     private static bool IsCapitalized(FixedAsset asset)
-        => asset.PostingEventId.HasValue
-            || asset.JournalEntryId.HasValue
-            || asset.Status is FixedAssetStatus.Capitalized or FixedAssetStatus.Active;
+        => !asset.CapitalizationReversalPostingEventId.HasValue &&
+            (asset.PostingEventId.HasValue
+             || asset.JournalEntryId.HasValue
+             || asset.Status is FixedAssetStatus.Capitalized or FixedAssetStatus.Active);
+
+    private async Task<FixedAsset> LoadAssetForCapitalizationReversalAsync(
+        Guid assetId,
+        CancellationToken cancellationToken)
+        => await _context.FixedAssets
+            .Include(asset => asset.BookValues)
+            .SingleOrDefaultAsync(asset =>
+                asset.TenantId == TenantId && asset.Id == assetId && !asset.IsDeleted,
+                cancellationToken)
+            ?? throw new KeyNotFoundException("Fixed asset not found.");
+
+    private static void EnsureDirectCapitalizationCanBeReversed(FixedAsset asset)
+    {
+        // Keep these validations separate so an operator or integrating module receives an
+        // actionable explanation. FR-GL-008 requires the original event and journal to be linked;
+        // silently treating incomplete lineage as an ordinary status problem would make a data or
+        // integration defect unnecessarily difficult to diagnose.
+        if (asset.CapitalizationReversalPostingEventId.HasValue)
+            throw new InvalidOperationException("The current fixed asset capitalization has already been reversed.");
+        if (!IsCapitalized(asset))
+            throw new InvalidOperationException("Only a currently posted fixed asset capitalization can be reversed.");
+        if (!asset.PostingEventId.HasValue || !asset.JournalEntryId.HasValue)
+            throw new InvalidOperationException("The fixed asset capitalization is missing its original posting event or journal lineage and cannot be reversed safely.");
+        if (!string.Equals(asset.SourceDocumentType, "FixedAsset", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "This capitalization belongs to a source document. Reverse that source document so its shared journal and the asset register remain synchronized.");
+        }
+    }
+
+    private async Task EnsureNoDownstreamAssetAccountingAsync(
+        FixedAsset asset,
+        CancellationToken cancellationToken)
+    {
+        if (asset.Status != FixedAssetStatus.Capitalized)
+        {
+            throw new InvalidOperationException(
+                "Capitalization reversal is allowed only before activation, depreciation, valuation, transfer, disposal, or another asset lifecycle action.");
+        }
+
+        var hasPostedDepreciation = await _context.AssetDepreciationSchedules.AnyAsync(item =>
+            item.TenantId == TenantId && item.FixedAssetId == asset.Id && item.IsPosted && !item.IsDeleted,
+            cancellationToken);
+        var hasPostedValuation = await _context.AssetValuations.AnyAsync(item =>
+            item.TenantId == TenantId && item.FixedAssetId == asset.Id && item.IsPostedToGL && !item.IsDeleted,
+            cancellationToken);
+        var hasPostedTransfer = await _context.AssetTransfers.AnyAsync(item =>
+            item.TenantId == TenantId && item.FixedAssetId == asset.Id && item.PostingEventId.HasValue && !item.IsDeleted,
+            cancellationToken);
+        var hasDisposal = await _context.AssetDisposals.AnyAsync(item =>
+            item.TenantId == TenantId && item.FixedAssetId == asset.Id &&
+            item.Status != AssetDisposalStatus.Rejected && item.Status != AssetDisposalStatus.Cancelled && !item.IsDeleted,
+            cancellationToken);
+        var hasOtherValueMovement = await _context.AssetTransactions.AnyAsync(item =>
+            item.TenantId == TenantId && item.FixedAssetId == asset.Id &&
+            item.TransactionType != "Capitalization" &&
+            item.TransactionType != "CapitalizationReversal" &&
+            !item.IsDeleted,
+            cancellationToken);
+
+        if (hasPostedDepreciation || hasPostedValuation || hasPostedTransfer || hasDisposal || hasOtherValueMovement)
+        {
+            throw new InvalidOperationException(
+                "Capitalization cannot be reversed after downstream asset accounting exists. Reverse the later lifecycle entries in order before reversing capitalization.");
+        }
+    }
+
+    private void ApplyCapitalizationReversal(
+        FixedAsset asset,
+        Guid reversalJournalEntryId,
+        Guid reversalPostingEventId,
+        DateTime reversalDate,
+        string reason,
+        FixedAssetCapitalizationReversal? request)
+    {
+        var reversedAt = DateTime.UtcNow;
+        asset.PurchasePrice = 0m;
+        asset.InstallationCost = 0m;
+        asset.TaxAmount = 0m;
+        asset.AcquisitionCost = 0m;
+        asset.NetBookValue = 0m;
+        asset.CapitalizationDate = null;
+        asset.Status = FixedAssetStatus.Draft;
+        asset.CapitalizationReversalJournalEntryId = reversalJournalEntryId;
+        asset.CapitalizationReversalPostingEventId = reversalPostingEventId;
+        asset.CapitalizationReversedAt = reversedAt;
+        asset.CapitalizationReversalReason = reason;
+        asset.UpdatedAt = reversedAt;
+        asset.UpdatedBy = UserName;
+
+        foreach (var bookValue in asset.BookValues.Where(value => !value.IsDeleted))
+        {
+            var amountReversed = bookValue.AcquisitionCost;
+            bookValue.AcquisitionCost = 0m;
+            bookValue.AccumulatedDepreciation = 0m;
+            bookValue.NetBookValue = 0m;
+            bookValue.CapitalizationDate = null;
+            bookValue.CapitalizationReversalJournalEntryId = reversalJournalEntryId;
+            bookValue.CapitalizationReversalPostingEventId = reversalPostingEventId;
+            bookValue.CapitalizationReversedAt = reversedAt;
+            bookValue.UpdatedAt = reversedAt;
+            bookValue.UpdatedBy = UserName;
+
+            // The negative register movement mirrors the compensating GL journal while preserving
+            // the original positive capitalization transaction. Reports can therefore reconstruct
+            // both gross activity and the zero current carrying value without destructive edits.
+            _context.AssetTransactions.Add(new AssetTransaction
+            {
+                TenantId = TenantId,
+                FixedAssetId = asset.Id,
+                AccountingBookId = bookValue.AccountingBookId,
+                BookClassification = bookValue.BookClassification,
+                TransactionDate = reversalDate.Date,
+                TransactionType = "CapitalizationReversal",
+                Description = reason,
+                Amount = -amountReversed,
+                ResultingBookValue = 0m,
+                RelatedEntityId = reversalPostingEventId,
+                PerformedByUserId = CurrentUserGuid,
+                CreatedAt = reversedAt,
+                CreatedBy = UserName
+            });
+        }
+
+        if (request != null)
+        {
+            request.Status = FixedAssetCapitalizationReversalStatuses.Posted;
+            request.ReversalJournalEntryId = reversalJournalEntryId;
+            request.ReversalPostingEventId = reversalPostingEventId;
+            request.PostedAt = reversedAt;
+            request.FailureReason = null;
+            request.UpdatedAt = reversedAt;
+            request.UpdatedBy = UserName;
+            request.LastModifiedById = CurrentUserGuid == Guid.Empty ? null : CurrentUserGuid;
+        }
+    }
+
+    private static FixedAssetCapitalizationReversalDto MapCapitalizationReversalToDto(
+        FixedAssetCapitalizationReversal request,
+        FixedAsset asset) => new()
+    {
+        Id = request.Id,
+        FixedAssetId = request.FixedAssetId,
+        AssetCode = asset.AssetCode,
+        AssetName = asset.Name,
+        OriginalPostingEventId = request.OriginalPostingEventId,
+        OriginalJournalEntryId = request.OriginalJournalEntryId,
+        ReversalPostingEventId = request.ReversalPostingEventId,
+        ReversalJournalEntryId = request.ReversalJournalEntryId,
+        Status = request.Status,
+        Reason = request.Reason,
+        ImpactAssessment = request.ImpactAssessment,
+        RequestedReversalDate = request.RequestedReversalDate,
+        RequestedByUserId = request.RequestedByUserId,
+        RequestedByUserName = request.RequestedByUserName,
+        RequestedAt = request.RequestedAt,
+        ReviewedByUserId = request.ReviewedByUserId,
+        ReviewedByUserName = request.ReviewedByUserName,
+        ReviewedAt = request.ReviewedAt,
+        ReviewComment = request.ReviewComment,
+        PostedAt = request.PostedAt,
+        FailureReason = request.FailureReason
+    };
 
     private async Task EnsureDirectCapitalizationApprovedAsync(FixedAsset asset, string? reason)
     {

@@ -136,6 +136,12 @@ namespace ErpSystem.Core.DTOs.Reports
 
     public class ReportExportResultDto
     {
+        /// <summary>
+        /// Identifies the durable export audit record. Scheduled delivery uses
+        /// this key to attach private-file evidence without creating a duplicate
+        /// export record alongside the existing reporting service.
+        /// </summary>
+        public Guid ExportId { get; set; }
         public Guid ReportId { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime ExportedAt { get; set; }

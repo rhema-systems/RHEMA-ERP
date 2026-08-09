@@ -24,6 +24,7 @@ import {
   type ProcedureCaseDocument,
   type ProcedureCaseSummary,
 } from '@/services/procedure-case.service';
+import { getProcedureWorkspaceTerminology } from '@/lib/procedure-workspace';
 
 const ProcedurePdfViewer = dynamic(() => import('@/components/procedures/ProcedurePdfViewer'), {
   ssr: false,
@@ -38,6 +39,7 @@ interface ProcedureCaseWorkspaceProps {
   module: 'Legal' | 'Estate' | 'Facilities' | 'PropertyManagement' | 'Planning';
   entityType: string;
   defaultTitle: string;
+  workspaceType?: string;
 }
 
 const LAND_FEE_ENTITY_TYPES = new Set([
@@ -121,9 +123,33 @@ const resolveProcedurePortalRecipient = (procedureCase: ProcedureCaseDetail): st
   return applicantName.includes('@') ? applicantName : '';
 };
 
-export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: ProcedureCaseWorkspaceProps) {
+export function ProcedureCaseWorkspace({
+  module,
+  entityType,
+  defaultTitle,
+  workspaceType,
+}: ProcedureCaseWorkspaceProps) {
   const searchParams = useSearchParams();
+  const terminology = getProcedureWorkspaceTerminology(workspaceType);
   const requestedCaseId = searchParams.get('caseId');
+  const prefillSignature = searchParams.toString();
+  const prefilledCase = React.useMemo(() => ({
+    title: searchParams.get('title') || defaultTitle,
+    referenceNumber: searchParams.get('referenceNumber') || '',
+    applicantName: searchParams.get('applicantName') || '',
+    sourceDepartment: searchParams.get('sourceDepartment') || '',
+    receivedDate: searchParams.get('receivedDate') || '',
+    description: searchParams.get('description') || '',
+  }), [defaultTitle, prefillSignature, searchParams]);
+  const prefilledFieldValues = React.useMemo(() => {
+    const values: Record<string, string | null> = {};
+    searchParams.forEach((value, key) => {
+      if (key.startsWith('field_')) {
+        values[key.slice('field_'.length)] = value;
+      }
+    });
+    return values;
+  }, [prefillSignature, searchParams]);
   const [cases, setCases] = React.useState<ProcedureCaseSummary[]>([]);
   const [selectedCase, setSelectedCase] = React.useState<ProcedureCaseDetail | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -144,13 +170,14 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
     notes: '',
   });
   const [newCase, setNewCase] = React.useState({
-    title: defaultTitle,
-    referenceNumber: '',
-    applicantName: '',
-    sourceDepartment: '',
-    receivedDate: '',
-    description: '',
+    title: prefilledCase.title,
+    referenceNumber: prefilledCase.referenceNumber,
+    applicantName: prefilledCase.applicantName,
+    sourceDepartment: prefilledCase.sourceDepartment,
+    receivedDate: prefilledCase.receivedDate,
+    description: prefilledCase.description,
   });
+  const appliedPrefillSignatureRef = React.useRef('');
 
   const currentStageItems = React.useMemo(
     () => selectedCase?.checklistItems.filter((item) => item.stageIndex === selectedCase.currentStageIndex) ?? [],
@@ -179,7 +206,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
         setSelectedCase(detail);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load procedure cases.');
+      setError(err instanceof Error ? err.message : 'Unable to load workspace records.');
     } finally {
       setIsLoading(false);
     }
@@ -188,6 +215,31 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
   React.useEffect(() => {
     void loadCases();
   }, [loadCases]);
+
+  React.useEffect(() => {
+    if (requestedCaseId || appliedPrefillSignatureRef.current === prefillSignature) {
+      return;
+    }
+
+    const hasPrefill =
+      Boolean(prefilledCase.referenceNumber) ||
+      Boolean(prefilledCase.applicantName) ||
+      Boolean(prefilledCase.sourceDepartment) ||
+      Boolean(prefilledCase.receivedDate) ||
+      Boolean(prefilledCase.description) ||
+      Object.keys(prefilledFieldValues).length > 0;
+    if (!hasPrefill) {
+      return;
+    }
+
+    appliedPrefillSignatureRef.current = prefillSignature;
+    setNewCase(prefilledCase);
+  }, [
+    prefillSignature,
+    prefilledCase,
+    prefilledFieldValues,
+    requestedCaseId,
+  ]);
 
   React.useEffect(() => {
     if (module !== 'Estate') {
@@ -291,7 +343,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       const detail = await procedureCaseService.getCase(id);
       setSelectedCase(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to open procedure case.');
+      setError(err instanceof Error ? err.message : 'Unable to open the workspace record.');
     } finally {
       setIsSaving(false);
     }
@@ -305,7 +357,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
         module,
         entityType,
         ...newCase,
-        fieldValues: {},
+        fieldValues: prefilledFieldValues,
       });
       setSelectedCase(created);
       setNewCase({
@@ -318,7 +370,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       });
       await loadCases();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create procedure case.');
+      setError(err instanceof Error ? err.message : 'Unable to create the workspace record.');
     } finally {
       setIsSaving(false);
     }
@@ -625,7 +677,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
       <CardHeader>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <CardTitle>Live Case Workspace</CardTitle>
+            <CardTitle>{terminology.title}</CardTitle>
           </div>
           <Badge variant={selectedCase?.usesConfiguredWorkflow ? 'default' : 'outline'}>
             {selectedCase?.usesConfiguredWorkflow ? 'Administration workflow' : 'Procedure stages'}
@@ -643,12 +695,16 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
           <div className="space-y-4">
             <div className="rounded-md border border-border bg-background p-4">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">Cases</h2>
+                <h2 className="text-sm font-semibold">
+                  {terminology.collectionLabel}
+                </h2>
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
               </div>
               <div className="space-y-2">
                 {cases.length === 0 && !isLoading ? (
-                  <p className="text-sm text-muted-foreground">No cases opened for this procedure yet.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {terminology.emptyMessage}
+                  </p>
                 ) : null}
                 {cases.map((procedureCase) => (
                   <button
@@ -675,7 +731,9 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
             </div>
 
             <div className="rounded-md border border-border bg-background p-4">
-              <h2 className="text-sm font-semibold">Open Case</h2>
+              <h2 className="text-sm font-semibold">
+                {terminology.createHeading}
+              </h2>
               <div className="mt-3 space-y-3">
                 <Input value={newCase.title} onChange={(event) => setNewCase({ ...newCase, title: event.target.value })} />
                 <Input placeholder="Reference number" value={newCase.referenceNumber} onChange={(event) => setNewCase({ ...newCase, referenceNumber: event.target.value })} />
@@ -685,7 +743,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
                 <Textarea placeholder="Description" value={newCase.description} onChange={(event) => setNewCase({ ...newCase, description: event.target.value })} />
                 <Button className="w-full gap-2" onClick={() => void createCase()} disabled={isSaving}>
                   <Plus className="h-4 w-4" />
-                  Create case
+                  {terminology.createLabel}
                 </Button>
               </div>
             </div>
@@ -1023,7 +1081,7 @@ export function ProcedureCaseWorkspace({ module, entityType, defaultTitle }: Pro
             </div>
           ) : (
             <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
-              Select or create a case to start work.
+              {terminology.selectMessage}
             </div>
           )}
         </div>

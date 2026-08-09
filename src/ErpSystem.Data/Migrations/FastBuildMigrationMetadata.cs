@@ -135,9 +135,10 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729022744_AddSupplierEvidenceDmsLinks")] partial class AddSupplierEvidenceDmsLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729084856_TDC0401FrameworkAgreements")] partial class TDC0401FrameworkAgreements { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260729124416_TDC0402FrameworkCallOffs")] partial class TDC0402FrameworkCallOffs { }
-[DbContext(typeof(ApplicationDbContext)), Migration("20260801160552_ReconcileFinanceMasterModelSnapshot")] partial class ReconcileFinanceMasterModelSnapshot { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260730132714_TDC0407ContractActivationGate")] partial class TDC0407ContractActivationGate { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260731091028_AddEstatePropertyRegisterFields")] partial class AddEstatePropertyRegisterFields { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260731140000_TDC0502ReceiptInspectionClosure")] partial class TDC0502ReceiptInspectionClosure { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260801160552_ReconcileFinanceMasterModelSnapshot")] partial class ReconcileFinanceMasterModelSnapshot { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260801204023_TDC0602InventoryMobileScanning")] partial class TDC0602InventoryMobileScanning { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802002739_TDC0603InventoryTrackingControls")] partial class TDC0603InventoryTrackingControls { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260802012523_TDC0604InventoryAccessLocations")] partial class TDC0604InventoryAccessLocations { }

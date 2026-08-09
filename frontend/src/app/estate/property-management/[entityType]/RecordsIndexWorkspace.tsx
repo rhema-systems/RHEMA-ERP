@@ -1,0 +1,140 @@
+'use client';
+
+import React from 'react';
+import { FileText, Loader2, RefreshCw, Search } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  estateLandManagementService,
+  type EstateManagedAsset,
+  type EstateManagedAssetDocument,
+} from '@/services/estate-land-management.service';
+import {
+  formatEstateDate,
+  occupantName,
+  propertyReference,
+  sourceReference,
+} from './property-workspace-utils';
+
+interface DocumentRow extends EstateManagedAssetDocument {
+  asset: EstateManagedAsset;
+}
+
+export function RecordsIndexWorkspace() {
+  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
+  const [documents, setDocuments] = React.useState<DocumentRow[]>([]);
+  const [searchDraft, setSearchDraft] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [selectedAssetId, setSelectedAssetId] = React.useState('all');
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const managedAssets = await estateLandManagementService.getManagedAssets({ search: search || undefined, take: 200 });
+      setAssets(managedAssets);
+      const targetAssets = selectedAssetId === 'all'
+        ? managedAssets.slice(0, 30)
+        : managedAssets.filter((asset) => asset.id === selectedAssetId);
+      const documentGroups = await Promise.all(
+        targetAssets.map(async (asset) => {
+          const records = await estateLandManagementService.getDocuments(asset.id).catch(() => []);
+          return records.map((record) => ({ ...record, asset }));
+        })
+      );
+      setDocuments(documentGroups.flat());
+    } catch {
+      setAssets([]);
+      setDocuments([]);
+      setLoadError('Unable to load property records index.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [search, selectedAssetId]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card><CardHeader className="pb-3"><CardDescription>Indexed assets</CardDescription><CardTitle className="text-2xl">{assets.length}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-3"><CardDescription>Loaded documents</CardDescription><CardTitle className="text-2xl">{documents.length}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-3"><CardDescription>DMS-linked records</CardDescription><CardTitle className="text-2xl">{documents.filter((item) => item.centralDocumentRecordId).length}</CardTitle></CardHeader></Card>
+      </div>
+
+      <Card>
+        <CardHeader className="gap-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Property Documents / Records Index</CardTitle>
+              <CardDescription className="mt-2 max-w-3xl">
+                Search property-linked document references, DMS references, listing images, lease files, handover evidence, and operational record metadata. Central DMS remains the file/version owner.
+              </CardDescription>
+            </div>
+            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>
+          </div>
+          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_18rem_auto]" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="pl-9" placeholder="Search property, document, tenant, or reference" />
+            </div>
+            <Select value={selectedAssetId} onValueChange={setSelectedAssetId}>
+              <SelectTrigger><SelectValue placeholder="Select property" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Recent matching properties</SelectItem>
+                {assets.map((asset) => (
+                  <SelectItem key={asset.id} value={asset.id}>{propertyReference(asset)} · {asset.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="submit">Search</Button>
+          </form>
+        </CardHeader>
+        <CardContent>
+          {loadError ? <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{loadError}</div> : null}
+          {isLoading ? <div className="flex justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading records index</div> : null}
+          {!isLoading && documents.length > 0 ? (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Document</TableHead>
+                    <TableHead>Property / unit</TableHead>
+                    <TableHead>Tenant / occupant</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>DMS reference</TableHead>
+                    <TableHead>Uploaded</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documents.map((document) => (
+                    <TableRow key={document.id}>
+                      <TableCell><div className="font-medium">{document.documentName || document.fileName}</div><div className="text-xs text-muted-foreground">{document.fileName}</div></TableCell>
+                      <TableCell><div>{document.asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(document.asset)} · {sourceReference(document.asset)}</div></TableCell>
+                      <TableCell>{occupantName(document.asset)}</TableCell>
+                      <TableCell>{document.documentType}</TableCell>
+                      <TableCell>{document.centralDocumentReference || 'Not linked'}</TableCell>
+                      <TableCell>{formatEstateDate(document.uploadedAt)}</TableCell>
+                      <TableCell><Badge variant={document.centralDocumentRecordId ? 'secondary' : 'outline'}>{document.centralDocumentRecordId ? 'DMS linked' : 'Asset file'}</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
+          {!isLoading && !loadError && documents.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No documents found for the current selection.</div> : null}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

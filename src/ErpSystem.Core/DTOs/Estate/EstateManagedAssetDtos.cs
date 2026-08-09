@@ -47,6 +47,16 @@ public class EstateManagedAssetDto
     public string? ProjectTitle { get; set; }
     public string? ProjectUnitCode { get; set; }
     public string? UnitType { get; set; }
+    public DateTime? DateOfTenancy { get; set; }
+    public DateTime? RightOfEntryDate { get; set; }
+    public int? LeaseTermYears { get; set; }
+    public decimal? GroundRentPayable { get; set; }
+    public decimal? GroundRentRatePerAcre { get; set; }
+    public decimal? GroundRentComputed { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? LesseeName { get; set; }
+    public string? LesseeAddress { get; set; }
+    public string? PropertyFileReference { get; set; }
     public decimal? AreaSquareMeters { get; set; }
     public decimal? ValuationAmount { get; set; }
     public string Currency { get; set; } = "GHS";
@@ -58,6 +68,9 @@ public class EstateManagedAssetDto
     public string ExternalListingType { get; set; } = "None";
     public string ExternalListingStatus { get; set; } = "Draft";
     public decimal? ExternalListingPrice { get; set; }
+    public decimal? ExternalSalePrice { get; set; }
+    public decimal? ExternalMonthlyRent { get; set; }
+    public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
     public DateTime? ExternalPublishedAt { get; set; }
@@ -116,8 +129,31 @@ public class UpdateEstateManagedAssetListingDto
     public string ExternalListingType { get; set; } = "None";
     public string ExternalListingStatus { get; set; } = "Draft";
     public decimal? ExternalListingPrice { get; set; }
+    public decimal? ExternalSalePrice { get; set; }
+    public decimal? ExternalMonthlyRent { get; set; }
+    public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
+}
+
+public class UpdateEstateManagedAssetRegisterDto
+{
+    public DateTime? DateOfTenancy { get; set; }
+    public DateTime? RightOfEntryDate { get; set; }
+    public int? LeaseTermYears { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+    public string? LesseeName { get; set; }
+    public string? LesseeAddress { get; set; }
+    public string? PropertyFileReference { get; set; }
+}
+
+public class UpdateEstateManagedAssetOccupancyDto
+{
+    public EstateManagedAssetStatus Status { get; set; }
+    public bool? IsAvailableForLease { get; set; }
+    public bool? IsAvailableForSale { get; set; }
+    public bool? IsPublishedToExternalPortal { get; set; }
+    public string? Notes { get; set; }
 }
 
 public class CreateManualExistingLandDto
@@ -198,6 +234,7 @@ public class EstateManagedAssetQuery
     public bool? AvailableForLease { get; set; }
     public bool? AvailableForSale { get; set; }
     public bool? AvailableForSaleOrLease { get; set; }
+    public bool? PortalListingCandidates { get; set; }
     public int Take { get; set; } = 100;
 }
 
@@ -253,6 +290,9 @@ public class LandAcquisitionEstateHandoffDto
     public DateTime? SurveyDate { get; set; }
     public int? BeaconCount { get; set; }
     public List<ExistingLandOwnerDto> OwnershipHistory { get; set; } = [];
+    public bool CadastralMatch { get; set; }
+    public bool OverlapCleared { get; set; }
+    public bool BoundaryConfirmed { get; set; }
     public bool BoundaryVerified { get; set; }
     public bool IsReadyForProjectManagement { get; set; }
     public string? Notes { get; set; }

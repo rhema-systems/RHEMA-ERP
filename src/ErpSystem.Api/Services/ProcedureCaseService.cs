@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.DTOs.Workflow;
@@ -92,7 +94,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new UnauthorizedAccessException("The current user is not allowed to view this procedure case.");
         }
 
-        return ToDetailDto(procedureCase);
+        return await ToDetailDtoAsync(procedureCase);
     }
 
     private async Task<List<ProcedureCase>> LoadVisibleProcedureCasesAsync(
@@ -224,39 +226,68 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         procedureCase.Activities.Add(Activity(tenantId, userId, procedureCase.Id, "Created", firstStage.Name, "Procedure case opened."));
 
         // Procedure cases are source records for workflow; keep creation, workflow startup, and linkage atomic.
-        await using var transaction = await _db.Database.BeginTransactionAsync();
-        _db.ProcedureCases.Add(procedureCase);
-        await _db.SaveChangesAsync();
-
-        if (workspace.WorkflowDefinitionName is not null)
+        // SQL Server retrying execution strategies require user-initiated transactions to run inside the
+        // strategy delegate so the complete transaction can be retried as one unit.
+        var executionStrategy = _db.Database.CreateExecutionStrategy();
+        await executionStrategy.ExecuteAsync(async () =>
         {
-            var workflowInstance = await _workflowEngine.StartWorkflowAsync(
-                workspace.WorkflowDefinitionName,
-                procedureCase.Id,
-                userId,
-                new
-                {
-                    procedureCase.Id,
-                    procedureCase.Module,
-                    procedureCase.EntityType,
-                    procedureCase.Title,
-                    procedureCase.ReferenceNumber,
-                    procedureCase.ApplicantName,
-                    procedureCase.SourceDepartment,
-                    procedureCase.ReceivedDate
-                });
-
-            procedureCase.WorkflowInstanceId = workflowInstance.Id;
-            procedureCase.WorkflowDefinitionId = workflowInstance.WorkflowDefinitionId;
-            procedureCase.WorkflowStepId = workflowInstance.CurrentStepId;
-            procedureCase.Activities.Add(Activity(tenantId, userId, procedureCase.Id, "Workflow started", firstStage.Name, workspace.WorkflowDefinitionName));
+            await using var transaction = await _db.Database.BeginTransactionAsync();
+            _db.ProcedureCases.Add(procedureCase);
             await _db.SaveChangesAsync();
-            await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, workflowInstance.Id, userId);
-        }
 
-        await transaction.CommitAsync();
+            if (workspace.WorkflowDefinitionId is { } workflowDefinitionId)
+            {
+                var workflowInstance = await _workflowEngine.StartWorkflowAsync(
+                    workflowDefinitionId,
+                    procedureCase.Id,
+                    userId,
+                    new
+                    {
+                        procedureCase.Id,
+                        procedureCase.Module,
+                        procedureCase.EntityType,
+                        procedureCase.Title,
+                        procedureCase.ReferenceNumber,
+                        procedureCase.ApplicantName,
+                        procedureCase.SourceDepartment,
+                        procedureCase.ReceivedDate
+                    });
 
-        return ToDetailDto((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
+                // The workflow engine persists through repositories that share this scoped DbContext.
+                // Clear their completed tracking graph before linking the source case so stale workflow
+                // entities cannot be written a second time as part of the case update.
+                _db.ChangeTracker.Clear();
+                var linkedRows = await _db.ProcedureCases
+                    .IgnoreQueryFilters()
+                    .Where(item =>
+                        item.TenantId == tenantId &&
+                        item.Id == procedureCase.Id &&
+                        !item.IsDeleted)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(item => item.WorkflowInstanceId, workflowInstance.Id)
+                        .SetProperty(item => item.WorkflowDefinitionId, workflowInstance.WorkflowDefinitionId)
+                        .SetProperty(item => item.WorkflowStepId, workflowInstance.CurrentStepId)
+                        .SetProperty(item => item.UpdatedAt, DateTime.UtcNow));
+                if (linkedRows != 1)
+                {
+                    throw new InvalidOperationException("The procedure case could not be linked to its workflow instance.");
+                }
+
+                _db.ProcedureCaseActivities.Add(Activity(
+                    tenantId,
+                    userId,
+                    procedureCase.Id,
+                    "Workflow started",
+                    firstStage.Name,
+                    workspace.WorkflowDefinitionName));
+                await _db.SaveChangesAsync();
+                await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, workflowInstance.Id, userId);
+            }
+
+            await transaction.CommitAsync();
+        });
+
+        return await ToDetailDtoAsync((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }
 
     public async Task<ProcedureCaseDetailDto?> UpdateFieldsAsync(Guid id, UpdateProcedureCaseFieldsRequest request)
@@ -298,10 +329,27 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             }
         }
 
+        var groundRentAssetCode = await SyncEstateGroundRentAssessmentAsync(
+            procedureCase,
+            request.FieldValues,
+            tenantId,
+            userId,
+            now);
+
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Updated intake", procedureCase.CurrentStageName, "Intake fields saved."));
+        if (groundRentAssetCode != null)
+        {
+            _db.ProcedureCaseActivities.Add(Activity(
+                tenantId,
+                userId,
+                procedureCase.Id,
+                "Ground rent assessed",
+                procedureCase.CurrentStageName,
+                $"SOP ground-rent assessment synchronized to Estate asset {groundRentAssetCode}."));
+        }
         await _db.SaveChangesAsync();
 
-        return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
+        return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
     }
 
     public async Task<ProcedureCaseDetailDto?> UpdateChecklistItemAsync(Guid id, Guid checklistItemId, UpdateProcedureCaseChecklistRequest request)
@@ -348,7 +396,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, request.IsCompleted ? "Completed checklist" : "Reopened checklist", procedureCase.CurrentStageName, item.Text));
         await _db.SaveChangesAsync();
 
-        return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
+        return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
     }
 
     public async Task<ProcedureCaseDetailDto?> AttachDocumentAsync(Guid id, Guid documentId, AttachProcedureCaseDocumentRequest request)
@@ -429,7 +477,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Attached document", procedureCase.CurrentStageName, document.Name));
         await _db.SaveChangesAsync();
 
-        return ToDetailDto((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
+        return await ToDetailDtoAsync((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }
 
     public async Task<ProcedureCaseDetailDto?> CompleteCurrentStageAsync(Guid id, CompleteProcedureCaseStageRequest request)
@@ -492,7 +540,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, procedureCase.WorkflowInstanceId.Value, userId, request.Notes);
             var syncedCase = (await LoadCaseAsync(id, asTracking: false))!;
             await NotifyEstateProcedureHandoffsAsync(syncedCase, completedStageName, syncedCase.CurrentStageName, userId, tenantId);
-            return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
+            return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
         }
 
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
@@ -536,7 +584,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var updatedCase = (await LoadCaseAsync(id, asTracking: false))!;
         await NotifyEstateProcedureHandoffsAsync(updatedCase, completedStageName, nextStage?.Name, userId, tenantId);
 
-        return ToDetailDto((await LoadCaseAsync(id, asTracking: false))!);
+        return await ToDetailDtoAsync((await LoadCaseAsync(id, asTracking: false))!);
     }
 
     public Task SyncFromWorkflowRuntimeAsync(Guid procedureCaseId, Guid workflowInstanceId, Guid actorUserId, string? notes = null)
@@ -849,7 +897,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                     step.RequiredRole,
                     ResolveStepAssignmentLabel(step, null) ?? step.Name,
                     step.Id,
-                    [step.Description ?? $"Complete {step.Name}."])
+                    BuildConfiguredWorkflowChecklist(step))
                 {
                     WorkflowDefinitionId = workflow.Id,
                     WorkflowDefinitionName = workflow.Name
@@ -857,12 +905,21 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList();
         }
 
+        if (string.Equals(
+                entityType,
+                "EstatePropertyManagementListingApplication",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Property Requests / Listing Applications requires an active published workflow in Administration > Workflow Setup.");
+        }
+
         return module switch
         {
             "Legal" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages
                 .Select((stage, index) => new StageSeed(index, stage.Name, stage.Owner, stage.Owner, null, stage.Checklist))
                 .ToList() ?? [],
-            "Estate" => BuildEstateStageSeeds(entityType),
+            "Estate" => [],
             "PropertyManagement" => _propertyManagementCatalog.GetProcedureWorkspace(entityType)?.Stages
                 .Select((stage, index) => new StageSeed(index, stage.Name, stage.Owner, stage.Owner, null, stage.Checklist))
                 .ToList() ?? [],
@@ -874,6 +931,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList() ?? [],
             _ => []
         };
+    }
+
+    private static IReadOnlyList<string> BuildConfiguredWorkflowChecklist(WorkflowStep step)
+    {
+        var configuration = DeserializeStepConfiguration(step.Configuration);
+        return configuration?.QualityConfig?.QualityChecks
+            .Where(check => check.IsRequired && !string.IsNullOrWhiteSpace(check.Name))
+            .Select(check => check.Name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildLegalSeed(string entityType)
@@ -904,8 +971,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return (
             procedure.Title,
-            BuildEstateFieldSeeds(procedure),
-            BuildEstateDocumentSeeds(procedure));
+            [],
+            []);
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildPropertyManagementSeed(string entityType)
@@ -936,21 +1003,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         ?? throw new InvalidOperationException($"Estate procedure workspace '{entityType}' was not found.");
 
     private List<StageSeed> BuildEstateStageSeeds(string entityType)
-    {
-        var procedure = GetEstateProcedure(entityType);
-        var stageNames = EstateStageNames(procedure.EntityType);
-
-        return stageNames
-            .Take(procedure.StageCount)
-            .Select((name, index) => new StageSeed(
-                index,
-                name,
-                EstateStageOwner(name),
-                EstateStageOwner(name),
-                null,
-                EstateStageChecklist(procedure.EntityType, name)))
-            .ToList();
-    }
+        => [];
 
     private static IReadOnlyList<FieldSeed> BuildEstateFieldSeeds(EstateProcedureCatalogItem procedure)
     {
@@ -1394,78 +1447,72 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         || string.Equals(entityType, "EstateTraditionalLands", StringComparison.OrdinalIgnoreCase)
         || string.Equals(entityType, "EstateTenancyRegularisation", StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<string> EstateStageNames(string entityType) =>
-        entityType switch
-        {
-            "EstateRegistrySecretariat" => ["Receive and log intake", "Classify file or letter", "Route to responsible officer", "Track movement", "Prepare typing or dispatch action", "Update client", "Close registry action"],
-            "EstateRecordsManagement" => ["Receive record request", "Verify estate register or ledger", "Check Revenue and Development consistency", "Prepare amendment or notification", "Review and sign", "Update records", "Notify agencies", "Close records action"],
-            "EstateInspection" => ["Receive inspection request", "Assign inspection officer", "Conduct site visit", "Prepare site report", "Submit report"],
-            "EstateSearchApplication" => ["Receive search application", "Check arrears and file status", "Review property records", "Prepare search report", "Dispatch search response"],
-            "EstateRecordAmendment" => ["Receive amendment request", "Validate supporting declaration", "Check arrears and ownership", "Update Revenue and Estate Records", "Dispatch confirmation"],
-            "EstateCertifiedTrueCopy" => ["Receive certified copy request", "Verify file and arrears", "Confirm payment", "Prepare certified copy", "Approve and dispatch"],
-            "EstateJointOwnership" => ["Receive addition request", "Verify lease and ownership", "Check arrears and consent", "Route cadastral or legal action", "Prepare deed or variation", "Update records", "Dispatch confirmation"],
-            "EstateTransfer" => ["Receive transfer request", "Verify parties and property", "Calculate fees and arrears", "Approve transfer instruction", "Route Legal execution", "Update records", "Dispatch completion"],
-            "EstateAssignment" => ["Receive assignment request", "Check consent and draft deed", "Verify arrears and development status", "Approve assignment instruction", "Route Legal registration", "Detach and update records", "Dispatch completion"],
-            "EstateMortgageConsent" => ["Receive mortgage consent request", "Verify arrears and development status", "Review draft deed or mortgage in principle", "Approve consent instruction", "Route Legal if required", "Dispatch consent response"],
-            "EstateLeasePreparation" => ["Receive lease request", "Verify development and property status", "Confirm cadastral requirements", "Prepare invoice instruction", "Confirm payment", "Route Legal preparation", "Update records", "Dispatch lease"],
-            "EstateAdditionalLand" => ["Receive additional land application", "Verify adjoining property records", "Conduct inspection and availability check", "Calculate fees and prepare recommendation", "Approve application", "Prepare offer and update records"],
-            "EstateLayoutRevision" => ["Receive layout revision request", "Review planning and site implications", "Prepare layout revision letter", "Approve and sign revision", "Dispatch and update records"],
-            "EstateChangeOfUse" => ["Receive change-of-use application", "Verify current use and arrears", "Inspect site and review planning", "Calculate change-of-use fee", "Approve change-of-use request", "Dispatch decision and update records"],
-            "EstateReminderRateRevision" => ["Identify unpaid proposal or arrears cases", "Validate revised rates and balances", "Prepare reminder or rate revision notice", "Approve and sign notice", "Dispatch and record follow-up"],
-            "EstateLeaseRenewal" => ["Receive renewal request", "Verify renewal requirements", "Check arrears and term threshold", "Route committee review", "Prepare invoice instruction", "Approve renewal", "Route Legal renewal", "Close renewal"],
-            "EstateServicedPlotAllocation" => ["Receive allocation request", "Compile allocation list", "Approve allocation", "Update payment book", "Prepare offer letter", "Prepare right of entry", "Dispatch documents", "Report allocation"],
-            "EstateLandsPartiallyServiced" => ["Receive application", "Assess land use and plot details", "Calculate LMF and ground rent", "Prepare proposal letter", "Confirm acceptance and payment", "Prepare offer and right of entry", "Report schedule"],
-            "EstateHousingHomeOwnership" => ["Receive housing request", "Verify tenancy and rent position", "Confirm HOS or recognition path", "Route legal or records action", "Confirm payment or conversion", "Prepare offer or rent card", "Update records"],
-            "EstateTraditionalLands" => ["Receive stool allocation", "Open file and check prior allocation", "Conduct site visit", "Request site plan", "Prepare proposal letter", "Prepare offer and right of entry"],
-            "EstateTenancyRegularisation" => ["Receive regularisation request", "Validate documents and plot number", "Interview applicant", "Check Revenue and Estate Records", "Route committee vetting", "Prepare proposal and fees", "Prepare offer and right of entry"],
-            "EstateReportingControls" => ["Collect schedule data", "Validate control checks", "Compile report", "Review exceptions", "Approve report", "Publish controls"],
-            _ => ["Receive request", "Validate records", "Check fees and approvals", "Route linked action", "Prepare output", "Update records", "Close case"]
-        };
-
-    private static string EstateStageOwner(string stageName)
+    private async Task<string?> SyncEstateGroundRentAssessmentAsync(
+        ProcedureCase procedureCase,
+        IDictionary<string, string?> requestedValues,
+        Guid tenantId,
+        Guid userId,
+        DateTime now)
     {
-        if (stageName.Contains("Legal", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(procedureCase.Module, "Estate", StringComparison.OrdinalIgnoreCase)
+            || !HasLandFeeDetermination(procedureCase.EntityType))
         {
-            return "Estate Officer / Legal";
+            return null;
         }
 
-        if (stageName.Contains("payment", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("arrears", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("invoice", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("fees", StringComparison.OrdinalIgnoreCase))
+        string? CurrentValue(string key)
         {
-            return "Estate Officer / Finance Revenue";
+            if (requestedValues.TryGetValue(key, out var requestedValue))
+            {
+                return requestedValue;
+            }
+
+            return procedureCase.Fields
+                .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase))
+                ?.Value;
         }
 
-        if (stageName.Contains("site", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("planning", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("cadastral", StringComparison.OrdinalIgnoreCase))
+        var propertyNumber = CurrentValue("propertyNumber")?.Trim();
+        if (string.IsNullOrWhiteSpace(propertyNumber)
+            || !TryParseEstateDecimal(CurrentValue("plotSizeAcres"), out var plotSizeAcres)
+            || !TryParseEstateDecimal(CurrentValue("groundRentRatePerAcre"), out var ratePerAcre)
+            || plotSizeAcres <= 0
+            || ratePerAcre < 0)
         {
-            return "Estate Officer / Planning";
+            return null;
         }
 
-        if (stageName.Contains("Approve", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("Review", StringComparison.OrdinalIgnoreCase))
+        var asset = await _db.EstateManagedAssets
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId
+                && item.AssetCode == propertyNumber
+                && !item.IsDeleted);
+        if (asset == null)
         {
-            return "HOE / Estate Manager";
+            return null;
         }
 
-        if (stageName.Contains("records", StringComparison.OrdinalIgnoreCase)
-            || stageName.Contains("ledger", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Estate Records";
-        }
+        var rawGroundRent = plotSizeAcres * ratePerAcre;
+        var computed = decimal.Round(
+            rawGroundRent,
+            3,
+            MidpointRounding.AwayFromZero);
+        asset.GroundRentRatePerAcre = ratePerAcre;
+        asset.GroundRentComputed = computed;
+        asset.GroundRentPayable = decimal.Ceiling(rawGroundRent);
+        asset.UpdatedAt = now;
+        asset.UpdatedBy = _currentUser.UserName;
+        asset.LastModifiedById = userId;
 
-        return "Estate Officer";
+        return asset.AssetCode;
     }
 
-    private static IReadOnlyList<string> EstateStageChecklist(string entityType, string stageName) =>
-    [
-        $"Complete {stageName.ToLowerInvariant()} for {entityType}.",
-        "Confirm Estate file reference, property number, applicant, and source department.",
-        "Attach or reference required Estate/DMS documents.",
-        "Record linked Finance, Legal, Planning, Project, Property Management, or Facilities references where applicable."
-    ];
+    private static bool TryParseEstateDecimal(string? value, out decimal result)
+        => decimal.TryParse(
+            value,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out result);
 
     private async Task<IReadOnlyList<DocumentSeed>> BuildWorkflowDocumentSeedsAsync(Guid workflowDefinitionId)
     {
@@ -1712,8 +1759,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             procedureCase.CreatedAt,
             procedureCase.UpdatedAt);
 
-    private ProcedureCaseDetailDto ToDetailDto(ProcedureCase procedureCase) =>
-        new(
+    private async Task<ProcedureCaseDetailDto> ToDetailDtoAsync(ProcedureCase procedureCase)
+    {
+        var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase.WorkflowStepId);
+        return new(
             procedureCase.Id,
             procedureCase.Module,
             procedureCase.EntityType,
@@ -1731,10 +1780,32 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             procedureCase.WorkflowDefinitionId.HasValue,
             procedureCase.WorkflowInstanceId,
             CanEdit(procedureCase),
+            currentStageFieldKeys,
             procedureCase.Fields.OrderBy(item => item.CreatedAt).Select(ToFieldDto).ToList(),
             procedureCase.ChecklistItems.OrderBy(item => item.StageIndex).ThenBy(item => item.CreatedAt).Select(ToChecklistDto).ToList(),
             procedureCase.Documents.OrderBy(item => item.CreatedAt).Select(ToDocumentDto).ToList(),
             procedureCase.Activities.OrderByDescending(item => item.PerformedAt).Take(20).Select(ToActivityDto).ToList());
+    }
+
+    private async Task<IReadOnlyList<string>> GetCurrentStageFieldKeysAsync(Guid? workflowStepId)
+    {
+        if (!workflowStepId.HasValue)
+        {
+            return [];
+        }
+
+        var configurationJson = await _db.WorkflowSteps
+            .AsNoTracking()
+            .Where(step => step.Id == workflowStepId.Value && !step.IsDeleted)
+            .Select(step => step.Configuration)
+            .FirstOrDefaultAsync();
+        var configuration = DeserializeStepConfiguration(configurationJson);
+        return configuration?.FormFields
+            ?.Where(field => !string.IsNullOrWhiteSpace(field.Name))
+            .Select(field => field.Name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+    }
 
     private static ProcedureCaseFieldDto ToFieldDto(ProcedureCaseField field) =>
         new(field.Id, field.Key, field.Label, field.FieldType, field.Value, ParseOptions(field.OptionsJson));
@@ -1801,7 +1872,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             return JsonSerializer.Deserialize<WorkflowStepConfigurationDto>(configurationJson, new JsonSerializerOptions
             {
-                PropertyNameCaseInsensitive = true
+                PropertyNameCaseInsensitive = true,
+                Converters = { new JsonStringEnumConverter() }
             });
         }
         catch (JsonException)

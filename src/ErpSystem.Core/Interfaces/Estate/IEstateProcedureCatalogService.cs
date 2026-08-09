@@ -12,4 +12,5 @@ public sealed record EstateProcedureCatalogItem(
     string Summary,
     string Icon,
     int StageCount,
-    string Accent);
+    string Accent,
+    string WorkspaceType = "Case Workflow");

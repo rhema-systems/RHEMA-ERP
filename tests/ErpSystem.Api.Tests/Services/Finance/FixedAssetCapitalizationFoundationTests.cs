@@ -441,6 +441,184 @@ public sealed class FixedAssetCapitalizationFoundationTests
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetActivated)).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetCapitalizationReversal")]
+    [Trait("Requirement", "FR-GL-008;FR-GL-010;FIN-LIM-0030")]
+    public async Task ApprovedDirectCapitalizationReversal_ShouldPostLinkedJournalAndZeroCurrentRegisterCost()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var maker = CreateServices(db, tenantId, userId: makerId, userName: "fa.maker");
+
+        var capitalized = await maker.FixedAssets.CapitalizeAsync(fixture.Asset.Id, new CapitalizeFixedAssetDto
+        {
+            CapitalizationDate = new DateTime(2026, 7, 5),
+            CreditAccountId = fixture.AucAccount.Id,
+            Reason = "Approved original capitalization"
+        });
+        capitalized.Status.Should().Be(FixedAssetStatus.Capitalized);
+        capitalized.PostingEventId.Should().NotBeNull("the reversal workflow requires immutable original posting lineage");
+        capitalized.JournalEntryId.Should().NotBeNull("the reversal must link back to the posted capitalization journal");
+        capitalized.CapitalizationReversalPostingEventId.Should().BeNull();
+        var postedAsset = await db.FixedAssets.SingleAsync(item => item.Id == fixture.Asset.Id);
+        postedAsset.CapitalizationReversalPostingEventId.Should().BeNull();
+        var request = await maker.FixedAssets.RequestCapitalizationReversalAsync(
+            fixture.Asset.Id,
+            new RequestFixedAssetCapitalizationReversalDto
+            {
+                ReversalDate = new DateTime(2026, 7, 20),
+                Reason = "Incorrect asset cost classification requires correction.",
+                ImpactAssessment = "The asset cost and AUC clearing entries will be fully reversed before corrected reposting."
+            });
+
+        // Use a separately resolved user to prove maker-checker separation is enforced by the
+        // service and not merely presented as a UI convention.
+        var reviewer = CreateServices(db, tenantId, userId: Guid.NewGuid(), userName: "fa.reviewer");
+        var approved = await reviewer.FixedAssets.ReviewCapitalizationReversalAsync(
+            fixture.Asset.Id,
+            request.Id,
+            new ReviewFixedAssetCapitalizationReversalDto
+            {
+                Approved = true,
+                ReviewComment = "Evidence reviewed; full reversal is appropriate before corrected capitalization."
+            });
+        approved.Status.Should().Be(FixedAssetCapitalizationReversalStatuses.Approved);
+
+        var posted = await maker.FixedAssets.PostCapitalizationReversalAsync(fixture.Asset.Id, request.Id);
+
+        posted.Status.Should().Be(FixedAssetCapitalizationReversalStatuses.Posted);
+        posted.ReversalJournalEntryId.Should().NotBeNull();
+        posted.ReversalPostingEventId.Should().NotBeNull();
+        var originalJournal = await db.JournalEntries.SingleAsync(item => item.Id == capitalized.JournalEntryId);
+        originalJournal.IsReversed.Should().BeTrue();
+        originalJournal.ReversalJournalEntryId.Should().Be(posted.ReversalJournalEntryId);
+        var asset = await db.FixedAssets.Include(item => item.BookValues).SingleAsync(item => item.Id == fixture.Asset.Id);
+        asset.Status.Should().Be(FixedAssetStatus.Draft);
+        asset.AcquisitionCost.Should().Be(0m);
+        asset.NetBookValue.Should().Be(0m);
+        asset.PostingEventId.Should().Be(capitalized.PostingEventId, "original lineage must not be destroyed");
+        asset.CapitalizationReversalPostingEventId.Should().Be(posted.ReversalPostingEventId);
+        asset.BookValues.Should().OnlyContain(value => value.AcquisitionCost == 0m && value.NetBookValue == 0m);
+        (await db.AssetTransactions.CountAsync(item =>
+            item.FixedAssetId == fixture.Asset.Id && item.TransactionType == "CapitalizationReversal")).Should().Be(1);
+        (await db.AuditLogs.CountAsync(item =>
+            item.TenantId == tenantId && item.Action == FinanceAuditEvents.FixedAssetCapitalizationReversed)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetCapitalizationReversal")]
+    [Trait("Requirement", "FR-GL-008;FIN-LIM-0030")]
+    public async Task CapitalizationReversalRequester_ShouldNotApproveOwnRequest()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId, userId: Guid.NewGuid(), userName: "same.actor");
+        await services.FixedAssets.CapitalizeAsync(fixture.Asset.Id, new CapitalizeFixedAssetDto
+        {
+            CapitalizationDate = new DateTime(2026, 7, 5),
+            CreditAccountId = fixture.AucAccount.Id,
+            Reason = "Approved original capitalization"
+        });
+        var request = await services.FixedAssets.RequestCapitalizationReversalAsync(
+            fixture.Asset.Id,
+            new RequestFixedAssetCapitalizationReversalDto
+            {
+                ReversalDate = new DateTime(2026, 7, 20),
+                Reason = "Incorrect asset cost classification requires correction.",
+                ImpactAssessment = "The original cost will be removed and a corrected capitalization submitted separately."
+            });
+
+        var act = () => services.FixedAssets.ReviewCapitalizationReversalAsync(
+            fixture.Asset.Id,
+            request.Id,
+            new ReviewFixedAssetCapitalizationReversalDto
+            {
+                Approved = true,
+                ReviewComment = "Attempting to approve the request created by this same authenticated user."
+            });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*requester cannot review*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetCapitalizationReversal")]
+    [Trait("Requirement", "FR-GL-010;FIN-LIM-0030")]
+    public async Task DownstreamAssetValueMovement_ShouldBlockCapitalizationReversal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        await services.FixedAssets.CapitalizeAsync(fixture.Asset.Id, new CapitalizeFixedAssetDto
+        {
+            CapitalizationDate = new DateTime(2026, 7, 5),
+            CreditAccountId = fixture.AucAccount.Id,
+            Reason = "Approved original capitalization"
+        });
+        db.AssetTransactions.Add(new AssetTransaction
+        {
+            TenantId = tenantId,
+            FixedAssetId = fixture.Asset.Id,
+            TransactionDate = new DateTime(2026, 7, 15),
+            TransactionType = "Depreciation",
+            Description = "Posted downstream depreciation evidence",
+            Amount = -10m,
+            ResultingBookValue = 90m,
+            PerformedByUserId = Guid.NewGuid()
+        });
+        await db.SaveChangesAsync();
+
+        var act = () => services.FixedAssets.RequestCapitalizationReversalAsync(
+            fixture.Asset.Id,
+            new RequestFixedAssetCapitalizationReversalDto
+            {
+                ReversalDate = new DateTime(2026, 7, 20),
+                Reason = "Incorrect asset cost classification requires correction.",
+                ImpactAssessment = "This request must be blocked because later asset value movements already exist."
+            });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Reverse the later lifecycle entries in order*");
+        (await db.FixedAssetCapitalizationReversals.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetCapitalizationReversal")]
+    [Trait("Requirement", "FR-GL-008;FR-GL-010;FIN-LIM-0030")]
+    public async Task ApInvoiceVoid_ShouldUseSharedReversalJournalAndSynchronizeAssetRegister()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        // AP void uses the current accounting date for the linked reversal. Seed that period as
+        // well as the invoice's July period so the test proves shared-journal behavior rather than
+        // being stopped earlier by the independent period-control safeguard.
+        SeedOpenPeriod(db, tenantId, startDate: new DateTime(2026, 8, 1));
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId, fixedAssetServiceRequired: true);
+        await services.VendorInvoices.PostAsync(fixture.Invoice.Id);
+
+        await services.VendorInvoices.VoidAsync(
+            fixture.Invoice.Id,
+            "Supplier invoice contained an incorrect fixed asset and must be fully reversed.");
+
+        var events = await db.FinancePostingEvents
+            .Where(item => item.TenantId == tenantId && item.SourceDocumentId == fixture.Invoice.Id)
+            .OrderBy(item => item.PostedAt)
+            .ToListAsync();
+        events.Should().HaveCount(2, "AP owns one posting event and one reversal event; FA must not post a duplicate journal");
+        var asset = await db.FixedAssets.SingleAsync(item => item.Id == fixture.Asset.Id);
+        asset.Status.Should().Be(FixedAssetStatus.Draft);
+        asset.AcquisitionCost.Should().Be(0m);
+        asset.CapitalizationReversalPostingEventId.Should().Be(events.Single(item => item.PostingAction == "Reverse").Id);
+        var line = await db.Set<VendorInvoiceLineItem>().SingleAsync(item => item.VendorInvoiceId == fixture.Invoice.Id);
+        line.CapitalizationReversalPostingEventId.Should().Be(asset.CapitalizationReversalPostingEventId);
+        (await db.AssetTransactions.CountAsync(item =>
+            item.FixedAssetId == fixture.Asset.Id && item.TransactionType == "CapitalizationReversal")).Should().Be(1);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -456,9 +634,11 @@ public sealed class FixedAssetCapitalizationFoundationTests
         Guid tenantId,
         bool fixedAssetServiceRequired = false,
         ITaxCalculationEngine? taxEngine = null,
-        IWorkflowService? workflowService = null)
+        IWorkflowService? workflowService = null,
+        Guid? userId = null,
+        string userName = "fa.poster")
     {
-        var currentUser = CreateCurrentUser(tenantId);
+        var currentUser = CreateCurrentUser(tenantId, userId, userName);
         var auditService = new FinanceAuditService(
             db,
             currentUser.Object,
@@ -471,13 +651,15 @@ public sealed class FixedAssetCapitalizationFoundationTests
             currentUser.Object,
             Mock.Of<ILogger<FinancePostingEngine>>(),
             auditService);
+        var reversalPolicy = new FinanceReversalPolicyService(db, currentUser.Object);
         var fixedAssetService = new FixedAssetService(
             db,
             currentUser.Object,
             accountingBookService: null,
             financePostingEngine: postingEngine,
             financeAuditService: auditService,
-            workflowService: workflowService);
+            workflowService: workflowService,
+            financeReversalPolicyService: reversalPolicy);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
         var vendorInvoiceService = new VendorInvoiceService(
             new UnitOfWork(db),
@@ -494,14 +676,17 @@ public sealed class FixedAssetCapitalizationFoundationTests
         return new ServiceFixture(vendorInvoiceService, fixedAssetService, subledgerPostingMock);
     }
 
-    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
+    private static Mock<ICurrentUserService> CreateCurrentUser(
+        Guid tenantId,
+        Guid? userId = null,
+        string userName = "fa.poster")
     {
-        var userId = Guid.NewGuid().ToString();
+        var resolvedUserId = (userId ?? Guid.NewGuid()).ToString();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
-        currentUser.SetupGet(x => x.UserId).Returns(userId);
-        currentUser.SetupGet(x => x.UserName).Returns("fa.poster");
+        currentUser.SetupGet(x => x.UserId).Returns(resolvedUserId);
+        currentUser.SetupGet(x => x.UserName).Returns(userName);
         currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(x => x.UserAgent).Returns("fixed-asset-capitalization-tests");
         currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
@@ -539,6 +724,30 @@ public sealed class FixedAssetCapitalizationFoundationTests
             isMultiCurrency: makePostingAccountsMultiCurrency);
         var taxAccount = SeedAccount(db, tenantId, "1400", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var supplier = SeedSupplier(db, tenantId, apAccount.Id, expenseAccount.Id);
+
+        if (makePostingAccountsMultiCurrency && !string.Equals(currencyCode, "GHS", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var account in new[] { assetCostAccount, aucAccount, expenseAccount, apAccount, taxAccount })
+            {
+                // The posting engine requires explicit account/currency authorization; marking an
+                // account multi-currency is not enough. Seed the link so this fixture tests fixed-
+                // asset currency snapshots rather than failing the independent GL configuration
+                // safeguard introduced by the FX foundation.
+                db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    AccountId = account.Id,
+                    LinkedCurrencyCode = currencyCode,
+                    TransactionRateType = "Daily",
+                    RevaluationRateType = "Month-End",
+                    IsActive = true,
+                    EffectiveDate = new DateTime(2026, 1, 1),
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "seed"
+                });
+            }
+        }
 
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -707,20 +916,23 @@ public sealed class FixedAssetCapitalizationFoundationTests
         ApplicationDbContext db,
         Guid tenantId,
         bool isOpen = true,
-        bool isClosed = false)
+        bool isClosed = false,
+        DateTime? startDate = null)
     {
+        var periodStart = (startDate ?? new DateTime(2026, 7, 1)).Date;
+        var periodEnd = periodStart.AddMonths(1).AddDays(-1);
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             FiscalYearId = Guid.NewGuid(),
-            PeriodName = "July 2026",
-            PeriodCode = $"2026-07-{tenantId.ToString("N")[..4]}",
-            PeriodNumber = 7,
+            PeriodName = periodStart.ToString("MMMM yyyy"),
+            PeriodCode = $"{periodStart:yyyy-MM}-{tenantId.ToString("N")[..4]}",
+            PeriodNumber = periodStart.Month,
             PeriodType = PeriodType.Monthly,
-            StartDate = new DateTime(2026, 7, 1),
-            EndDate = new DateTime(2026, 7, 31),
-            PeriodDays = 31,
+            StartDate = periodStart,
+            EndDate = periodEnd,
+            PeriodDays = (periodEnd - periodStart).Days + 1,
             PeriodStatus = isClosed ? "Closed" : isOpen ? "Open" : "Future",
             IsOpen = isOpen,
             IsClosed = isClosed,

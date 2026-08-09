@@ -262,6 +262,7 @@ export default function BudgetScenariosPage() {
                                                 <h3 className="font-semibold text-lg">{scenario.name}</h3>
                                                 {getStatusBadge(scenario.status)}
                                                 {scenario.isActive && <Badge variant="default" className="bg-green-600 hover:bg-green-700">Official</Badge>}
+                                                <Badge variant="outline">{scenario.versionType} v{scenario.versionNumber}</Badge>
                                             </div>
                                             <p className="text-sm text-muted-foreground mt-1">
                                                 {getFiscalYearCode(scenario.fiscalYearId)} • {scenario.baseCurrencyCode} • Updated {formatDate(scenario.updatedAt || scenario.createdAt)}

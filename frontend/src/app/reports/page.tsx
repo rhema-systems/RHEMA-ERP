@@ -71,7 +71,8 @@ import {
   Play,
   ChevronRight,
   BookOpen,
-  Bookmark
+  Bookmark,
+  Map
 } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { useToast } from '../../hooks/use-toast';
@@ -166,6 +167,54 @@ export default function UserReportsPage() {
       icon: 'Activity', 
       reportCount: 10,
       color: 'bg-indigo-100 text-indigo-700 border-indigo-200'
+    },
+    {
+      id: 'planning',
+      name: 'Planning Reports',
+      description: 'Planning vetting, site reports, layouts, searches, regularization, compliance, and committee reports',
+      icon: 'Map',
+      reportCount: 0,
+      color: 'bg-sky-100 text-sky-700 border-sky-200'
+    },
+    {
+      id: 'estate',
+      name: 'Estate Reports',
+      description: 'Land acquisition, estate casework, registers, inspections, and operational control reports',
+      icon: 'Building',
+      reportCount: 0,
+      color: 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    },
+    {
+      id: 'property-management',
+      name: 'Property Management Reports',
+      description: 'Property units, listings, leases, occupancy, handover, billing, and ground rent reports',
+      icon: 'Building',
+      reportCount: 0,
+      color: 'bg-teal-100 text-teal-700 border-teal-200'
+    },
+    {
+      id: 'facilities',
+      name: 'Facilities Reports',
+      description: 'Facilities maintenance, complaints, service providers, cleaners, asset operations, and service charge reports',
+      icon: 'Activity',
+      reportCount: 0,
+      color: 'bg-cyan-100 text-cyan-700 border-cyan-200'
+    },
+    {
+      id: 'legal',
+      name: 'Legal Reports',
+      description: 'Legal matters, mortgages, court processes, leases, transfers, approvals, and closeout reports',
+      icon: 'Shield',
+      reportCount: 0,
+      color: 'bg-violet-100 text-violet-700 border-violet-200'
+    },
+    {
+      id: 'dms',
+      name: 'DMS Reports',
+      description: 'Document register, versioning, module queue, metadata completeness, and records control reports',
+      icon: 'BookOpen',
+      reportCount: 0,
+      color: 'bg-slate-100 text-slate-700 border-slate-200'
     },
     {
       id: 'maintenance',
@@ -267,6 +316,14 @@ export default function UserReportsPage() {
         return <Package className="h-5 w-5" />;
       case 'Activity':
         return <Activity className="h-5 w-5" />;
+      case 'Map':
+        return <Map className="h-5 w-5" />;
+      case 'Building':
+        return <Building className="h-5 w-5" />;
+      case 'Shield':
+        return <Shield className="h-5 w-5" />;
+      case 'BookOpen':
+        return <BookOpen className="h-5 w-5" />;
       default:
         return <FileText className="h-5 w-5" />;
     }
@@ -285,6 +342,14 @@ export default function UserReportsPage() {
         return <Package className="h-4 w-4" />;
       case 'operations':
         return <Activity className="h-4 w-4" />;
+      case 'planning':
+        return <Map className="h-4 w-4" />;
+      case 'estate':
+      case 'property-management':
+      case 'facilities':
+      case 'legal':
+      case 'dms':
+        return <Building className="h-4 w-4" />;
       default:
         return <FileText className="h-4 w-4" />;
     }
@@ -303,6 +368,14 @@ export default function UserReportsPage() {
         return 'bg-orange-100 text-orange-700';
       case 'operations':
         return 'bg-indigo-100 text-indigo-700';
+      case 'planning':
+        return 'bg-sky-100 text-sky-700';
+      case 'estate':
+      case 'property-management':
+      case 'facilities':
+      case 'legal':
+      case 'dms':
+        return 'bg-emerald-100 text-emerald-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
@@ -363,11 +436,27 @@ export default function UserReportsPage() {
     }
   };
 
+  React.useEffect(() => {
+    if (!isClient) {
+      return;
+    }
+
+    const moduleFromUrl = new URLSearchParams(window.location.search).get('module') || 'all';
+    setSelectedModule(moduleFromUrl);
+  }, [isClient]);
+
+  const normalizeReportModule = (value?: string | null) =>
+    (value ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+
   // Filter reports
   const filteredReports = reports.filter(report => {
+    const userReport = report as UserReportDefinition;
     const matchesSearch = report.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          report.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesModule = selectedModule === 'all' || (report as UserReportDefinition).moduleId === selectedModule;
+    const matchesModule = selectedModule === 'all'
+      || normalizeReportModule(userReport.moduleId) === selectedModule
+      || normalizeReportModule(userReport.moduleName) === selectedModule
+      || normalizeReportModule(report.type) === selectedModule;
     const matchesFavorites = !showFavorites || report.isFavorite;
     return matchesSearch && matchesModule && matchesFavorites;
   });
@@ -499,6 +588,7 @@ export default function UserReportsPage() {
                       return;
                     }
 
+                    router.push(`/reports?module=${encodeURIComponent(module.id)}`);
                     setSelectedModule(module.id);
                   }}
                 >

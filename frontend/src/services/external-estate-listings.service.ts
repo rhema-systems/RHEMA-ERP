@@ -20,6 +20,12 @@ export interface ExternalEstateListing {
   areaUnit?: string | null;
   externalListingType: string;
   externalListingPrice?: number | null;
+  externalSalePrice?: number | null;
+  externalMonthlyRent?: number | null;
+  externalLeaseTermMonths?: number | null;
+  groundRentPayable?: number | null;
+  groundRentRatePerAcre?: number | null;
+  groundRentComputed?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
   externalPublishedAt?: string | null;
@@ -42,10 +48,21 @@ export interface ExternalListingRequest {
 
 export interface CreateExternalListingRequest {
   requestType?: string;
+  businessPartnerId?: string;
   applicantName?: string;
   contact?: string;
   offerAmount?: number;
   message?: string;
+}
+
+export interface ExternalCustomerProfile {
+  id: string;
+  partnerName: string;
+  primaryEmail?: string | null;
+  primaryPhone?: string | null;
+  physicalAddress?: string | null;
+  customerAccountNumber: string;
+  currency?: string | null;
 }
 
 interface ApiResponse<T> {
@@ -55,10 +72,18 @@ interface ApiResponse<T> {
 }
 
 class ExternalEstateListingsService {
+  async getCustomerProfiles(): Promise<ExternalCustomerProfile[]> {
+    const response = await apiService.get<ApiResponse<ExternalCustomerProfile[]>>(
+      '/estate/external/customer-profiles'
+    );
+    return response.data || [];
+  }
+
   async getListings(query: {
     location?: string;
     listingType?: string;
     search?: string;
+    businessPartnerId?: string;
     take?: number;
   }): Promise<ExternalEstateListing[]> {
     const response = await apiService.get<ApiResponse<ExternalEstateListing[]>>(
