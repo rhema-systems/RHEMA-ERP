@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
@@ -25,6 +26,14 @@ export default function DepreciationPage() {
   const [postToGl, setPostToGl] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<AssetDepreciationSchedule[]>([]);
+  const [productionUnits, setProductionUnits] = useState('');
+  const [productionEvidenceReference, setProductionEvidenceReference] = useState('');
+  const [productionEvidenceNotes, setProductionEvidenceNotes] = useState('');
+
+  const selectedAssetData = useMemo(
+    () => assets.find((asset) => asset.id === selectedAsset),
+    [assets, selectedAsset]
+  );
 
   useEffect(() => {
     const loadData = async () => {
@@ -93,12 +102,47 @@ export default function DepreciationPage() {
       return;
     }
 
+    // Bulk runs cannot manufacture operational usage evidence. Only production assets that could
+    // actually enter depreciation should block the bulk action; draft or already fully depreciated
+    // records must not prevent Finance from processing the rest of the register.
+    const hasEligibleProductionAsset = assets.some((asset) =>
+      asset.depreciationMethod === 'UnitsOfProduction' &&
+      (asset.status === 'Active' || asset.status === 'Capitalized') &&
+      asset.netBookValue > asset.residualValue
+    );
+    if (selectedAsset === 'all' && hasEligibleProductionAsset) {
+      toast({
+        title: 'Select a production-based asset',
+        description: 'Units-of-production charges require asset-specific verified usage evidence, so run those assets individually.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (selectedAssetData?.depreciationMethod === 'UnitsOfProduction' &&
+        (Number(productionUnits) <= 0 || !productionEvidenceReference.trim())) {
+      toast({
+        title: 'Production evidence required',
+        description: 'Enter positive period usage and a meter reading or production-report reference.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       setIsRunning(true);
       const data = await fixedAssetsDataService.runDepreciation({
         fiscalPeriodId: selectedPeriod,
         fixedAssetId: selectedAsset === 'all' ? undefined : selectedAsset,
         postToGl,
+        productionUsageEntries: selectedAssetData?.depreciationMethod === 'UnitsOfProduction'
+          ? [{
+              fixedAssetId: selectedAssetData.id,
+              unitsConsumed: Number(productionUnits),
+              evidenceReference: productionEvidenceReference.trim(),
+              evidenceNotes: productionEvidenceNotes.trim() || undefined,
+            }]
+          : [],
       });
       setResults(data);
       toast({
@@ -188,6 +232,43 @@ export default function DepreciationPage() {
             <Checkbox checked={postToGl} onCheckedChange={(value) => setPostToGl(Boolean(value))} />
             <span className="text-sm">Post to GL</span>
           </div>
+          {selectedAssetData?.depreciationMethod === 'UnitsOfProduction' && (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="productionUnits">Verified Period Usage</label>
+                <Input
+                  id="productionUnits"
+                  type="number"
+                  min={0}
+                  step="0.0001"
+                  value={productionUnits}
+                  onChange={(event) => setProductionUnits(event.target.value)}
+                  placeholder="Meter/output units consumed"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="productionEvidence">Evidence Reference</label>
+                <Input
+                  id="productionEvidence"
+                  value={productionEvidenceReference}
+                  onChange={(event) => setProductionEvidenceReference(event.target.value)}
+                  placeholder="Meter reading or production report"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-3">
+                <label className="text-sm font-medium" htmlFor="productionNotes">Evidence Notes</label>
+                <Input
+                  id="productionNotes"
+                  value={productionEvidenceNotes}
+                  onChange={(event) => setProductionEvidenceNotes(event.target.value)}
+                  placeholder="Optional context for the independent run approver"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Usage and evidence are snapshotted on the schedule and approved with the depreciation run before posting.
+                </p>
+              </div>
+            </>
+          )}
         </CardContent>
         <CardContent>
           <Button onClick={handleRun} disabled={isRunning}>
@@ -206,6 +287,8 @@ export default function DepreciationPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Asset</TableHead>
+                <TableHead>Method</TableHead>
+                <TableHead className="text-right">Usage</TableHead>
                 <TableHead className="text-right">Depreciation</TableHead>
                 <TableHead className="text-right">Accumulated</TableHead>
                 <TableHead className="text-right">Net Book</TableHead>
@@ -215,7 +298,7 @@ export default function DepreciationPage() {
             <TableBody>
               {results.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                     No depreciation results yet.
                   </TableCell>
                 </TableRow>
@@ -223,6 +306,12 @@ export default function DepreciationPage() {
                 results.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-mono">{row.fixedAssetId}</TableCell>
+                    <TableCell>{row.depreciationMethodSnapshot}</TableCell>
+                    <TableCell className="text-right">
+                      {row.depreciationMethodSnapshot === 'UnitsOfProduction'
+                        ? row.periodProductionUnits.toFixed(4)
+                        : '—'}
+                    </TableCell>
                     <TableCell className="text-right">{row.depreciationAmount.toFixed(2)}</TableCell>
                     <TableCell className="text-right">{row.accumulatedDepreciation.toFixed(2)}</TableCell>
                     <TableCell className="text-right">{row.netBookValue.toFixed(2)}</TableCell>

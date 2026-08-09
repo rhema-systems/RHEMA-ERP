@@ -61,6 +61,8 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           depreciationConvention: asset.depreciationConvention,
           usefulLifeMonths: asset.usefulLifeMonths,
           residualValue: asset.residualValue,
+          diminishingBalanceRatePercent: asset.diminishingBalanceRatePercent,
+          lifetimeProductionCapacity: asset.lifetimeProductionCapacity,
           status: asset.status,
           disposalDate: toDateInput(asset.disposalDate),
           maintenanceAssetId: asset.maintenanceAssetId,
@@ -381,12 +383,46 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
                 <SelectItem value="StraightLine">Straight Line</SelectItem>
                 <SelectItem value="DecliningBalance">Declining Balance</SelectItem>
                 <SelectItem value="DoubleDecliningBalance">Double Declining Balance</SelectItem>
-                <SelectItem value="SumOfYearsDigits">Sum of Years Digits</SelectItem>
                 <SelectItem value="UnitsOfProduction">Units of Production</SelectItem>
-                <SelectItem value="None">None</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          {(formData.depreciationMethod === 'DecliningBalance' ||
+            formData.depreciationMethod === 'DoubleDecliningBalance') && (
+            <div className="space-y-2">
+              <Label htmlFor="diminishingRate">Annual Diminishing-Balance Rate (%)</Label>
+              <Input
+                id="diminishingRate"
+                type="number"
+                min={0}
+                max={100}
+                step="0.0001"
+                value={formData.diminishingBalanceRatePercent}
+                disabled={accountingLocked}
+                onChange={(e) => setFormData({ ...formData, diminishingBalanceRatePercent: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Double-declining may use 0 for the useful-life-derived accelerated rate.
+              </p>
+            </div>
+          )}
+          {formData.depreciationMethod === 'UnitsOfProduction' && (
+            <div className="space-y-2">
+              <Label htmlFor="productionCapacity">Approved Lifetime Production Capacity</Label>
+              <Input
+                id="productionCapacity"
+                type="number"
+                min={0}
+                step="0.0001"
+                value={formData.lifetimeProductionCapacity}
+                disabled={accountingLocked}
+                onChange={(e) => setFormData({ ...formData, lifetimeProductionCapacity: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Capitalized assumptions are locked and must not be destructively edited.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="convention">Depreciation Convention</Label>
             <Select

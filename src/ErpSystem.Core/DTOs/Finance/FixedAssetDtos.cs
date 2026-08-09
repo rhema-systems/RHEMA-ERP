@@ -11,6 +11,8 @@ public class FixedAssetCategoryDto
     public DepreciationMethod DefaultMethod { get; set; }
     public int DefaultUsefulLifeMonths { get; set; }
     public decimal DefaultResidualValuePercent { get; set; }
+    public decimal DefaultDiminishingBalanceRatePercent { get; set; }
+    public decimal DefaultLifetimeProductionCapacity { get; set; }
     public Guid AssetAccountId { get; set; }
     public Guid AccumulatedDepreciationAccountId { get; set; }
     public Guid DepreciationExpenseAccountId { get; set; }
@@ -35,6 +37,8 @@ public class CreateFixedAssetCategoryDto
     public DepreciationMethod DefaultMethod { get; set; } = DepreciationMethod.StraightLine;
     public int DefaultUsefulLifeMonths { get; set; } = 36;
     public decimal DefaultResidualValuePercent { get; set; }
+    public decimal DefaultDiminishingBalanceRatePercent { get; set; }
+    public decimal DefaultLifetimeProductionCapacity { get; set; }
     public Guid AssetAccountId { get; set; }
     public Guid AccumulatedDepreciationAccountId { get; set; }
     public Guid DepreciationExpenseAccountId { get; set; }
@@ -57,6 +61,8 @@ public class UpdateFixedAssetCategoryDto
     public DepreciationMethod DefaultMethod { get; set; } = DepreciationMethod.StraightLine;
     public int DefaultUsefulLifeMonths { get; set; } = 36;
     public decimal DefaultResidualValuePercent { get; set; }
+    public decimal DefaultDiminishingBalanceRatePercent { get; set; }
+    public decimal DefaultLifetimeProductionCapacity { get; set; }
     public Guid AssetAccountId { get; set; }
     public Guid AccumulatedDepreciationAccountId { get; set; }
     public Guid DepreciationExpenseAccountId { get; set; }
@@ -96,6 +102,9 @@ public class FixedAssetDto
     public DepreciationConvention DepreciationConvention { get; set; }
     public int UsefulLifeMonths { get; set; }
     public decimal ResidualValue { get; set; }
+    public decimal DiminishingBalanceRatePercent { get; set; }
+    public decimal LifetimeProductionCapacity { get; set; }
+    public decimal AccumulatedProductionUnits { get; set; }
     public FixedAssetStatus Status { get; set; }
     public DateTime? DisposalDate { get; set; }
     public string FunctionalCurrencyCode { get; set; } = "GHS";
@@ -137,6 +146,9 @@ public class FixedAssetBookValueDto
     public int? RemainingUsefulLifeMonths { get; set; }
     public DepreciationMethod DepreciationMethod { get; set; }
     public DepreciationConvention DepreciationConvention { get; set; }
+    public decimal DiminishingBalanceRatePercent { get; set; }
+    public decimal LifetimeProductionCapacity { get; set; }
+    public decimal AccumulatedProductionUnits { get; set; }
     public DateTime? PlacedInServiceDate { get; set; }
     public DateTime? OpeningAsOfDate { get; set; }
     public decimal OpeningYtdDepreciation { get; set; }
@@ -172,6 +184,8 @@ public class CreateFixedAssetDto
     public DepreciationConvention DepreciationConvention { get; set; } = DepreciationConvention.FullMonth;
     public int UsefulLifeMonths { get; set; }
     public decimal ResidualValue { get; set; }
+    public decimal DiminishingBalanceRatePercent { get; set; }
+    public decimal LifetimeProductionCapacity { get; set; }
     public Guid? MaintenanceAssetId { get; set; }
     public string? SerialNumber { get; set; }
 }
@@ -193,6 +207,8 @@ public class UpdateFixedAssetDto
     public DepreciationConvention DepreciationConvention { get; set; } = DepreciationConvention.FullMonth;
     public int UsefulLifeMonths { get; set; }
     public decimal ResidualValue { get; set; }
+    public decimal DiminishingBalanceRatePercent { get; set; }
+    public decimal LifetimeProductionCapacity { get; set; }
     public FixedAssetStatus Status { get; set; } = FixedAssetStatus.Draft;
     public DateTime? DisposalDate { get; set; }
     public Guid? MaintenanceAssetId { get; set; }
@@ -260,6 +276,22 @@ public class RunDepreciationDto
     public string? BookClassification { get; set; }
     public bool PostToGl { get; set; } = true;
     public DateTime? PostingDate { get; set; }
+
+    /// <summary>
+    /// Verified output/usage evidence for units-of-production assets included in this run. The
+    /// depreciation run's existing approval workflow independently approves these values before GL
+    /// posting, avoiding an ungoverned second usage-entry path.
+    /// </summary>
+    public List<FixedAssetProductionUsageDto> ProductionUsageEntries { get; set; } = new();
+}
+
+public sealed class FixedAssetProductionUsageDto
+{
+    public Guid FixedAssetId { get; set; }
+    public string? BookClassification { get; set; }
+    public decimal UnitsConsumed { get; set; }
+    public string EvidenceReference { get; set; } = string.Empty;
+    public string? EvidenceNotes { get; set; }
 }
 
 public class AssetDepreciationScheduleDto
@@ -279,6 +311,13 @@ public class AssetDepreciationScheduleDto
     public decimal ResidualValueSnapshot { get; set; }
     public int UsefulLifeMonthsSnapshot { get; set; }
     public DepreciationMethod DepreciationMethodSnapshot { get; set; }
+    public decimal DiminishingBalanceRatePercentSnapshot { get; set; }
+    public decimal LifetimeProductionCapacitySnapshot { get; set; }
+    public decimal PeriodProductionUnits { get; set; }
+    public decimal CumulativeProductionUnitsBefore { get; set; }
+    public decimal CumulativeProductionUnitsAfter { get; set; }
+    public string? ProductionEvidenceReference { get; set; }
+    public string? ProductionEvidenceNotes { get; set; }
     public DateTime? PlacedInServiceDateSnapshot { get; set; }
     public bool IsPosted { get; set; }
     public DateTime? PostedDate { get; set; }

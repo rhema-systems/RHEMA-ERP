@@ -81,6 +81,26 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal ResidualValue { get; set; } // Scrap value at end of life
 
+        /// <summary>
+        /// Approved annual rate for diminishing-balance depreciation. Double-declining balance can
+        /// leave this at zero to use the transparent 200% / useful-life calculation.
+        /// </summary>
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DiminishingBalanceRatePercent { get; set; }
+
+        /// <summary>
+        /// Estimated lifetime output used only by units-of-production depreciation.
+        /// </summary>
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal LifetimeProductionCapacity { get; set; }
+
+        /// <summary>
+        /// Default-book usage snapshot. Book-specific accumulated usage remains authoritative in
+        /// FixedAssetBookValue; this field supports the register and operator workspace.
+        /// </summary>
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal AccumulatedProductionUnits { get; set; }
+
         // --- Tracking ---
         
         public FixedAssetStatus Status { get; set; } = FixedAssetStatus.Draft;

@@ -496,7 +496,8 @@ public partial class FixedAssetDepreciationService
             // Snapshot equality is an important final guard. It catches any unmodelled carrying
             // value movement without guessing how that later activity should itself be reversed.
             if (RoundMoney(bookValue.AccumulatedDepreciation) != RoundMoney(line.AccumulatedDepreciation) ||
-                RoundMoney(bookValue.NetBookValue) != RoundMoney(line.NetBookValue))
+                RoundMoney(bookValue.NetBookValue) != RoundMoney(line.NetBookValue) ||
+                RoundUnits(bookValue.AccumulatedProductionUnits) != RoundUnits(line.CumulativeProductionUnitsAfter))
             {
                 throw new InvalidOperationException(
                     "The asset book value has later accounting activity and no longer matches this depreciation run. Reverse later activity first.");
@@ -549,6 +550,10 @@ public partial class FixedAssetDepreciationService
 
             bookValue.AccumulatedDepreciation = schedule.AccumulatedDepreciationBefore;
             bookValue.NetBookValue = schedule.NetBookValueBefore;
+            // Units-of-production usage is part of the accounting estimate consumed by this run.
+            // Restoring its exact pre-run snapshot makes a corrected run deterministic and prevents
+            // the reversed usage from exhausting the asset's lifetime capacity.
+            bookValue.AccumulatedProductionUnits = schedule.CumulativeProductionUnitsBefore;
             bookValue.LastDepreciationDate = priorDepreciationDates[BuildAssetBookKey(schedule)];
             if (bookValue.RemainingUsefulLifeMonths.HasValue)
                 bookValue.RemainingUsefulLifeMonths += 1;
@@ -561,6 +566,7 @@ public partial class FixedAssetDepreciationService
                 schedule.FixedAsset.NetBookValue = schedule.NetBookValueBefore;
                 schedule.FixedAsset.ResidualValue = bookValue.ResidualValue;
                 schedule.FixedAsset.UsefulLifeMonths = bookValue.UsefulLifeMonths;
+                schedule.FixedAsset.AccumulatedProductionUnits = bookValue.AccumulatedProductionUnits;
                 if (schedule.FixedAsset.Status == FixedAssetStatus.FullyDepreciated &&
                     schedule.NetBookValueBefore > bookValue.ResidualValue)
                 {

@@ -32,6 +32,8 @@ export default function NewFixedAssetPage() {
     depreciationConvention: 'FullMonth',
     usefulLifeMonths: 36,
     residualValue: 0,
+    diminishingBalanceRatePercent: 0,
+    lifetimeProductionCapacity: 0,
     maintenanceAssetId: '',
     serialNumber: '',
   });
@@ -130,7 +132,22 @@ export default function NewFixedAssetPage() {
             <Label htmlFor="category">Category *</Label>
             <Select
               value={formData.fixedAssetCategoryId}
-              onValueChange={(value) => setFormData({ ...formData, fixedAssetCategoryId: value })}
+              onValueChange={(value) => {
+                const category = categories.find((item) => item.id === value);
+                // Category policy is a template for a new draft, not a live reference. Copying the
+                // assumptions here makes the intended method visible and reviewable before the
+                // asset enters the capitalization approval workflow.
+                setFormData({
+                  ...formData,
+                  fixedAssetCategoryId: value,
+                  depreciationMethod: category?.defaultMethod ?? formData.depreciationMethod,
+                  usefulLifeMonths: category?.defaultUsefulLifeMonths ?? formData.usefulLifeMonths,
+                  diminishingBalanceRatePercent:
+                    category?.defaultDiminishingBalanceRatePercent ?? formData.diminishingBalanceRatePercent,
+                  lifetimeProductionCapacity:
+                    category?.defaultLifetimeProductionCapacity ?? formData.lifetimeProductionCapacity,
+                });
+              }}
             >
               <SelectTrigger id="category">
                 <SelectValue placeholder="Select category" />
@@ -243,9 +260,7 @@ export default function NewFixedAssetPage() {
                 <SelectItem value="StraightLine">Straight Line</SelectItem>
                 <SelectItem value="DecliningBalance">Declining Balance</SelectItem>
                 <SelectItem value="DoubleDecliningBalance">Double Declining Balance</SelectItem>
-                <SelectItem value="SumOfYearsDigits">Sum of Years Digits</SelectItem>
                 <SelectItem value="UnitsOfProduction">Units of Production</SelectItem>
-                <SelectItem value="None">None</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -266,6 +281,40 @@ export default function NewFixedAssetPage() {
               </SelectContent>
             </Select>
           </div>
+          {(formData.depreciationMethod === 'DecliningBalance' ||
+            formData.depreciationMethod === 'DoubleDecliningBalance') && (
+            <div className="space-y-2">
+              <Label htmlFor="diminishingRate">Annual Diminishing-Balance Rate (%)</Label>
+              <Input
+                id="diminishingRate"
+                type="number"
+                min={0}
+                max={100}
+                step="0.0001"
+                value={formData.diminishingBalanceRatePercent}
+                onChange={(e) => setFormData({ ...formData, diminishingBalanceRatePercent: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Double-declining may use 0 to derive 200% divided by useful life in years.
+              </p>
+            </div>
+          )}
+          {formData.depreciationMethod === 'UnitsOfProduction' && (
+            <div className="space-y-2">
+              <Label htmlFor="productionCapacity">Approved Lifetime Production Capacity</Label>
+              <Input
+                id="productionCapacity"
+                type="number"
+                min={0}
+                step="0.0001"
+                value={formData.lifetimeProductionCapacity}
+                onChange={(e) => setFormData({ ...formData, lifetimeProductionCapacity: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Use the same measurable unit that operators will report each depreciation period.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="usefulLife">Useful Life (Months)</Label>
             <Input
