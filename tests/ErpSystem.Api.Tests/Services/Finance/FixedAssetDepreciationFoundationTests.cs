@@ -170,6 +170,137 @@ public sealed class FixedAssetDepreciationFoundationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task DiminishingBalanceUsesApprovedAnnualRateAndSnapshotsIt()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            depreciationMethod: DepreciationMethod.DecliningBalance,
+            diminishingBalanceRatePercent: 20m);
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+
+        result.Single().DepreciationAmount.Should().Be(20m);
+        result.Single().DiminishingBalanceRatePercentSnapshot.Should().Be(20m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task DoubleDecliningDerivesTransparentRateFromUsefulLife()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            usefulLifeMonths: 60,
+            depreciationMethod: DepreciationMethod.DoubleDecliningBalance);
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+
+        result.Single().DiminishingBalanceRatePercentSnapshot.Should().Be(40m);
+        result.Single().DepreciationAmount.Should().Be(40m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task UnitsOfProductionUsesVerifiedPeriodUsageAndSnapshotsEvidence()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            acquisitionCost: 1200m,
+            residualValue: 200m,
+            depreciationMethod: DepreciationMethod.UnitsOfProduction,
+            lifetimeProductionCapacity: 1000m);
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false,
+            ProductionUsageEntries =
+            {
+                new FixedAssetProductionUsageDto
+                {
+                    FixedAssetId = fixture.Asset.Id,
+                    UnitsConsumed = 100m,
+                    EvidenceReference = "METER-2026-07-31",
+                    EvidenceNotes = "Plant meter signed by operations supervisor."
+                }
+            }
+        });
+
+        var schedule = result.Single();
+        schedule.DepreciationAmount.Should().Be(100m);
+        schedule.PeriodProductionUnits.Should().Be(100m);
+        schedule.CumulativeProductionUnitsAfter.Should().Be(100m);
+        schedule.ProductionEvidenceReference.Should().Be("METER-2026-07-31");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDepreciationMethods")]
+    public async Task UnitsOfProductionRejectsMissingEvidenceAndCapacityOverrun()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var fixture = await SeedDepreciationFoundationAsync(
+            db,
+            tenantId,
+            depreciationMethod: DepreciationMethod.UnitsOfProduction,
+            lifetimeProductionCapacity: 1000m,
+            accumulatedProductionUnits: 950m);
+        var services = CreateServices(db, tenantId);
+
+        var missingEvidence = () => services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+        await missingEvidence.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Verified production usage is required*");
+
+        var capacityOverrun = () => services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false,
+            ProductionUsageEntries =
+            {
+                new FixedAssetProductionUsageDto
+                {
+                    FixedAssetId = fixture.Asset.Id,
+                    UnitsConsumed = 100m,
+                    EvidenceReference = "METER-OVERRUN"
+                }
+            }
+        });
+        await capacityOverrun.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*exceed approved lifetime capacity*");
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDepreciation")]
     [Trait("Category", "FixedAssets")]
     public async Task ResidualValueCannotExceedAssetCost()
@@ -808,7 +939,11 @@ public sealed class FixedAssetDepreciationFoundationTests
         bool periodIsOpen = true,
         bool periodIsClosed = false,
         string transactionCurrency = "GHS",
-        decimal exchangeRate = 1m)
+        decimal exchangeRate = 1m,
+        DepreciationMethod depreciationMethod = DepreciationMethod.StraightLine,
+        decimal diminishingBalanceRatePercent = 0m,
+        decimal lifetimeProductionCapacity = 0m,
+        decimal accumulatedProductionUnits = 0m)
     {
         SeedTenant(db, tenantId);
         var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
@@ -855,8 +990,10 @@ public sealed class FixedAssetDepreciationFoundationTests
             AssetAccountId = assetAccount.Id,
             AccumulatedDepreciationAccountId = accumulatedAccount.Id,
             DepreciationExpenseAccountId = expenseAccount.Id,
-            DefaultMethod = DepreciationMethod.StraightLine,
+            DefaultMethod = depreciationMethod,
             DefaultUsefulLifeMonths = usefulLifeMonths,
+            DefaultDiminishingBalanceRatePercent = diminishingBalanceRatePercent,
+            DefaultLifetimeProductionCapacity = lifetimeProductionCapacity,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -881,8 +1018,11 @@ public sealed class FixedAssetDepreciationFoundationTests
             NetBookValue = netBookValue ?? acquisitionCost - accumulatedDepreciation,
             UsefulLifeMonths = usefulLifeMonths,
             ResidualValue = residualValue,
-            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationMethod = depreciationMethod,
             DepreciationConvention = DepreciationConvention.FullMonth,
+            DiminishingBalanceRatePercent = diminishingBalanceRatePercent,
+            LifetimeProductionCapacity = lifetimeProductionCapacity,
+            AccumulatedProductionUnits = accumulatedProductionUnits,
             Status = status,
             FunctionalCurrencyCode = "GHS",
             TransactionCurrencyCode = transactionCurrency,
@@ -912,8 +1052,11 @@ public sealed class FixedAssetDepreciationFoundationTests
             ResidualValue = residualValue,
             UsefulLifeMonths = usefulLifeMonths,
             RemainingUsefulLifeMonths = usefulLifeMonths,
-            DepreciationMethod = DepreciationMethod.StraightLine,
+            DepreciationMethod = depreciationMethod,
             DepreciationConvention = DepreciationConvention.FullMonth,
+            DiminishingBalanceRatePercent = diminishingBalanceRatePercent,
+            LifetimeProductionCapacity = lifetimeProductionCapacity,
+            AccumulatedProductionUnits = accumulatedProductionUnits,
             PlacedInServiceDate = asset.PlacedInServiceDate,
             CapitalizationDate = asset.CapitalizationDate,
             CapitalizationJournalEntryId = journalEntryId,

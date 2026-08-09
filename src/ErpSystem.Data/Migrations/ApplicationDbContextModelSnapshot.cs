@@ -14553,6 +14553,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("CumulativeProductionUnitsAfter")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("CumulativeProductionUnitsBefore")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -14570,6 +14576,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("DepreciationReversalId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("DiminishingBalanceRatePercentSnapshot")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid>("FiscalPeriodId")
                         .HasColumnType("uniqueidentifier");
@@ -14598,6 +14607,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("LifetimeProductionCapacitySnapshot")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal>("NetBookValue")
                         .HasColumnType("decimal(18,4)");
 
@@ -14607,6 +14619,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("PlacedInServiceDateSnapshot")
                         .HasColumnType("datetime2");
 
+                    b.Property<decimal>("PeriodProductionUnits")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<DateTime?>("PostedDate")
                         .HasColumnType("datetime2");
 
@@ -14615,6 +14630,14 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("PostingEventId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProductionEvidenceNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ProductionEvidenceReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime?>("RejectedAt")
                         .HasColumnType("datetime2");
@@ -15542,6 +15565,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("AcquisitionCost")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal>("AccumulatedProductionUnits")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<string>("AssetCode")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -15597,6 +15623,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("DepreciationMethod")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("DiminishingBalanceRatePercent")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -15632,6 +15661,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("LifetimeProductionCapacity")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("Location")
                         .HasMaxLength(500)
@@ -15739,6 +15771,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("AccumulatedDepreciation")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<decimal>("AccumulatedProductionUnits")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal>("AcquisitionCost")
                         .HasColumnType("decimal(18,2)");
 
@@ -15786,6 +15821,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("DepreciationMethod")
                         .HasColumnType("int");
 
+                    b.Property<decimal>("DiminishingBalanceRatePercent")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<Guid>("FixedAssetId")
                         .HasColumnType("uniqueidentifier");
 
@@ -15797,6 +15835,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("LifetimeProductionCapacity")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<decimal>("NetBookValue")
                         .HasColumnType("decimal(18,4)");
@@ -16038,10 +16079,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("DefaultDiminishingBalanceRatePercent")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int>("DefaultMethod")
                         .HasColumnType("int");
 
                     b.Property<decimal>("DefaultResidualValuePercent")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("DefaultLifetimeProductionCapacity")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("DefaultUsefulLifeMonths")

@@ -81,6 +81,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
     public async Task<FixedAssetDto> CreateAsync(CreateFixedAssetDto dto)
     {
+        ValidateDepreciationConfiguration(
+            dto.DepreciationMethod,
+            dto.UsefulLifeMonths,
+            dto.ResidualValue,
+            dto.DiminishingBalanceRatePercent,
+            dto.LifetimeProductionCapacity);
         var assetCode = NormalizeRequiredText(dto.AssetCode);
         if (string.IsNullOrWhiteSpace(assetCode))
         {
@@ -125,6 +131,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             DepreciationConvention = dto.DepreciationConvention,
             UsefulLifeMonths = dto.UsefulLifeMonths,
             ResidualValue = dto.ResidualValue,
+            DiminishingBalanceRatePercent = RoundRate(dto.DiminishingBalanceRatePercent),
+            LifetimeProductionCapacity = dto.LifetimeProductionCapacity,
+            AccumulatedProductionUnits = 0m,
             MaintenanceAssetId = dto.MaintenanceAssetId,
             SerialNumber = dto.SerialNumber,
             CreatedAt = DateTime.UtcNow,
@@ -197,6 +206,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         var acquisitionCost = dto.AcquisitionCost
             ?? (dto.PurchasePrice + dto.InstallationCost + dto.TaxAmount);
         var isCapitalized = IsCapitalized(asset);
+        ValidateDepreciationConfiguration(
+            dto.DepreciationMethod,
+            dto.UsefulLifeMonths,
+            dto.ResidualValue,
+            dto.DiminishingBalanceRatePercent,
+            dto.LifetimeProductionCapacity);
         if (isCapitalized)
         {
             ValidateCapitalizedAssetUpdate(asset, dto, acquisitionCost);
@@ -219,6 +234,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             asset.DepreciationConvention = dto.DepreciationConvention;
             asset.UsefulLifeMonths = dto.UsefulLifeMonths;
             asset.ResidualValue = dto.ResidualValue;
+            asset.DiminishingBalanceRatePercent = RoundRate(dto.DiminishingBalanceRatePercent);
+            asset.LifetimeProductionCapacity = dto.LifetimeProductionCapacity;
+            asset.AccumulatedProductionUnits = 0m;
             asset.Status = dto.Status;
             asset.DisposalDate = dto.DisposalDate;
         }
@@ -261,6 +279,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 bookValue.RemainingUsefulLifeMonths = dto.UsefulLifeMonths;
                 bookValue.DepreciationMethod = dto.DepreciationMethod;
                 bookValue.DepreciationConvention = dto.DepreciationConvention;
+                bookValue.DiminishingBalanceRatePercent = RoundRate(dto.DiminishingBalanceRatePercent);
+                bookValue.LifetimeProductionCapacity = dto.LifetimeProductionCapacity;
+                bookValue.AccumulatedProductionUnits = 0m;
                 bookValue.PlacedInServiceDate = dto.PlacedInServiceDate;
                 bookValue.UpdatedAt = DateTime.UtcNow;
                 bookValue.UpdatedBy = UserName;
@@ -323,6 +344,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             DepreciationConvention = asset.DepreciationConvention,
             UsefulLifeMonths = asset.UsefulLifeMonths,
             ResidualValue = asset.ResidualValue,
+            DiminishingBalanceRatePercent = asset.DiminishingBalanceRatePercent,
+            LifetimeProductionCapacity = asset.LifetimeProductionCapacity,
+            AccumulatedProductionUnits = asset.AccumulatedProductionUnits,
             Status = asset.Status,
             DisposalDate = asset.DisposalDate,
             FunctionalCurrencyCode = asset.FunctionalCurrencyCode,
@@ -372,6 +396,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             RemainingUsefulLifeMonths = value.RemainingUsefulLifeMonths,
             DepreciationMethod = value.DepreciationMethod,
             DepreciationConvention = value.DepreciationConvention,
+            DiminishingBalanceRatePercent = value.DiminishingBalanceRatePercent,
+            LifetimeProductionCapacity = value.LifetimeProductionCapacity,
+            AccumulatedProductionUnits = value.AccumulatedProductionUnits,
             PlacedInServiceDate = value.PlacedInServiceDate,
             OpeningAsOfDate = value.OpeningAsOfDate,
             OpeningYtdDepreciation = value.OpeningYtdDepreciation,
@@ -479,6 +506,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             RemainingUsefulLifeMonths = remainingUsefulLifeMonths,
             DepreciationMethod = depreciationMethod,
             DepreciationConvention = depreciationConvention,
+            DiminishingBalanceRatePercent = asset.DiminishingBalanceRatePercent,
+            LifetimeProductionCapacity = asset.LifetimeProductionCapacity,
+            AccumulatedProductionUnits = asset.AccumulatedProductionUnits,
             PlacedInServiceDate = placedInServiceDate,
             OpeningAsOfDate = openingAsOfDate,
             OpeningYtdDepreciation = openingYtdDepreciation,
@@ -2132,6 +2162,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             bookValue.RemainingUsefulLifeMonths = asset.UsefulLifeMonths;
             bookValue.DepreciationMethod = asset.DepreciationMethod;
             bookValue.DepreciationConvention = asset.DepreciationConvention;
+            bookValue.DiminishingBalanceRatePercent = asset.DiminishingBalanceRatePercent;
+            bookValue.LifetimeProductionCapacity = asset.LifetimeProductionCapacity;
+            bookValue.AccumulatedProductionUnits = asset.AccumulatedProductionUnits;
             bookValue.PlacedInServiceDate = asset.PlacedInServiceDate;
             bookValue.CapitalizationDate = capitalizationDate.Date;
             bookValue.CapitalizationJournalEntryId = journalEntryId;
@@ -2535,6 +2568,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             asset.DepreciationConvention != dto.DepreciationConvention ||
             asset.UsefulLifeMonths != dto.UsefulLifeMonths ||
             RoundMoney(asset.ResidualValue) != RoundMoney(dto.ResidualValue) ||
+            RoundRate(asset.DiminishingBalanceRatePercent) != RoundRate(dto.DiminishingBalanceRatePercent) ||
+            RoundUnits(asset.LifetimeProductionCapacity) != RoundUnits(dto.LifetimeProductionCapacity) ||
             asset.PlacedInServiceDate?.Date != dto.PlacedInServiceDate?.Date)
         {
             throw new InvalidOperationException("Capitalized fixed asset depreciation assumptions cannot be edited through the normal update path.");
@@ -2545,6 +2580,55 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             throw new InvalidOperationException("Capitalized fixed asset status cannot be moved back to a pre-capitalization state.");
         }
     }
+
+    private static void ValidateDepreciationConfiguration(
+        DepreciationMethod method,
+        int usefulLifeMonths,
+        decimal residualValue,
+        decimal diminishingBalanceRatePercent,
+        decimal lifetimeProductionCapacity)
+    {
+        if (usefulLifeMonths <= 0)
+        {
+            throw new InvalidOperationException("Fixed asset useful life must be greater than zero.");
+        }
+
+        if (residualValue < 0m)
+        {
+            throw new InvalidOperationException("Fixed asset residual value cannot be negative.");
+        }
+
+        // These rejections are intentional accounting guardrails. The enum retains historical
+        // values for compatibility, but TDC's approved catalogue excludes methods without an
+        // evidenced IAS 16 consumption pattern.
+        if (method is DepreciationMethod.SumOfYearsDigits or DepreciationMethod.None)
+        {
+            throw new InvalidOperationException("TDC supports straight-line, diminishing-balance, double-declining, and units-of-production depreciation only.");
+        }
+
+        if (method == DepreciationMethod.DecliningBalance &&
+            (diminishingBalanceRatePercent <= 0m || diminishingBalanceRatePercent > 100m))
+        {
+            throw new InvalidOperationException("Diminishing-balance depreciation requires an annual rate greater than 0% and no more than 100%.");
+        }
+
+        if (method == DepreciationMethod.DoubleDecliningBalance &&
+            (diminishingBalanceRatePercent < 0m || diminishingBalanceRatePercent > 100m))
+        {
+            throw new InvalidOperationException("A double-declining override rate must be between 0% and 100%; zero uses 200% divided by useful life in years.");
+        }
+
+        if (method == DepreciationMethod.UnitsOfProduction && lifetimeProductionCapacity <= 0m)
+        {
+            throw new InvalidOperationException("Units-of-production depreciation requires a positive lifetime production capacity.");
+        }
+    }
+
+    private static decimal RoundRate(decimal value)
+        => Math.Round(value, 4, MidpointRounding.AwayFromZero);
+
+    private static decimal RoundUnits(decimal value)
+        => Math.Round(value, 4, MidpointRounding.AwayFromZero);
 
     private async Task RecordFixedAssetAuditAsync(
         string eventType,

@@ -34,6 +34,8 @@ export interface FixedAssetCategory {
   defaultMethod: DepreciationMethod;
   defaultUsefulLifeMonths: number;
   defaultResidualValuePercent: number;
+  defaultDiminishingBalanceRatePercent: number;
+  defaultLifetimeProductionCapacity: number;
   assetAccountId: string;
   accumulatedDepreciationAccountId: string;
   depreciationExpenseAccountId: string;
@@ -52,6 +54,8 @@ export interface CreateFixedAssetCategoryDto {
   defaultMethod: DepreciationMethod;
   defaultUsefulLifeMonths: number;
   defaultResidualValuePercent: number;
+  defaultDiminishingBalanceRatePercent: number;
+  defaultLifetimeProductionCapacity: number;
   assetAccountId: string;
   accumulatedDepreciationAccountId: string;
   depreciationExpenseAccountId: string;
@@ -83,6 +87,9 @@ export interface FixedAsset {
   depreciationConvention: DepreciationConvention;
   usefulLifeMonths: number;
   residualValue: number;
+  diminishingBalanceRatePercent: number;
+  lifetimeProductionCapacity: number;
+  accumulatedProductionUnits: number;
   status: FixedAssetStatus;
   disposalDate?: string;
   functionalCurrencyCode: string;
@@ -120,6 +127,9 @@ export interface FixedAssetBookValue {
   remainingUsefulLifeMonths?: number;
   depreciationMethod: DepreciationMethod;
   depreciationConvention: DepreciationConvention;
+  diminishingBalanceRatePercent: number;
+  lifetimeProductionCapacity: number;
+  accumulatedProductionUnits: number;
   placedInServiceDate?: string;
   openingAsOfDate?: string;
   openingYtdDepreciation: number;
@@ -201,6 +211,8 @@ export interface CreateFixedAssetDto {
   depreciationConvention: DepreciationConvention;
   usefulLifeMonths: number;
   residualValue: number;
+  diminishingBalanceRatePercent: number;
+  lifetimeProductionCapacity: number;
   maintenanceAssetId?: string;
   serialNumber?: string;
 }
@@ -216,6 +228,15 @@ export interface RunDepreciationDto {
   postToGl: boolean;
   postingDate?: string;
   bookClassification?: string;
+  productionUsageEntries?: FixedAssetProductionUsage[];
+}
+
+export interface FixedAssetProductionUsage {
+  fixedAssetId: string;
+  bookClassification?: string;
+  unitsConsumed: number;
+  evidenceReference: string;
+  evidenceNotes?: string;
 }
 
 export interface AssetDepreciationSchedule {
@@ -226,6 +247,14 @@ export interface AssetDepreciationSchedule {
   bookClassification: string;
   fiscalPeriodId: string;
   depreciationAmount: number;
+  depreciationMethodSnapshot: DepreciationMethod;
+  diminishingBalanceRatePercentSnapshot: number;
+  lifetimeProductionCapacitySnapshot: number;
+  periodProductionUnits: number;
+  cumulativeProductionUnitsBefore: number;
+  cumulativeProductionUnitsAfter: number;
+  productionEvidenceReference?: string;
+  productionEvidenceNotes?: string;
   accumulatedDepreciation: number;
   netBookValue: number;
   isPosted: boolean;

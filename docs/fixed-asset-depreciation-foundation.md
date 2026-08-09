@@ -2,7 +2,7 @@
 
 Date: 2026-07-07
 
-Scope boundary: this batch implements fixed asset straight-line depreciation setup, schedule/run creation, posting through `IFinancePostingEngine`, book-value updates, audit events, diagnostics, and focused tests. It does not implement revaluation, impairment, transfers, disposals, frontend UI, data migration/sign-off, print/export, broad fixed asset reporting, capitalization reversal, or depreciation reversal.
+Scope boundary: Batch 20 established straight-line depreciation setup, schedule/run creation, posting through `IFinancePostingEngine`, book-value updates, audit events, diagnostics, and focused tests. Subsequent Finance slices added workflow approval, period-close completeness, correction/reversal, frontend operations and the standards-aligned methods described below. Revaluation, impairment, transfers and disposals remain separate asset-accounting workflows.
 
 ## Architecture Decision
 
@@ -22,19 +22,17 @@ Depreciation journals are posted only through `IFinancePostingEngine`; this batc
 - `src/ErpSystem.Data/Migrations/20260707103000_AddFixedAssetDepreciationFoundation.cs`
 - `tests/ErpSystem.Api.Tests/Services/Finance/FixedAssetDepreciationFoundationTests.cs`
 
-## Supported Method
+## Supported Methods
 
-Batch 20 supports straight-line depreciation only.
+The original Batch 20 foundation supported straight-line depreciation only. The 2026-08-09 `FIN-LIM-0031` extension adds:
 
-Unsupported methods are rejected clearly:
+- declining balance using an approved annual rate
+- double-declining balance using an approved rate or a derived `200% / useful life in years` rate
+- units of production using approved lifetime capacity and period-specific usage evidence
 
-- declining balance
-- double-declining balance
-- sum-of-years-digits
-- units-of-production
-- none
+Sum-of-years-digits and `None` remain unavailable as normal depreciation choices. Revenue-based depreciation is deliberately not offered. See `docs/fixed-asset-depreciation-method-policy.md` for the standards research and TDC policy decision.
 
-This is tracked as `FIN-LIM-0031` if additional methods are required for production.
+Method, rate/capacity and usage values are copied into immutable schedule snapshots so future configuration does not rewrite posted accounting evidence.
 
 ## Depreciation Run Model
 
@@ -67,6 +65,9 @@ It captures:
 - residual value snapshot
 - useful life snapshot
 - method snapshot
+- diminishing-balance rate snapshot, when applicable
+- lifetime production capacity, period usage and cumulative usage before/after, when applicable
+- production evidence reference and notes, when applicable
 - placed-in-service date snapshot
 - journal entry ID
 - posting event ID
@@ -90,6 +91,11 @@ Depreciation validates:
 - depreciation cannot reduce NBV below residual value
 - duplicate tenant/asset/period/book depreciation is idempotent
 - unsupported methods fail clearly
+- diminishing-balance rates are greater than zero and no more than 100%
+- units-of-production capacity and period usage are positive
+- cumulative production usage cannot exceed approved lifetime capacity
+- units-of-production posting requires asset-specific usage evidence
+- posting revalidates saved method assumptions against the tracked asset book before creating the journal
 - depreciation account mappings are same-tenant, active, direct-posting, and account-type compatible
 
 ## Posting Design
@@ -365,10 +371,10 @@ Rollback is safe only before depreciation postings are used. After production de
 ## Limitations Register
 
 - `FIN-LIM-0023`: resolved for straight-line depreciation foundation.
-- `FIN-LIM-0031`: additional depreciation methods remain open.
-- `FIN-LIM-0032`: depreciation workflow routing remains open.
-- `FIN-LIM-0033`: depreciation reversal/correction remains open.
-- `FIN-LIM-0034`: period-close depreciation completeness blocker remains open.
+- `FIN-LIM-0031`: resolved by the standards-aligned diminishing-balance, double-declining and units-of-production extension.
+- `FIN-LIM-0032`: resolved by Finance workflow approval hardening.
+- `FIN-LIM-0033`: resolved by controlled depreciation run reversal/correction.
+- `FIN-LIM-0034`: resolved by the non-waivable fixed-asset depreciation period-close control.
 
 None of the open Batch 20 limitations blocks starting revaluation/impairment, transfer, or disposal foundation work. They remain final go-live controls unless explicitly accepted by accounting/product leadership.
 

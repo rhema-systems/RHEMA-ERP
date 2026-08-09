@@ -3366,6 +3366,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.OpeningSource).HasMaxLength(50);
             entity.Property(e => e.SourceDocumentType).HasMaxLength(50);
+            entity.Property(e => e.DiminishingBalanceRatePercent).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.LifetimeProductionCapacity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.AccumulatedProductionUnits).HasColumnType("decimal(18,4)");
             entity.HasOne(e => e.FixedAsset)
                 .WithMany(asset => asset.BookValues)
                 .HasForeignKey(e => e.FixedAssetId)
@@ -3459,6 +3462,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.NetBookValue).HasColumnType("decimal(18,2)");
             entity.Property(e => e.DepreciableAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ResidualValueSnapshot).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiminishingBalanceRatePercentSnapshot).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.LifetimeProductionCapacitySnapshot).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.PeriodProductionUnits).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CumulativeProductionUnitsBefore).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CumulativeProductionUnitsAfter).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ProductionEvidenceReference).HasMaxLength(200);
+            entity.Property(e => e.ProductionEvidenceNotes).HasMaxLength(1000);
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification, e.CorrectionSequence }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetDepreciationRunId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });
@@ -3524,6 +3534,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure FixedAssetCategory → Account relationships (prevent cascade cycles with multiple FKs)
         builder.Entity<FixedAssetCategory>(entity =>
         {
+            entity.Property(c => c.DefaultDiminishingBalanceRatePercent).HasColumnType("decimal(18,4)");
+            entity.Property(c => c.DefaultLifetimeProductionCapacity).HasColumnType("decimal(18,4)");
             entity.HasOne(c => c.AssetAccount)
                 .WithMany()
                 .HasForeignKey(c => c.AssetAccountId)

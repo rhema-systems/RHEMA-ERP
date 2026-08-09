@@ -69,6 +69,29 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public ErpSystem.Core.Enums.DepreciationMethod DepreciationMethodSnapshot { get; set; }
 
+        // Method-specific assumptions are copied to every schedule so later category/asset policy
+        // changes cannot rewrite how a historical charge was calculated.
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DiminishingBalanceRatePercentSnapshot { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal LifetimeProductionCapacitySnapshot { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal PeriodProductionUnits { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal CumulativeProductionUnitsBefore { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal CumulativeProductionUnitsAfter { get; set; }
+
+        [MaxLength(200)]
+        public string? ProductionEvidenceReference { get; set; }
+
+        [MaxLength(1000)]
+        public string? ProductionEvidenceNotes { get; set; }
+
         public DateTime? PlacedInServiceDateSnapshot { get; set; }
 
         // --- Status ---
