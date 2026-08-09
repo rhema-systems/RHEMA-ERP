@@ -479,6 +479,10 @@ public static class AppraisalMappingExtensions
             FilePath = entity.FilePath,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            FileSizeBytes = entity.FileSizeBytes,
+            UploadedById = entity.UploadedById,
+            UploadedByName = entity.UploadedBy?.FullName ?? string.Empty,
+            ReviewEventId = entity.ReviewEventId,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -942,7 +946,7 @@ public static class AppraisalMappingExtensions
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
         entity.AppraisalSettingsId = dto.AppraisalSettingsId;
-        entity.Status = dto.Status;
+        // Status is not copied — see UpdateAppraisalCycleDto. Open/close own it.
         entity.GoalSettingOpenDate = dto.GoalSettingOpenDate;
         entity.GoalSettingDeadline = dto.GoalSettingDeadline;
         entity.Q1ReviewOpenDate = dto.Q1ReviewOpenDate;
@@ -1860,7 +1864,7 @@ public static class AppraisalMappingExtensions
             Status = dto.Status,
             Challenges = dto.Challenges,
             Notes = dto.Notes,
-            RecordedById = dto.RecordedById,
+            // RecordedById is stamped by the service from the caller's token, not mapped here.
             EntryDate = DateTime.UtcNow,
             ReviewEventId = dto.ReviewEventId
         };
@@ -2037,7 +2041,7 @@ public static class AppraisalMappingExtensions
         return new PerformanceJournalEntry
         {
             AppraisalCycleId = dto.AppraisalCycleId,
-            OwnerId = dto.OwnerId,
+            // OwnerId is stamped by the service from the caller's token, not mapped from the payload.
             SubjectEmployeeId = dto.SubjectEmployeeId,
             RelatedGoalId = dto.RelatedGoalId,
             Title = dto.Title,
@@ -2202,6 +2206,8 @@ public static class AppraisalMappingExtensions
             CycleCode = entity.Cycle?.CycleCode,
             PerformanceAppraisalId = entity.PerformanceAppraisalId,
             AppraisalNumber = entity.Appraisal?.AppraisalNumber,
+            EmployeeId = entity.Appraisal?.EmployeeId ?? Guid.Empty,
+            EmployeeName = entity.Appraisal?.Employee?.FullName,
             Type = entity.Type,
             EventDate = entity.EventDate,
             Status = entity.Status,
@@ -2236,14 +2242,15 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalReviewEventDto dto, AppraisalReviewEvent entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
+        // AppraisalCycleId, PerformanceAppraisalId, Status and OverallPeriodScore are deliberately
+        // NOT copied from the payload. The first two would re-point the event at a different
+        // employee's appraisal; the last two are owned by submit / complete / finalize, and a plain
+        // PUT carrying them was a way to mark a review Completed — or award a period score — without
+        // passing any of the gates those operations enforce.
         entity.Type = dto.Type;
         entity.EventDate = dto.EventDate;
-        entity.Status = dto.Status;
         entity.IsLightTouch = dto.IsLightTouch;
         entity.IsFullAppraisal = dto.IsFullAppraisal;
-        entity.OverallPeriodScore = dto.OverallPeriodScore;
         // Use null-coalescing so only non-null values overwrite — prevents one role from
         // accidentally clearing fields owned by the other role on a full-PUT save.
         entity.AchievementsSummary = dto.AchievementsSummary ?? entity.AchievementsSummary;

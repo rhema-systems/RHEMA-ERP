@@ -88,6 +88,17 @@ class EmployeeService {
     return apiService.post<PagedResult<Employee>>(`${this.baseUrl}/paged?${params.toString()}`, search);
   }
 
+  /**
+   * The signed-in manager's own direct reports.
+   *
+   * Prefer this over the `manager/{id}/direct-reports` form: the client has no employee id of its
+   * own, and screens that fetch one in order to pass it back are how several of this module's
+   * authorization holes started.
+   */
+  getMyDirectReports(): Promise<Employee[]> {
+    return apiService.get<Employee[]>(`${this.baseUrl}/manager/me/direct-reports`);
+  }
+
   getById(id: string): Promise<Employee> {
     return apiService.get<Employee>(`${this.baseUrl}/${id}`);
   }

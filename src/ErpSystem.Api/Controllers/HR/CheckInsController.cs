@@ -1,9 +1,15 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -17,17 +23,31 @@ namespace ErpSystem.Api.Controllers.HR;
 [Authorize]
 public class CheckInsController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly ICheckInService _checkInService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<CheckInsController> _logger;
 
     public CheckInsController(
         ICheckInService checkInService,
         ICurrentUserService currentUserService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorageService,
+        ApplicationDbContext db,
         ILogger<CheckInsController> logger)
     {
         _checkInService = checkInService;
         _currentUserService = currentUserService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorageService = fileStorageService;
+        _db = db;
         _logger = logger;
     }
 
@@ -42,7 +62,9 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
-            return Ok(result);
+            // The employee's own list: they are the subject, not the conductor, so the private
+            // notes are not theirs to read.
+            return Ok(Redact(result));
         }
         catch (Exception ex)
         {
@@ -62,6 +84,7 @@ public class CheckInsController : ControllerBase
         try
         {
             var result = await _checkInService.GetByConductedByIdAsync(employeeId, cycleId, cancellationToken);
+            // The conductor's own list — their private notes are their own, so no redaction.
             return Ok(result);
         }
         catch (Exception ex)
@@ -96,8 +119,60 @@ public class CheckInsController : ControllerBase
         return UnprocessableEntity(new { message = ex.Message });
     }
 
-    /// <summary>Get check-ins with pagination</summary>
+    private bool IsHr =>
+        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+
+    /// <summary>HR, or the employee the check-in is about, or their line manager.</summary>
+    private async Task<bool> CanAccessEmployeeAsync(Guid employeeId, CancellationToken ct)
+    {
+        if (IsHr) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (me == employeeId) return true;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<Core.Entities.HR.Employee>()
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == me, ct);
+    }
+
+    /// <summary>
+    /// As <see cref="CanAccessCheckInAsync"/> minus the employee: editing, deleting and closing a
+    /// check-in belong to whoever is holding it. The employee's record of the meeting is the
+    /// conductor's, not theirs to amend.
+    /// </summary>
+    private async Task<bool> CanManageCheckInAsync(Guid checkInId, CancellationToken ct)
+    {
+        if (IsHr) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<CheckIn>()
+            .AsNoTracking()
+            .AnyAsync(c => c.Id == checkInId && c.TenantId == tenantId && c.ConductedById == me, ct);
+    }
+
+    /// <summary>
+    /// Blanks the conductor's private notes for anyone who is not the conductor (or HR).
+    /// </summary>
+    /// <remarks>
+    /// <c>PrivateNotes</c> is on <c>CheckInDto</c> and was returned by every read, so an employee
+    /// could see their manager's private record of the meeting simply by calling the API — the
+    /// Next.js screen hides the field, which is not the same as it being private. Suppression
+    /// belongs here, where the caller is known, rather than in a client that can be bypassed.
+    /// </remarks>
+    private CheckInDto Redact(CheckInDto dto)
+    {
+        if (IsHr) return dto;
+        if (_currentUserService.EmployeeId is Guid me && dto.ConductedById == me) return dto;
+        dto.PrivateNotes = null;
+        return dto;
+    }
+
+    private IEnumerable<CheckInDto> Redact(IEnumerable<CheckInDto> dtos) => dtos.Select(Redact).ToList();
+
+    /// <summary>Every check-in in the tenant — HR's view.</summary>
     [HttpGet("paged")]
+    [Authorize(Roles = HrRoles)]
     [ProducesResponseType(typeof(PagedResult<CheckInDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
@@ -116,13 +191,16 @@ public class CheckInsController : ControllerBase
     /// <summary>Get a check-in by ID</summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(CheckInDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessCheckInAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.GetByIdAsync(id, cancellationToken);
-            return Ok(result);
+            return Ok(Redact(result));
         }
         catch (ArgumentException ex)
         {
@@ -138,12 +216,15 @@ public class CheckInsController : ControllerBase
     /// <summary>Get check-ins for an employee, optionally filtered by cycle</summary>
     [HttpGet("by-employee/{employeeId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<CheckInDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByEmployee(Guid employeeId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
-            return Ok(result);
+            return Ok(Redact(result));
         }
         catch (Exception ex)
         {
@@ -152,15 +233,21 @@ public class CheckInsController : ControllerBase
         }
     }
 
-    /// <summary>Get check-ins conducted by a specific person, optionally filtered by cycle</summary>
+    /// <summary>
+    /// Get check-ins conducted by a specific person. HR, or that person themselves — everyone else
+    /// should use <c>me/conducting</c>, which needs no id at all.
+    /// </summary>
     [HttpGet("by-conductor/{conductedById:guid}")]
     [ProducesResponseType(typeof(IEnumerable<CheckInDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByConductedBy(Guid conductedById, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
+        if (!IsHr && _currentUserService.EmployeeId != conductedById) return Forbid();
+
         try
         {
             var result = await _checkInService.GetByConductedByIdAsync(conductedById, cycleId, cancellationToken);
-            return Ok(result);
+            return Ok(Redact(result));
         }
         catch (Exception ex)
         {
@@ -172,12 +259,15 @@ public class CheckInsController : ControllerBase
     /// <summary>Get upcoming check-ins for an employee within the next N days</summary>
     [HttpGet("upcoming/{employeeId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<CheckInDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetUpcoming(Guid employeeId, [FromQuery] int daysAhead = 30, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeAsync(employeeId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.GetUpcomingAsync(employeeId, daysAhead, cancellationToken);
-            return Ok(result);
+            return Ok(Redact(result));
         }
         catch (Exception ex)
         {
@@ -232,10 +322,12 @@ public class CheckInsController : ControllerBase
         if (id != updateDto.Id)
             return BadRequest(new { message = "ID mismatch" });
 
+        if (!await CanManageCheckInAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.UpdateAsync(updateDto, cancellationToken);
-            return Ok(result);
+            return Ok(Redact(result));
         }
         catch (ArgumentException ex)
         {
@@ -254,6 +346,8 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanManageCheckInAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.DeleteAsync(id, cancellationToken);
@@ -277,10 +371,13 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Complete(Guid checkInId, [FromBody] CompleteCheckInRequest request, CancellationToken cancellationToken = default)
     {
+        // Closing the meeting, and writing the private notes, is the conductor's act.
+        if (!await CanManageCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.CompleteAsync(checkInId, request.SharedNotes, request.PrivateNotes, request.ActionItems, cancellationToken);
-            return Ok(result);
+            return Ok(Redact(result));
         }
         catch (ArgumentException ex)
         {
@@ -305,6 +402,9 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddGoalUpdate(Guid checkInId, [FromBody] CreateCheckInGoalUpdateDto dto, CancellationToken cancellationToken = default)
     {
+        // Either side of the conversation may record what it changed about a goal.
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.AddGoalUpdateAsync(checkInId, dto, cancellationToken);
@@ -326,6 +426,8 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<CheckInGoalUpdateDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetGoalUpdates(Guid checkInId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.GetGoalUpdatesAsync(checkInId, cancellationToken);
@@ -351,6 +453,8 @@ public class CheckInsController : ControllerBase
         if (updateId != dto.Id)
             return BadRequest(new { message = "ID mismatch" });
 
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.UpdateGoalUpdateAsync(checkInId, dto, cancellationToken);
@@ -373,6 +477,8 @@ public class CheckInsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteGoalUpdate(Guid checkInId, Guid updateId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.DeleteGoalUpdateAsync(checkInId, updateId, cancellationToken);
@@ -392,33 +498,101 @@ public class CheckInsController : ControllerBase
 
     // ── Attachments ───────────────────────────────────────────────────────
 
-    /// <summary>Add an attachment to a check-in</summary>
+    /// <summary>
+    /// HR, the employee the check-in is about, or whoever is conducting it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Scoped to the attachment endpoints only. The rest of this controller has no entitlement
+    /// test at all — any authenticated user can read any check-in by id, private notes included —
+    /// which is a real hole but a wider one than this slice set out to close. What is not
+    /// acceptable is adding a *new* file-download surface with no gate, so these four endpoints
+    /// carry the rule the whole controller ought to. Widening it to the rest is its own change.
+    /// </remarks>
+    private async Task<bool> CanAccessCheckInAsync(Guid checkInId, CancellationToken ct)
+    {
+        if (User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<CheckIn>()
+            .AsNoTracking()
+            .Where(c => c.Id == checkInId && c.TenantId == tenantId)
+            .AnyAsync(c => c.EmployeeId == me || c.ConductedById == me, ct);
+    }
+
+    /// <summary>
+    /// Attach a file to a check-in, through the controlled-upload gate every other HR document
+    /// family uses (scan, then central-DMS registration, rolled back if the record write fails).
+    /// </summary>
+    /// <remarks>
+    /// Replaces a JSON endpoint that took a caller-supplied <c>filePath</c> and could not have
+    /// worked in any case — see <c>CheckInService.AddAttachmentAsync</c>.
+    /// </remarks>
     [HttpPost("{checkInId:guid}/attachments")]
     [ProducesResponseType(typeof(AppraisalAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AddAttachment(Guid checkInId, [FromBody] CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> AddAttachment(
+        Guid checkInId, IFormFile file, [FromForm] string? description, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var result = await _checkInService.AddAttachmentAsync(checkInId, dto, cancellationToken);
-            return StatusCode(201, result);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding attachment to check-in {CheckInId}", checkInId);
-            return StatusCode(500, "An error occurred while adding the attachment");
-        }
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUserService, _logger, file,
+            sourceEntityType: "CheckIn",
+            sourceRecordId: checkInId,
+            sourceLabel: "Check-in attachment",
+            documentType: "CheckInAttachment",
+            description: description,
+            persist: (uploadedById, document) => _checkInService.AddAttachmentAsync(
+                checkInId, uploadedById, document.OriginalFileName, document.FileSize, description,
+                cancellationToken,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Streams a check-in attachment. The file lives outside the web root, so this endpoint is the
+    /// only way to it.
+    /// </summary>
+    [HttpGet("{checkInId:guid}/attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AppraisalAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.CheckInId == checkInId && a.TenantId == tenantId && !a.IsDeleted,
+                cancellationToken);
+
+        if (attachment is null)
+            return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
     }
 
     /// <summary>Get attachments for a check-in</summary>
     [HttpGet("{checkInId:guid}/attachments")]
     [ProducesResponseType(typeof(IEnumerable<AppraisalAttachmentDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetAttachments(Guid checkInId, CancellationToken cancellationToken = default)
     {
+        // Entitled the same as the file itself — a listing still leaks filenames and uploaders.
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.GetAttachmentsAsync(checkInId, cancellationToken);
@@ -438,9 +612,12 @@ public class CheckInsController : ControllerBase
     /// <summary>Delete an attachment from a check-in</summary>
     [HttpDelete("{checkInId:guid}/attachments/{attachmentId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAttachment(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessCheckInAsync(checkInId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _checkInService.DeleteAttachmentAsync(checkInId, attachmentId, cancellationToken);

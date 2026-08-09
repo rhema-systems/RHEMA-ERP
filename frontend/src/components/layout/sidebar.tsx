@@ -82,6 +82,7 @@ import {
   PackageCheck,
   CalendarCheck,
   MessagesSquare,
+  NotebookPen,
   ScrollText,
   Timer,
   BellRing,
@@ -462,8 +463,10 @@ export const navigationItems: NavItem[] = [
           { title: 'My Appraisals', href: '/hr/performance/appraisals', icon: ClipboardCheck },
           { title: 'Peer Reviews', href: '/hr/performance/peer-reviews', icon: MessagesSquare },
           { title: 'Team Appraisals', href: '/hr/performance/team-appraisals', icon: UserCheck },
+          { title: 'Interim Reviews', href: '/hr/performance/interim-reviews', icon: CalendarCheck },
           { title: 'Check-ins', href: '/hr/performance/check-ins', icon: CalendarCheck },
           { title: 'Conversations', href: '/hr/performance/conversations', icon: MessagesSquare },
+          { title: 'Journal', href: '/hr/performance/journal', icon: NotebookPen },
           {
             title: 'Development Plans',
             href: '/hr/performance/development-plans',

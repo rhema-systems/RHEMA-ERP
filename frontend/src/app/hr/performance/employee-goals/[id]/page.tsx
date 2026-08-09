@@ -28,7 +28,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
-import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
+import { GoalRequiredSkillsPanel } from '@/components/hr/performance/GoalRequiredSkillsPanel';
 import {
   NumberField,
   TextareaField,
@@ -60,11 +60,13 @@ const APPROVABLE = new Set(['PendingApproval']);
 const LOCKABLE = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack', 'Completed']);
 const PROGRESS_OPEN = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack']);
 
+// No `recordedById`: the recorder is the signed-in user, stamped server-side. It used to be a
+// picker defaulting to the goal's owner "so HR could record on someone's behalf", which is the
+// same thing as letting anyone attribute a progress claim to a colleague who never made it.
 const progressSchema = z.object({
   progressPercent: z.coerce.number().min(0).max(100).optional(),
   actualValue: z.coerce.number().min(0).optional(),
   status: z.string().min(1, 'Required'),
-  recordedById: z.string().min(1, 'Required'),
   challenges: z.string().max(500).optional(),
   notes: z.string().max(2000).optional(),
 });
@@ -148,9 +150,6 @@ export default function EmployeeGoalDetailPage() {
     progressPercent: undefined,
     actualValue: undefined,
     status: 'InProgress',
-    // Defaults to the goal's owner, which is who normally logs progress; HR recording on
-    // someone's behalf can change it.
-    recordedById: goal.employeeId,
     challenges: '',
     notes: '',
   };
@@ -341,6 +340,8 @@ export default function EmployeeGoalDetailPage() {
         </Card>
       </div>
 
+      <GoalRequiredSkillsPanel goalId={id} readOnly={goal.isLocked} />
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Approval trail</CardTitle>
@@ -389,7 +390,6 @@ export default function EmployeeGoalDetailPage() {
               status: v.status as GoalProgressStatus,
               challenges: v.challenges || null,
               notes: v.notes || null,
-              recordedById: v.recordedById,
               reviewEventId: null,
             });
           }}
@@ -433,7 +433,6 @@ export default function EmployeeGoalDetailPage() {
             progressPercent: r.progressPercent ?? undefined,
             actualValue: r.actualValue ?? undefined,
             status: r.status,
-            recordedById: r.recordedById,
             challenges: r.challenges ?? '',
             notes: r.notes ?? '',
           })}
@@ -461,13 +460,6 @@ export default function EmployeeGoalDetailPage() {
                 label="Status"
                 required
                 options={GOAL_PROGRESS_STATUS_OPTIONS}
-              />
-              <EmployeePickerField
-                form={form}
-                name="recordedById"
-                label="Recorded by"
-                required
-                initialLabel={goal.employeeName}
               />
               <TextareaField
                 form={form}

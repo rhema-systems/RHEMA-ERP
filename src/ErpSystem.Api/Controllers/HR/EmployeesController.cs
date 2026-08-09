@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,13 +14,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class EmployeesController : ControllerBase
 {
     private readonly IEmployeeService _service;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<EmployeesController> _logger;
 
     public EmployeesController(
         IEmployeeService service,
+        ICurrentUserService currentUserService,
         ILogger<EmployeesController> logger)
     {
         _service = service;
+        _currentUserService = currentUserService;
         _logger = logger;
     }
 
@@ -299,6 +303,26 @@ public class EmployeesController : ControllerBase
     {
         if (managerId == Guid.Empty) return BadRequest("Invalid manager id.");
         return Ok(await _service.GetDirectReportsAsync(managerId, cancellationToken));
+    }
+
+    /// <summary>
+    /// The signed-in manager's own direct reports.
+    /// </summary>
+    /// <remarks>
+    /// The token-derived twin of the route above, matching <c>manager/me/team-cycles</c> on the
+    /// appraisals controller. Screens that need "my team" have no employee id of their own, and
+    /// making them fetch one is how several of the module's authorization holes started — a client
+    /// that must know its own id can pass someone else's.
+    /// </remarks>
+    [HttpGet("manager/me/direct-reports")]
+    [ProducesResponseType(typeof(IEnumerable<EmployeeDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<IEnumerable<EmployeeDto>>> GetMyDirectReports(CancellationToken cancellationToken)
+    {
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+            return Forbid();
+
+        return Ok(await _service.GetDirectReportsAsync(me, cancellationToken));
     }
 
     // NEW ENDPOINT: management chain for a given employee.

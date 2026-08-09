@@ -16,6 +16,7 @@ import {
   Layers,
   Lightbulb,
   MessagesSquare,
+  NotebookPen,
   Scale,
   Target,
   TriangleAlert,
@@ -91,6 +92,13 @@ const items: NavCardItem[] = [
       'Kick-off, quarterly, mid-year and final review meetings held against an appraisal — the agenda before, the notes after.',
     href: '/hr/performance/conversations',
     icon: MessagesSquare,
+  },
+  {
+    title: 'Journal',
+    description:
+      'Evidence noted as it happens. Private to you unless you share it — a private entry is readable by nobody else, not your manager and not HR.',
+    href: '/hr/performance/journal',
+    icon: NotebookPen,
   },
   {
     title: 'Development Plans',

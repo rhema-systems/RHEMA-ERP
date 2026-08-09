@@ -133,6 +133,10 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   passed: 'outline',
   none: 'outline',
 
+  // Interim reviews. "EmployeeSubmitted" is the one that needs someone to act — it is the
+  // manager's queue — so it carries weight rather than reading as settled.
+  employeesubmitted: 'secondary',
+
   // Training service bonds.
   pendingacceptance: 'secondary',
   fulfilled: 'default',

@@ -27,6 +27,11 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { AppraisalPhaseRail } from '@/components/hr/performance/AppraisalPhaseRail';
 import { EmployeeTrendPanel } from '@/components/hr/performance/EmployeeTrendPanel';
 import {
+  GoalAssessmentPanel,
+  toGoalAssessments,
+  type GoalAssessmentValues,
+} from '@/components/hr/performance/GoalAssessmentPanel';
+import {
   EvaluationScoreForm,
   type ScoreValues,
 } from '@/components/hr/performance/EvaluationScoreForm';
@@ -80,6 +85,7 @@ export default function ManagerEvaluationPage() {
     recommendPIP: false,
     recommendTermination: false,
   });
+  const [goalValues, setGoalValues] = useState<GoalAssessmentValues>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [tab, setTab] = useState('evaluation');
 
@@ -168,7 +174,9 @@ export default function ManagerEvaluationPage() {
         recommendationNotes: narrative.recommendationNotes || null,
         ...recommendations,
         isDraft,
-        goalAssessments: [],
+        // The manager's year-end verdict on each goal. Posted as an empty array before, so the
+        // cycle never scored the goals it spent the year cascading.
+        goalAssessments: toGoalAssessments(goalValues),
       }),
     onSuccess: (result, isDraft) => {
       if (!result.success) {
@@ -304,6 +312,7 @@ export default function ManagerEvaluationPage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="evaluation">Evaluation</TabsTrigger>
+          <TabsTrigger value="goals">Goals</TabsTrigger>
           <TabsTrigger value="narrative">Assessment &amp; recommendations</TabsTrigger>
           {context.settings?.requirePeerReviews && (
             <TabsTrigger value="peers">Peer feedback</TabsTrigger>
@@ -363,6 +372,16 @@ export default function ManagerEvaluationPage() {
                   }
                 : undefined
             }
+          />
+        </TabsContent>
+
+        <TabsContent value="goals" className="mt-4">
+          <GoalAssessmentPanel
+            appraisalId={appraisalId}
+            mode="manager"
+            values={goalValues}
+            onChange={setGoalValues}
+            readOnly={readOnly}
           />
         </TabsContent>
 

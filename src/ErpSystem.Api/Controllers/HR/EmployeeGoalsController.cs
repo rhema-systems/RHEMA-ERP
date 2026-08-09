@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Exceptions;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -15,15 +16,18 @@ public class EmployeeGoalsController : ControllerBase
 {
     private readonly IEmployeeGoalService _employeeGoalService;
     private readonly IGoalWorkflowCommandService _workflowService;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<EmployeeGoalsController> _logger;
 
     public EmployeeGoalsController(
         IEmployeeGoalService employeeGoalService,
         IGoalWorkflowCommandService workflowService,
+        ICurrentUserService currentUserService,
         ILogger<EmployeeGoalsController> logger)
     {
         _employeeGoalService = employeeGoalService;
         _workflowService     = workflowService;
+        _currentUserService  = currentUserService;
         _logger              = logger;
     }
 
@@ -450,9 +454,14 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddProgressEntry(Guid goalId, [FromBody] CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
+        // The recorder is the caller. The payload used to name them, so a progress entry could be
+        // attributed to a colleague who never made it.
+        if (_currentUserService.EmployeeId is not Guid recordedById || recordedById == Guid.Empty)
+            return Unauthorized("User employee context not found");
+
         try
         {
-            var result = await _employeeGoalService.AddProgressEntryAsync(goalId, dto, cancellationToken);
+            var result = await _employeeGoalService.AddProgressEntryAsync(goalId, dto, recordedById, cancellationToken);
             return StatusCode(201, result);
         }
         catch (ArgumentException ex)

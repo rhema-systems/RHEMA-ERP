@@ -389,8 +389,12 @@ public class EmployeeGoalService : IEmployeeGoalService
         };
     }
 
-    public async Task<GoalProgressEntryDto> AddProgressEntryAsync(Guid goalId, CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+    public async Task<GoalProgressEntryDto> AddProgressEntryAsync(Guid goalId, CreateGoalProgressEntryDto dto, Guid recordedById, CancellationToken cancellationToken = default)
     {
+        // GoalProgressEntry.RecordedById is a required Employee FK.
+        if (recordedById == Guid.Empty)
+            throw new InvalidOperationException("Unable to determine the recording employee. Please ensure your account is linked to an employee record.");
+
         var tenantId = GetTenantId();
         var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
 
@@ -401,6 +405,9 @@ public class EmployeeGoalService : IEmployeeGoalService
         entity.TenantId = tenantId;
         entity.EmployeeGoalId = goalId;
         entity.EntryDate = DateTime.UtcNow;
+        // Attribution comes from the token, not the payload: a progress entry is a claim about what
+        // someone did, and the body used to be free to name anyone.
+        entity.RecordedById = recordedById;
 
         await _progressRepository.AddAsync(entity);
 

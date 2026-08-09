@@ -1,11 +1,16 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -17,17 +22,29 @@ public class PerformanceAppraisalsController : ControllerBase
     private readonly IPerformanceAppraisalService _appraisalService;
     private readonly IPeerNominationService _peerNominationService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<PerformanceAppraisalsController> _logger;
 
     public PerformanceAppraisalsController(
         IPerformanceAppraisalService appraisalService,
         IPeerNominationService peerNominationService,
         ICurrentUserService currentUserService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorageService,
+        ApplicationDbContext db,
         ILogger<PerformanceAppraisalsController> logger)
     {
         _appraisalService = appraisalService;
         _peerNominationService = peerNominationService;
         _currentUserService = currentUserService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorageService = fileStorageService;
+        _db = db;
         _logger = logger;
     }
 
@@ -677,29 +694,105 @@ public class PerformanceAppraisalsController : ControllerBase
     #region Attachment Operations
 
     /// <summary>
-    /// Add an attachment to an appraisal
+    /// True when the caller may see this appraisal's evidence: HR, the appraisee, or their line
+    /// manager. Mirrors the rule on <see cref="AppraisalReviewEventsController"/>.
     /// </summary>
-    [HttpPost("{appraisalId}/attachments")]
-    [ProducesResponseType(typeof(AppraisalAttachmentDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(400)]
-    public async Task<IActionResult> AddAttachment(Guid appraisalId, [FromBody] CreateAppraisalAttachmentDto createDto)
+    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, CancellationToken ct)
     {
+        if (User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .AnyAsync(a => a.EmployeeId == me || a.Employee.ManagerId == me, ct);
+    }
+
+    /// <summary>
+    /// Attach a file to an appraisal, through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a JSON endpoint that took a caller-supplied <c>filePath</c> and could not have
+    /// worked in any case — see <c>PerformanceAppraisalService.AddAttachmentAsync</c>. The
+    /// entitlement test is new too: appraisal evidence had no gate beyond <c>[Authorize]</c>.
+    /// </remarks>
+    [HttpPost("{appraisalId:guid}/attachments")]
+    [ProducesResponseType(typeof(AppraisalAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddAttachment(
+        Guid appraisalId, IFormFile file, [FromForm] string? description, CancellationToken cancellationToken = default)
+    {
+        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUserService, _logger, file,
+            sourceEntityType: "PerformanceAppraisal",
+            sourceRecordId: appraisalId,
+            sourceLabel: "Appraisal attachment",
+            documentType: "AppraisalAttachment",
+            description: description,
+            persist: (uploadedById, document) => _appraisalService.AddAttachmentAsync(
+                appraisalId, uploadedById, document.OriginalFileName, document.FileSize, description,
+                cancellationToken,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken);
+    }
+
+    /// <summary>Streams an appraisal attachment — the file lives outside the web root.</summary>
+    [HttpGet("{appraisalId:guid}/attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AppraisalAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.PerformanceAppraisalId == appraisalId && a.TenantId == tenantId && !a.IsDeleted,
+                cancellationToken);
+
+        if (attachment is null)
+            return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
+    }
+
+    /// <summary>Remove an attachment from an appraisal.</summary>
+    [HttpDelete("{appraisalId:guid}/attachments/{attachmentId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteAttachment(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
         try
         {
-            if (!ModelState.IsValid)
-                return BadRequest(ModelState);
-
-            var response = await _appraisalService.AddAttachmentAsync(appraisalId, createDto);
-            return Ok(response);
+            var removed = await _appraisalService.DeleteAttachmentAsync(appraisalId, attachmentId, cancellationToken);
+            if (!removed) return NotFound(new { message = "Attachment not found" });
+            return NoContent();
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error adding attachment to appraisal {AppraisalId}", appraisalId);
-            return StatusCode(500, "An error occurred while adding the attachment");
+            _logger.LogError(ex, "Error deleting attachment {AttachmentId} from appraisal {AppraisalId}", attachmentId, appraisalId);
+            return StatusCode(500, "An error occurred while deleting the attachment");
         }
     }
 
@@ -708,11 +801,15 @@ public class PerformanceAppraisalsController : ControllerBase
     /// </summary>
     [HttpGet("{appraisalId}/attachments")]
     [ProducesResponseType(typeof(IEnumerable<AppraisalAttachmentDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAttachments(Guid appraisalId)
+    public async Task<IActionResult> GetAttachments(Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        // The list is entitled the same as the file. Gating the download but not the listing still
+        // hands an outsider every filename, description and uploader on someone's appraisal.
+        if (!await CanAccessAppraisalAsync(appraisalId, cancellationToken)) return Forbid();
+
         try
         {
-            var response = await _appraisalService.GetAttachmentsAsync(appraisalId);
+            var response = await _appraisalService.GetAttachmentsAsync(appraisalId, cancellationToken);
             return Ok(response);
         }
         catch (Exception ex)

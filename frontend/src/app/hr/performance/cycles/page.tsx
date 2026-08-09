@@ -213,7 +213,12 @@ export default function AppraisalCyclesPage() {
         dialogClassName="sm:max-w-[720px]"
         list={() => appraisalCycleService.getAll()}
         create={(values) => appraisalCycleService.create(toPayload(values))}
-        update={(id, values) => appraisalCycleService.update(id, { id, ...toPayload(values) })}
+        update={(id, values) => {
+          // `status` is deliberately dropped: this payload hardcodes Draft for the create path,
+          // and sending it on an edit is what used to revert an Open cycle to Draft.
+          const { status: _status, ...rest } = toPayload(values);
+          return appraisalCycleService.update(id, { id, ...rest });
+        }}
         remove={(id) => appraisalCycleService.remove(id)}
         getId={(r) => r.id}
         columns={[

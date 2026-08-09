@@ -506,7 +506,13 @@ export interface CreateAppraisalCycle extends AppraisalCyclePhaseDates {
   status: AppraisalCycleStatus;
 }
 
-export type UpdateAppraisalCycle = CreateAppraisalCycle & { id: string };
+/**
+ * ⚠ No `status` — the server ignores it on this path and it is off the type so nobody sends one.
+ * A cycle moves between Draft / Open / Closed through the open, close and reopen endpoints, which
+ * run the scope-overlap checks and stamp who acted. This form used to post a hardcoded `'Draft'`
+ * on every save, so editing an Open cycle's phase dates quietly reverted it to Draft.
+ */
+export type UpdateAppraisalCycle = Omit<CreateAppraisalCycle, 'status'> & { id: string };
 
 /** What `POST {cycle}/generate-appraisals` reports back. */
 export interface GenerateAppraisalsResult {

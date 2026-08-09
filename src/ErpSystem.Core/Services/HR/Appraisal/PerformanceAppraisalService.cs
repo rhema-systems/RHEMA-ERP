@@ -1040,34 +1040,96 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
 
     #region AppraisalAttachment Operations
 
-    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid appraisalId, CreateAppraisalAttachmentDto createDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Attaches a file to an appraisal.
+    ///
+    /// <para>Replaces a path that could never have run — see the note on
+    /// <c>CheckInService.AddAttachmentAsync</c>. This was the worst of the four: besides the
+    /// unset <c>UploadedById</c> (a required Employee FK), it set neither <c>EntityType</c> nor
+    /// <c>UploadDate</c>, so a row that somehow survived the FK would have sorted at
+    /// <c>0001-01-01</c> under the list read's own ordering.</para>
+    /// </summary>
+    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(
+        Guid appraisalId, Guid uploadedById, string fileName, long? fileSizeBytes, string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
-        var appraisalExists = await _appraisalRepository.ExistsAsync(a => a.TenantId == GetTenantId() && a.Id == appraisalId);
-        
+        var tenantId = GetTenantId();
+        var appraisalExists = await _appraisalRepository.ExistsAsync(a => a.TenantId == tenantId && a.Id == appraisalId);
+
         if (!appraisalExists)
             throw new ArgumentException("Performance appraisal not found");
 
-        var entity = createDto.ToEntity();
-        entity.TenantId = GetTenantId();
-        entity.PerformanceAppraisalId = appraisalId;
+        var entity = new AppraisalAttachment
+        {
+            TenantId               = tenantId,
+            PerformanceAppraisalId = appraisalId,
+            EntityType             = AppraisalAttachmentEntityType.PerformanceAppraisal,
+            FileName               = fileName,
+            FilePath               = string.Empty,
+            FileSizeBytes          = fileSizeBytes,
+            Description            = description,
+            UploadDate             = DateTime.UtcNow,
+            UploadedById           = uploadedById,
+            FileUploadRecordId     = fileUploadRecordId,
+            DocumentRecordId       = documentRecordId,
+            DocumentVersionId      = documentVersionId,
+        };
 
         await _appraisalAttachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        var saved = await _appraisalAttachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == tenantId, cancellationToken);
+
         _logger.LogInformation("Attachment added successfully: {Id}", entity.Id);
 
-        return entity.ToDto();
+        return saved!.ToDto();
+    }
+
+    public async Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _appraisalAttachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(
+                a => a.Id == attachmentId && a.PerformanceAppraisalId == appraisalId && a.TenantId == tenantId,
+                cancellationToken);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid appraisalId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        // The mapper reads UploadedBy?.FullName, so without this Include every row's uploader
+        // column came back blank — the recurring missing-Include shape.
         var entities = await _appraisalAttachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
             .Where(a => a.TenantId == tenantId && a.PerformanceAppraisalId == appraisalId)
-                                                .OrderByDescending(a => a.UploadDate)
-                                                .ToListAsync(cancellationToken);
+            .OrderByDescending(a => a.UploadDate)
+            .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
+    }
+
+    public async Task<bool> DeleteAttachmentAsync(Guid appraisalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _appraisalAttachmentRepository.GetQueryable()
+            .FirstOrDefaultAsync(
+                a => a.Id == attachmentId && a.PerformanceAppraisalId == appraisalId && a.TenantId == tenantId,
+                cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException("Attachment not found.");
+
+        await _appraisalAttachmentRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     /// <summary>
@@ -2268,6 +2330,13 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
         // Get or create manager evaluator evaluation
         var managerEvaluation = appraisal.EvaluatorEvaluations.FirstOrDefault(e => e.EvaluatorRole == EvaluatorRole.Manager);
 
+        // Whether this record is new decides if it may be Updated later in the method. Calling
+        // UpdateAsync on something added in the same unit of work flips EF's tracking from Added to
+        // Modified, so it emits an UPDATE for a row that does not exist yet and the save dies with
+        // "expected to affect 1 row(s), but actually affected 0" — which reads like a concurrency
+        // problem rather than the create problem it is.
+        var managerEvaluationIsNew = managerEvaluation == null;
+
         if (managerEvaluation == null)
         {
             managerEvaluation = new EvaluatorEvaluation
@@ -2422,7 +2491,11 @@ public class PerformanceAppraisalService : IPerformanceAppraisalService
             }
         }
 
-        await _evaluatorEvaluationRepository.UpdateAsync(managerEvaluation);
+        // Only when it already existed — see managerEvaluationIsNew above. A record added in this
+        // same unit of work is already pending insert; marking it Modified turns that insert into
+        // an UPDATE of a row that is not there.
+        if (!managerEvaluationIsNew)
+            await _evaluatorEvaluationRepository.UpdateAsync(managerEvaluation);
 
         // Upsert goal appraisal assessments (manager-side fields)
         if (saveDto.GoalAssessments != null && saveDto.GoalAssessments.Count > 0)

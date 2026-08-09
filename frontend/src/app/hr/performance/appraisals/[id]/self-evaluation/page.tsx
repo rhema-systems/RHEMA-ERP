@@ -24,6 +24,11 @@ import {
   EvaluationScoreForm,
   type ScoreValues,
 } from '@/components/hr/performance/EvaluationScoreForm';
+import {
+  GoalAssessmentPanel,
+  toGoalAssessments,
+  type GoalAssessmentValues,
+} from '@/components/hr/performance/GoalAssessmentPanel';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { performanceAppraisalService } from '@/services/hr/appraisal-run.service';
@@ -49,6 +54,7 @@ export default function SelfEvaluationPage() {
 
   const [values, setValues] = useState<ScoreValues>({});
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [goalValues, setGoalValues] = useState<GoalAssessmentValues>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const { data: context, isLoading } = useQuery({
@@ -113,7 +119,10 @@ export default function SelfEvaluationPage() {
         itemScores: toItemScores(values),
         isDraft,
         customQuestionResponses,
-        goalAssessments: [],
+        // The year-end verdict on the goals the cycle spent the year cascading. This was posted
+        // as an empty array, so the goals were never scored by the appraisal that exists to score
+        // them; the backend has always accepted them.
+        goalAssessments: toGoalAssessments(goalValues),
       });
     },
     onSuccess: (result, isDraft) => {
@@ -230,6 +239,14 @@ export default function SelfEvaluationPage() {
         onChange={(id, patch) =>
           setValues((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }))
         }
+      />
+
+      <GoalAssessmentPanel
+        appraisalId={appraisalId}
+        mode="self"
+        values={goalValues}
+        onChange={setGoalValues}
+        readOnly={readOnly}
       />
 
       {customQuestions.length > 0 && (

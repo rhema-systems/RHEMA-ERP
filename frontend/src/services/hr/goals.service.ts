@@ -1,5 +1,7 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
+import type { AppraisalAttachment } from '@/types/hr/calibration';
 import type {
   AppraisalCycleOption,
   CompanyGoal,
@@ -391,6 +393,41 @@ class UnitGoalService {
 
   getEmployeeGoalSummaries(id: string): Promise<UnitGoalEmployeeGoalSummary[]> {
     return apiService.get<UnitGoalEmployeeGoalSummary[]>(`${this.baseUrl}/${id}/employee-goals`);
+  }
+
+  // ── Attachments ────────────────────────────────────────────────────────────
+  //
+  // ⚠ Readable by anyone authenticated in the tenant, matching every other endpoint on this
+  // controller — a unit goal is a departmental target, not personal data. That is a weaker rule
+  // than the appraisal and check-in attachments next door, so do not attach anything sensitive.
+
+  getAttachments(goalId: string): Promise<AppraisalAttachment[]> {
+    return apiService.get<AppraisalAttachment[]>(`${this.baseUrl}/${goalId}/attachments`);
+  }
+
+  /** Goes through the controlled upload gate; throws an `HrDocumentUploadError` when refused. */
+  uploadAttachment(
+    goalId: string,
+    file: File,
+    description?: string | null,
+  ): Promise<AppraisalAttachment> {
+    return hrDocumentService.upload<AppraisalAttachment>(
+      `${this.baseUrl}/${goalId}/attachments`,
+      file,
+      { description },
+    );
+  }
+
+  /** Streams the file through the authorizing endpoint — stored paths are not URLs. */
+  downloadAttachment(goalId: string, attachment: AppraisalAttachment): Promise<void> {
+    return hrDocumentService.download(
+      `${this.baseUrl}/${goalId}/attachments/${attachment.id}/download`,
+      attachment.fileName,
+    );
+  }
+
+  deleteAttachment(goalId: string, attachmentId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${goalId}/attachments/${attachmentId}`);
   }
 
   create(data: CreateUnitGoal): Promise<UnitGoal> {

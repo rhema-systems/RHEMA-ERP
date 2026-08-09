@@ -37,6 +37,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Slider } from '@/components/ui/slider';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DevelopmentSkillSuggestions } from '@/components/hr/performance/DevelopmentSkillSuggestions';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
@@ -347,7 +348,13 @@ export default function DevelopmentPlanDetailPage() {
           <TabsTrigger value="overview">Notes</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="objectives" className="pt-4">
+        <TabsContent value="objectives" className="space-y-4 pt-4">
+          {/* What this year's goals say the employee needs to develop — the plan's raw material. */}
+          <DevelopmentSkillSuggestions
+            employeeId={data.employeeId}
+            cycleId={data.appraisalCycleId}
+          />
+
           <Card>
             <CardContent className="p-0">
               {objectives.isLoading ? (

@@ -44,6 +44,8 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
+import { CycleInterimReviewsPanel } from '@/components/hr/performance/CycleInterimReviewsPanel';
+import { CyclePhaseDatesDialog } from '@/components/hr/performance/CyclePhaseDatesDialog';
 import {
   appraisalCycleService,
   appraisalCycleTargetService,
@@ -194,6 +196,7 @@ export default function AppraisalCycleDetailPage() {
   const id = (params?.id as string) ?? '';
   const [action, setAction] = useState<null | 'open' | 'close' | 'generate' | 'remind'>(null);
   const [exclusionsFor, setExclusionsFor] = useState<AppraisalCycleTarget | null>(null);
+  const [phaseDatesOpen, setPhaseDatesOpen] = useState(false);
 
   const {
     data: cycle,
@@ -427,6 +430,7 @@ export default function AppraisalCycleDetailPage() {
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="coverage">Coverage</TabsTrigger>
           <TabsTrigger value="progress">Progress &amp; alerts</TabsTrigger>
+          <TabsTrigger value="interim">Interim reviews</TabsTrigger>
           <TabsTrigger value="calendar">Calendar</TabsTrigger>
         </TabsList>
 
@@ -463,12 +467,16 @@ export default function AppraisalCycleDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Phase dates</CardTitle>
-              <CardDescription>
-                A phase with no deadline never appears on the calendar or in reminders. Edit these
-                from the cycle list.
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-4 pb-2">
+              <div className="space-y-1.5">
+                <CardTitle className="text-base">Phase dates</CardTitle>
+                <CardDescription>
+                  A phase with no deadline never appears on the calendar or in reminders.
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setPhaseDatesOpen(true)}>
+                Edit dates
+              </Button>
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
               <InfoRow label="Goal setting opens" value={day(cycle.goalSettingOpenDate)} />
@@ -1128,6 +1136,11 @@ export default function AppraisalCycleDetailPage() {
           )}
         </TabsContent>
 
+        {/* ── Interim reviews ─────────────────────────────────────────────── */}
+        <TabsContent value="interim" className="pt-4">
+          <CycleInterimReviewsPanel cycleId={id} />
+        </TabsContent>
+
         {/* ── Calendar ────────────────────────────────────────────────────── */}
         <TabsContent value="calendar" className="pt-4">
           <Card>
@@ -1212,6 +1225,12 @@ export default function AppraisalCycleDetailPage() {
         onConfirm={async () => {
           await runAction.mutateAsync();
         }}
+      />
+
+      <CyclePhaseDatesDialog
+        cycle={cycle}
+        open={phaseDatesOpen}
+        onOpenChange={setPhaseDatesOpen}
       />
     </div>
   );

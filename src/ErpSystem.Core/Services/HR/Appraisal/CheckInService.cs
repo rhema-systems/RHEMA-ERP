@@ -326,22 +326,64 @@ public class CheckInService : ICheckInService
 
     // ─── Attachments ─────────────────────────────────────────────────────────
 
-    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid checkInId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Attaches a file to a check-in.
+    ///
+    /// <para>Replaces a path that could never have run: it mapped a
+    /// <c>CreateAppraisalAttachmentDto</c>, which carries no uploader, onto an entity whose
+    /// <c>UploadedById</c> is a required Employee FK, so every call died on a foreign-key violation
+    /// against <c>Guid.Empty</c>. It also set <c>PerformanceAppraisalId</c> from the payload while
+    /// setting <c>CheckInId</c> here, populating two of the polymorphic FKs documented as mutually
+    /// exclusive.</para>
+    /// </summary>
+    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(
+        Guid checkInId, Guid uploadedById, string fileName, long? fileSizeBytes, string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
         await GetOwnedCheckInAsync(checkInId, cancellationToken);
         var tenantId = GetTenantId();
 
-        var entity = dto.ToEntity();
-        entity.TenantId = tenantId;
-        entity.CheckInId = checkInId;
-        entity.EntityType = AppraisalAttachmentEntityType.CheckIn;
-        entity.UploadDate = DateTime.UtcNow;
+        var entity = new AppraisalAttachment
+        {
+            TenantId           = tenantId,
+            CheckInId          = checkInId,
+            EntityType         = AppraisalAttachmentEntityType.CheckIn,
+            FileName           = fileName,
+            // The file lives outside the web root and is reachable only through the authorizing
+            // download endpoint, so there is no servable path to record.
+            FilePath           = string.Empty,
+            FileSizeBytes      = fileSizeBytes,
+            Description        = description,
+            UploadDate         = DateTime.UtcNow,
+            UploadedById       = uploadedById,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
+        };
 
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // Re-read rather than mapping the tracked instance: UploadedBy was never loaded on it, so
+        // the create response carried a blank uploader name while a later GET showed it.
+        var saved = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == tenantId, cancellationToken);
+
         _logger.LogInformation("Attachment added to check-in {CheckInId}: {AttachmentId}", checkInId, entity.Id);
-        return entity.ToDto();
+        return saved!.ToDto();
+    }
+
+    public async Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid checkInId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.CheckInId == checkInId && a.TenantId == tenantId, cancellationToken);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid checkInId, CancellationToken cancellationToken = default)

@@ -992,6 +992,11 @@ public class AppraisalAttachmentDto : BaseDto
     public string FilePath { get; set; } = string.Empty;
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public Guid UploadedById { get; set; }
+    public string UploadedByName { get; set; } = string.Empty;
+    /// <summary>Set when the attachment hangs off an interim review event rather than the appraisal.</summary>
+    public Guid? ReviewEventId { get; set; }
 }
 
 public class CreateAppraisalAttachmentDto : CreateDtoBase
@@ -1428,7 +1433,10 @@ public class UpdateAppraisalCycleDto : UpdateDtoBase
     [Required]
     public Guid AppraisalSettingsId { get; set; }
 
-    public AppraisalCycleStatus Status { get; set; }
+    // Status is deliberately absent. It belongs to the open / close / reopen endpoints, which run
+    // the scope-overlap checks and stamp who acted; a plain edit carrying it could move a cycle
+    // between states with none of that. The Next.js form sent a hardcoded "Draft" on every save,
+    // so editing an Open cycle's phase dates silently reverted it to Draft.
 
     public DateOnly? GoalSettingOpenDate { get; set; }
     public DateOnly? GoalSettingDeadline { get; set; }
@@ -4345,8 +4353,9 @@ public class CreateGoalProgressEntryDto : CreateDtoBase
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
-    [Required]
-    public Guid RecordedById { get; set; }
+    // RecordedById is deliberately absent: the recorder is taken from the caller's token. Both
+    // write paths (EmployeeGoals and AppraisalReviewEvents) stamp it, so a progress entry cannot be
+    // attributed to someone who did not make it.
 
     public Guid? ReviewEventId { get; set; }
 }
@@ -4540,8 +4549,8 @@ public class CreatePerformanceJournalEntryDto : CreateDtoBase
     [Required]
     public Guid AppraisalCycleId { get; set; }
 
-    [Required]
-    public Guid OwnerId { get; set; }
+    // OwnerId is deliberately absent: the author is taken from the caller's token. See
+    // IPerformanceJournalService.CreateAsync.
 
     public Guid? SubjectEmployeeId { get; set; }
     public Guid? RelatedGoalId { get; set; }
@@ -4766,6 +4775,9 @@ public class AppraisalReviewEventDto : BaseDto
     public string? CycleCode { get; set; }
     public Guid PerformanceAppraisalId { get; set; }
     public string? AppraisalNumber { get; set; }
+    /// <summary>The appraisee. A manager's team list is unreadable without a name on each row.</summary>
+    public Guid EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
     public ReviewEventType Type { get; set; }
     public DateOnly EventDate { get; set; }
     public AppraisalReviewStatus Status { get; set; }
@@ -4799,21 +4811,17 @@ public class CreateAppraisalReviewEventDto : CreateDtoBase
 
 public class UpdateAppraisalReviewEventDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalCycleId { get; set; }
-
-    [Required]
-    public Guid PerformanceAppraisalId { get; set; }
+    // The event's cycle, appraisal, status and period score are not editable here — an event
+    // cannot be re-pointed at another employee's appraisal, and status/score belong to
+    // submit / complete / finalize. See UpdateEntity.
 
     public ReviewEventType Type { get; set; }
 
     [Required]
     public DateOnly EventDate { get; set; }
 
-    public AppraisalReviewStatus Status { get; set; }
     public bool IsLightTouch { get; set; }
     public bool IsFullAppraisal { get; set; }
-    public decimal? OverallPeriodScore { get; set; }
 
     [MaxLength(2000)]
     public string? AchievementsSummary { get; set; }
@@ -5120,6 +5128,32 @@ public class CalibrationRatingAdjustmentDto : BaseDto
 /// <para>The adjuster is taken from the caller's token, never the payload — this is a signed
 /// audit trail of who moved someone's rating.</para>
 /// </summary>
+/// <summary>
+/// One frozen criterion of an appraisal, as a calibration panel needs to see it: what it is worth,
+/// what the manager scored, and whatever the panel has already moved it to.
+/// </summary>
+/// <remarks>
+/// The criterion snapshot (<c>PerformanceAppraisalCriterionConfig</c>) was previously reachable
+/// only inside a manager's or HR's own evaluation context, which a panellist is not entitled to —
+/// so the calibration dialog could adjust the overall score and nothing finer. This is the light
+/// read that makes per-criterion adjustment possible.
+/// </remarks>
+public class CalibrationCriterionDto
+{
+    public Guid TemplateItemId { get; set; }
+    public string? TemplateItemName { get; set; }
+    public int WeightUsed { get; set; }
+
+    /// <summary>The manager's score for this criterion — what the panel is moving away from.</summary>
+    public decimal? ManagerScore { get; set; }
+    public decimal? ManagerActualValue { get; set; }
+
+    /// <summary>Set when this panel has already adjusted this criterion.</summary>
+    public Guid? AdjustmentId { get; set; }
+    public decimal? AdjustedScore { get; set; }
+    public string? Rationale { get; set; }
+}
+
 public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
 {
     [Required]

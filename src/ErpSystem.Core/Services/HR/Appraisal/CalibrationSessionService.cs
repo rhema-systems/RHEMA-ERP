@@ -22,6 +22,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     private readonly IGenericRepository<OrganizationUnit> _orgUnitRepository;
     private readonly IGenericRepository<CriterionScore> _criterionScoreRepository;
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
+    private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
     private readonly IPerformanceAppraisalService _appraisalService;
     private readonly IAppraisalNotificationService _notifications;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -38,6 +39,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         IGenericRepository<OrganizationUnit> orgUnitRepository,
         IGenericRepository<CriterionScore> criterionScoreRepository,
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
+        IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
         IPerformanceAppraisalService appraisalService,
         IAppraisalNotificationService notifications,
         ICurrentUserProvider currentUserProvider,
@@ -53,6 +55,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         _orgUnitRepository = orgUnitRepository;
         _criterionScoreRepository = criterionScoreRepository;
         _gradeDefinitionRepository = gradeDefinitionRepository;
+        _criterionConfigRepository = criterionConfigRepository;
         _appraisalService = appraisalService;
         _notifications = notifications;
         _currentUserProvider = currentUserProvider;
@@ -434,6 +437,67 @@ public class CalibrationSessionService : ICalibrationSessionService
             .OrderByDescending(a => a.AdjustmentDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
+    }
+
+    /// <summary>
+    /// The appraisal's frozen criteria as a calibration panel needs them: weight, the manager's
+    /// score, and whatever this panel has already moved each one to.
+    /// </summary>
+    /// <remarks>
+    /// The criterion snapshot was otherwise reachable only inside a manager's or HR's evaluation
+    /// context — which a panellist is not entitled to — so the calibration dialog could only move
+    /// the overall score. The API has always accepted per-criterion adjustments; nothing could
+    /// enumerate the criteria to offer them.
+    /// </remarks>
+    public async Task<IEnumerable<CalibrationCriterionDto>> GetAppraisalCriteriaAsync(
+        Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
+    {
+        var session = await GetOwnedSessionAsync(sessionId);
+        var tenantId = session.TenantId;
+
+        var configs = await _criterionConfigRepository
+            .GetQueryable(c => c.PerformanceAppraisalId == appraisalId && c.TenantId == tenantId)
+            .Include(c => c.TemplateItem).ThenInclude(i => i.Competency)
+            .Include(c => c.TemplateItem).ThenInclude(i => i.KpiDefinition)
+            .ToListAsync(cancellationToken);
+
+        // What the panel is moving away from. The manager's is the authoritative pre-calibration
+        // figure — see the PreCalibrationScore note on CommitAsync.
+        var managerScores = await _criterionScoreRepository
+            .GetQueryable(s => s.TenantId == tenantId
+                            && s.EvaluatorEvaluation.AppraisalId == appraisalId
+                            && s.EvaluatorEvaluation.EvaluatorRole == EvaluatorRole.Manager)
+            .ToListAsync(cancellationToken);
+
+        var adjustments = await _adjustmentRepository
+            .GetQueryable(a => a.CalibrationSessionId == sessionId
+                            && a.PerformanceAppraisalId == appraisalId
+                            && a.TemplateItemId != null
+                            && a.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        return configs
+            .Select(c =>
+            {
+                var score = managerScores.FirstOrDefault(s => s.TemplateItemId == c.TemplateItemId);
+                var adjustment = adjustments.FirstOrDefault(a => a.TemplateItemId == c.TemplateItemId);
+
+                return new CalibrationCriterionDto
+                {
+                    TemplateItemId = c.TemplateItemId,
+                    TemplateItemName = c.TemplateItem?.Competency?.CriteriaName
+                                       ?? c.TemplateItem?.KpiDefinition?.KpiName,
+                    WeightUsed = c.WeightUsed,
+                    ManagerScore = score?.NumericScore,
+                    ManagerActualValue = score?.ActualValue,
+                    AdjustmentId = adjustment?.Id,
+                    AdjustedScore = adjustment?.AdjustedScore,
+                    Rationale = adjustment?.Rationale,
+                };
+            })
+            .OrderByDescending(c => c.WeightUsed)
+            .ThenBy(c => c.TemplateItemName)
+            .ToList();
     }
 
     public async Task<CalibrationRatingAdjustmentDto> UpdateRatingAdjustmentAsync(
@@ -862,21 +926,58 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     // ─── Attachments ─────────────────────────────────────────────────────────
 
-    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid sessionId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Attaches a file to a calibration session.
+    ///
+    /// <para>Replaces a path that could never have run — see the note on
+    /// <c>CheckInService.AddAttachmentAsync</c>; <c>UploadedById</c> is a required Employee FK and
+    /// was never set, so every call died on a foreign-key violation.</para>
+    /// </summary>
+    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(
+        Guid sessionId, Guid uploadedById, string fileName, long? fileSizeBytes, string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
         var session = await GetOwnedSessionAsync(sessionId);
 
-        var entity = dto.ToEntity();
-        entity.CalibrationSessionId = sessionId;
-        entity.TenantId = session.TenantId;
-        entity.EntityType = AppraisalAttachmentEntityType.CalibrationSession;
-        entity.UploadDate = DateTime.UtcNow;
+        var entity = new AppraisalAttachment
+        {
+            TenantId              = session.TenantId,
+            CalibrationSessionId  = sessionId,
+            EntityType            = AppraisalAttachmentEntityType.CalibrationSession,
+            FileName              = fileName,
+            FilePath              = string.Empty,
+            FileSizeBytes         = fileSizeBytes,
+            Description           = description,
+            UploadDate            = DateTime.UtcNow,
+            UploadedById          = uploadedById,
+            FileUploadRecordId    = fileUploadRecordId,
+            DocumentRecordId      = documentRecordId,
+            DocumentVersionId     = documentVersionId,
+        };
 
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        var saved = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == session.TenantId, cancellationToken);
+
         _logger.LogInformation("Attachment added to calibration session {SessionId}: {AttachmentId}", sessionId, entity.Id);
-        return entity.ToDto();
+        return saved!.ToDto();
+    }
+
+    public async Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var session = await GetOwnedSessionAsync(sessionId);
+        var entity = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(
+                a => a.Id == attachmentId && a.CalibrationSessionId == sessionId && a.TenantId == session.TenantId,
+                cancellationToken);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid sessionId, CancellationToken cancellationToken = default)

@@ -18,6 +18,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
 import { unitGoalService } from '@/services/hr/goals.service';
 import { formatDate, formatPercent, humanizeEnum } from '@/lib/hr/attendance-format';
 import type { GoalPriority } from '@/types/hr/goals';
@@ -167,6 +168,17 @@ export default function UnitGoalDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <AttachmentsPanel
+        title="Supporting evidence"
+        note="Readable by anyone in the tenant — a unit goal is a departmental target, so do not attach anything personal."
+        queryKey={['hr', 'unit-goal-attachments', id]}
+        list={() => unitGoalService.getAttachments(id)}
+        upload={(file, description) => unitGoalService.uploadAttachment(id, file, description)}
+        download={(attachment) => unitGoalService.downloadAttachment(id, attachment)}
+        remove={(attachmentId) => unitGoalService.deleteAttachment(id, attachmentId)}
+        emptyDescription="Attach the plans, dashboards or papers that back this target up."
+      />
 
       <Card>
         <CardHeader className="pb-3">

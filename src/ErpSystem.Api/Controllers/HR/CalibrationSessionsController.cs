@@ -1,10 +1,15 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -28,15 +33,27 @@ public class CalibrationSessionsController : ControllerBase
 {
     private readonly ICalibrationSessionService _calibrationService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<CalibrationSessionsController> _logger;
 
     public CalibrationSessionsController(
         ICalibrationSessionService calibrationService,
         ICurrentUserService currentUserService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorageService,
+        ApplicationDbContext db,
         ILogger<CalibrationSessionsController> logger)
     {
         _calibrationService = calibrationService;
         _currentUserService = currentUserService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorageService = fileStorageService;
+        _db = db;
         _logger = logger;
     }
 
@@ -592,17 +609,80 @@ public class CalibrationSessionsController : ControllerBase
         }
     }
 
-    /// <summary>Add an attachment to a calibration session</summary>
+    /// <summary>
+    /// Attach a file to a calibration session, through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a JSON endpoint that took a caller-supplied <c>filePath</c> and could not have
+    /// worked in any case — see <c>CalibrationSessionService.AddAttachmentAsync</c>.
+    /// </remarks>
     [HttpPost("{sessionId:guid}/attachments")]
     [Authorize(Roles = HrRoles)]
     [ProducesResponseType(typeof(AppraisalAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AddAttachment(Guid sessionId, [FromBody] CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+    public Task<IActionResult> AddAttachment(
+        Guid sessionId, IFormFile file, [FromForm] string? description, CancellationToken cancellationToken = default)
+        => HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUserService, _logger, file,
+            sourceEntityType: "CalibrationSession",
+            sourceRecordId: sessionId,
+            sourceLabel: "Calibration session attachment",
+            documentType: "CalibrationSessionAttachment",
+            description: description,
+            persist: (uploadedById, document) => _calibrationService.AddAttachmentAsync(
+                sessionId, uploadedById, document.OriginalFileName, document.FileSize, description,
+                cancellationToken,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken);
+
+    /// <summary>
+    /// Streams a calibration attachment. Reads stay open to any authenticated user, matching the
+    /// rest of this controller — the managers on a panel need the papers that go with the grid.
+    /// </summary>
+    [HttpGet("{sessionId:guid}/attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid sessionId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AppraisalAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.CalibrationSessionId == sessionId && a.TenantId == tenantId && !a.IsDeleted,
+                cancellationToken);
+
+        if (attachment is null)
+            return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
+    }
+
+    /// <summary>
+    /// An appraisal's frozen criteria for the calibration panel: weight, the manager's score, and
+    /// whatever this session has already adjusted.
+    /// </summary>
+    /// <remarks>
+    /// A read, so it follows this controller's rule that panellists can see the grid. Without it
+    /// the calibration dialog could only move an appraisal's overall score — the API accepted
+    /// per-criterion adjustments but nothing could enumerate the criteria to offer them, because
+    /// the snapshot only came back inside a manager's or HR's own evaluation context.
+    /// </remarks>
+    [HttpGet("{sessionId:guid}/appraisals/{appraisalId:guid}/criteria")]
+    [ProducesResponseType(typeof(IEnumerable<CalibrationCriterionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetAppraisalCriteria(Guid sessionId, Guid appraisalId, CancellationToken cancellationToken = default)
     {
         try
         {
-            var result = await _calibrationService.AddAttachmentAsync(sessionId, dto, cancellationToken);
-            return StatusCode(201, result);
+            return Ok(await _calibrationService.GetAppraisalCriteriaAsync(sessionId, appraisalId, cancellationToken));
         }
         catch (ArgumentException ex)
         {
@@ -610,8 +690,8 @@ public class CalibrationSessionsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error adding attachment to calibration session {SessionId}", sessionId);
-            return StatusCode(500, "An error occurred while adding the attachment");
+            _logger.LogError(ex, "Error retrieving criteria for appraisal {AppraisalId} in session {SessionId}", appraisalId, sessionId);
+            return StatusCode(500, "An error occurred while retrieving the appraisal's criteria");
         }
     }
 

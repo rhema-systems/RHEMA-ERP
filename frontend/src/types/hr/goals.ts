@@ -421,6 +421,26 @@ export interface EmployeeGoal extends AuditFields {
   managerFeedback?: string | null;
   isLocked: boolean;
   lockedDate?: string | null;
+
+  /**
+   * Year-end assessment of this goal, scoped to one appraisal.
+   *
+   * ⚠ Only populated by `getByAppraisal` — the by-employee and paged reads leave these null,
+   * because an assessment belongs to an appraisal rather than to the goal. Both sides are stored
+   * separately and on purpose: the point of the year-end conversation is comparing what the
+   * employee claimed with what the manager concluded, so neither overwrites the other.
+   */
+  selfFinalProgressPercent?: number | null;
+  selfFinalStatus?: GoalProgressStatus | null;
+  selfFinalActualValue?: number | null;
+  selfAssessmentNotes?: string | null;
+  selfEvidenceLinks?: string | null;
+
+  managerFinalProgressPercent?: number | null;
+  managerFinalStatus?: GoalProgressStatus | null;
+  managerFinalActualValue?: number | null;
+  managerAssessmentNotes?: string | null;
+  managerEvidenceLinks?: string | null;
 }
 
 /**
@@ -490,6 +510,11 @@ export interface GoalProgressEntry extends AuditFields {
   reviewEventId?: string | null;
 }
 
+/**
+ * No `recordedById` — the recorder is taken from the caller's token on every write path
+ * (`EmployeeGoals` and `AppraisalReviewEvents`). It used to be a required field on the payload,
+ * which meant a progress claim could be attributed to someone who never made it.
+ */
 export interface CreateGoalProgressEntry {
   employeeGoalId: string;
   progressPercent?: number | null;
@@ -497,11 +522,10 @@ export interface CreateGoalProgressEntry {
   status: GoalProgressStatus;
   challenges?: string | null;
   notes?: string | null;
-  recordedById: string;
   reviewEventId?: string | null;
 }
 
-export type UpdateGoalProgressEntry = Omit<CreateGoalProgressEntry, 'recordedById'> & {
+export type UpdateGoalProgressEntry = CreateGoalProgressEntry & {
   id: string;
 };
 

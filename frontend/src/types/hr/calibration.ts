@@ -175,6 +175,26 @@ export interface CalibrationApplyResult {
   appraisalsCalibrated: number;
 }
 
+/**
+ * One frozen criterion of an appraisal, as the panel sees it.
+ *
+ * The criterion snapshot used to be reachable only inside a manager's or HR's own evaluation
+ * context — which a panellist is not — so the calibration dialog could adjust the overall score
+ * and nothing finer, even though the API accepted per-criterion adjustments all along.
+ */
+export interface CalibrationCriterion {
+  templateItemId: string;
+  templateItemName?: string | null;
+  weightUsed: number;
+  /** What the manager scored — the figure the panel is moving away from. */
+  managerScore?: number | null;
+  managerActualValue?: number | null;
+  /** Present when this session has already adjusted this criterion. */
+  adjustmentId?: string | null;
+  adjustedScore?: number | null;
+  rationale?: string | null;
+}
+
 // ── Attachments ──────────────────────────────────────────────────────────────────
 
 export interface AppraisalAttachment extends AuditFields {
@@ -184,15 +204,19 @@ export interface AppraisalAttachment extends AuditFields {
   filePath: string;
   description?: string | null;
   uploadDate: string;
+  fileSizeBytes?: number | null;
+  uploadedById: string;
+  uploadedByName: string;
+  /** Set when the attachment hangs off an interim review event rather than the appraisal itself. */
+  reviewEventId?: string | null;
 }
 
 /**
- * ⚠ `appraisalId` is required by the DTO but ignored for a calibration attachment — the service
- * overwrites the link with the session id and stamps the entity type. Send an empty GUID.
+ * ⚠ **Gone from every performance attachment path (2026-08-08).** Attachments are now uploaded as
+ * multipart through the controlled gate — scan, DMS registration, an authorizing download endpoint —
+ * so there is no caller-supplied `filePath` any more. The JSON shape this type described could
+ * never have worked: the attachment row's `uploadedById` is a required employee FK the payload had
+ * no field for, so every one of those endpoints failed on a foreign-key violation the first time it
+ * ran. Use each service's `uploadAttachment(parentId, file, description)`.
  */
-export interface CreateAppraisalAttachment {
-  appraisalId: string;
-  fileName: string;
-  filePath: string;
-  description?: string | null;
-}
+export type CreateAppraisalAttachment = never;

@@ -41,7 +41,7 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime } from '@/lib/hr/attendance-format';
 import { calibrationSessionService } from '@/services/hr/calibration.service';
-import type { CalibrationMatrixRow } from '@/types/hr/calibration';
+import type { CalibrationCriterion, CalibrationMatrixRow } from '@/types/hr/calibration';
 
 /**
  * One calibration session: the grid, the panel, and the decisions it took.
@@ -55,11 +55,11 @@ import type { CalibrationMatrixRow } from '@/types/hr/calibration';
  * ⚠ Adjustments are only accepted while the session is open. Once it is completed the grid is
  * read-only, and the only remaining action is to commit it.
  *
- * **Overall-score adjustments only, from here.** The API also accepts per-criterion adjustments,
- * and any that exist are shown, but there is no light endpoint that enumerates an appraisal's
- * frozen criteria for a panel to pick from — the criterion list only comes back inside the
- * manager's or HR's own evaluation context. Restating the final number is what a calibration
- * panel does in practice.
+ * **The overall score is the headline; individual criteria are behind a disclosure.** Restating the
+ * final number is what a panel does in practice, so that is the default action. Per-criterion
+ * adjustment is available underneath for the cases where the disagreement is about one specific
+ * thing — each criterion is its own adjustment record, and the rationale is shared because it is
+ * one panel decision.
  */
 export default function CalibrationSessionDetailPage() {
   const params = useParams<{ id: string }>();
@@ -68,6 +68,7 @@ export default function CalibrationSessionDetailPage() {
   const { toast } = useToast();
 
   const [adjustRow, setAdjustRow] = useState<CalibrationMatrixRow | null>(null);
+  const [criterionScores, setCriterionScores] = useState<Record<string, string>>({});
   const [adjustScore, setAdjustScore] = useState('');
   const [adjustRationale, setAdjustRationale] = useState('');
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -93,6 +94,15 @@ export default function CalibrationSessionDetailPage() {
     queryKey: ['hr', 'calibration-participants', sessionId],
     queryFn: () => calibrationSessionService.getParticipants(sessionId),
     enabled: !!sessionId,
+  });
+
+  // Only fetched once a row is open for calibration — the panel does not need every appraisal's
+  // criteria to read the grid.
+  const criteria = useQuery({
+    queryKey: ['hr', 'calibration-criteria', sessionId, adjustRow?.appraisalId],
+    queryFn: () =>
+      calibrationSessionService.getAppraisalCriteria(sessionId, adjustRow?.appraisalId ?? ''),
+    enabled: !!adjustRow?.appraisalId,
   });
 
   const adjustments = useQuery({
@@ -189,6 +199,41 @@ export default function CalibrationSessionDetailPage() {
       refresh();
     },
     onError: fail('Could not record the adjustment'),
+  });
+
+  /**
+   * One criterion's adjustment. Separate from the overall-score mutation because they are separate
+   * records server-side: `templateItemId` null is the overall restatement, non-null is the
+   * criterion. The rationale is shared — it is the same panel decision.
+   */
+  const saveCriterionAdjustment = useMutation({
+    mutationFn: ({
+      row,
+      criterion,
+    }: {
+      row: CalibrationMatrixRow;
+      criterion: CalibrationCriterion;
+    }) => {
+      const payload = {
+        performanceAppraisalId: row.appraisalId,
+        templateItemId: criterion.templateItemId,
+        originalScore: criterion.managerScore ?? null,
+        adjustedScore: Number(criterionScores[criterion.templateItemId]),
+        rationale: adjustRationale.trim() || null,
+      };
+      return criterion.adjustmentId
+        ? calibrationSessionService.updateAdjustment(sessionId, criterion.adjustmentId, {
+            ...payload,
+            id: criterion.adjustmentId,
+          })
+        : calibrationSessionService.addAdjustment(sessionId, payload);
+    },
+    onSuccess: () => {
+      toast({ title: 'Criterion adjustment recorded' });
+      criteria.refetch();
+      refresh();
+    },
+    onError: fail('Could not record the criterion adjustment'),
   });
 
   const clearAdjustment = useMutation({
@@ -706,6 +751,62 @@ export default function CalibrationSessionDetailPage() {
                 placeholder="Why the panel moved this rating. Kept as the audit trail."
               />
             </div>
+
+            {/* Per-criterion detail. Optional: a panel that only restates the final number never
+                opens this, and each criterion is its own adjustment record. */}
+            {(criteria.data ?? []).length > 0 && (
+              <details className="rounded-lg border p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Adjust individual criteria ({criteria.data?.length})
+                </summary>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Each criterion is recorded separately from the overall score above. Leave one
+                  blank to leave it alone.
+                </p>
+                <div className="mt-3 space-y-3">
+                  {(criteria.data ?? []).map((c) => (
+                    <div key={c.templateItemId} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
+                      <div className="space-y-1">
+                        <p className="text-sm">{c.templateItemName ?? 'Unnamed criterion'}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Weight {c.weightUsed} · manager scored{' '}
+                          <span className="tabular-nums">{score(c.managerScore)}</span>
+                        </p>
+                      </div>
+                      <Input
+                        className="w-24"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        aria-label={`Calibrated score for ${c.templateItemName ?? 'criterion'}`}
+                        value={criterionScores[c.templateItemId] ?? ''}
+                        onChange={(e) =>
+                          setCriterionScores((prev) => ({
+                            ...prev,
+                            [c.templateItemId]: e.target.value,
+                          }))
+                        }
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          !isValidScore(criterionScores[c.templateItemId] ?? '') ||
+                          saveCriterionAdjustment.isPending
+                        }
+                        onClick={() =>
+                          adjustRow &&
+                          saveCriterionAdjustment.mutate({ row: adjustRow, criterion: c })
+                        }
+                      >
+                        {c.adjustmentId ? 'Update' : 'Record'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
 
           <DialogFooter>

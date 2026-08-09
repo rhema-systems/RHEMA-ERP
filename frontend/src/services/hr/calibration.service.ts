@@ -1,14 +1,15 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   AppraisalAttachment,
   CalibrationApplyResult,
+  CalibrationCriterion,
   CalibrationMatrix,
   CalibrationParticipant,
   CalibrationRatingAdjustment,
   CalibrationSession,
   CompleteCalibrationSession,
-  CreateAppraisalAttachment,
   CreateCalibrationParticipant,
   CreateCalibrationRatingAdjustment,
   CreateCalibrationSession,
@@ -168,12 +169,45 @@ class CalibrationSessionService {
     return apiService.get<CalibrationMatrix>(`${this.baseUrl}/${sessionId}/matrix`);
   }
 
+  /**
+   * The appraisal's frozen criteria with the manager's score and any adjustment already made —
+   * what a per-criterion calibration needs. A read, so panellists get it, not just HR.
+   */
+  getAppraisalCriteria(sessionId: string, appraisalId: string): Promise<CalibrationCriterion[]> {
+    return apiService.get<CalibrationCriterion[]>(
+      `${this.baseUrl}/${sessionId}/appraisals/${appraisalId}/criteria`,
+    );
+  }
+
   getAttachments(sessionId: string): Promise<AppraisalAttachment[]> {
     return apiService.get<AppraisalAttachment[]>(`${this.baseUrl}/${sessionId}/attachments`);
   }
 
-  addAttachment(sessionId: string, data: CreateAppraisalAttachment): Promise<AppraisalAttachment> {
-    return apiService.post<AppraisalAttachment>(`${this.baseUrl}/${sessionId}/attachments`, data);
+  /**
+   * Goes through the controlled upload gate (scan + DMS registration); throws an
+   * `HrDocumentUploadError` when refused. HR only.
+   *
+   * This was a JSON post carrying a caller-invented `filePath`, which could never have worked —
+   * the attachment row's uploader is a required FK the payload had no way to supply.
+   */
+  uploadAttachment(
+    sessionId: string,
+    file: File,
+    description?: string | null,
+  ): Promise<AppraisalAttachment> {
+    return hrDocumentService.upload<AppraisalAttachment>(
+      `${this.baseUrl}/${sessionId}/attachments`,
+      file,
+      { description },
+    );
+  }
+
+  /** Streams the file through the authorizing endpoint — stored paths are not URLs. */
+  downloadAttachment(sessionId: string, attachment: AppraisalAttachment): Promise<void> {
+    return hrDocumentService.download(
+      `${this.baseUrl}/${sessionId}/attachments/${attachment.id}/download`,
+      attachment.fileName,
+    );
   }
 
   removeAttachment(sessionId: string, attachmentId: string): Promise<void> {

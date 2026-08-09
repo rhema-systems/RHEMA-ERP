@@ -32,6 +32,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { CheckInObjectivesPanel } from '@/components/hr/performance/CheckInObjectivesPanel';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
 import { checkInService } from '@/services/hr/appraisal-run.service';
@@ -232,6 +233,12 @@ export default function CheckInDetailPage() {
           />
         </CardContent>
       </Card>
+
+      <CheckInObjectivesPanel
+        checkInId={checkInId}
+        cycleId={checkIn.appraisalCycleId}
+        readOnly={held}
+      />
 
       {checkIn.agenda && (
         <Card>

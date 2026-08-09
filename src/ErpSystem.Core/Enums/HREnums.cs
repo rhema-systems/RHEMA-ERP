@@ -1364,7 +1364,10 @@ public enum AppraisalAttachmentEntityType
 
     KpiEvaluation = 6,
 
-    CalibrationSession = 7
+    CalibrationSession = 7,
+
+    /// <summary>Evidence attached to an interim (quarterly/mid-year) review event.</summary>
+    ReviewEvent = 8
 }
 
 public enum EvaluatorRole
