@@ -4503,11 +4503,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("ReportSchedules");
             entity.HasOne(s => s.Report).WithMany(r => r.Schedules).HasForeignKey(s => s.ReportId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(s => s.ReportTemplate).WithMany().HasForeignKey(s => s.ReportTemplateId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(s => s.RunAsUser).WithMany().HasForeignKey(s => s.RunAsUserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(s => s.PausedBy).WithMany().HasForeignKey(s => s.PausedById).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(s => s.RowVersion).IsRowVersion();
             entity.HasIndex(s => s.ReportId);
+            entity.HasIndex(s => s.ReportTemplateId);
             entity.HasIndex(s => s.IsActive);
             entity.HasIndex(s => s.NextExecutionDate);
             entity.HasIndex(s => s.Frequency);
+            // The production worker scans by tenant/state/due date; this composite
+            // index avoids a table scan as schedules accumulate across tenants.
+            entity.HasIndex(s => new { s.IsActive, s.Status, s.NextExecutionDate });
         });
 
         // Configure ReportTemplate entity
@@ -4532,11 +4540,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("ReportExecutions");
             entity.HasOne(e => e.Report).WithMany(r => r.Executions).HasForeignKey(e => e.ReportId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportSchedule).WithMany().HasForeignKey(e => e.ReportScheduleId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportTemplate).WithMany().HasForeignKey(e => e.ReportTemplateId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportExport).WithMany().HasForeignKey(e => e.ReportExportId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(e => e.RowVersion).IsRowVersion();
             entity.HasIndex(e => e.ReportId);
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExecutedAt);
             entity.HasIndex(e => e.Status);
+            // This filtered key is the final idempotency gate when multiple API
+            // instances observe the same due schedule at the same time.
+            entity.HasIndex(e => new { e.TenantId, e.ReportScheduleId, e.ScheduledFor })
+                .IsUnique()
+                .HasFilter("[ReportScheduleId] IS NOT NULL AND [ScheduledFor] IS NOT NULL AND [IsDeleted] = 0");
         });
 
         // Configure UserReportFavorite entity
@@ -4562,6 +4579,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExportedAt);
             entity.HasIndex(e => e.Format);
+            entity.HasIndex(e => new { e.TenantId, e.Status, e.ExportedAt });
         });
 
         // Configure ReportRoleAssignment entity

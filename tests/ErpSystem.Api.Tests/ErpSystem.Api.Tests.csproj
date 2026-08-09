@@ -179,6 +179,7 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutExecutionServiceTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
+    <Compile Include="Services\Finance\FinanceReportAutomationTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />

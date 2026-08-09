@@ -801,6 +801,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBankingSettlementService, ErpSystem.Api.Services.Finance.Cash.BankingSettlementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICashierTillService, ErpSystem.Api.Services.Finance.Cash.CashierTillService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportExportService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportExportService>();
+            // FR-RP-010 deliberately extends the shared report/template model.
+            // The processor is scoped because each scheduler pass owns one EF
+            // unit of work; the hosted service below creates a fresh scope.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReportAutomationService, ErpSystem.Api.Services.Finance.Reporting.FinanceReportAutomationService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.Reporting.FinanceReportAutomationProcessor>();
             services.AddScoped<ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ICurrencyRevaluationService>(sp =>
                 sp.GetRequiredService<ErpSystem.Api.Services.Finance.MultiCurrency.CurrencyRevaluationService>());
@@ -1173,6 +1178,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // signed-in browser. Generated items remain Pending Approval, so
             // automation cannot bypass Finance maker-checker controls.
             services.AddHostedService<ErpSystem.Api.Services.Finance.GL.RecurringJournalBackgroundService>();
+
+            // Generates private, retained Finance report artifacts even when no
+            // user has the report workspace open.
+            services.AddHostedService<ErpSystem.Api.Services.Finance.Reporting.FinanceReportAutomationBackgroundService>();
 
             // Tenant data retention (audit/security logs, notifications, EHC audit events)
             services.AddHostedService<ErpSystem.Api.Services.DataRetentionBackgroundService>();

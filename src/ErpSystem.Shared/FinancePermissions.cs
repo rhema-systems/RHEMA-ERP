@@ -110,6 +110,9 @@ public static class FinancePermissions
     public const string ExportFinanceReports = "Finance.Reports.Export";
     public const string ManageFinancialStatementLayouts = "Finance.Reports.Layouts.Manage";
     public const string PublishFinancialStatementLayouts = "Finance.Reports.Layouts.Publish";
+    public const string ViewReportSchedules = "Finance.Reports.Schedules.View";
+    public const string ManageReportSchedules = "Finance.Reports.Schedules.Manage";
+    public const string RunReportSchedules = "Finance.Reports.Schedules.Run";
 
     public const string OpenAccountingPeriods = "Finance.PeriodOpen";
     public const string CloseAccountingPeriods = "Finance.PeriodClose";
@@ -223,6 +226,9 @@ public static class FinancePermissions
         new(ExportFinanceReports, "Export/Print Finance Reports", "Export or print finance reports and finance-controlled documents.", CategoryReporting),
         new(ManageFinancialStatementLayouts, "Manage Financial Statement Layouts", "Create and maintain draft financial statement layouts and mappings.", CategoryReporting),
         new(PublishFinancialStatementLayouts, "Publish Financial Statement Layouts", "Validate and publish versioned financial statement layouts for production reporting.", CategoryReporting),
+        new(ViewReportSchedules, "View Finance Report Schedules", "View Finance report schedules, delivery history, and retained artifacts.", CategoryReporting),
+        new(ManageReportSchedules, "Manage Finance Report Schedules", "Create, update, pause, and resume controlled Finance report schedules.", CategoryReporting),
+        new(RunReportSchedules, "Run Finance Report Schedules", "Run due or on-demand Finance report schedule occurrences.", CategoryReporting),
 
         new(OpenAccountingPeriods, "Open Accounting Periods", "Open future fiscal periods for controlled transaction posting.", CategoryPeriodClose),
         new(CloseAccountingPeriods, "Close Accounting Periods", "Close fiscal periods after month-end checks.", CategoryPeriodClose),

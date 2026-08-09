@@ -30,6 +30,14 @@ public static class FinanceAuditEvents
     public const string RecurringJournalOccurrencePosted = "Finance.RecurringJournal.OccurrencePosted";
     public const string RecurringJournalGenerationFailed = "Finance.RecurringJournal.GenerationFailed";
 
+    public const string ReportScheduleCreated = "Finance.ReportSchedule.Created";
+    public const string ReportScheduleUpdated = "Finance.ReportSchedule.Updated";
+    public const string ReportSchedulePaused = "Finance.ReportSchedule.Paused";
+    public const string ReportScheduleResumed = "Finance.ReportSchedule.Resumed";
+    public const string ReportScheduleExecuted = "Finance.ReportSchedule.Executed";
+    public const string ReportScheduleExecutionFailed = "Finance.ReportSchedule.ExecutionFailed";
+    public const string ReportScheduleArtifactDownloaded = "Finance.ReportSchedule.ArtifactDownloaded";
+
     public const string PostingEventCreated = "Finance.PostingEvent.Created";
     public const string DuplicatePostingAttempt = "Finance.PostingEvent.DuplicateAttempt";
     public const string PostingFailed = "Finance.PostingEvent.Failed";

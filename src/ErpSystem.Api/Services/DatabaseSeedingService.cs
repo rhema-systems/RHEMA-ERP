@@ -7567,6 +7567,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Banking.Deposits.Submit",
                     "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
+                    "Finance.Reports.Schedules.View",
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Request",
                     "Finance.Workflow.Submit",
@@ -7612,6 +7613,11 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodReopen",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export",
+                    // Finance Managers own the operational schedule lifecycle;
+                    // pinned templates and immutable executions preserve control.
+                    "Finance.Reports.Schedules.View",
+                    "Finance.Reports.Schedules.Manage",
+                    "Finance.Reports.Schedules.Run",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
@@ -7651,7 +7657,10 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
-                    "Finance.Reports.Run"
+                    "Finance.Reports.Run",
+                    "Finance.Reports.Schedules.View",
+                    "Finance.Reports.Schedules.Manage",
+                    "Finance.Reports.Schedules.Run"
                 },
                 ["Managing Director"] = new[]
                 {
@@ -7664,7 +7673,8 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Reports.Run",
-                    "Finance.Reports.Export"
+                    "Finance.Reports.Export",
+                    "Finance.Reports.Schedules.View"
                 },
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]

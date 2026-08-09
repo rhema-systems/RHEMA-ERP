@@ -132160,6 +132160,12 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -132194,22 +132200,51 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Parameters")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("ReportExportId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("ReportId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReportScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReportTemplateId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ResultMetadata")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("ScheduledFor")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<int?>("TemplateVersion")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("TotalRows")
                         .HasColumnType("int");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -132224,13 +132259,21 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ExecutedAt");
 
+                    b.HasIndex("ReportExportId");
+
                     b.HasIndex("ReportId");
+
+                    b.HasIndex("ReportScheduleId");
+
+                    b.HasIndex("ReportTemplateId");
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "ReportScheduleId", "ScheduledFor")
+                        .IsUnique()
+                        .HasFilter("[ReportScheduleId] IS NOT NULL AND [ScheduledFor] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.ToTable("ReportExecutions", (string)null);
                 });
@@ -132240,6 +132283,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -132288,10 +132335,21 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("ReportId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("RetainUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Sha256Checksum")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("StoragePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -132313,9 +132371,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ReportId");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "Status", "ExportedAt");
 
                     b.ToTable("ReportExports", (string)null);
                 });
@@ -132406,6 +132464,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("ConsecutiveFailureCount")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -132448,11 +132509,18 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<DateTime?>("LastExecutionDate")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("MaximumRetryAttempts")
+                        .HasColumnType("int");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -132465,7 +132533,28 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Parameters")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("PausedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PausedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RecipientUserIds")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<Guid>("ReportId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReportTemplateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("RunAsUserId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("StartDate")
@@ -132496,9 +132585,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("NextExecutionDate");
 
+                    b.HasIndex("PausedById");
+
                     b.HasIndex("ReportId");
 
+                    b.HasIndex("ReportTemplateId");
+
+                    b.HasIndex("RunAsUserId");
+
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("IsActive", "Status", "NextExecutionDate");
 
                     b.ToTable("ReportSchedules", (string)null);
                 });
@@ -177652,11 +177749,26 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.ReportExecution", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.ReportExport", "ReportExport")
+                        .WithMany()
+                        .HasForeignKey("ReportExportId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("ErpSystem.Core.Entities.Report", "Report")
                         .WithMany("Executions")
                         .HasForeignKey("ReportId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.ReportSchedule", "ReportSchedule")
+                        .WithMany()
+                        .HasForeignKey("ReportScheduleId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.ReportTemplate", "ReportTemplate")
+                        .WithMany()
+                        .HasForeignKey("ReportTemplateId")
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -177671,6 +177783,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Report");
+
+                    b.Navigation("ReportExport");
+
+                    b.Navigation("ReportSchedule");
+
+                    b.Navigation("ReportTemplate");
 
                     b.Navigation("Tenant");
 
@@ -177733,11 +177851,26 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.ReportSchedule", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "PausedBy")
+                        .WithMany()
+                        .HasForeignKey("PausedById")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("ErpSystem.Core.Entities.Report", "Report")
                         .WithMany("Schedules")
                         .HasForeignKey("ReportId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.ReportTemplate", "ReportTemplate")
+                        .WithMany()
+                        .HasForeignKey("ReportTemplateId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "RunAsUser")
+                        .WithMany()
+                        .HasForeignKey("RunAsUserId")
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -177745,7 +177878,13 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("PausedBy");
+
                     b.Navigation("Report");
+
+                    b.Navigation("ReportTemplate");
+
+                    b.Navigation("RunAsUser");
 
                     b.Navigation("Tenant");
                 });
