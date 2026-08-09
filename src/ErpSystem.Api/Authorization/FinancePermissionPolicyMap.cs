@@ -131,6 +131,7 @@ public static class FinancePermissionPolicyMap
             "FinanceApprovals" => FinanceApprovalPolicy(action),
             "Finance" => FinanceControllerPolicy(action),
             "FinanceReportExports" => One(FinancePermissions.ExportFinanceReports),
+            "FinanceAdHocReports" => FinanceAdHocReportPolicy(action),
             "FinancialStatementLayouts" => FinancialStatementLayoutPolicy(action),
             "FinancePurchaseOrder" => FinancePurchaseOrderPolicy(action),
             "FinancePurchaseOrderReceipt" => FinancePurchaseOrderReceiptPolicy(action),
@@ -176,6 +177,15 @@ public static class FinancePermissionPolicyMap
 
         return One(FinancePermissions.ManageChartOfAccounts);
     }
+
+    private static IReadOnlyList<string> FinanceAdHocReportPolicy(string action) => action switch
+    {
+        "Execute" => One(FinancePermissions.RunFinanceReports),
+        "Export" => One(FinancePermissions.ExportFinanceReports),
+        // Reading the builder catalogue exposes its curated Finance field dictionary and saved
+        // definitions, so it deliberately requires builder authority rather than generic view.
+        _ => One(FinancePermissions.BuildAdHocReports)
+    };
 
     private static IReadOnlyList<string> AllocationPolicy(string action)
         => string.Equals(action, "RunAllocation", StringComparison.OrdinalIgnoreCase)

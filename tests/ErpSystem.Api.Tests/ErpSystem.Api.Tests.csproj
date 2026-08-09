@@ -180,6 +180,7 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutExecutionServiceTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
+    <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
     <Compile Include="Services\Finance\AllocationRunBatchServiceTests.cs" />

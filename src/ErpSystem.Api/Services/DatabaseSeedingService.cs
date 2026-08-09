@@ -7567,6 +7567,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Banking.Deposits.Submit",
                     "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
+                    "Finance.Reports.AdHoc.Build",
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Request",
                     "Finance.Workflow.Submit",
@@ -7612,6 +7613,8 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodReopen",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export",
+                    "Finance.Reports.AdHoc.Build",
+                    "Finance.Reports.AdHoc.Share",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
@@ -7651,7 +7654,9 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
-                    "Finance.Reports.Run"
+                    "Finance.Reports.Run",
+                    "Finance.Reports.AdHoc.Build",
+                    "Finance.Reports.AdHoc.Share"
                 },
                 ["Managing Director"] = new[]
                 {

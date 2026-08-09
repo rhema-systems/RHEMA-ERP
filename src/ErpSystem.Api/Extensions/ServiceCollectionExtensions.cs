@@ -608,6 +608,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
             services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
                 provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
+            // Resolve every interface to the same scoped instance. The ad hoc lifecycle and the
+            // shared execution/export engine must observe one EF change tracker and user context.
+            services.AddScoped<ErpSystem.Api.Services.Finance.Reporting.FinanceAdHocReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAdHocReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.Reporting.FinanceAdHocReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.Reporting.FinanceAdHocReportService>());
             services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
             services.AddScoped<IReportTemplateLifecycleService, ErpSystem.Data.Services.ReportTemplateLifecycleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentOutputService, ErpSystem.Api.Services.Documents.DocumentOutputService>();

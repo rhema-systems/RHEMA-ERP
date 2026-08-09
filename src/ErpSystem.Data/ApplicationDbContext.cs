@@ -309,6 +309,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<UserReportFavorite> UserReportFavorites { get; set; }
     public DbSet<ReportExport> ReportExports { get; set; }
     public DbSet<ReportRoleAssignment> ReportRoleAssignments { get; set; }
+    public DbSet<FinanceAdHocReportDefinition> FinanceAdHocReportDefinitions { get; set; }
 
     // Report data source entities
     public DbSet<DataSource> ReportDataSources { get; set; }
@@ -4575,6 +4576,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(rra => rra.ReportId);
             entity.HasIndex(rra => rra.RoleId);
             entity.HasIndex(rra => rra.AssignedAt);
+        });
+
+        builder.Entity<FinanceAdHocReportDefinition>(entity =>
+        {
+            entity.ToTable("FinanceAdHocReportDefinitions");
+            entity.HasOne(item => item.Report).WithMany().HasForeignKey(item => item.ReportId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.OwnerUser).WithMany().HasForeignKey(item => item.OwnerUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.Property(item => item.RowVersion).IsRowVersion();
+            // One shared Report row has exactly one governed Finance builder definition.
+            entity.HasIndex(item => item.ReportId).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.OwnerUserId, item.Visibility });
+            entity.HasIndex(item => new { item.TenantId, item.DatasetCode });
         });
 
         // Configure DataSource entity

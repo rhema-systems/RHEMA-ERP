@@ -72,9 +72,30 @@ public class DatabaseReportsService : IReportsService
                 reports = await _reportRepository.GetReportsByTenantAsync(tenantId, type, status);
             }
 
+            // An administrator may bypass custom report-role assignments, but record-level system
+            // visibility still applies. In particular, a private Finance ad hoc definition must
+            // not leak merely because the shared catalogue was opened in administration mode.
+            if (bypassRoleFiltering)
+            {
+                var authorizedReports = new List<Report>();
+                foreach (var report in reports)
+                {
+                    var provider = ProviderFor(report.Query);
+                    if (provider is not null)
+                    {
+                        if (await provider.CanReadReportAsync(report.Query!, true))
+                            authorizedReports.Add(report);
+                    }
+                    else if (!IsSystemIdentifier(report.Query))
+                    {
+                        authorizedReports.Add(report);
+                    }
+                }
+                reports = authorizedReports;
+            }
             // System-owned reports use their module provider's responsibility/permission model.
             // Custom reports retain the report-role assignment model.
-            if (!bypassRoleFiltering)
+            else
             {
                 var reportList = reports.ToList();
                 var systemReports = reportList.Where(r => ProviderFor(r.Query) is not null).ToList();
@@ -102,10 +123,14 @@ public class DatabaseReportsService : IReportsService
                 }
 
                 var authorizedSystemReports = new List<Report>();
-                foreach (var providerGroup in systemReports.GroupBy(report => ProviderFor(report.Query)!))
+                foreach (var systemReport in systemReports)
                 {
-                    if (await providerGroup.Key.CanReadAsync(false))
-                        authorizedSystemReports.AddRange(providerGroup);
+                    var provider = ProviderFor(systemReport.Query)!;
+                    // Some protected providers own records with different visibility (such as
+                    // private versus Finance-shared ad hoc definitions). Authorize each identifier
+                    // before mapping it so even its name cannot leak through the shared catalogue.
+                    if (await provider.CanReadReportAsync(systemReport.Query!, false))
+                        authorizedSystemReports.Add(systemReport);
                 }
                 reports = customReports.Concat(authorizedSystemReports);
             }
@@ -145,7 +170,7 @@ public class DatabaseReportsService : IReportsService
             var provider = ProviderFor(report.Query);
             if (provider is not null)
             {
-                if (!await provider.CanReadAsync(isAdminUser))
+                if (!await provider.CanReadReportAsync(report.Query!, isAdminUser))
                     throw new UnauthorizedAccessException("Access denied: system report read permission is required.");
             }
             else if (IsSystemIdentifier(report.Query))
