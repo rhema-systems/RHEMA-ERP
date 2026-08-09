@@ -801,7 +801,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 maskedContact = prepared.MaskedContact
             });
         }
-        catch (Exception exception)
+        catch (Exception exception) when (IsExpectedProblem(exception))
         {
             return Problem(exception);
         }
@@ -842,7 +842,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     prepared.Channel,
                     prepared.NormalizedContact),
                 request.OtpCode,
-                consumeOnSuccess: true,
+                consumeOnSuccess: false,
                 cancellationToken);
             if (!verification.Success)
                 throw new ProcurementSupplierApplicantAccessException(
@@ -850,14 +850,43 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                     verification.FailureReason ?? "The verification code is invalid.",
                     StatusCodes.Status401Unauthorized);
 
-            return Ok(await _applicantAccess.CorrectVerifiedContactAndRetryAsync(
+            var result = await _applicantAccess.CorrectVerifiedContactAndRetryAsync(
                 registrationId,
                 correction,
                 actorUserId,
                 Correlation("contact-correction-confirm"),
-                cancellationToken));
+                cancellationToken);
+
+            // Consume only after the serializable contact correction commits. A
+            // transient persistence failure must not burn an otherwise valid OTP.
+            // The target is bound to tenant, registration, channel and contact, so
+            // a completed correction cannot reuse it for another application.
+            var consumed = await _otp.VerifyOtpAsync(
+                prepared.TenantId,
+                OtpPurpose.SupplierApplicantContactCorrection,
+                prepared.Channel == ProcurementSupplierApplicantVerificationChannel.Email
+                    ? OtpChannel.Email
+                    : OtpChannel.Sms,
+                ContactCorrectionOtpTarget(
+                    registrationId,
+                    prepared.Channel,
+                    prepared.NormalizedContact),
+                request.OtpCode,
+                consumeOnSuccess: true,
+                cancellationToken);
+            if (!consumed.Success)
+            {
+                // Persistence already succeeded. Do not turn a cache-cleanup issue
+                // into a false failure response; the newly-current contact makes
+                // this scoped OTP unusable for another correction.
+                _logger.LogWarning(
+                    "Supplier contact correction OTP cleanup was incomplete for registration {RegistrationId}",
+                    registrationId);
+            }
+
+            return Ok(result);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (IsExpectedProblem(exception))
         {
             return Problem(exception);
         }
@@ -975,6 +1004,16 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             }
         });
     }
+
+    private static bool IsExpectedProblem(Exception exception) => exception is
+        ProcurementSupplierApplicantAccessException or
+        ProcurementSupplierOnboardingTokenAuthorizationException or
+        ProcurementSupplierOnboardingTokenValidationException or
+        ProcurementSupplierOnboardingTokenConflictException or
+        ProcurementSupplierOnboardingTokenNotFoundException or
+        CaptchaVerificationException or
+        ControlledFileUploadException or
+        UnauthorizedAccessException;
 
     private static ProcurementSupplierApplicantVerificationChannel ParseChannel(
         string channel) =>
