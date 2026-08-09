@@ -1,4 +1,5 @@
 import { compatibleApiService as apiService } from './compatibleApiService';
+import { apiService as rawApiService } from './api.service';
 
 export interface ExternalEstateRequestType {
   code: string;
@@ -15,9 +16,11 @@ export interface ExternalEstateServiceRequest {
   title: string;
   referenceNumber?: string | null;
   applicantName?: string | null;
+  sourceDepartment?: string | null;
   status: string;
   currentStageName: string;
   currentAssignedRole?: string | null;
+  fieldValues?: Record<string, string | null>;
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -63,6 +66,38 @@ class ExternalEstateServicesService {
     const response = await apiService.post<ApiResponse<ExternalEstateServiceRequest>>(
       '/estate/external/requests',
       payload
+    );
+    return response.data;
+  }
+
+  async submitPropertyRequestDecision(
+    requestId: string,
+    payload: { decision: 'Accept' | 'Reject'; notes?: string | null }
+  ): Promise<ExternalEstateServiceRequest> {
+    const response = await apiService.post<ApiResponse<ExternalEstateServiceRequest>>(
+      `/estate/external/requests/${requestId}/customer-decision`,
+      payload
+    );
+    return response.data;
+  }
+
+  async uploadSignedAgreement(
+    requestId: string,
+    file: File,
+    notes?: string | null
+  ): Promise<ExternalEstateServiceRequest> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (notes) {
+      formData.append('notes', notes);
+    }
+
+    const response = await rawApiService.request<ApiResponse<ExternalEstateServiceRequest>>(
+      `/estate/external/requests/${requestId}/signed-agreement`,
+      {
+        method: 'POST',
+        body: formData,
+      }
     );
     return response.data;
   }

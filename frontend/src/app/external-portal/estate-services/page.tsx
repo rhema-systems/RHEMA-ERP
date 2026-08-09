@@ -221,7 +221,12 @@ export default function ExternalEstateServicesPage() {
       externalEstateServicesService.getMyRequests(),
     ]);
     setRequestTypes(types);
-    setRequests(submittedRequests);
+    setRequests(
+      submittedRequests.filter(
+        (request) =>
+          request.sourceDepartment !== 'External Portal - Estate Listings'
+      )
+    );
     setForm((current) => ({
       ...current,
       requestType: current.requestType || types[0]?.code || '',

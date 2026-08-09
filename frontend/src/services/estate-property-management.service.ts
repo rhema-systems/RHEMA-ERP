@@ -1,4 +1,5 @@
 import { compatibleApiService as apiService } from './compatibleApiService';
+import { resolveProcedureWorkspaceType } from '@/lib/procedure-workspace';
 import type {
   CreateFacilitiesArInvoiceRequest,
   CreateFacilitiesArPaymentRequest,
@@ -19,7 +20,13 @@ class EstatePropertyManagementService {
     const response = await apiService.get<ApiResponse<FacilitiesProcedure[]>>(
       '/estate/property-management/procedures',
     );
-    return response.data || [];
+    return (response.data || []).map((procedure) => ({
+      ...procedure,
+      workspaceType: resolveProcedureWorkspaceType(
+        procedure.entityType,
+        procedure.workspaceType,
+      ),
+    }));
   }
 
   async getProcedureWorkspace(
@@ -30,7 +37,20 @@ class EstatePropertyManagementService {
     >(
       `/estate/property-management/procedures/${encodeURIComponent(entityType)}`,
     );
-    return response.data || null;
+    if (!response.data) {
+      return null;
+    }
+
+    return {
+      ...response.data,
+      procedure: {
+        ...response.data.procedure,
+        workspaceType: resolveProcedureWorkspaceType(
+          response.data.procedure.entityType,
+          response.data.procedure.workspaceType,
+        ),
+      },
+    };
   }
 
   async createArInvoice(

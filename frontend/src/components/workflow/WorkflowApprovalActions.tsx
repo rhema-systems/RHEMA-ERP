@@ -66,6 +66,7 @@ export interface WorkflowApprovalActionsProps {
   externalTaskAttachments?: WorkflowTaskAttachmentDto[];
   hideSatisfiedTaskDocumentUploads?: boolean;
   hideSatisfiedTaskDocumentSection?: boolean;
+  hideDocumentChecklistItems?: boolean;
 
   // UI tuning
   size?: 'sm' | 'default' | 'lg' | 'icon';
@@ -97,6 +98,7 @@ export function WorkflowApprovalActions({
   externalTaskAttachments = [],
   hideSatisfiedTaskDocumentUploads = false,
   hideSatisfiedTaskDocumentSection = false,
+  hideDocumentChecklistItems = false,
   size = 'sm',
   iconOnly = false,
   renderMode = 'buttons',
@@ -159,6 +161,18 @@ export function WorkflowApprovalActions({
   const effectiveStepInstanceId = (hasActiveSummary ? workflowSummary?.currentStepInstanceId : undefined) || summaryStepInstanceId;
   const effectiveStepType = hasActiveSummary ? workflowSummary?.currentStepType : summaryStepType;
   const effectiveChecklist = hasActiveSummary ? (workflowSummary?.currentStepChecklist ?? []) : summaryChecklist;
+  const approvalChecklist = React.useMemo(
+    () => hideDocumentChecklistItems
+      ? effectiveChecklist.filter((item) => !item.requiresDocument)
+      : effectiveChecklist,
+    [effectiveChecklist, hideDocumentChecklistItems]
+  );
+  const hiddenApprovalDocumentChecklist = React.useMemo(
+    () => hideDocumentChecklistItems
+      ? effectiveChecklist.filter((item) => item.requiresDocument)
+      : [],
+    [effectiveChecklist, hideDocumentChecklistItems]
+  );
   const effectiveTaskConfig = hasActiveSummary ? workflowSummary?.currentStepTaskConfig : summaryTaskConfig;
   const baseTaskAttachments = hasActiveSummary
     ? (workflowSummary?.currentStepTaskAttachments ?? summaryTaskAttachments)
@@ -436,9 +450,28 @@ export function WorkflowApprovalActions({
   const confirmApproval = async (comments: string, checklistResponses?: WorkflowApprovalChecklistResponseDto[], signature?: WorkflowSignatureSubmissionDto) => {
     const handler = approvalMode === 'approve' ? onApprove : onReject;
     if (!handler) return false;
+    const persistedChecklistResponses = approvalMode === 'approve'
+      ? [
+          ...(checklistResponses ?? []),
+          ...hiddenApprovalDocumentChecklist.map((item, index) => ({
+            id: item.id,
+            name: item.name,
+            isSatisfied: true,
+            notes: 'Satisfied by required stage workspace document validation.',
+            attachmentIds: getWorkflowChecklistAttachments(item, index, effectiveTaskAttachments)
+              .map((attachment) => attachment.id),
+          })),
+        ]
+      : checklistResponses;
     try {
       setProcessing(true);
-      if (approvalMode === 'approve' && checklistResponses?.length) {
+      // Domain workspaces that hide document checks bridge their verified documents
+      // inside the domain approval action, before the workflow engine validates them.
+      if (
+        approvalMode === 'approve' &&
+        persistedChecklistResponses?.length &&
+        !hideDocumentChecklistItems
+      ) {
         if (!effectiveStepInstanceId) {
           toast.error('Cannot save approval checklist', {
             description: 'The current workflow step could not be identified. Refresh the page and try again.',
@@ -446,13 +479,13 @@ export function WorkflowApprovalActions({
           return false;
         }
 
-        await workflowApiService.saveStepChecklistResponses(effectiveStepInstanceId, checklistResponses);
+        await workflowApiService.saveStepChecklistResponses(effectiveStepInstanceId, persistedChecklistResponses);
       }
 
       if (approvalMode === 'approve' && signature && workflowSummary?.currentUserApprovalId) {
         await workflowApiService.stageWorkflowSignature(workflowSummary.currentUserApprovalId, signature);
       }
-      if (approvalMode === 'approve') await onApprove?.(comments, checklistResponses, signature);
+      if (approvalMode === 'approve') await onApprove?.(comments, persistedChecklistResponses, signature);
       else await onReject?.(comments, checklistResponses);
       toast.success(
         approvalMode === 'approve' ? `${entityLabel} approved` : `${entityLabel} rejected`,
@@ -886,7 +919,7 @@ export function WorkflowApprovalActions({
               ? `Approve this ${entityLabel.toLowerCase()}.`
               : `Reject this ${entityLabel.toLowerCase()}. A comment is required.`
           }
-          checklistItems={approvalMode === 'approve' ? effectiveChecklist : []}
+          checklistItems={approvalMode === 'approve' ? approvalChecklist : []}
           stepInstanceId={effectiveStepInstanceId}
           initialAttachments={effectiveTaskAttachments}
           signaturePolicy={approvalMode === 'approve' ? workflowSummary?.currentStepSignaturePolicy : undefined}
@@ -1259,7 +1292,7 @@ export function WorkflowApprovalActions({
             ? `Approve this ${entityLabel.toLowerCase()}.`
             : `Reject this ${entityLabel.toLowerCase()}. A comment is required.`
         }
-        checklistItems={approvalMode === 'approve' ? effectiveChecklist : []}
+        checklistItems={approvalMode === 'approve' ? approvalChecklist : []}
         stepInstanceId={effectiveStepInstanceId}
         initialAttachments={effectiveTaskAttachments}
         signaturePolicy={approvalMode === 'approve' ? workflowSummary?.currentStepSignaturePolicy : undefined}

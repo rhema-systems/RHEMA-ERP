@@ -507,6 +507,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IPropertyManagementProcedureCatalogService, ErpSystem.Core.Services.Estate.PropertyManagementProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateProcedureCatalogService, ErpSystem.Core.Services.Estate.EstateProcedureCatalogService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Estate.IEstateManagedAssetService, ErpSystem.Core.Services.Estate.EstateManagedAssetService>();
+            services.AddScoped<ErpSystem.Api.Services.Estate.IGroundRentAdministrationService, ErpSystem.Api.Services.Estate.GroundRentAdministrationService>();
             services
                 .AddOptions<ErpSystem.Api.Services.Estate.EstateGisNetworkSecurityOptions>()
                 .Configure<IConfiguration>((options, configuration) =>

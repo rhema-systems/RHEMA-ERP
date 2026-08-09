@@ -981,6 +981,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EstateManagedAsset> EstateManagedAssets { get; set; }
     public DbSet<EstateLandDemarcation> EstateLandDemarcations { get; set; }
     public DbSet<EstateManagedAssetDocument> EstateManagedAssetDocuments { get; set; }
+    public DbSet<EstateGroundRentAccount> EstateGroundRentAccounts { get; set; }
+    public DbSet<EstateGroundRentCharge> EstateGroundRentCharges { get; set; }
+    public DbSet<EstateGroundRentReview> EstateGroundRentReviews { get; set; }
+    public DbSet<EstateFacilityDutyRoster> EstateFacilityDutyRosters { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
@@ -8338,6 +8342,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });
             entity.HasIndex(item => new { item.TenantId, item.LandAcquisitionId });
+            entity.HasIndex(item => new { item.TenantId, item.CustomerBusinessPartnerId });
             entity.HasIndex(item => new { item.TenantId, item.IsPublishedToExternalPortal, item.ExternalListingStatus });
             entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
@@ -8346,8 +8351,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.GisSyncStatus).HasDefaultValue("NotLinked");
             entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
             entity.Property(item => item.AreaValue).HasPrecision(18, 4);
+            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,2)");
+            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,2)");
+            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,3)");
             entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
             entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
             entity.HasMany(item => item.Documents)
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)
@@ -8378,6 +8388,69 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId });
             entity.HasIndex(item => new { item.TenantId, item.CentralDocumentRecordId });
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.IsListingImage });
+        });
+
+        builder.Entity<EstateGroundRentAccount>(entity =>
+        {
+            entity.ToTable("EstateGroundRentAccounts");
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.CustomerBusinessPartnerId, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.NextDueDate, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.NextReviewDate, item.Status });
+            entity.Property(item => item.AnnualAmount).HasPrecision(18, 2);
+            entity.Property(item => item.RatePerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.EscalationValue).HasPrecision(18, 4);
+            entity.Property(item => item.PenaltyValue).HasPrecision(18, 4);
+            entity.Property(item => item.PenaltyCapAmount).HasPrecision(18, 2);
+            entity.HasOne(item => item.EstateManagedAsset)
+                .WithMany()
+                .HasForeignKey(item => item.EstateManagedAssetId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(item => item.GroundRentIncomeAccount)
+                .WithMany()
+                .HasForeignKey(item => item.GroundRentIncomeAccountId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasMany(item => item.Charges)
+                .WithOne(item => item.GroundRentAccount)
+                .HasForeignKey(item => item.GroundRentAccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.Reviews)
+                .WithOne(item => item.GroundRentAccount)
+                .HasForeignKey(item => item.GroundRentAccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EstateGroundRentCharge>(entity =>
+        {
+            entity.ToTable("EstateGroundRentCharges");
+            entity.HasIndex(item => new { item.TenantId, item.GroundRentAccountId, item.DueDate }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.FinanceInvoiceId });
+            entity.HasIndex(item => new { item.TenantId, item.PenaltyInvoiceId });
+            entity.Property(item => item.BaseAmount).HasPrecision(18, 2);
+            entity.Property(item => item.PenaltyAmount).HasPrecision(18, 2);
+        });
+
+        builder.Entity<EstateGroundRentReview>(entity =>
+        {
+            entity.ToTable("EstateGroundRentReviews");
+            entity.HasIndex(item => new { item.TenantId, item.GroundRentAccountId, item.EffectiveDate });
+            entity.Property(item => item.PreviousAnnualAmount).HasPrecision(18, 2);
+            entity.Property(item => item.NewAnnualAmount).HasPrecision(18, 2);
+            entity.Property(item => item.PreviousRatePerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.NewRatePerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.EscalationValue).HasPrecision(18, 4);
+        });
+
+        builder.Entity<EstateFacilityDutyRoster>(entity =>
+        {
+            entity.ToTable("EstateFacilityDutyRosters");
+            entity.HasIndex(item => new { item.TenantId, item.RosterReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.StaffName, item.StartDate });
+            entity.HasIndex(item => new { item.TenantId, item.PropertyReference, item.PropertyUnit });
+            entity.HasIndex(item => new { item.TenantId, item.ServiceAreaType, item.ServiceAreaName });
+            entity.HasIndex(item => new { item.TenantId, item.AttendanceStatus, item.CompletionStatus });
+            entity.HasIndex(item => new { item.TenantId, item.LinkedMaintenanceReference });
+            entity.HasIndex(item => new { item.TenantId, item.LinkedComplaintReference });
         });
 
         builder.Entity<LandAcquisitionNote>(entity =>

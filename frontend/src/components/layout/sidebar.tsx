@@ -1000,6 +1000,18 @@ export const navigationItems: NavItem[] = [
     children: [
       { title: 'Projects', href: '/development/projects', icon: Briefcase },
       {
+        title: 'Town Planning',
+        href: '/development/planning',
+        icon: MapPin,
+        children: [
+          { title: 'Planning Dashboard', href: '/development/planning/dashboard', icon: BarChart3 },
+          { title: 'SOP Procedures', href: '/development/planning', icon: ClipboardList },
+          { title: 'Workflow Setup', href: '/administration/workflow?q=Planning', icon: Workflow },
+          { title: 'Documents', href: '/document-management?module=Planning', icon: FileText },
+          { title: 'Reports', href: '/reports?module=planning', icon: FileCheck },
+        ],
+      },
+      {
         title: 'Operations',
         href: '/development/project-operations',
         icon: Activity,
@@ -1643,9 +1655,19 @@ export const navigationItems: NavItem[] = [
         icon: FileText,
       },
       {
+        title: 'Metadata Templates',
+        href: '/document-management/CentralDocumentMetadataTemplate',
+        icon: BookTemplate,
+      },
+      {
         title: 'Version Control',
         href: '/document-management/CentralDocumentVersion',
         icon: Workflow,
+      },
+      {
+        title: 'Access / Retention',
+        href: '/document-management/CentralDocumentGovernance',
+        icon: ShieldCheck,
       },
       {
         title: 'Module Queue',
@@ -1670,7 +1692,6 @@ export const navigationItems: NavItem[] = [
         title: 'Facilities Dashboard',
         href: '/estate/facilities/dashboard',
         icon: BarChart3,
-        permissions: ['facilities.dashboard.read'],
       },
       {
         title: 'Land Acquisition',
@@ -1734,9 +1755,34 @@ export const navigationItems: NavItem[] = [
             icon: FileText,
           },
           {
+            title: 'Mortgage Consent',
+            href: '/estate/EstateMortgageConsent',
+            icon: FileCheck,
+          },
+          {
             title: 'Lease Preparation',
             href: '/estate/EstateLeasePreparation',
             icon: FileText,
+          },
+          {
+            title: 'Additional Land',
+            href: '/estate/EstateAdditionalLand',
+            icon: Landmark,
+          },
+          {
+            title: 'Layout Revision',
+            href: '/estate/EstateLayoutRevision',
+            icon: MapPin,
+          },
+          {
+            title: 'Change of Use',
+            href: '/estate/EstateChangeOfUse',
+            icon: FileCheck,
+          },
+          {
+            title: 'Reminders / Rate Revision',
+            href: '/estate/EstateReminderRateRevision',
+            icon: ClipboardList,
           },
           {
             title: 'Lease Renewal',
@@ -1769,8 +1815,8 @@ export const navigationItems: NavItem[] = [
             icon: Award,
           },
           {
-            title: 'Reports / Controls',
-            href: '/estate/EstateReportingControls',
+            title: 'Reports',
+            href: '/reports?module=estate',
             icon: BarChart3,
           },
         ],
@@ -1796,6 +1842,11 @@ export const navigationItems: NavItem[] = [
             icon: MapPin,
           },
           {
+            title: 'Property Requests',
+            href: '/estate/property-management/EstatePropertyManagementListingApplication',
+            icon: ClipboardList,
+          },
+          {
             title: 'Lease Management',
             href: '/estate/property-management/EstatePropertyManagementLease',
             icon: FileCheck,
@@ -1809,6 +1860,11 @@ export const navigationItems: NavItem[] = [
             title: 'Billing / Service Charge',
             href: '/estate/property-management/EstatePropertyManagementBillingServiceCharge',
             icon: CreditCard,
+          },
+          {
+            title: 'Ground Rent',
+            href: '/estate/property-management/EstatePropertyManagementGroundRent',
+            icon: Banknote,
           },
           {
             title: 'Occupancy / Availability',
@@ -1831,13 +1887,58 @@ export const navigationItems: NavItem[] = [
         title: 'Facilities Management',
         href: '/estate/facilities',
         icon: Building2,
-        permissions: ['facilities.access'],
-      },
-      {
-        title: 'Facilities Billing',
-        href: '/estate/facilities/EstateFacilityBillingServiceCharge',
-        icon: CreditCard,
-        permissions: ['facilities.billing.manage', 'facilities.finance.view'],
+        children: [
+          {
+            title: 'Dashboard',
+            href: '/estate/facilities/dashboard',
+            icon: BarChart3,
+          },
+          {
+            title: 'Property / Site Operating View',
+            href: '/estate/facilities/EstateFacilityPropertySite',
+            icon: Building2,
+          },
+          {
+            title: 'Lease / Occupancy Coordination',
+            href: '/estate/facilities/EstateFacilityLease',
+            icon: FileCheck,
+          },
+          {
+            title: 'Maintenance Intake',
+            href: '/estate/facilities/EstateFacilityMaintenance',
+            icon: Wrench,
+          },
+          {
+            title: 'Complaints',
+            href: '/estate/facilities/EstateFacilityComplaint',
+            icon: MessageSquare,
+          },
+          {
+            title: 'Service Providers',
+            href: '/estate/facilities/EstateFacilityServiceProvider',
+            icon: Briefcase,
+          },
+          {
+            title: 'Staff / Cleaners',
+            href: '/estate/facilities/EstateFacilityStaffCleaner',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'Asset Operating View',
+            href: '/estate/facilities/EstateFacilityAssetRegister',
+            icon: Database,
+          },
+          {
+            title: 'Billing / Service Charge',
+            href: '/estate/facilities/EstateFacilityBillingServiceCharge',
+            icon: CreditCard,
+          },
+          {
+            title: 'Documents Index',
+            href: '/estate/facilities/EstateFacilityDocument',
+            icon: FileText,
+          },
+        ],
       },
     ],
   },
@@ -1853,6 +1954,16 @@ export const navigationItems: NavItem[] = [
         title: 'Procedure Manual',
         href: '/legal/LegalProcedure',
         icon: BookOpen,
+      },
+      {
+        title: 'Legal Opinions / Advisory',
+        href: '/legal/LegalOpinionAdvisory',
+        icon: MessageSquare,
+      },
+      {
+        title: 'External Counsel',
+        href: '/legal/LegalExternalCounsel',
+        icon: Briefcase,
       },
       { title: 'Mortgages', href: '/legal/LegalMortgage', icon: FileCheck },
       {
@@ -2139,6 +2250,31 @@ export const navigationItems: NavItem[] = [
         title: 'Operations Reports',
         href: '/reports/operations',
         icon: BarChart3,
+      },
+      {
+        title: 'Property Management Reports',
+        href: '/reports?module=property-management',
+        icon: Building2,
+      },
+      {
+        title: 'Facilities Reports',
+        href: '/reports?module=facilities',
+        icon: Building,
+      },
+      {
+        title: 'Legal Reports',
+        href: '/reports?module=legal',
+        icon: Gavel,
+      },
+      {
+        title: 'DMS Reports',
+        href: '/reports?module=dms',
+        icon: BookTemplate,
+      },
+      {
+        title: 'Planning Reports',
+        href: '/reports?module=planning',
+        icon: MapPin,
       },
     ],
   },
