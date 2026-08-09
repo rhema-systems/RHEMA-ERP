@@ -7,6 +7,7 @@ import {
   CreditCard,
   FileText,
   Home,
+  ListFilter,
   ShoppingCart,
   TrendingUp,
   UserCheck,
@@ -43,6 +44,9 @@ export const moduleReportLandings = {
         title: 'Core accounting',
         items: [
           { title: 'Financial statements', href: '/finance/reports', icon: FileText },
+          // FR-RP-012 is intentionally exposed from the shared Reports hierarchy. Unlike the
+          // legacy administration builder, this route uses Finance-owned datasets and permissions.
+          { title: 'Ad hoc report builder', href: '/reports/financial/ad-hoc', icon: ListFilter },
           { title: 'Cash reports', href: '/finance/cash/reports', icon: Banknote },
           { title: 'Fixed asset reports', href: '/finance/fixed-assets/reports', icon: Building2 },
           { title: 'Tax reports', href: '/finance/tax/reports', icon: FileText },

@@ -81,6 +81,14 @@ namespace ErpSystem.Core.DTOs.Reports
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 100;
 
+        /// <summary>
+        /// Marks an execution initiated by the server's authorized export workflow. This value is
+        /// never accepted from HTTP JSON; protected providers may use it to apply export authority
+        /// and their saved export ceiling without weakening interactive report-run authorization.
+        /// </summary>
+        [JsonIgnore]
+        public bool IsExportExecution { get; set; }
+
         [JsonIgnore]
         public ReportTemplateGenerationContextDto? TemplateContext { get; set; }
     }

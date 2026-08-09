@@ -7633,6 +7633,7 @@ namespace ErpSystem.Web.Services
                     "Finance.Banking.Deposits.Submit",
                     "Finance.Banking.ReturnedCheques.Manage",
                     "Finance.Reports.Run",
+                    "Finance.Reports.AdHoc.Build",
                     "Finance.Reports.Schedules.View",
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Request",
@@ -7679,6 +7680,8 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodReopen",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export",
+                    "Finance.Reports.AdHoc.Build",
+                    "Finance.Reports.AdHoc.Share",
                     // Finance Managers own the operational schedule lifecycle;
                     // pinned templates and immutable executions preserve control.
                     "Finance.Reports.Schedules.View",
@@ -7725,6 +7728,8 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.RequestChanges",
                     "Finance.Workflow.PostAfterApproval",
                     "Finance.Reports.Run",
+                    "Finance.Reports.AdHoc.Build",
+                    "Finance.Reports.AdHoc.Share",
                     "Finance.Reports.Schedules.View",
                     "Finance.Reports.Schedules.Manage",
                     "Finance.Reports.Schedules.Run"

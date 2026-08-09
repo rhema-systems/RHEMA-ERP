@@ -111,6 +111,8 @@ public static class FinancePermissions
 
     public const string RunFinanceReports = "Finance.Reports.Run";
     public const string ExportFinanceReports = "Finance.Reports.Export";
+    public const string BuildAdHocReports = "Finance.Reports.AdHoc.Build";
+    public const string ShareAdHocReports = "Finance.Reports.AdHoc.Share";
     public const string ManageFinancialStatementLayouts = "Finance.Reports.Layouts.Manage";
     public const string PublishFinancialStatementLayouts = "Finance.Reports.Layouts.Publish";
     public const string ViewReportSchedules = "Finance.Reports.Schedules.View";
@@ -234,6 +236,8 @@ public static class FinancePermissions
 
         new(RunFinanceReports, "Run Finance Reports", "Run finance statements, aging, cash, bank, tax, FX, and fixed asset reports.", CategoryReporting),
         new(ExportFinanceReports, "Export/Print Finance Reports", "Export or print finance reports and finance-controlled documents.", CategoryReporting),
+        new(BuildAdHocReports, "Build Finance Ad Hoc Reports", "Create and maintain private reports from governed Finance datasets without direct SQL access.", CategoryReporting),
+        new(ShareAdHocReports, "Share Finance Ad Hoc Reports", "Publish governed ad hoc definitions to other authorised Finance report users.", CategoryReporting),
         new(ManageFinancialStatementLayouts, "Manage Financial Statement Layouts", "Create and maintain draft financial statement layouts and mappings.", CategoryReporting),
         new(PublishFinancialStatementLayouts, "Publish Financial Statement Layouts", "Validate and publish versioned financial statement layouts for production reporting.", CategoryReporting),
         new(ViewReportSchedules, "View Finance Report Schedules", "View Finance report schedules, delivery history, and retained artifacts.", CategoryReporting),
