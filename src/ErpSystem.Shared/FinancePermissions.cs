@@ -137,6 +137,10 @@ public static class FinancePermissions
     public const string SubmitBudgetReturns = "Finance.BudgetReturns.Submit";
     public const string ApproveBudgetReturns = "Finance.BudgetReturns.Approve";
     public const string LockBudgets = "Finance.Budgeting.Lock";
+    public const string ViewBudgetRevisions = "Finance.BudgetRevisions.Read";
+    public const string MaintainBudgetRevisions = "Finance.BudgetRevisions.Write";
+    public const string SubmitBudgetRevisions = "Finance.BudgetRevisions.Submit";
+    public const string ApplyBudgetRevisions = "Finance.BudgetRevisions.Apply";
 
     public static readonly FinancePermissionDefinition[] All =
     {
@@ -249,7 +253,11 @@ public static class FinancePermissions
         new(EditBudgetReturns, "Edit Assigned Budget Returns", "Edit assigned budget worksheets before submission.", CategoryBudgeting),
         new(SubmitBudgetReturns, "Submit Budget Returns", "Submit assigned budget worksheets.", CategoryBudgeting),
         new(ApproveBudgetReturns, "Approve Budget Returns", "Approve or reject submitted budget worksheets.", CategoryBudgeting),
-        new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting)
+        new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting),
+        new(ViewBudgetRevisions, "View Budget Revisions", "View virements, supplementary budgets, Board evidence, and resulting official versions.", CategoryBudgeting),
+        new(MaintainBudgetRevisions, "Maintain Budget Revisions", "Prepare controlled virement and supplementary-budget requests.", CategoryBudgeting),
+        new(SubmitBudgetRevisions, "Submit Budget Revisions", "Submit validated budget revisions to the configured Board approval workflow.", CategoryBudgeting),
+        new(ApplyBudgetRevisions, "Apply Budget Revisions", "Apply an approved revision by creating and adopting an immutable successor budget.", CategoryBudgeting)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();

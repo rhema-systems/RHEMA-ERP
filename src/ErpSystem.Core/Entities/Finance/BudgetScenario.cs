@@ -17,6 +17,24 @@ public class BudgetScenario : TenantEntity
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Human-readable version classification used in official-budget history.
+    /// Original scenarios are created through normal planning; applied requests
+    /// create Virement or Supplementary successors.
+    /// </summary>
+    [Required]
+    [MaxLength(20)]
+    public string VersionType { get; set; } = "Original";
+
+    /// <summary>Monotonically increasing official version within a fiscal year.</summary>
+    public int VersionNumber { get; set; } = 1;
+
+    /// <summary>The official scenario copied to produce this immutable version.</summary>
+    public Guid? ParentScenarioId { get; set; }
+
+    [ForeignKey(nameof(ParentScenarioId))]
+    public virtual BudgetScenario? ParentScenario { get; set; }
+
     [Required]
     public Guid FiscalYearId { get; set; }
 

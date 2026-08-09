@@ -79,6 +79,19 @@ namespace ErpSystem.Web.Services
                     "Independent final payment authorization before posting, clearing, or settlement finalization.")
             };
 
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> BudgetRevisionApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Finance Manager Review",
+                    new[] { "Finance Manager" },
+                    "Confirms the virement or supplementary-budget arithmetic, available balances, effective date, and supporting Board resolution."),
+                new(
+                    "Managing Director Final Authority",
+                    new[] { "Managing Director" },
+                    "Records TDC executive authority against the cited Board resolution before Finance may create the successor official budget.")
+            };
+
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
 
         private sealed record FinanceWorkflowSeedSpec(
@@ -388,10 +401,14 @@ namespace ErpSystem.Web.Services
                 {
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
-                        var approvalStages = spec.EntityCode is
-                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
-                            ? FinancePaymentApprovalStages
-                            : FinanceApprovalStages;
+                        var approvalStages = spec.EntityCode switch
+                        {
+                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException" => FinancePaymentApprovalStages,
+                            // TDC budget changes are governed separately from routine
+                            // accounting approvals because FR-BG-012 requires Board authority.
+                            "BudgetRevision" => BudgetRevisionApprovalStages,
+                            _ => FinanceApprovalStages
+                        };
 
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
@@ -757,6 +774,8 @@ namespace ErpSystem.Web.Services
                     "Budget scenario approval before locking, activation, or archival."),
                 new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
                     "Department budget worksheet approval workflow before consolidation."),
+                new("BudgetRevision", "Budget Revision", typeof(BudgetRevision).FullName, "Budget Revision Board Approval",
+                    "TDC virement and supplementary-budget approval supported by a Board resolution before a successor official budget can be applied."),
                 new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",
                     "Unit accounting journal approval before posting quantity balances."),
                 new("UnitAccountBudget", "Unit Budget", typeof(UnitAccountBudget).FullName, "Unit Budget Approval",
@@ -7620,7 +7639,8 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Approve",
-                    "Finance.Budgeting.Lock"
+                    "Finance.Budgeting.Lock",
+                    "Finance.BudgetRevisions.Read"
                 },
                 ["Chief Accountant"] = new[]
                 {
@@ -7660,6 +7680,7 @@ namespace ErpSystem.Web.Services
                     // administer transactions merely because they hold final authority.
                     "Finance.Read",
                     "Finance.AP.Payments.Approve",
+                    "Finance.BudgetRevisions.Read",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
                     "Finance.Workflow.RequestChanges",
@@ -7674,7 +7695,10 @@ namespace ErpSystem.Web.Services
                     "Finance.Budgeting.Write",
                     "Finance.BudgetReturns.Assign",
                     "Finance.BudgetReturns.Edit",
-                    "Finance.BudgetReturns.Submit"
+                    "Finance.BudgetReturns.Submit",
+                    "Finance.BudgetRevisions.Read",
+                    "Finance.BudgetRevisions.Write",
+                    "Finance.BudgetRevisions.Submit"
                 },
                 // "HR User" is the role this seeder actually creates; note the HR controllers'
                 // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded

@@ -171,6 +171,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
+    public DbSet<BudgetRevision> BudgetRevisions { get; set; }
+    public DbSet<BudgetRevisionLine> BudgetRevisionLines { get; set; }
     public DbSet<BankAccount> BankAccounts { get; set; }
     public DbSet<LiquidityAccount> LiquidityAccounts { get; set; }
     public DbSet<LiquidityAccountEntry> LiquidityAccountEntries { get; set; }
@@ -7009,6 +7011,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(scenario => scenario.SupersededByUserId)
                 .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(scenario => scenario.ParentScenario)
+                .WithMany()
+                .HasForeignKey(scenario => scenario.ParentScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<BudgetReturn>(entity =>
@@ -7044,6 +7050,43 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
+        });
+
+        builder.Entity<BudgetRevision>(entity =>
+        {
+            entity.Property(revision => revision.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(revision => new { revision.TenantId, revision.RevisionNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(revision => new { revision.TenantId, revision.SourceScenarioId, revision.Status });
+            entity.HasOne(revision => revision.SourceScenario)
+                .WithMany()
+                .HasForeignKey(revision => revision.SourceScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(revision => revision.ResultScenario)
+                .WithMany()
+                .HasForeignKey(revision => revision.ResultScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<BudgetRevisionLine>(entity =>
+        {
+            // One signed adjustment per budget cell avoids ambiguous duplicate
+            // changes and makes the net-zero virement rule deterministic.
+            entity.HasIndex(line => new
+                {
+                    line.TenantId,
+                    line.BudgetRevisionId,
+                    line.SegmentValueId,
+                    line.AccountId,
+                    line.FiscalPeriodId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(line => line.BudgetRevision)
+                .WithMany(revision => revision.Lines)
+                .HasForeignKey(line => line.BudgetRevisionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 
