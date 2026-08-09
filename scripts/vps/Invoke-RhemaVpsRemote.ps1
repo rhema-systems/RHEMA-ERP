@@ -279,6 +279,12 @@ function Invoke-Preflight {
     Write-Output 'GUARD_COVERAGE|20260807233500_FixSupplierEvidencePackBindingLineageTrigger'
     Write-Output 'GUARD_COVERAGE|20260807234500_RecordEverySystemExceptionOccurrence'
     Write-Output 'GUARD_COVERAGE|20260808124500_AddProjectBoqApprovalPublication'
+    # These migrations create new Quantity Survey tables and then define trigger
+    # bodies for immutable snapshots and tenant-safe lineage. Their THROW
+    # statements are not executed during migration apply and do not inspect or
+    # rewrite legacy rows.
+    Write-Output 'GUARD_COVERAGE|20260808231322_AddQuantitySurveyRateBuildUps'
+    Write-Output 'GUARD_COVERAGE|20260809002001_AddQuantitySurveyEstimateVersions'
     # Trigger replacement only; all existing rows remain untouched.
     Write-Output 'GUARD_COVERAGE|20260809173500_AllowControlledSupplierApplicantContactCorrection'
     $guards = @(Get-MigrationGuardResults)
