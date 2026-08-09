@@ -117,6 +117,7 @@ public static class FinancePermissionPolicyMap
             "Invoice" => ArInvoicePolicy(action),
             "Payment" => ArPaymentPolicy(action),
             "ArReports" => ReportPolicy(action),
+            "ArCollectionFollowUp" => ArCollectionFollowUpPolicy(action),
             "BankAccount" => ReadOrManage(action, methods, FinancePermissions.ManageBankAccounts),
             "BankReconciliation" => BankReconciliationPolicy(action),
             "BankingSettlement" => BankingSettlementPolicy(action),
@@ -132,6 +133,7 @@ public static class FinancePermissionPolicyMap
             "Finance" => FinanceControllerPolicy(action),
             "FinanceReportExports" => One(FinancePermissions.ExportFinanceReports),
             "FinanceAdHocReports" => FinanceAdHocReportPolicy(action),
+            "FinanceReportAutomation" => FinanceReportAutomationPolicy(action),
             "FinancialStatementLayouts" => FinancialStatementLayoutPolicy(action),
             "FinancePurchaseOrder" => FinancePurchaseOrderPolicy(action),
             "FinancePurchaseOrderReceipt" => FinancePurchaseOrderReceiptPolicy(action),
@@ -252,6 +254,14 @@ public static class FinancePermissionPolicyMap
             _ => IsRead(action, Array.Empty<string>()) ? One(FinancePermissions.ViewFinance) : One(FinancePermissions.ReceiveCustomerPayments)
         };
 
+    private static IReadOnlyList<string> ArCollectionFollowUpPolicy(string action)
+        => action switch
+        {
+            "GenerateTasks" or "CreateTask" or "UpdateTask" => One(FinancePermissions.ManageArCollections),
+            "RecordReminder" => One(FinancePermissions.RecordArCollectionReminders),
+            _ => One(FinancePermissions.ViewArCollections)
+        };
+
     private static IReadOnlyList<string> BankReconciliationPolicy(string action)
         => action switch
         {
@@ -265,6 +275,10 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "CreateScenario" or "UpdateScenario" or "DeleteScenario" or "CreateReturn" or "OpenScenario" => One(FinancePermissions.MaintainBudgets),
+            "CreateRevision" or "UpdateRevision" => One(FinancePermissions.MaintainBudgetRevisions),
+            "SubmitRevision" => One(FinancePermissions.SubmitBudgetRevisions),
+            "ApplyRevision" => One(FinancePermissions.ApplyBudgetRevisions),
+            "GetRevisions" or "GetRevision" => One(FinancePermissions.ViewBudgetRevisions),
             "GetReturns" or "UpdateReturn" => One(FinancePermissions.AssignBudgetReturns),
             "BulkSaveEntries" => One(FinancePermissions.EditBudgetReturns),
             "SubmitReturn" or "RecallReturn" => One(FinancePermissions.SubmitBudgetReturns),
@@ -584,6 +598,14 @@ public static class FinancePermissionPolicyMap
             "ValidateVersion" => One(FinancePermissions.ManageFinancialStatementLayouts),
             "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
+        };
+
+    private static IReadOnlyList<string> FinanceReportAutomationPolicy(string action)
+        => action switch
+        {
+            "GetWorkspace" or "DownloadArtifact" => One(FinancePermissions.ViewReportSchedules),
+            "RunNow" or "ProcessDue" => One(FinancePermissions.RunReportSchedules),
+            _ => One(FinancePermissions.ManageReportSchedules)
         };
 
     private static IReadOnlyList<string> FallbackPolicy(string action, IReadOnlyCollection<string> methods)

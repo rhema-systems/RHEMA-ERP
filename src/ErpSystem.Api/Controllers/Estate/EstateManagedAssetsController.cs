@@ -45,6 +45,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
         [FromQuery] string? search = null,
         [FromQuery] bool? availableForLease = null,
         [FromQuery] bool? availableForSale = null,
+        [FromQuery] bool? portalListingCandidates = null,
         [FromQuery] int take = 100)
     {
         var assets = await _managedAssetService.GetManagedAssetsAsync(new EstateManagedAssetQuery
@@ -54,6 +55,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
             Search = search,
             AvailableForLease = availableForLease,
             AvailableForSale = availableForSale,
+            PortalListingCandidates = portalListingCandidates,
             Take = take
         });
 
@@ -204,6 +206,40 @@ public sealed class EstateManagedAssetsController : ControllerBase
         {
             var asset = await _managedAssetService.UpdateExternalListingAsync(id, request);
             return Ok(new { success = true, data = asset, message = "External portal listing updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id:guid}/register")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer")]
+    public async Task<IActionResult> UpdateRegister(
+        Guid id,
+        [FromBody] UpdateEstateManagedAssetRegisterDto request)
+    {
+        try
+        {
+            var asset = await _managedAssetService.UpdateRegisterAsync(id, request);
+            return Ok(new { success = true, data = asset, message = "Estate register record updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id:guid}/occupancy")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer")]
+    public async Task<IActionResult> UpdateOccupancy(
+        Guid id,
+        [FromBody] UpdateEstateManagedAssetOccupancyDto request)
+    {
+        try
+        {
+            var asset = await _managedAssetService.UpdateOccupancyAsync(id, request);
+            return Ok(new { success = true, data = asset, message = "Occupancy and availability updated." });
         }
         catch (InvalidOperationException ex)
         {

@@ -72,6 +72,8 @@ public sealed class FinanceAdHocReportBuilderTests
         compiled.PageSql.Should().Contain("SUM([t].[DebitAmount]) AS [debit]");
         compiled.PageSql.Should().Contain("GROUP BY [a].[AccountNumber]");
         compiled.PageSql.Should().Contain("ORDER BY [debit] DESC");
+        compiled.CountSql.Should().Contain("TOP (126)")
+            .And.Contain("[GovernedRows]");
         compiled.MaximumRows.Should().Be(125);
         compiled.PageSize.Should().Be(125);
     }
@@ -92,6 +94,40 @@ public sealed class FinanceAdHocReportBuilderTests
         compiled.MaximumRows.Should().Be(1);
         compiled.PageSize.Should().Be(1);
         compiled.Offset.Should().Be(1);
+    }
+
+    [Fact]
+    public void ExportExecution_UsesExportAuthorityAndSavedDefinitionCeiling()
+    {
+        var sharedTransportRequest = new ExecuteReportDto
+        {
+            Page = 2,
+            PageSize = 1000,
+            MaxRows = 1000,
+            IsExportExecution = true
+        };
+
+        var governed = FinanceAdHocReportService.GovernExecutionRequest(5000, sharedTransportRequest);
+
+        FinanceAdHocReportService.RequiredExecutionPermission(governed)
+            .Should().Be(FinancePermissions.ExportFinanceReports);
+        governed.MaxRows.Should().Be(5000,
+            "the saved Finance definition governs the complete multi-page export");
+        governed.Page.Should().Be(2);
+        governed.PageSize.Should().Be(1000);
+    }
+
+    [Fact]
+    public void InteractiveExecution_RetainsRunAuthorityAndAnyStricterRequestedCeiling()
+    {
+        var request = new ExecuteReportDto { MaxRows = 250 };
+
+        var governed = FinanceAdHocReportService.GovernExecutionRequest(5000, request);
+
+        governed.Should().BeSameAs(request);
+        governed.MaxRows.Should().Be(250);
+        FinanceAdHocReportService.RequiredExecutionPermission(governed)
+            .Should().Be(FinancePermissions.RunFinanceReports);
     }
 
     [Theory]
@@ -156,6 +192,51 @@ public sealed class FinanceAdHocReportBuilderTests
         result.Should().NotContain(item => item.Name.Contains("private", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task SharedCatalogue_AuthorizesStaticProviderOnceForAllOfItsReports()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var reports = new[]
+        {
+            StaticSystemReport("Static one", "system://static/one", tenantId),
+            StaticSystemReport("Static two", "system://static/two", tenantId)
+        };
+        var reportRepository = new Mock<IReportRepository>();
+        reportRepository.Setup(repository => repository.GetReportsByTenantAsync(tenantId, null, null))
+            .ReturnsAsync(reports);
+        reportRepository.Setup(repository => repository.IsReportFavoriteAsync(
+                It.IsAny<Guid>(), userId, tenantId))
+            .ReturnsAsync(false);
+        var roleAssignments = new Mock<IReportRoleAssignmentRepository>();
+        roleAssignments.Setup(repository => repository.GetAccessibleReportIdsForUserAsync(userId, tenantId))
+            .ReturnsAsync(Array.Empty<Guid>());
+        roleAssignments.Setup(repository => repository.FindAsync(
+                It.IsAny<System.Linq.Expressions.Expression<Func<ReportRoleAssignment, bool>>>()))
+            .ReturnsAsync(Array.Empty<ReportRoleAssignment>());
+        roleAssignments.Setup(repository => repository.GetAssignmentsByReportAsync(It.IsAny<Guid>(), tenantId))
+            .ReturnsAsync(Array.Empty<ReportRoleAssignment>());
+        var provider = new ProviderWideVisibilityProvider();
+        var service = new DatabaseReportsService(
+            reportRepository.Object,
+            Mock.Of<IReportScheduleRepository>(),
+            Mock.Of<IReportTemplateRepository>(),
+            Mock.Of<IReportExecutionRepository>(),
+            Mock.Of<IUserReportFavoriteRepository>(),
+            Mock.Of<IReportExportRepository>(),
+            roleAssignments.Object,
+            NullLogger<DatabaseReportsService>.Instance,
+            Mock.Of<IUnitOfWork>(),
+            new ConfigurationBuilder().Build(),
+            [provider]);
+
+        var result = await service.GetReportsAsync(tenantId, userId);
+
+        result.Should().HaveCount(2);
+        provider.AuthorizationCalls.Should().Be(1,
+            "provider-wide permissions should not be queried once per catalogue row");
+    }
+
     private static Report SystemReport(string name, Guid definitionId, Guid tenantId) => new()
     {
         Id = Guid.NewGuid(),
@@ -167,12 +248,24 @@ public sealed class FinanceAdHocReportBuilderTests
         Query = FinanceAdHocReportValues.QueryPrefix + definitionId
     };
 
+    private static Report StaticSystemReport(string name, string query, Guid tenantId) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tenantId,
+        Name = name,
+        Description = name,
+        Type = "table",
+        Status = "published",
+        Query = query
+    };
+
     /// <summary>
     /// A small provider double that models one visible and one private persisted definition.
     /// The test protects the shared catalogue boundary, not merely the Finance endpoint itself.
     /// </summary>
     private sealed class RecordVisibilityProvider(Guid allowedId) : ISystemReportProvider
     {
+        public bool RequiresRecordLevelReadAuthorization => true;
         public bool CanHandle(string? reportQuery) => OwnsIdentifier(reportQuery);
         public bool OwnsIdentifier(string? reportQuery) =>
             reportQuery?.StartsWith(FinanceAdHocReportValues.QueryPrefix, StringComparison.OrdinalIgnoreCase) == true;
@@ -182,6 +275,26 @@ public sealed class FinanceAdHocReportBuilderTests
         public Task<bool> CanReadReportAsync(string reportQuery, bool isAdministrator,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(reportQuery.EndsWith(allowedId.ToString(), StringComparison.OrdinalIgnoreCase));
+        public Task<ReportResultDto> ExecuteAsync(string reportQuery, ExecuteReportDto request,
+            bool isAdministrator, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task AuthorizeExportAsync(string reportQuery, bool isAdministrator,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class ProviderWideVisibilityProvider : ISystemReportProvider
+    {
+        public int AuthorizationCalls { get; private set; }
+        public bool CanHandle(string? reportQuery) => OwnsIdentifier(reportQuery);
+        public bool OwnsIdentifier(string? reportQuery) =>
+            reportQuery?.StartsWith("system://static/", StringComparison.OrdinalIgnoreCase) == true;
+        public string? ResolveCode(string? reportQuery) => reportQuery;
+        public Task<bool> CanReadAsync(bool isAdministrator, CancellationToken cancellationToken = default)
+        {
+            AuthorizationCalls++;
+            return Task.FromResult(true);
+        }
+
         public Task<ReportResultDto> ExecuteAsync(string reportQuery, ExecuteReportDto request,
             bool isAdministrator, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

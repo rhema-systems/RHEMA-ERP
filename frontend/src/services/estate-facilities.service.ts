@@ -1,4 +1,5 @@
 import { compatibleApiService as apiService } from './compatibleApiService';
+import type { ProcedureWorkspaceType } from '@/lib/procedure-workspace';
 
 export interface FacilitiesProcedure {
   title: string;
@@ -8,6 +9,7 @@ export interface FacilitiesProcedure {
   icon: string;
   stageCount: number;
   accent: string;
+  workspaceType?: ProcedureWorkspaceType;
 }
 
 export interface FacilitiesWorkspaceStage {
@@ -161,6 +163,78 @@ export interface FacilitiesArResultNotificationRequest {
   actionUrl?: string | null;
 }
 
+export interface EstateFacilityDutyRosterItem {
+  id: string;
+  rosterReference: string;
+  employeeProfileId?: string | null;
+  employeeNumber?: string | null;
+  staffName: string;
+  staffType: string;
+  dutyType: string;
+  propertyReference?: string | null;
+  propertyUnit?: string | null;
+  serviceAreaType: string;
+  serviceAreaName: string;
+  frequency: string;
+  dayPattern?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  shiftStart: string;
+  shiftEnd: string;
+  supervisorName?: string | null;
+  toolsIssued?: string | null;
+  suppliesIssued?: string | null;
+  checklist?: string | null;
+  attendanceStatus: string;
+  completionStatus: string;
+  qualityStatus: string;
+  linkedMaintenanceReference?: string | null;
+  linkedComplaintReference?: string | null;
+  linkedProcedureCaseReference?: string | null;
+  lastAttendanceAt?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface UpsertEstateFacilityDutyRosterRequest {
+  employeeProfileId?: string | null;
+  employeeNumber?: string | null;
+  staffName: string;
+  staffType: string;
+  dutyType: string;
+  propertyReference?: string | null;
+  propertyUnit?: string | null;
+  serviceAreaType: string;
+  serviceAreaName: string;
+  frequency: string;
+  dayPattern?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  shiftStart: string;
+  shiftEnd: string;
+  supervisorName?: string | null;
+  toolsIssued?: string | null;
+  suppliesIssued?: string | null;
+  checklist?: string | null;
+  attendanceStatus: string;
+  completionStatus: string;
+  qualityStatus: string;
+  linkedMaintenanceReference?: string | null;
+  linkedComplaintReference?: string | null;
+  linkedProcedureCaseReference?: string | null;
+  notes?: string | null;
+}
+
+export interface UpdateEstateFacilityDutyAttendanceRequest {
+  attendanceStatus: string;
+  completionStatus: string;
+  qualityStatus: string;
+  linkedMaintenanceReference?: string | null;
+  linkedComplaintReference?: string | null;
+  notes?: string | null;
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data: T;
@@ -223,6 +297,34 @@ class EstateFacilitiesService {
     request: FacilitiesArResultNotificationRequest
   ): Promise<void> {
     await apiService.post('/estate/facilities/ar-billing/results', request);
+  }
+
+  async getDutyRoster(): Promise<EstateFacilityDutyRosterItem[]> {
+    const response = await apiService.get<ApiResponse<EstateFacilityDutyRosterItem[]>>(
+      '/estate/facilities/duty-roster'
+    );
+    return response.data || [];
+  }
+
+  async createDutyRosterItem(
+    request: UpsertEstateFacilityDutyRosterRequest
+  ): Promise<EstateFacilityDutyRosterItem> {
+    const response = await apiService.post<ApiResponse<EstateFacilityDutyRosterItem>>(
+      '/estate/facilities/duty-roster',
+      request
+    );
+    return response.data;
+  }
+
+  async updateDutyAttendance(
+    id: string,
+    request: UpdateEstateFacilityDutyAttendanceRequest
+  ): Promise<EstateFacilityDutyRosterItem> {
+    const response = await apiService.post<ApiResponse<EstateFacilityDutyRosterItem>>(
+      `/estate/facilities/duty-roster/${encodeURIComponent(id)}/attendance`,
+      request
+    );
+    return response.data;
   }
 }
 

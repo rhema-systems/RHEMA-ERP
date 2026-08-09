@@ -1,5 +1,7 @@
 namespace ErpSystem.Core.DTOs.Estate;
 
+using ErpSystem.Core.DTOs.Workflow;
+
 public record LandAcquisitionBoardDto(IReadOnlyList<LandAcquisitionStageDto> Stages);
 
 public record LandAcquisitionStageDto(
@@ -52,6 +54,7 @@ public class LandAcquisitionWorkspaceResponse
     public LandAcquisitionItemDto? Item { get; set; }
     public bool StageInputsComplete { get; set; }
     public IReadOnlyList<string> MissingInputs { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<WorkflowDocumentRequirementDto> DocumentRequirements { get; set; } = Array.Empty<WorkflowDocumentRequirementDto>();
 }
 
 public class LandAcquisitionWorkspaceDataResponse
@@ -61,6 +64,7 @@ public class LandAcquisitionWorkspaceDataResponse
     public Dictionary<string, object?> Values { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool StageInputsComplete { get; set; }
     public IReadOnlyList<string> MissingInputs { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<WorkflowDocumentRequirementDto> DocumentRequirements { get; set; } = Array.Empty<WorkflowDocumentRequirementDto>();
 }
 
 public class LandAcquisitionSummaryResponse

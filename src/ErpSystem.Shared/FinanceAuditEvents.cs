@@ -30,6 +30,14 @@ public static class FinanceAuditEvents
     public const string RecurringJournalOccurrencePosted = "Finance.RecurringJournal.OccurrencePosted";
     public const string RecurringJournalGenerationFailed = "Finance.RecurringJournal.GenerationFailed";
 
+    public const string ReportScheduleCreated = "Finance.ReportSchedule.Created";
+    public const string ReportScheduleUpdated = "Finance.ReportSchedule.Updated";
+    public const string ReportSchedulePaused = "Finance.ReportSchedule.Paused";
+    public const string ReportScheduleResumed = "Finance.ReportSchedule.Resumed";
+    public const string ReportScheduleExecuted = "Finance.ReportSchedule.Executed";
+    public const string ReportScheduleExecutionFailed = "Finance.ReportSchedule.ExecutionFailed";
+    public const string ReportScheduleArtifactDownloaded = "Finance.ReportSchedule.ArtifactDownloaded";
+
     public const string PostingEventCreated = "Finance.PostingEvent.Created";
     public const string DuplicatePostingAttempt = "Finance.PostingEvent.DuplicateAttempt";
     public const string PostingFailed = "Finance.PostingEvent.Failed";
@@ -64,6 +72,12 @@ public static class FinanceAuditEvents
     public const string BudgetReturnApproved = "Finance.BudgetReturn.Approved";
     public const string BudgetReturnRejected = "Finance.BudgetReturn.Rejected";
     public const string BudgetWorksheetSaved = "Finance.BudgetWorksheet.Saved";
+    public const string BudgetRevisionCreated = "Finance.BudgetRevision.Created";
+    public const string BudgetRevisionUpdated = "Finance.BudgetRevision.Updated";
+    public const string BudgetRevisionSubmitted = "Finance.BudgetRevision.SubmittedForApproval";
+    public const string BudgetRevisionApproved = "Finance.BudgetRevision.Approved";
+    public const string BudgetRevisionRejected = "Finance.BudgetRevision.Rejected";
+    public const string BudgetRevisionApplied = "Finance.BudgetRevision.AppliedToOfficialBudget";
 
     public const string SourceDocumentApproved = "Finance.SourceDocument.Approved";
     public const string SourceDocumentPosted = "Finance.SourceDocument.Posted";
@@ -123,6 +137,12 @@ public static class FinanceAuditEvents
     public const string ApProcurementReconciliationGenerated = "Finance.AP.ProcurementReconciliation.Generated";
     public const string ApProcurementReconciliationExported = "Finance.AP.ProcurementReconciliation.Exported";
     public const string ArUnappliedSettlementsGenerated = "Finance.AR.UnappliedSettlements.Generated";
+    public const string ArCollectionTasksGenerated = "Finance.AR.Collections.TasksGenerated";
+    public const string ArCollectionTaskCreated = "Finance.AR.Collections.TaskCreated";
+    public const string ArCollectionTaskUpdated = "Finance.AR.Collections.TaskUpdated";
+    public const string ArCollectionTaskAutoResolved = "Finance.AR.Collections.TaskAutoResolved";
+    public const string ArCollectionTaskReactivated = "Finance.AR.Collections.TaskReactivated";
+    public const string ArCollectionReminderRecorded = "Finance.AR.Collections.ReminderRecorded";
     public const string CashBankTransactionCaptured = "Finance.CashBankTransaction.Captured";
     public const string CashBankTransactionSubmitted = "Finance.CashBankTransaction.Submitted";
     public const string CashBankTransactionApproved = "Finance.CashBankTransaction.Approved";

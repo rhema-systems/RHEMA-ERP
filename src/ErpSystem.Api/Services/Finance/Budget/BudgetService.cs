@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -33,17 +34,20 @@ public partial class BudgetService : IBudgetService
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowService _workflowService;
+    private readonly IDocumentNumberingService? _documentNumberingService;
     private readonly IFinanceAuditService? _financeAuditService;
 
     public BudgetService(
         ApplicationDbContext context,
         ICurrentUserService currentUserService,
         IWorkflowService workflowService,
+        IDocumentNumberingService? documentNumberingService = null,
         IFinanceAuditService? financeAuditService = null)
     {
         _context = context;
         _currentUserService = currentUserService;
         _workflowService = workflowService;
+        _documentNumberingService = documentNumberingService;
         _financeAuditService = financeAuditService;
     }
 
@@ -950,6 +954,9 @@ public partial class BudgetService : IBudgetService
             TenantId = scenario.TenantId,
             Name = scenario.Name,
             Description = scenario.Description,
+            VersionType = scenario.VersionType,
+            VersionNumber = scenario.VersionNumber,
+            ParentScenarioId = scenario.ParentScenarioId,
             FiscalYearId = scenario.FiscalYearId,
             FiscalYearName = scenario.FiscalYear?.FiscalYearName ?? string.Empty,
             BaseCurrencyCode = scenario.BaseCurrencyCode,
@@ -1127,6 +1134,7 @@ public partial class BudgetService : IBudgetService
             Reason = eventType is FinanceAuditEvents.BudgetReturnRecalled
                 or FinanceAuditEvents.BudgetReturnRejected
                 or FinanceAuditEvents.BudgetScenarioRejected
+                or FinanceAuditEvents.BudgetRevisionRejected
                     ? comment
                     : null,
             Resource = $"Finance.{entityType}",

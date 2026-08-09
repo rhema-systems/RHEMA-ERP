@@ -378,6 +378,136 @@ public class BudgetController : ControllerBase
     }
 
     // ========================================================================
+    // CONTROLLED BUDGET REVISIONS
+    // ========================================================================
+
+    /// <summary>
+    /// Lists Finance-owned virement and supplementary-budget requests. These are
+    /// deliberately separate from procurement commitments and project budgets.
+    /// </summary>
+    [HttpGet("revisions")]
+    public async Task<ActionResult<IReadOnlyList<BudgetRevisionDto>>> GetRevisions(
+        [FromQuery] Guid? fiscalYearId = null)
+        => Ok(await _budgetService.GetRevisionsAsync(fiscalYearId));
+
+    [HttpGet("revisions/{id}")]
+    public async Task<ActionResult<BudgetRevisionDto>> GetRevision(Guid id)
+    {
+        try
+        {
+            return Ok(await _budgetService.GetRevisionAsync(id));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
+    /// Captures signed budget-cell adjustments and the Board resolution that
+    /// authorizes them. A virement must net to zero; a supplementary request may
+    /// only increase the approved total.
+    /// </summary>
+    [HttpPost("revisions")]
+    public async Task<ActionResult<BudgetRevisionDto>> CreateRevision(CreateBudgetRevisionDto dto)
+    {
+        try
+        {
+            var result = await _budgetService.CreateRevisionAsync(dto);
+            return CreatedAtAction(nameof(GetRevision), new { id = result.Id }, result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPut("revisions/{id}")]
+    public async Task<ActionResult<BudgetRevisionDto>> UpdateRevision(
+        Guid id,
+        UpdateBudgetRevisionDto dto)
+    {
+        try
+        {
+            return Ok(await _budgetService.UpdateRevisionAsync(id, dto));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget revision changed after you opened it. Refresh and try again.");
+        }
+    }
+
+    /// <summary>
+    /// Sends a validated request through the shared Finance workflow. Workflow
+    /// approval authorizes the request but does not yet alter the official budget.
+    /// </summary>
+    [HttpPost("revisions/{id}/submit")]
+    public async Task<ActionResult<BudgetRevisionDto>> SubmitRevision(
+        Guid id,
+        BudgetRevisionCommandDto dto)
+    {
+        try
+        {
+            return Ok(await _budgetService.SubmitRevisionAsync(id, dto.RowVersion));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("This budget revision changed after you opened it. Refresh and try again.");
+        }
+    }
+
+    /// <summary>
+    /// Applies an approved request by cloning the official scenario, changing the
+    /// clone, adopting it, and superseding the prior baseline in one transaction.
+    /// </summary>
+    [HttpPost("revisions/{id}/apply")]
+    public async Task<ActionResult<BudgetRevisionDto>> ApplyRevision(
+        Guid id,
+        BudgetRevisionCommandDto dto)
+    {
+        try
+        {
+            return Ok(await _budgetService.ApplyRevisionAsync(id, dto.RowVersion));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict("The approved budget or revision changed. Refresh before applying it.");
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict("Another official budget change completed at the same time. Refresh and try again.");
+        }
+    }
+
+    // ========================================================================
     // RETURNS (ASSIGNMENTS)
     // ========================================================================
 

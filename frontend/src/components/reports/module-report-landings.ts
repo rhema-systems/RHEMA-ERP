@@ -3,6 +3,7 @@ import {
   BarChart3,
   Banknote,
   Building2,
+  CalendarClock,
   CreditCard,
   FileText,
   Home,
@@ -49,6 +50,7 @@ export const moduleReportLandings = {
           { title: 'Cash reports', href: '/finance/cash/reports', icon: Banknote },
           { title: 'Fixed asset reports', href: '/finance/fixed-assets/reports', icon: Building2 },
           { title: 'Tax reports', href: '/finance/tax/reports', icon: FileText },
+          { title: 'Report automation', href: '/reports/automation', icon: CalendarClock },
         ],
       },
       {

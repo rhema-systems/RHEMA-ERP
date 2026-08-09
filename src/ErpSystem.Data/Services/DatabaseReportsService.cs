@@ -77,21 +77,11 @@ public class DatabaseReportsService : IReportsService
             // not leak merely because the shared catalogue was opened in administration mode.
             if (bypassRoleFiltering)
             {
-                var authorizedReports = new List<Report>();
-                foreach (var report in reports)
-                {
-                    var provider = ProviderFor(report.Query);
-                    if (provider is not null)
-                    {
-                        if (await provider.CanReadReportAsync(report.Query!, true))
-                            authorizedReports.Add(report);
-                    }
-                    else if (!IsSystemIdentifier(report.Query))
-                    {
-                        authorizedReports.Add(report);
-                    }
-                }
-                reports = authorizedReports;
+                var reportList = reports.ToList();
+                var systemReports = reportList.Where(report => ProviderFor(report.Query) is not null);
+                var authorizedSystemReports = await AuthorizeSystemReportsAsync(systemReports, true);
+                reports = reportList.Where(report => !IsSystemIdentifier(report.Query))
+                    .Concat(authorizedSystemReports);
             }
             // System-owned reports use their module provider's responsibility/permission model.
             // Custom reports retain the report-role assignment model.
@@ -122,16 +112,7 @@ public class DatabaseReportsService : IReportsService
                     }
                 }
 
-                var authorizedSystemReports = new List<Report>();
-                foreach (var systemReport in systemReports)
-                {
-                    var provider = ProviderFor(systemReport.Query)!;
-                    // Some protected providers own records with different visibility (such as
-                    // private versus Finance-shared ad hoc definitions). Authorize each identifier
-                    // before mapping it so even its name cannot leak through the shared catalogue.
-                    if (await provider.CanReadReportAsync(systemReport.Query!, false))
-                        authorizedSystemReports.Add(systemReport);
-                }
+                var authorizedSystemReports = await AuthorizeSystemReportsAsync(systemReports, false);
                 reports = customReports.Concat(authorizedSystemReports);
             }
 
@@ -531,6 +512,10 @@ public class DatabaseReportsService : IReportsService
                 Page = 1,
                 PageSize = 1000,
                 MaxRows = 1000,
+                // This marker is set only after the export endpoint has completed its dedicated
+                // authorization. Providers can distinguish export-only roles from interactive
+                // report runners without exposing a client-controlled permission bypass.
+                IsExportExecution = true,
                 TemplateContext = exportReportDto.TemplateContext
             };
 
@@ -571,6 +556,7 @@ public class DatabaseReportsService : IReportsService
 
             return new ReportExportResultDto
             {
+                ExportId = export.Id,
                 ReportId = reportId,
                 Status = "completed",
                 ExportedAt = export.ExportedAt,
@@ -1535,6 +1521,35 @@ public class DatabaseReportsService : IReportsService
 
     private ISystemReportProvider? ProviderFor(string? reportQuery) =>
         _systemReportProviders.FirstOrDefault(provider => provider.CanHandle(reportQuery));
+
+    private async Task<List<Report>> AuthorizeSystemReportsAsync(
+        IEnumerable<Report> reports,
+        bool isAdministrator)
+    {
+        var authorized = new List<Report>();
+        foreach (var providerGroup in reports.GroupBy(report => ProviderFor(report.Query)!))
+        {
+            if (!providerGroup.Key.RequiresRecordLevelReadAuthorization)
+            {
+                // Inventory, Procurement, and other static providers apply one permission to all
+                // their definitions. Resolve it once per provider to avoid serial authorization
+                // queries for every catalogue row.
+                if (await providerGroup.Key.CanReadAsync(isAdministrator))
+                    authorized.AddRange(providerGroup);
+                continue;
+            }
+
+            // Dynamic providers such as the Finance ad hoc builder mix private and Finance-shared
+            // records under one prefix, so each identifier must be checked before metadata leaks.
+            foreach (var report in providerGroup)
+            {
+                if (await providerGroup.Key.CanReadReportAsync(report.Query!, isAdministrator))
+                    authorized.Add(report);
+            }
+        }
+
+        return authorized;
+    }
 
     private bool IsSystemIdentifier(string? reportQuery) =>
         _systemReportProviders.Any(provider => provider.OwnsIdentifier(reportQuery));

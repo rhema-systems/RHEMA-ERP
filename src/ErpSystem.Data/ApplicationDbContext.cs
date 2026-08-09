@@ -171,6 +171,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
+    public DbSet<BudgetRevision> BudgetRevisions { get; set; }
+    public DbSet<BudgetRevisionLine> BudgetRevisionLines { get; set; }
     public DbSet<BankAccount> BankAccounts { get; set; }
     public DbSet<LiquidityAccount> LiquidityAccounts { get; set; }
     public DbSet<LiquidityAccountEntry> LiquidityAccountEntries { get; set; }
@@ -980,6 +982,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EstateManagedAsset> EstateManagedAssets { get; set; }
     public DbSet<EstateLandDemarcation> EstateLandDemarcations { get; set; }
     public DbSet<EstateManagedAssetDocument> EstateManagedAssetDocuments { get; set; }
+    public DbSet<EstateGroundRentAccount> EstateGroundRentAccounts { get; set; }
+    public DbSet<EstateGroundRentCharge> EstateGroundRentCharges { get; set; }
+    public DbSet<EstateGroundRentReview> EstateGroundRentReviews { get; set; }
+    public DbSet<EstateFacilityDutyRoster> EstateFacilityDutyRosters { get; set; }
     public DbSet<EstateGisConfiguration> EstateGisConfigurations { get; set; }
     public DbSet<LandAcquisitionNote> LandAcquisitionNotes { get; set; }
     public DbSet<LandAcquisitionChecklistResponse> LandAcquisitionChecklistResponses { get; set; }
@@ -1925,6 +1931,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<CollectionActivity>(entity =>
         {
             entity.ToTable("CollectionActivities");
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            // A posted invoice may have many calls/reminders, but Finance must have
+            // only one durable primary work item for that exposure. The filtered
+            // SQL Server index makes bulk generation idempotent under concurrency.
+            entity.HasIndex(e => new { e.TenantId, e.InvoiceId, e.CollectionContext })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsPrimaryTask] = 1 AND [InvoiceId] IS NOT NULL");
+            entity.HasIndex(e => new { e.TenantId, e.CollectionContext, e.CollectionStatus, e.FollowUpDate });
             entity.HasOne(e => e.Customer)
                 .WithMany()
                 .HasForeignKey(e => e.CustomerId)
@@ -1936,6 +1950,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.AssignedTo)
                 .WithMany()
                 .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CompletedBy)
+                .WithMany()
+                .HasForeignKey(e => e.CompletedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ParentActivity)
+                .WithMany(e => e.History)
+                .HasForeignKey(e => e.ParentActivityId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
@@ -4504,11 +4526,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("ReportSchedules");
             entity.HasOne(s => s.Report).WithMany(r => r.Schedules).HasForeignKey(s => s.ReportId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(s => s.ReportTemplate).WithMany().HasForeignKey(s => s.ReportTemplateId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(s => s.RunAsUser).WithMany().HasForeignKey(s => s.RunAsUserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(s => s.PausedBy).WithMany().HasForeignKey(s => s.PausedById).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(s => s.RowVersion).IsRowVersion();
             entity.HasIndex(s => s.ReportId);
+            entity.HasIndex(s => s.ReportTemplateId);
             entity.HasIndex(s => s.IsActive);
             entity.HasIndex(s => s.NextExecutionDate);
             entity.HasIndex(s => s.Frequency);
+            // The production worker scans by tenant/state/due date; this composite
+            // index avoids a table scan as schedules accumulate across tenants.
+            entity.HasIndex(s => new { s.IsActive, s.Status, s.NextExecutionDate });
         });
 
         // Configure ReportTemplate entity
@@ -4533,11 +4563,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("ReportExecutions");
             entity.HasOne(e => e.Report).WithMany(r => r.Executions).HasForeignKey(e => e.ReportId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportSchedule).WithMany().HasForeignKey(e => e.ReportScheduleId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportTemplate).WithMany().HasForeignKey(e => e.ReportTemplateId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportExport).WithMany().HasForeignKey(e => e.ReportExportId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(e => e.RowVersion).IsRowVersion();
             entity.HasIndex(e => e.ReportId);
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExecutedAt);
             entity.HasIndex(e => e.Status);
+            // This filtered key is the final idempotency gate when multiple API
+            // instances observe the same due schedule at the same time.
+            entity.HasIndex(e => new { e.TenantId, e.ReportScheduleId, e.ScheduledFor })
+                .IsUnique()
+                .HasFilter("[ReportScheduleId] IS NOT NULL AND [ScheduledFor] IS NOT NULL AND [IsDeleted] = 0");
         });
 
         // Configure UserReportFavorite entity
@@ -4563,6 +4602,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExportedAt);
             entity.HasIndex(e => e.Format);
+            entity.HasIndex(e => new { e.TenantId, e.Status, e.ExportedAt });
         });
 
         // Configure ReportRoleAssignment entity
@@ -7026,6 +7066,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(scenario => scenario.SupersededByUserId)
                 .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(scenario => scenario.ParentScenario)
+                .WithMany()
+                .HasForeignKey(scenario => scenario.ParentScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<BudgetReturn>(entity =>
@@ -7061,6 +7105,43 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
+        });
+
+        builder.Entity<BudgetRevision>(entity =>
+        {
+            entity.Property(revision => revision.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(revision => new { revision.TenantId, revision.RevisionNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(revision => new { revision.TenantId, revision.SourceScenarioId, revision.Status });
+            entity.HasOne(revision => revision.SourceScenario)
+                .WithMany()
+                .HasForeignKey(revision => revision.SourceScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(revision => revision.ResultScenario)
+                .WithMany()
+                .HasForeignKey(revision => revision.ResultScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<BudgetRevisionLine>(entity =>
+        {
+            // One signed adjustment per budget cell avoids ambiguous duplicate
+            // changes and makes the net-zero virement rule deterministic.
+            entity.HasIndex(line => new
+                {
+                    line.TenantId,
+                    line.BudgetRevisionId,
+                    line.SegmentValueId,
+                    line.AccountId,
+                    line.FiscalPeriodId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(line => line.BudgetRevision)
+                .WithMany(revision => revision.Lines)
+                .HasForeignKey(line => line.BudgetRevisionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 
@@ -8312,6 +8393,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.AssetType, item.Status });
             entity.HasIndex(item => new { item.TenantId, item.ProjectUnitId });
             entity.HasIndex(item => new { item.TenantId, item.LandAcquisitionId });
+            entity.HasIndex(item => new { item.TenantId, item.CustomerBusinessPartnerId });
             entity.HasIndex(item => new { item.TenantId, item.IsPublishedToExternalPortal, item.ExternalListingStatus });
             entity.Property(item => item.AssetType).HasConversion<string>().HasMaxLength(40);
             entity.Property(item => item.Status).HasConversion<string>().HasMaxLength(40);
@@ -8320,8 +8402,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.GisSyncStatus).HasDefaultValue("NotLinked");
             entity.Property(item => item.AreaSquareMeters).HasPrecision(18, 4);
             entity.Property(item => item.AreaValue).HasPrecision(18, 4);
+            entity.Property(item => item.GroundRentPayable).HasColumnType("decimal(18,2)");
+            entity.Property(item => item.GroundRentRatePerAcre).HasColumnType("decimal(18,2)");
+            entity.Property(item => item.GroundRentComputed).HasColumnType("decimal(18,3)");
             entity.Property(item => item.ValuationAmount).HasPrecision(18, 2);
             entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
             entity.HasMany(item => item.Documents)
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)
@@ -8352,6 +8439,69 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId });
             entity.HasIndex(item => new { item.TenantId, item.CentralDocumentRecordId });
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.IsListingImage });
+        });
+
+        builder.Entity<EstateGroundRentAccount>(entity =>
+        {
+            entity.ToTable("EstateGroundRentAccounts");
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.CustomerBusinessPartnerId, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.NextDueDate, item.Status });
+            entity.HasIndex(item => new { item.TenantId, item.NextReviewDate, item.Status });
+            entity.Property(item => item.AnnualAmount).HasPrecision(18, 2);
+            entity.Property(item => item.RatePerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.EscalationValue).HasPrecision(18, 4);
+            entity.Property(item => item.PenaltyValue).HasPrecision(18, 4);
+            entity.Property(item => item.PenaltyCapAmount).HasPrecision(18, 2);
+            entity.HasOne(item => item.EstateManagedAsset)
+                .WithMany()
+                .HasForeignKey(item => item.EstateManagedAssetId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(item => item.GroundRentIncomeAccount)
+                .WithMany()
+                .HasForeignKey(item => item.GroundRentIncomeAccountId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasMany(item => item.Charges)
+                .WithOne(item => item.GroundRentAccount)
+                .HasForeignKey(item => item.GroundRentAccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.Reviews)
+                .WithOne(item => item.GroundRentAccount)
+                .HasForeignKey(item => item.GroundRentAccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EstateGroundRentCharge>(entity =>
+        {
+            entity.ToTable("EstateGroundRentCharges");
+            entity.HasIndex(item => new { item.TenantId, item.GroundRentAccountId, item.DueDate }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.FinanceInvoiceId });
+            entity.HasIndex(item => new { item.TenantId, item.PenaltyInvoiceId });
+            entity.Property(item => item.BaseAmount).HasPrecision(18, 2);
+            entity.Property(item => item.PenaltyAmount).HasPrecision(18, 2);
+        });
+
+        builder.Entity<EstateGroundRentReview>(entity =>
+        {
+            entity.ToTable("EstateGroundRentReviews");
+            entity.HasIndex(item => new { item.TenantId, item.GroundRentAccountId, item.EffectiveDate });
+            entity.Property(item => item.PreviousAnnualAmount).HasPrecision(18, 2);
+            entity.Property(item => item.NewAnnualAmount).HasPrecision(18, 2);
+            entity.Property(item => item.PreviousRatePerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.NewRatePerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.EscalationValue).HasPrecision(18, 4);
+        });
+
+        builder.Entity<EstateFacilityDutyRoster>(entity =>
+        {
+            entity.ToTable("EstateFacilityDutyRosters");
+            entity.HasIndex(item => new { item.TenantId, item.RosterReference }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.StaffName, item.StartDate });
+            entity.HasIndex(item => new { item.TenantId, item.PropertyReference, item.PropertyUnit });
+            entity.HasIndex(item => new { item.TenantId, item.ServiceAreaType, item.ServiceAreaName });
+            entity.HasIndex(item => new { item.TenantId, item.AttendanceStatus, item.CompletionStatus });
+            entity.HasIndex(item => new { item.TenantId, item.LinkedMaintenanceReference });
+            entity.HasIndex(item => new { item.TenantId, item.LinkedComplaintReference });
         });
 
         builder.Entity<LandAcquisitionNote>(entity =>

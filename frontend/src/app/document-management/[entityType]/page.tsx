@@ -358,6 +358,19 @@ export default function DocumentManagementWorkspacePage() {
           </div>
         </div>
 
+        {workspace.stages.length === 0 ? (
+          <Card className="border-dashed border-border bg-muted/40">
+            <CardHeader>
+              <CardTitle className="text-base">Workflow not configured</CardTitle>
+              <CardDescription>
+                No DMS stages, checklists, fields, outputs, or handoffs are
+                predefined here. Configure and publish the workflow in
+                Administration &gt; Workflow Setup for this DMS entity type.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : null}
+
         {workspace.workspace.entityType === 'CentralDocumentVersion' ? (
           <Card className="border-border bg-card text-card-foreground">
             <CardHeader>

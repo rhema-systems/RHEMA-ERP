@@ -81,6 +81,17 @@ public partial class AddFinanceAdHocReportBuilder : Migration
             columns: new[] { "TenantId", "OwnerUserId", "Visibility" });
     }
 
-    protected override void Down(MigrationBuilder migrationBuilder) =>
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        // The foreign key cascades only when a Reports principal is deleted; dropping this dependent
+        // table cannot remove its principals. Delete the linked report rows first so a rollback does
+        // not expose orphaned finance-adhoc identifiers to the legacy custom-SQL execution path.
+        migrationBuilder.Sql("""
+            DELETE report
+            FROM [Reports] AS report
+            INNER JOIN [FinanceAdHocReportDefinitions] AS definition
+                ON definition.[ReportId] = report.[Id];
+            """);
         migrationBuilder.DropTable(name: "FinanceAdHocReportDefinitions");
+    }
 }

@@ -50,7 +50,9 @@ const accentClasses: Record<string, string> = {
 
 const operationalWorkspaceTypes = new Set([
   'CentralDocumentRegister',
+  'CentralDocumentMetadataTemplate',
   'CentralDocumentVersion',
+  'CentralDocumentGovernance',
   'CentralDocumentIntegrationQueue',
 ]);
 

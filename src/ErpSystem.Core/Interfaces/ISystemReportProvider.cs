@@ -8,6 +8,13 @@ namespace ErpSystem.Core.Interfaces;
 /// </summary>
 public interface ISystemReportProvider
 {
+    /// <summary>
+    /// Indicates that catalogue visibility varies by persisted report identifier. The shared
+    /// catalogue groups provider-wide authorization by default so static module providers do not
+    /// repeat the same database-backed permission lookup for every report row.
+    /// </summary>
+    bool RequiresRecordLevelReadAuthorization => false;
+
     bool CanHandle(string? reportQuery);
     bool OwnsIdentifier(string? reportQuery);
     string? ResolveCode(string? reportQuery);

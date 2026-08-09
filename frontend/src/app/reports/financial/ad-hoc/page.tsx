@@ -68,6 +68,21 @@ function message(error: unknown) {
     : 'The Finance report action could not be completed.';
 }
 
+function editableFingerprint(definition: SaveFinanceAdHocDefinition) {
+  // RowVersion is concurrency evidence, not user-editable report content. Excluding it gives the
+  // UI a stable comparison between the persisted definition and the fields currently on screen.
+  return JSON.stringify({
+    name: definition.name,
+    description: definition.description,
+    datasetCode: definition.datasetCode,
+    columns: definition.columns,
+    filters: definition.filters,
+    sorts: definition.sorts,
+    visibility: definition.visibility,
+    maximumRows: definition.maximumRows,
+  });
+}
+
 export default function FinanceAdHocReportBuilderPage() {
   const { toast } = useToast();
   const [workspace, setWorkspace] = useState<FinanceAdHocWorkspace | null>(
@@ -87,6 +102,14 @@ export default function FinanceAdHocReportBuilderPage() {
   );
   const canMaintainSelection =
     !selectedDefinition || selectedDefinition.canMaintain;
+  const hasUnsavedChanges = useMemo(
+    () =>
+      Boolean(
+        selectedDefinition?.canMaintain &&
+          editableFingerprint(form) !== editableFingerprint(selectedDefinition)
+      ),
+    [form, selectedDefinition]
+  );
 
   const load = async (preferredId?: string) => {
     const data = await financeAdHocReportsService.getWorkspace();
@@ -213,7 +236,7 @@ export default function FinanceAdHocReportBuilderPage() {
   };
 
   const run = async () => {
-    if (!selectedId) return;
+    if (!selectedId || hasUnsavedChanges) return;
     setBusy(true);
     try {
       setResult(
@@ -235,7 +258,7 @@ export default function FinanceAdHocReportBuilderPage() {
   };
 
   const exportResult = async (format: 'xlsx' | 'pdf') => {
-    if (!selectedId) return;
+    if (!selectedId || hasUnsavedChanges) return;
     setBusy(true);
     try {
       const exported = await financeAdHocReportsService.export(selectedId, {
@@ -651,6 +674,13 @@ export default function FinanceAdHocReportBuilderPage() {
                       design.
                     </p>
                   )}
+                  {hasUnsavedChanges && (
+                    <p className="text-sm text-amber-700 dark:text-amber-300">
+                      Save your changes before running or exporting. This keeps
+                      the visible design aligned with the server-governed
+                      definition used to produce the result.
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     <Button
                       onClick={save}
@@ -662,7 +692,7 @@ export default function FinanceAdHocReportBuilderPage() {
                     <Button
                       variant="outline"
                       onClick={run}
-                      disabled={busy || !selectedId}
+                      disabled={busy || !selectedId || hasUnsavedChanges}
                     >
                       <Play className="mr-2 h-4 w-4" />
                       Run preview
@@ -670,7 +700,7 @@ export default function FinanceAdHocReportBuilderPage() {
                     <Button
                       variant="outline"
                       onClick={() => void exportResult('xlsx')}
-                      disabled={busy || !selectedId}
+                      disabled={busy || !selectedId || hasUnsavedChanges}
                     >
                       <Download className="mr-2 h-4 w-4" />
                       Excel
@@ -678,7 +708,7 @@ export default function FinanceAdHocReportBuilderPage() {
                     <Button
                       variant="outline"
                       onClick={() => void exportResult('pdf')}
-                      disabled={busy || !selectedId}
+                      disabled={busy || !selectedId || hasUnsavedChanges}
                     >
                       PDF
                     </Button>

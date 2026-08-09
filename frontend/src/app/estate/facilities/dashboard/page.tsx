@@ -12,7 +12,6 @@ import {
   Wrench,
 } from 'lucide-react';
 
-import { AuthGuard } from '@/components/auth/auth-guard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -109,7 +108,6 @@ export default function FacilitiesDashboardPage() {
   }, [openCases]);
 
   return (
-    <AuthGuard requiredPermissions={['facilities.access']}>
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -258,6 +256,5 @@ export default function FacilitiesDashboardPage() {
           </CardContent>
         </Card>
       </div>
-    </AuthGuard>
   );
 }

@@ -180,6 +180,10 @@ public sealed class FinanceAdHocReportService : IFinanceAdHocReportService
 
     public bool CanHandle(string? reportQuery) => TryDefinitionId(reportQuery, out _);
 
+    // Finance definitions can be private to their owner or visible to all authorized Finance
+    // users, so the shared catalogue must authorize each persisted definition independently.
+    public bool RequiresRecordLevelReadAuthorization => true;
+
     public bool OwnsIdentifier(string? reportQuery) => !string.IsNullOrWhiteSpace(reportQuery)
         && reportQuery.StartsWith(FinanceAdHocReportValues.QueryPrefix, StringComparison.OrdinalIgnoreCase);
 
@@ -230,12 +234,21 @@ public sealed class FinanceAdHocReportService : IFinanceAdHocReportService
     {
         var definition = await RequiredForExecutionAsync(reportQuery, cancellationToken);
         await EnsureCanReadDefinitionAsync(definition, cancellationToken);
-        if (!isAdministrator && !await HasPermissionAsync(FinancePermissions.RunFinanceReports, cancellationToken))
-            throw new UnauthorizedAccessException("Finance report run permission is required.");
+        var requiredPermission = RequiredExecutionPermission(request);
+        if (!isAdministrator && !await HasPermissionAsync(requiredPermission, cancellationToken))
+            throw new UnauthorizedAccessException(request.IsExportExecution
+                ? "Finance report export permission is required."
+                : "Finance report run permission is required.");
 
         var stored = DeserializeStored(definition.DefinitionJson);
         var dataset = ValidateStored(stored);
-        var compiled = FinanceAdHocSqlCompiler.Compile(dataset, stored, TenantId(), definition.MaximumRows, request);
+        // The shared exporter pages in 1,000-row chunks. For Finance exports, its generic MaxRows
+        // value is a page transport default rather than an authority ceiling; the saved definition
+        // remains the governing limit (up to 5,000 rows). Interactive callers retain their optional
+        // stricter MaxRows override.
+        var governedRequest = GovernExecutionRequest(definition.MaximumRows, request);
+        var compiled = FinanceAdHocSqlCompiler.Compile(
+            dataset, stored, TenantId(), definition.MaximumRows, governedRequest);
         var connectionString = _configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("The Finance reporting database connection is not configured.");
         var startedAt = DateTime.UtcNow;
@@ -274,6 +287,31 @@ public sealed class FinanceAdHocReportService : IFinanceAdHocReportService
             }
         };
     }
+
+    internal static string RequiredExecutionPermission(ExecuteReportDto request) =>
+        request.IsExportExecution
+            ? FinancePermissions.ExportFinanceReports
+            : FinancePermissions.RunFinanceReports;
+
+    internal static ExecuteReportDto GovernExecutionRequest(
+        int definitionMaximumRows,
+        ExecuteReportDto request) =>
+        !request.IsExportExecution
+            ? request
+            : new ExecuteReportDto
+            {
+                Parameters = request.Parameters,
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                IncludeMetadata = request.IncludeMetadata,
+                Page = request.Page,
+                PageSize = request.PageSize,
+                // Export pages may be transported 1,000 rows at a time, but the persisted Finance
+                // definition—not that generic page default—governs the complete export ceiling.
+                MaxRows = definitionMaximumRows,
+                IsExportExecution = true,
+                TemplateContext = request.TemplateContext
+            };
 
     private async Task<FinanceAdHocReportDefinition> RequiredForExecutionAsync(
         string query, CancellationToken cancellationToken)
@@ -551,18 +589,22 @@ internal static class FinanceAdHocSqlCompiler
         for (var index = 0; index < stored.Filters.Count; index++)
             predicates.Add(Filter(stored.Filters[index], dataset.Fields[stored.Filters[index].Field], index, parameters));
 
+        // Compute the governed ceiling before building the count. The count needs only one row
+        // beyond that ceiling to determine whether the result was capped; counting an entire large
+        // grouped ledger would add database load without changing any response metadata.
+        var requestedMaximumRows = Math.Clamp(request.MaxRows ?? 5000, 1, 5000);
+        var maximumRows = Math.Min(Math.Clamp(definitionMaximumRows, 1, 5000), requestedMaximumRows);
         var baseSql = $"SELECT {string.Join(", ", select)} FROM {dataset.FromSql} " +
             $"WHERE {string.Join(" AND ", predicates.Select(item => $"({item})"))}" +
             (groups.Count == 0 ? string.Empty : $" GROUP BY {string.Join(", ", groups)}");
-        var countSql = $"SELECT COUNT_BIG(1) FROM ({baseSql}) AS [AdHocCount]";
+        var countSql = $"SELECT COUNT_BIG(1) FROM (SELECT TOP ({maximumRows + 1}) 1 AS [RowPresent] " +
+            $"FROM ({baseSql}) AS [GovernedRows]) AS [AdHocCount]";
         var order = stored.Sorts.Count > 0
             ? stored.Sorts.Select(item => $"[{item.Field}] {(item.Descending ? "DESC" : "ASC")}")
             : new[] { $"[{stored.Columns[0].Field}] ASC" };
         // ExecuteReportDto is shared with legacy providers and therefore has no range annotations.
         // Clamp its optional override here so a crafted zero/negative value cannot produce invalid
         // FETCH syntax and an oversized value can never relax the definition's saved ceiling.
-        var requestedMaximumRows = Math.Clamp(request.MaxRows ?? 5000, 1, 5000);
-        var maximumRows = Math.Min(Math.Clamp(definitionMaximumRows, 1, 5000), requestedMaximumRows);
         var page = Math.Max(1, request.Page);
         var requestedPageSize = Math.Min(Math.Max(1, request.PageSize), Math.Min(200, maximumRows));
         // Calculate in Int64 because Page is client input; Int32 multiplication could wrap a very
