@@ -607,7 +607,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     private static string ReadSource(params string[] path)
-        => File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. path]));
+        => File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. path]))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
 
     private static string Slice(string source, string startMarker, string endMarker)
     {

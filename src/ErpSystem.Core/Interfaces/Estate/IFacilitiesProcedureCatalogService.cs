@@ -13,7 +13,8 @@ public sealed record FacilitiesProcedureCatalogItem(
     string Summary,
     string Icon,
     int StageCount,
-    string Accent);
+    string Accent,
+    string WorkspaceType = "Case Workflow");
 
 public sealed record FacilitiesProcedureWorkspace(
     FacilitiesProcedureCatalogItem Procedure,

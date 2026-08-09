@@ -34,6 +34,7 @@ public sealed record ProcedureCaseDetailDto(
     bool UsesConfiguredWorkflow,
     Guid? WorkflowInstanceId,
     bool CanEditCurrentStage,
+    IReadOnlyList<string> CurrentStageFieldKeys,
     IReadOnlyList<ProcedureCaseFieldDto> Fields,
     IReadOnlyList<ProcedureCaseChecklistItemDto> ChecklistItems,
     IReadOnlyList<ProcedureCaseDocumentDto> Documents,

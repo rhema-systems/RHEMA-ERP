@@ -49,6 +49,27 @@ public class WorkflowChecklistEvidenceValidatorTests
     }
 
     [Fact]
+    public void Validate_AcceptsEvidenceWithTheConfiguredDocumentName_WhenLegacyKeysDiffer()
+    {
+        var checklist = new[] { ChecklistItem(isRequired: true, requiresDocument: true) };
+        var responses = new[] { SatisfiedResponse() };
+        var attachments = new[]
+        {
+            new WorkflowTaskAttachmentDto
+            {
+                ChecklistItemId = "legacy-task-requirement",
+                RequirementKey = "legacy-task-requirement",
+                DocumentName = "Current Tax Clearance",
+                FileName = "clearance.pdf"
+            }
+        };
+
+        var errors = WorkflowChecklistEvidenceValidator.Validate(checklist, responses, attachments);
+
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Validate_DoesNotRequireEvidence_ForUncheckedOptionalItem()
     {
         var checklist = new[] { ChecklistItem(isRequired: false, requiresDocument: true) };

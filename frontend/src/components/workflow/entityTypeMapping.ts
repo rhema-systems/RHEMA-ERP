@@ -51,6 +51,15 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   // Estate/DMS integration: Estate procedure and land-acquisition cases use Workflow approvals instead of a separate approval engine.
   estate: [
     'LandAcquisition',
+    'EstatePropertyManagementPropertyUnit',
+    'EstatePropertyManagementLease',
+    'EstatePropertyManagementTenantOccupant',
+    'EstatePropertyManagementBillingServiceCharge',
+    'EstatePropertyManagementGroundRent',
+    'EstatePropertyManagementListingApplication',
+    'EstatePropertyManagementOccupancyAvailability',
+    'EstatePropertyManagementMoveInMoveOutHandover',
+    'EstatePropertyManagementDocumentRecordIndex',
     'EstateFacilityPropertySite',
     'EstateFacilityLease',
     'EstateFacilityMaintenance',
@@ -68,7 +77,12 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'EstateJointOwnership',
     'EstateTransfer',
     'EstateAssignment',
+    'EstateMortgageConsent',
     'EstateLeasePreparation',
+    'EstateAdditionalLand',
+    'EstateLayoutRevision',
+    'EstateChangeOfUse',
+    'EstateReminderRateRevision',
     'EstateLeaseRenewal',
     'EstateServicedPlotAllocation',
     'EstateLandsPartiallyServiced',
@@ -80,6 +94,8 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
   // Estate/DMS integration: Legal procedures are exposed to Workflow so Estate handoffs can still route through Legal-owned review.
   legal: [
     'LegalProcedure',
+    'LegalOpinionAdvisory',
+    'LegalExternalCounsel',
     'LegalMortgage',
     'LegalMortgageInPrinciple',
     'LegalCourtProcess',
@@ -88,6 +104,13 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'LegalAssignmentSubleaseVesting',
     'LegalLeaseVariationRenewalSublease',
     'LegalTransfer'
+  ],
+  'document-management': [
+    'CentralDocumentRegister',
+    'CentralDocumentMetadataTemplate',
+    'CentralDocumentVersion',
+    'CentralDocumentGovernance',
+    'CentralDocumentIntegrationQueue'
   ],
   sales: ['Customer', 'SalesOrder', 'SalesAgreement', 'SalesAllocation', 'PlotAllocation', 'Refund', 'CreditNote'],
   quality: ['Quality']

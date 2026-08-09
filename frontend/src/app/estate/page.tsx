@@ -50,6 +50,10 @@ import {
   procedureCaseService,
   type ProcedureCaseSummary,
 } from '@/services/procedure-case.service';
+import {
+  getProcedureStageLabel,
+  getProcedureWorkspaceActionLabel,
+} from '@/lib/procedure-workspace';
 
 const procedureIcons: Record<
   string,
@@ -200,17 +204,17 @@ export default function EstateOperationsPage() {
       icon: Landmark,
     },
     {
-      label: 'Estate Cases',
+      label: 'Estate Open Work',
       value: openEstateCases.length.toString(),
       icon: ClipboardList,
     },
     {
-      label: 'Property Cases',
+      label: 'Property Operations',
       value: openPropertyCases.length.toString(),
       icon: Home,
     },
     {
-      label: 'Facilities Cases',
+      label: 'Facilities Open Work',
       value: openFacilitiesCases.length.toString(),
       icon: Building2,
     },
@@ -221,6 +225,18 @@ export default function EstateOperationsPage() {
     },
   ];
 
+  const workflowProcedures = procedures.filter(
+    (procedure) =>
+      procedure.workspaceType !== 'Register' &&
+      procedure.workspaceType !== 'Dashboard / Report'
+  );
+  const workflowEntityTypes = new Set(
+    workflowProcedures.map((procedure) => procedure.entityType)
+  );
+  const estateWorkflowItems = estateCases.filter((item) =>
+    workflowEntityTypes.has(item.entityType)
+  );
+
   const estateReadiness = [
     {
       label: 'Project Pull Readiness',
@@ -229,14 +245,16 @@ export default function EstateOperationsPage() {
     {
       label: 'Estate Workflow Coverage',
       value:
-        procedures.length > 0
+        workflowProcedures.length > 0
           ? Math.round(
-              (new Set(estateCases.map((item) => item.entityType)).size / procedures.length) * 100
+              (new Set(estateWorkflowItems.map((item) => item.entityType)).size /
+                workflowProcedures.length) *
+                100
             )
           : 0,
     },
     {
-      label: 'Estate Case Closure',
+      label: 'Estate Work Completion',
       value:
         estateCases.length > 0
           ? Math.round(
@@ -486,6 +504,16 @@ export default function EstateOperationsPage() {
         </Card>
       </div>
 
+      <div>
+        <h2 className="text-lg font-semibold">
+          Estate Casework &amp; Registers
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          SOP case workflows, departmental registers, operational queues,
+          inspection events, and reporting controls.
+        </p>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {isLoading ? (
             <Card className="border-border bg-card text-card-foreground sm:col-span-2 xl:col-span-3">
@@ -501,6 +529,9 @@ export default function EstateOperationsPage() {
               const Icon = procedureIcons[procedure.icon] || FileText;
               const accent =
                 accentClasses[procedure.accent] || accentClasses.teal;
+              const isWorkflowManagedRequest =
+                procedure.entityType ===
+                'EstatePropertyManagementListingApplication';
 
               return (
                 <Card
@@ -513,7 +544,12 @@ export default function EstateOperationsPage() {
                         <Icon className={`h-5 w-5 ${accent}`} />
                       </div>
                       <Badge variant="secondary">
-                        {procedure.stageCount} stages
+                        {isWorkflowManagedRequest
+                          ? 'Workflow managed'
+                          : getProcedureStageLabel(
+                              procedure.workspaceType,
+                              procedure.stageCount
+                            )}
                       </Badge>
                     </div>
                     <div>
@@ -528,14 +564,18 @@ export default function EstateOperationsPage() {
                   <CardContent className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{procedure.entityType}</Badge>
-                      <Badge variant="outline">Live cases</Badge>
+                      <Badge variant="outline">
+                        {procedure.workspaceType ?? 'Case Workflow'}
+                      </Badge>
                     </div>
                     <Button
                       variant="outline"
                       className="w-full justify-between"
                       onClick={() => openWorkspace(procedure.entityType)}
                     >
-                      Open workspace
+                      {getProcedureWorkspaceActionLabel(
+                        procedure.workspaceType
+                      )}
                       <ArrowRight className="h-4 w-4" />
                     </Button>
                     {canManageWorkflows ? (

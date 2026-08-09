@@ -8,6 +8,9 @@ public class BudgetScenarioDto
     public Guid TenantId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string VersionType { get; set; } = "Original";
+    public int VersionNumber { get; set; }
+    public Guid? ParentScenarioId { get; set; }
     public Guid FiscalYearId { get; set; }
     public string FiscalYearName { get; set; } = string.Empty;
     public string BaseCurrencyCode { get; set; } = string.Empty;
@@ -355,4 +358,112 @@ public class BudgetScenarioComparisonDto
     public decimal DifferenceTotal { get; set; }
     public IReadOnlyList<BudgetScenarioComparisonLineDto> Lines { get; set; } =
         Array.Empty<BudgetScenarioComparisonLineDto>();
+}
+
+/// <summary>
+/// Creates either a net-zero virement or a positive supplementary-budget request
+/// against the currently adopted scenario. Amounts are signed base-currency changes.
+/// </summary>
+public class CreateBudgetRevisionDto
+{
+    [Required]
+    public Guid SourceScenarioId { get; set; }
+
+    [Required]
+    [RegularExpression("^(Virement|Supplementary)$")]
+    public string RevisionType { get; set; } = "Virement";
+
+    [Required]
+    public DateTime EffectiveDate { get; set; }
+
+    [Required]
+    [MaxLength(100)]
+    public string BoardResolutionReference { get; set; } = string.Empty;
+
+    [Required]
+    public DateTime BoardResolutionDate { get; set; }
+
+    [Required]
+    [MinLength(20)]
+    [MaxLength(2000)]
+    public string Justification { get; set; } = string.Empty;
+
+    [Required]
+    [MinLength(1)]
+    public List<BudgetRevisionLineInputDto> Lines { get; set; } = new();
+}
+
+public class UpdateBudgetRevisionDto : CreateBudgetRevisionDto
+{
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public class BudgetRevisionLineInputDto
+{
+    public Guid? SegmentValueId { get; set; }
+
+    [Required]
+    public Guid AccountId { get; set; }
+
+    [Required]
+    public Guid FiscalPeriodId { get; set; }
+
+    public decimal AdjustmentAmountBase { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class BudgetRevisionCommandDto
+{
+    [Required]
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public class BudgetRevisionLineDto
+{
+    public Guid Id { get; set; }
+    public Guid? SegmentValueId { get; set; }
+    public string SegmentCode { get; set; } = string.Empty;
+    public string SegmentName { get; set; } = "General";
+    public Guid AccountId { get; set; }
+    public string AccountCode { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public Guid FiscalPeriodId { get; set; }
+    public string PeriodCode { get; set; } = string.Empty;
+    public string PeriodName { get; set; } = string.Empty;
+    public decimal CurrentAmountBase { get; set; }
+    public decimal AdjustmentAmountBase { get; set; }
+    public decimal RevisedAmountBase { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class BudgetRevisionDto
+{
+    public Guid Id { get; set; }
+    public string RevisionNumber { get; set; } = string.Empty;
+    public string RevisionType { get; set; } = string.Empty;
+    public Guid SourceScenarioId { get; set; }
+    public string SourceScenarioName { get; set; } = string.Empty;
+    public Guid FiscalYearId { get; set; }
+    public string FiscalYearName { get; set; } = string.Empty;
+    public Guid? ResultScenarioId { get; set; }
+    public string? ResultScenarioName { get; set; }
+    public DateTime EffectiveDate { get; set; }
+    public string BoardResolutionReference { get; set; } = string.Empty;
+    public DateTime BoardResolutionDate { get; set; }
+    public string Justification { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public decimal IncreaseAmountBase { get; set; }
+    public decimal ReductionAmountBase { get; set; }
+    public decimal NetChangeAmountBase { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public DateTime? AppliedAt { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
+    public IReadOnlyList<BudgetRevisionLineDto> Lines { get; set; } =
+        Array.Empty<BudgetRevisionLineDto>();
 }

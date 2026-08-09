@@ -12,17 +12,13 @@ import {
   Search,
   Send,
   Star,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -54,15 +50,42 @@ function formatMoney(value?: number, currency = 'GHS') {
   }).format(value);
 }
 
+function formatLeaseTerm(months?: number) {
+  if (!months) return 'Duration not set';
+  if (months % 12 === 0) {
+    const years = months / 12;
+    return `${years} year${years === 1 ? '' : 's'}`;
+  }
+  return `${months} month${months === 1 ? '' : 's'}`;
+}
+
+function commercialSummary(asset: EstateManagedAsset) {
+  const currency = asset.externalListingCurrency || asset.currency;
+  if (asset.externalListingType === 'Rent') {
+    return `${formatMoney(asset.externalMonthlyRent, currency)} / month · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
+  }
+  if (asset.externalListingType === 'SaleAndRent') {
+    return `${formatMoney(asset.externalSalePrice, currency)} sale · ${formatMoney(asset.externalMonthlyRent, currency)} / month`;
+  }
+  return formatMoney(
+    asset.externalSalePrice ||
+      asset.externalListingPrice ||
+      asset.valuationAmount,
+    currency
+  );
+}
+
 export default function EstatePropertyListingsPage() {
   const searchParams = useSearchParams();
   const requestedAssetId = searchParams.get('assetId');
   const requestedListingType = searchParams.get('listingType');
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
-  const [documents, setDocuments] = React.useState<EstateManagedAssetDocument[]>(
-    []
-  );
+  const [documents, setDocuments] = React.useState<
+    EstateManagedAssetDocument[]
+  >([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [requestedAssetUnavailable, setRequestedAssetUnavailable] =
+    React.useState(false);
   const [search, setSearch] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -71,38 +94,55 @@ export default function EstatePropertyListingsPage() {
     isPublishedToExternalPortal: false,
     externalListingType: 'Rent',
     externalListingStatus: 'Published',
-    externalListingPrice: '',
+    externalSalePrice: '',
+    externalMonthlyRent: '',
+    externalLeaseDuration: '',
+    externalLeaseDurationUnit: 'months',
     externalListingCurrency: 'GHS',
     externalListingNotes: '',
   });
 
   const selected = React.useMemo(
-    () => assets.find((asset) => asset.id === selectedId) || assets[0],
+    () => assets.find((asset) => asset.id === selectedId),
     [assets, selectedId]
   );
 
-  const loadAssets = React.useCallback(async (query?: string) => {
-    setIsLoading(true);
-    try {
-      const data = await estateLandManagementService.getManagedAssets({
-        search: query,
-        take: 300,
-      });
-      setAssets(data);
-      setSelectedId((current) =>
-        requestedAssetId &&
-        data.some((asset) => asset.id === requestedAssetId)
-          ? requestedAssetId
-          : current && data.some((asset) => asset.id === current)
-          ? current
-          : (data[0]?.id ?? null)
-      );
-    } catch {
-      toast.error('Unable to load managed assets.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [requestedAssetId]);
+  const loadAssets = React.useCallback(
+    async (query?: string) => {
+      setIsLoading(true);
+      try {
+        const data = await estateLandManagementService.getManagedAssets({
+          search: query,
+          portalListingCandidates: true,
+          take: 300,
+        });
+        setAssets(data);
+        const requestedAsset = requestedAssetId
+          ? data.find((asset) => asset.id === requestedAssetId)
+          : undefined;
+        if (requestedAssetId) {
+          setRequestedAssetUnavailable(!requestedAsset);
+          setSelectedId(requestedAsset?.id ?? null);
+        } else {
+          setRequestedAssetUnavailable(false);
+          setSelectedId((current) =>
+            current && data.some((asset) => asset.id === current)
+              ? current
+              : (data[0]?.id ?? null)
+          );
+        }
+      } catch {
+        if (requestedAssetId) {
+          setSelectedId(null);
+          setRequestedAssetUnavailable(true);
+        }
+        toast.error('Unable to load managed assets.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [requestedAssetId]
+  );
 
   const loadDocuments = React.useCallback(async (assetId: string) => {
     try {
@@ -119,11 +159,15 @@ export default function EstatePropertyListingsPage() {
   React.useEffect(() => {
     if (!selected) return;
 
+    const leaseTermMonths = selected.externalLeaseTermMonths;
+    const durationUsesYears =
+      leaseTermMonths != null &&
+      leaseTermMonths > 0 &&
+      leaseTermMonths % 12 === 0;
     setForm({
       isPublishedToExternalPortal: selected.isPublishedToExternalPortal,
       externalListingType:
-        selected.externalListingType &&
-        selected.externalListingType !== 'None'
+        selected.externalListingType && selected.externalListingType !== 'None'
           ? selected.externalListingType
           : requestedListingType === 'Sale' ||
               requestedListingType === 'Rent' ||
@@ -133,10 +177,29 @@ export default function EstatePropertyListingsPage() {
               ? 'Sale'
               : 'Rent',
       externalListingStatus: selected.externalListingStatus || 'Published',
-      externalListingPrice:
-        selected.externalListingPrice == null
+      externalSalePrice:
+        selected.externalSalePrice == null &&
+        selected.externalListingType !== 'Rent'
+          ? selected.externalListingPrice == null
+            ? ''
+            : String(selected.externalListingPrice)
+          : selected.externalSalePrice == null
+            ? ''
+            : String(selected.externalSalePrice),
+      externalMonthlyRent:
+        selected.externalMonthlyRent == null &&
+        selected.externalListingType === 'Rent'
+          ? selected.externalListingPrice == null
+            ? ''
+            : String(selected.externalListingPrice)
+          : selected.externalMonthlyRent == null
+            ? ''
+            : String(selected.externalMonthlyRent),
+      externalLeaseDuration:
+        leaseTermMonths == null
           ? ''
-          : String(selected.externalListingPrice),
+          : String(durationUsesYears ? leaseTermMonths / 12 : leaseTermMonths),
+      externalLeaseDurationUnit: durationUsesYears ? 'years' : 'months',
       externalListingCurrency: selected.externalListingCurrency || 'GHS',
       externalListingNotes: selected.externalListingNotes || '',
     });
@@ -147,6 +210,19 @@ export default function EstatePropertyListingsPage() {
   const publishedCount = assets.filter(
     (asset) => asset.isPublishedToExternalPortal
   ).length;
+  const includesSale =
+    form.externalListingType === 'Sale' ||
+    form.externalListingType === 'SaleAndRent';
+  const includesRent =
+    form.externalListingType === 'Rent' ||
+    form.externalListingType === 'SaleAndRent';
+  const rentPublicationBlockedByGroundRent = Boolean(
+    selected &&
+      form.isPublishedToExternalPortal &&
+      includesRent &&
+      selected.assetType === EstateManagedAssetType.Land &&
+      !(selected.groundRentPayable != null && selected.groundRentPayable > 0)
+  );
 
   const saveListing = async () => {
     if (!selected) return;
@@ -156,13 +232,28 @@ export default function EstatePropertyListingsPage() {
         selected.id,
         {
           isPublishedToExternalPortal: form.isPublishedToExternalPortal,
-          externalListingType: form.isPublishedToExternalPortal
-            ? form.externalListingType
-            : 'None',
+          externalListingType: form.externalListingType,
           externalListingStatus: form.externalListingStatus,
-          externalListingPrice: form.externalListingPrice
-            ? Number(form.externalListingPrice)
-            : null,
+          externalListingPrice: includesSale
+            ? form.externalSalePrice
+              ? Number(form.externalSalePrice)
+              : null
+            : form.externalMonthlyRent
+              ? Number(form.externalMonthlyRent)
+              : null,
+          externalSalePrice:
+            includesSale && form.externalSalePrice
+              ? Number(form.externalSalePrice)
+              : null,
+          externalMonthlyRent:
+            includesRent && form.externalMonthlyRent
+              ? Number(form.externalMonthlyRent)
+              : null,
+          externalLeaseTermMonths:
+            includesRent && form.externalLeaseDuration
+              ? Number(form.externalLeaseDuration) *
+                (form.externalLeaseDurationUnit === 'years' ? 12 : 1)
+              : null,
           externalListingCurrency: form.externalListingCurrency,
           externalListingNotes: form.externalListingNotes,
         }
@@ -173,6 +264,31 @@ export default function EstatePropertyListingsPage() {
       toast.success('Portal listing updated.');
     } catch (error: any) {
       toast.error(error?.message || 'Unable to update portal listing.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const removeListing = async () => {
+    if (!selected) return;
+    setIsSaving(true);
+    try {
+      await estateLandManagementService.updateExternalListing(selected.id, {
+        isPublishedToExternalPortal: false,
+        externalListingType: 'None',
+        externalListingStatus: 'Draft',
+        externalListingPrice: null,
+        externalSalePrice: null,
+        externalMonthlyRent: null,
+        externalLeaseTermMonths: null,
+        externalListingCurrency: form.externalListingCurrency,
+        externalListingNotes: null,
+      });
+      toast.success('Asset removed from Portal Listings.');
+      setSelectedId(null);
+      await loadAssets(search);
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to remove the portal listing.');
     } finally {
       setIsSaving(false);
     }
@@ -245,7 +361,7 @@ export default function EstatePropertyListingsPage() {
       <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Managed Assets</CardTitle>
+            <CardTitle className="text-base">Portal inventory</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
@@ -283,7 +399,10 @@ export default function EstatePropertyListingsPage() {
                     <button
                       key={asset.id}
                       type="button"
-                      onClick={() => setSelectedId(asset.id)}
+                      onClick={() => {
+                        setRequestedAssetUnavailable(false);
+                        setSelectedId(asset.id);
+                      }}
                       className={`w-full rounded-md border p-3 text-left ${
                         active
                           ? 'border-primary bg-primary/5'
@@ -300,8 +419,10 @@ export default function EstatePropertyListingsPage() {
                           </p>
                         </div>
                         {asset.isPublishedToExternalPortal ? (
-                          <Badge variant="secondary">Portal</Badge>
-                        ) : null}
+                          <Badge variant="secondary">Published</Badge>
+                        ) : (
+                          <Badge variant="outline">Draft</Badge>
+                        )}
                       </div>
                       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                         <MapPin className="h-3.5 w-3.5 shrink-0" />
@@ -323,7 +444,12 @@ export default function EstatePropertyListingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {selected ? (
+            {requestedAssetUnavailable ? (
+              <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+                The requested managed asset could not be loaded. Search for the
+                asset and select it explicitly before editing a listing.
+              </div>
+            ) : selected ? (
               <>
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="rounded-md border p-3">
@@ -335,11 +461,7 @@ export default function EstatePropertyListingsPage() {
                   <div className="rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Price</div>
                     <div className="mt-1 font-medium">
-                      {formatMoney(
-                        selected.externalListingPrice ||
-                          selected.valuationAmount,
-                        selected.externalListingCurrency || selected.currency
-                      )}
+                      {commercialSummary(selected)}
                     </div>
                   </div>
                   <div className="rounded-md border p-3">
@@ -355,14 +477,14 @@ export default function EstatePropertyListingsPage() {
                     <Label>Portal visibility</Label>
                     <Select
                       value={
-                        form.isPublishedToExternalPortal
-                          ? 'published'
-                          : 'draft'
+                        form.isPublishedToExternalPortal ? 'published' : 'draft'
                       }
                       onValueChange={(value) =>
                         setForm((current) => ({
                           ...current,
                           isPublishedToExternalPortal: value === 'published',
+                          externalListingStatus:
+                            value === 'published' ? 'Published' : 'Draft',
                         }))
                       }
                     >
@@ -419,36 +541,142 @@ export default function EstatePropertyListingsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid grid-cols-[1fr_110px] gap-2">
-                    <div className="space-y-2">
-                      <Label>Price</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={form.externalListingPrice}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            externalListingPrice: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Currency</Label>
-                      <Input
-                        value={form.externalListingCurrency}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            externalListingCurrency:
-                              event.target.value.toUpperCase(),
-                          }))
-                        }
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label>Currency</Label>
+                    <Input
+                      value={form.externalListingCurrency}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          externalListingCurrency:
+                            event.target.value.toUpperCase(),
+                        }))
+                      }
+                    />
                   </div>
                 </div>
+
+                <div className="rounded-md border p-4">
+                  <div className="mb-4">
+                    <div className="font-medium">Commercial terms</div>
+                    <div className="text-sm text-muted-foreground">
+                      Complete the applicable terms before publishing.
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {includesSale ? (
+                      <div className="space-y-2">
+                        <Label>Sale price</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={form.externalSalePrice}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              externalSalePrice: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter sale price"
+                        />
+                      </div>
+                    ) : null}
+                    {includesRent ? (
+                      <>
+                        <div className="space-y-2">
+                          <Label>Rent per month</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={form.externalMonthlyRent}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                externalMonthlyRent: event.target.value,
+                              }))
+                            }
+                            placeholder="Enter monthly rent"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Rental duration</Label>
+                          <div className="grid grid-cols-[1fr_130px] gap-2">
+                            <Input
+                              type="number"
+                              min="1"
+                              value={form.externalLeaseDuration}
+                              onChange={(event) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  externalLeaseDuration: event.target.value,
+                                }))
+                              }
+                              placeholder="Duration"
+                            />
+                            <Select
+                              value={form.externalLeaseDurationUnit}
+                              onValueChange={(value) =>
+                                setForm((current) => ({
+                                  ...current,
+                                  externalLeaseDurationUnit: value,
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="months">Months</SelectItem>
+                                <SelectItem value="years">Years</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+
+                {includesRent &&
+                selected.assetType === EstateManagedAssetType.Land ? (
+                  <div
+                    className={`rounded-md border p-4 ${
+                      selected.groundRentPayable != null &&
+                      selected.groundRentPayable > 0
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                        : 'border-amber-200 bg-amber-50 text-amber-900'
+                    }`}
+                  >
+                    <div className="font-medium">Ground rent assessment</div>
+                    <p className="mt-1 text-sm">
+                      {selected.groundRentPayable != null &&
+                      selected.groundRentPayable > 0
+                        ? `Annual ground rent assessed at ${formatMoney(
+                            selected.groundRentPayable,
+                            form.externalListingCurrency || selected.currency
+                          )}. This can be shown on the portal, but billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
+                        : 'Assess and approve annual ground rent before publishing this land rental listing.'}
+                    </p>
+                    {selected.groundRentPayable == null ||
+                    selected.groundRentPayable <= 0 ? (
+                      <Button
+                        asChild
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="mt-3 bg-white"
+                      >
+                        <Link
+                          href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(
+                            selected.id
+                          )}`}
+                        >
+                          Set up ground rent
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label>Listing notes</Label>
@@ -463,8 +691,24 @@ export default function EstatePropertyListingsPage() {
                   />
                 </div>
 
-                <div className="flex justify-end">
-                  <Button onClick={saveListing} disabled={isSaving}>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => void removeListing()}
+                    disabled={isSaving}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Remove from Portal Listings
+                  </Button>
+                  <Button
+                    onClick={saveListing}
+                    disabled={isSaving || rentPublicationBlockedByGroundRent}
+                    title={
+                      rentPublicationBlockedByGroundRent
+                        ? 'Assess annual ground rent before publishing this land rental listing.'
+                        : undefined
+                    }
+                  >
                     {isSaving ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -536,7 +780,7 @@ export default function EstatePropertyListingsPage() {
               </>
             ) : (
               <div className="rounded-md border py-16 text-center text-sm text-muted-foreground">
-                Select a managed asset.
+                No Portal Listing candidate is selected.
               </div>
             )}
           </CardContent>

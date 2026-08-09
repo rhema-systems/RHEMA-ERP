@@ -504,6 +504,19 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("BudgetRevision"))
+            {
+                var revision = await _unitOfWork.Repository<BudgetRevision>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.SourceScenario);
+                info.EntityType = "BudgetRevision";
+                info.EntityNumber = revision?.RevisionNumber;
+                info.EntityName = revision == null
+                    ? null
+                    : $"{revision.RevisionType} - {revision.SourceScenario?.Name}";
+                info.ActionUrl = $"/finance/budgeting/revisions/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("UnitJournalEntry"))
             {
                 var entry = await _unitOfWork.Repository<UnitJournalEntry>().FirstOrDefaultAsync(x => x.Id == entityId);

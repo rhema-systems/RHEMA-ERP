@@ -76,6 +76,9 @@ public static class FinancePermissions
     public const string VoidArInvoices = "Finance.AR.Invoices.Void";
     public const string ReceiveCustomerPayments = "Finance.AR.Payments.Receive";
     public const string ReverseArPayments = "Finance.AR.Payments.Reverse";
+    public const string ViewArCollections = "Finance.AR.Collections.View";
+    public const string ManageArCollections = "Finance.AR.Collections.Manage";
+    public const string RecordArCollectionReminders = "Finance.AR.Collections.Reminders.Record";
 
     public const string ManageBankAccounts = "Finance.BankAccounts.Manage";
     public const string RecordCashBankTransactions = "Finance.CashBank.Transactions.Record";
@@ -140,6 +143,10 @@ public static class FinancePermissions
     public const string SubmitBudgetReturns = "Finance.BudgetReturns.Submit";
     public const string ApproveBudgetReturns = "Finance.BudgetReturns.Approve";
     public const string LockBudgets = "Finance.Budgeting.Lock";
+    public const string ViewBudgetRevisions = "Finance.BudgetRevisions.Read";
+    public const string MaintainBudgetRevisions = "Finance.BudgetRevisions.Write";
+    public const string SubmitBudgetRevisions = "Finance.BudgetRevisions.Submit";
+    public const string ApplyBudgetRevisions = "Finance.BudgetRevisions.Apply";
 
     public static readonly FinancePermissionDefinition[] All =
     {
@@ -192,6 +199,9 @@ public static class FinancePermissions
         new(VoidArInvoices, "Void AR Invoices", "Void customer invoices with reversal controls.", CategoryAccountsReceivable),
         new(ReceiveCustomerPayments, "Receive Customer Payments", "Record, allocate, clear, bounce, and credit customer payments.", CategoryAccountsReceivable),
         new(ReverseArPayments, "Reverse AR Payments", "Reverse posted customer receipts through controlled compensating journals.", CategoryAccountsReceivable),
+        new(ViewArCollections, "View AR Collections", "View overdue AR exposures, collection work queues, promises, and follow-up history.", CategoryAccountsReceivable),
+        new(ManageArCollections, "Manage AR Collections", "Generate, assign, prioritize, and resolve controlled AR collection tasks.", CategoryAccountsReceivable),
+        new(RecordArCollectionReminders, "Record AR Collection Reminders", "Prepare and record customer reminders and collection-contact evidence.", CategoryAccountsReceivable),
 
         new(ManageBankAccounts, "Manage Bank Accounts", "Create, update, delete, and configure bank accounts.", CategoryCashBank),
         new(RecordCashBankTransactions, "Record Cash/Bank Transactions", "Record cash receipts, payments, and transfers.", CategoryCashBank),
@@ -255,7 +265,11 @@ public static class FinancePermissions
         new(EditBudgetReturns, "Edit Assigned Budget Returns", "Edit assigned budget worksheets before submission.", CategoryBudgeting),
         new(SubmitBudgetReturns, "Submit Budget Returns", "Submit assigned budget worksheets.", CategoryBudgeting),
         new(ApproveBudgetReturns, "Approve Budget Returns", "Approve or reject submitted budget worksheets.", CategoryBudgeting),
-        new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting)
+        new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting),
+        new(ViewBudgetRevisions, "View Budget Revisions", "View virements, supplementary budgets, Board evidence, and resulting official versions.", CategoryBudgeting),
+        new(MaintainBudgetRevisions, "Maintain Budget Revisions", "Prepare controlled virement and supplementary-budget requests.", CategoryBudgeting),
+        new(SubmitBudgetRevisions, "Submit Budget Revisions", "Submit validated budget revisions to the configured Board approval workflow.", CategoryBudgeting),
+        new(ApplyBudgetRevisions, "Apply Budget Revisions", "Apply an approved revision by creating and adopting an immutable successor budget.", CategoryBudgeting)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();

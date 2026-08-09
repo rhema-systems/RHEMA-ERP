@@ -94,6 +94,23 @@ public class EstateManagedAsset : TenantEntity
     [MaxLength(120)]
     public string? UnitType { get; set; }
 
+    public DateTime? DateOfTenancy { get; set; }
+    public DateTime? RightOfEntryDate { get; set; }
+    public int? LeaseTermYears { get; set; }
+    public decimal? GroundRentPayable { get; set; }
+    public decimal? GroundRentRatePerAcre { get; set; }
+    public decimal? GroundRentComputed { get; set; }
+    public Guid? CustomerBusinessPartnerId { get; set; }
+
+    [MaxLength(240)]
+    public string? LesseeName { get; set; }
+
+    [MaxLength(500)]
+    public string? LesseeAddress { get; set; }
+
+    [MaxLength(120)]
+    public string? PropertyFileReference { get; set; }
+
     public decimal? AreaSquareMeters { get; set; }
     public decimal? ValuationAmount { get; set; }
 
@@ -113,6 +130,12 @@ public class EstateManagedAsset : TenantEntity
     public string ExternalListingStatus { get; set; } = "Draft";
 
     public decimal? ExternalListingPrice { get; set; }
+
+    public decimal? ExternalSalePrice { get; set; }
+
+    public decimal? ExternalMonthlyRent { get; set; }
+
+    public int? ExternalLeaseTermMonths { get; set; }
 
     [MaxLength(10)]
     public string ExternalListingCurrency { get; set; } = "GHS";

@@ -561,7 +561,7 @@ public class LocationService : ILocationService
         }
         else
         {
-            if (!level.IsRootLevel)
+            if (level.LevelNumber != 1)
                 throw new InvalidOperationException("Root locations must be created under a root level.");
 
             var rootCount = await _repository.GetRootLocationCountAsync(createDto.StructureId);
