@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -40,6 +41,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly INotificationService _notifications;
     private readonly SupplierApplicantAccessOptions _options;
+    private readonly string _supplierLoginUrl;
     private readonly ILogger<ProcurementSupplierApplicantAccessService> _logger;
 
     public ProcurementSupplierApplicantAccessService(
@@ -52,6 +54,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         UserManager<ApplicationUser> userManager,
         RoleManager<ApplicationRole> roleManager,
         INotificationService notifications,
+        IConfiguration configuration,
         IOptions<SupplierApplicantAccessOptions> options,
         ILogger<ProcurementSupplierApplicantAccessService> logger)
     {
@@ -65,6 +68,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         _roleManager = roleManager;
         _notifications = notifications;
         _options = options.Value;
+        _supplierLoginUrl = BuildSupplierLoginUrl(configuration["FrontendUrl"]);
         _logger = logger;
     }
 
@@ -2039,19 +2043,33 @@ public sealed class ProcurementSupplierApplicantAccessService :
         var action = resend ? "TemporaryCredentialResent" : "TemporaryCredentialNotified";
         try
         {
+            var expiresAt =
+                $"{access.TemporaryCredentialExpiresAtUtc:yyyy-MM-dd HH:mm} UTC";
             var message =
-                $"Your supplier application is approved. Login: {access.LoginIdentifier}. " +
-                $"Temporary password: {temporaryPassword}. It expires " +
-                $"{access.TemporaryCredentialExpiresAtUtc:yyyy-MM-dd HH:mm} UTC and must be changed at first login.";
+                $"Your supplier application is approved. Open {_supplierLoginUrl}. " +
+                $"Login: {access.LoginIdentifier}. Temporary password: {temporaryPassword}. " +
+                $"It expires {expiresAt} and must be changed at first login.";
             if (access.VerifiedChannel ==
                 ProcurementSupplierApplicantVerificationChannel.Email)
             {
+                var encodedUrl = System.Net.WebUtility.HtmlEncode(_supplierLoginUrl);
+                var encodedLogin =
+                    System.Net.WebUtility.HtmlEncode(access.LoginIdentifier);
+                var encodedPassword =
+                    System.Net.WebUtility.HtmlEncode(temporaryPassword);
+                var encodedExpiry = System.Net.WebUtility.HtmlEncode(expiresAt);
                 await _notifications.SendEmailAsync(
                     access.VerifiedContact,
                     resend
                         ? "Supplier portal temporary credential reissued"
                         : "Supplier portal account approved",
-                    $"<p>{System.Net.WebUtility.HtmlEncode(message)}</p>",
+                    $"<p>Your supplier application is approved.</p>" +
+                    $"<p><strong>Portal login:</strong> " +
+                    $"<a href=\"{encodedUrl}\">{encodedUrl}</a></p>" +
+                    $"<p><strong>Login identifier:</strong> {encodedLogin}<br/>" +
+                    $"<strong>Temporary password:</strong> {encodedPassword}<br/>" +
+                    $"<strong>Expires:</strong> {encodedExpiry}</p>" +
+                    "<p>You must change this password at first login.</p>",
                     isHtml: true);
             }
             else
@@ -2112,6 +2130,22 @@ public sealed class ProcurementSupplierApplicantAccessService :
                 "Supplier temporary credential delivery failed for applicant access {AccessId}",
                 access.Id);
         }
+    }
+
+    private static string BuildSupplierLoginUrl(string? frontendUrl)
+    {
+        var configuredUrl = string.IsNullOrWhiteSpace(frontendUrl)
+            ? "http://localhost:3000"
+            : frontendUrl.Trim();
+        if (!Uri.TryCreate(configuredUrl, UriKind.Absolute, out var parsedUrl) ||
+            (parsedUrl.Scheme != Uri.UriSchemeHttp &&
+             parsedUrl.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException(
+                "FrontendUrl must be configured with an absolute HTTP or HTTPS URL.");
+        }
+
+        return $"{configuredUrl.TrimEnd('/')}/login";
     }
 
     private async Task<ProcurementSupplierApplicantAccess> LoadAccessAsync(

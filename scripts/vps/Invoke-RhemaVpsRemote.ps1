@@ -132,6 +132,7 @@ function Set-TestServerConfiguration {
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' 'true'
     Set-ServiceEnvironmentValue $xml 'CandidatePortal__PortalUrl' `
         $ExpectedPublicOrigin
+    Set-ServiceEnvironmentValue $xml 'FrontendUrl' $ExpectedPublicOrigin
 
     $settings = New-Object System.Xml.XmlWriterSettings
     $settings.Indent = $true
@@ -224,6 +225,7 @@ function Invoke-Preflight {
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
         'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
+        'FrontendUrl' = $ExpectedPublicOrigin
     }
     foreach ($entry in $requiredSettings.GetEnumerator()) {
         $actual = [string](($xml.service.env | Where-Object {

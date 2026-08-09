@@ -13,6 +13,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -673,7 +674,10 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
             .SingleAsync(item => item.Id == access.ApprovedUserId);
         supplierUser.Email.Should().Be("supplier.owner@example.test");
         fixture.DeliveredMessages.Should().ContainSingle(message =>
-            message.Contains("supplier.owner@example.test", StringComparison.Ordinal));
+            message.Contains("supplier.owner@example.test", StringComparison.Ordinal) &&
+            message.Contains(
+                "https://supplier-portal.example.test/login",
+                StringComparison.Ordinal));
 
         var correctionEvent = fixture.RecordedControlEvents.Single(item =>
             item.Action == "ApplicantVerifiedContactCorrected");
@@ -1146,6 +1150,12 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                 _userManager.Object,
                 _roleManager.Object,
                 _notifications.Object,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["FrontendUrl"] = "https://supplier-portal.example.test/"
+                    })
+                    .Build(),
                 Options.Create(new SupplierApplicantAccessOptions()),
                 NullLogger<ProcurementSupplierApplicantAccessService>.Instance);
         }
