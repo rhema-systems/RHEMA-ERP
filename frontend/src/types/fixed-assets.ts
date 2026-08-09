@@ -523,6 +523,8 @@ export interface CreateAssetValuationDto {
   valuationDate: string;
   valuationType: ValuationType;
   fairValue: number;
+  sourceImpairmentValuationId?: string;
+  unimpairedCarryingAmountCap?: number;
   revisedUsefulLifeMonths?: number;
   valuerName?: string;
   valuationMethod?: string;
@@ -557,6 +559,9 @@ export interface AssetValuation {
   revaluationDeficit: number;
   impairmentLoss: number;
   impairmentReversal: number;
+  sourceImpairmentValuationId?: string;
+  outstandingImpairmentBefore: number;
+  unimpairedCarryingAmountCap: number;
   revisedUsefulLifeMonths?: number;
   valuerName?: string;
   valuationMethod?: string;
@@ -564,9 +569,44 @@ export interface AssetValuation {
   reason?: string;
   notes?: string;
   isPostedToGL: boolean;
+  isCorrected: boolean;
+  correctionId?: string;
+  correctedAt?: string;
   journalEntryId?: string;
   postedDate?: string;
   createdAt: string;
+}
+
+export interface RequestAssetValuationCorrectionDto {
+  reason: string;
+  impactAssessment: string;
+  reversalDate?: string;
+}
+
+export interface ReviewAssetValuationCorrectionDto {
+  approved: boolean;
+  reviewComment: string;
+}
+
+export interface AssetValuationCorrection {
+  id: string;
+  originalValuationId: string;
+  fixedAssetId: string;
+  assetCode?: string;
+  valuationType: string;
+  status: 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted';
+  reason: string;
+  impactAssessment: string;
+  requestedReversalDate: string;
+  requestedByUserName: string;
+  requestedAt: string;
+  reviewedByUserName?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  originalJournalEntryId: string;
+  reversalJournalEntryId?: string;
+  postedAt?: string;
+  failureReason?: string;
 }
 
 export interface BulkOperationResult<T> {

@@ -1,5 +1,7 @@
 # Fixed Asset Revaluation and Impairment Foundation - PR Summary
 
+> Update (2026-08-09): the impairment-reversal and posted-valuation-correction exclusions recorded in this historical foundation summary are now resolved by `docs/fixed-asset-valuation-correction-foundation.md`.
+
 Date: 2026-07-08
 
 ## Scope

@@ -34,6 +34,9 @@ import type {
   FixedAssetDepreciationReversal,
   RequestFixedAssetDepreciationReversalDto,
   ReviewFixedAssetDepreciationReversalDto,
+  AssetValuationCorrection,
+  RequestAssetValuationCorrectionDto,
+  ReviewAssetValuationCorrectionDto,
 } from '@/types/fixed-assets';
 import {
   FixedAssetReportQuery,
@@ -380,6 +383,35 @@ class FixedAssetsDataService {
 
   async postValuationToGL(valuationId: string): Promise<AssetValuation> {
     return apiService.post<AssetValuation>(`/finance/fixed-assets/valuations/${valuationId}/post-to-gl`);
+  }
+
+  // Posted valuation corrections use the same explicit maker-checker stages as the
+  // capitalization and depreciation correction workspaces; the browser cannot "undo" a journal.
+  async getValuationCorrections(valuationId: string): Promise<AssetValuationCorrection[]> {
+    return apiService.get<AssetValuationCorrection[]>(`/finance/fixed-assets/valuations/${valuationId}/corrections`);
+  }
+
+  async requestValuationCorrection(
+    valuationId: string,
+    dto: RequestAssetValuationCorrectionDto
+  ): Promise<AssetValuationCorrection> {
+    return apiService.post<AssetValuationCorrection>(`/finance/fixed-assets/valuations/${valuationId}/corrections`, dto);
+  }
+
+  async reviewValuationCorrection(
+    valuationId: string,
+    correctionId: string,
+    dto: ReviewAssetValuationCorrectionDto
+  ): Promise<AssetValuationCorrection> {
+    return apiService.post<AssetValuationCorrection>(
+      `/finance/fixed-assets/valuations/${valuationId}/corrections/${correctionId}/review`, dto
+    );
+  }
+
+  async postValuationCorrection(valuationId: string, correctionId: string): Promise<AssetValuationCorrection> {
+    return apiService.post<AssetValuationCorrection>(
+      `/finance/fixed-assets/valuations/${valuationId}/corrections/${correctionId}/post`
+    );
   }
 
   // ===== LIFECYCLE MANAGEMENT =====

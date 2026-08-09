@@ -18,7 +18,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { cn } from '@/lib/utils';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
-import type { FixedAsset, FixedAssetCategory, AssetValuation, ValuationType, CreateAssetValuationDto, CreateBulkAssetValuationDto } from '@/types/fixed-assets';
+import type { FixedAsset, FixedAssetCategory, AssetValuation, AssetValuationCorrection, ValuationType, CreateAssetValuationDto, CreateBulkAssetValuationDto } from '@/types/fixed-assets';
 import { useToast } from '@/components/ui/use-toast';
 
 export default function AssetValuationsPage() {
@@ -48,6 +48,15 @@ export default function AssetValuationsPage() {
         valuationType: 'Revaluation' as ValuationType,
         indexPercentage: 0,
     });
+
+    // A posted valuation is never edited in place. This workspace deliberately mirrors the
+    // request -> independent review -> compensating-journal stages enforced by the API.
+    const [correctionDialogOpen, setCorrectionDialogOpen] = useState(false);
+    const [correctionValuation, setCorrectionValuation] = useState<AssetValuation | null>(null);
+    const [corrections, setCorrections] = useState<AssetValuationCorrection[]>([]);
+    const [correctionReason, setCorrectionReason] = useState('');
+    const [correctionImpact, setCorrectionImpact] = useState('');
+    const [correctionReview, setCorrectionReview] = useState('');
 
     useEffect(() => {
         loadData();
@@ -110,9 +119,32 @@ export default function AssetValuationsPage() {
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }, [valuations, searchTerm]);
 
+    const eligibleSourceImpairments = useMemo(() => {
+        if (!singleForm.fixedAssetId) return [];
+        return valuations.filter(v =>
+            v.fixedAssetId === singleForm.fixedAssetId &&
+            v.valuationType === 'Impairment' &&
+            v.isPostedToGL &&
+            !v.isCorrected &&
+            v.impairmentLoss > valuations
+                .filter(r => r.sourceImpairmentValuationId === v.id && r.isPostedToGL && !r.isCorrected)
+                .reduce((sum, r) => sum + r.impairmentReversal, 0)
+        );
+    }, [singleForm.fixedAssetId, valuations]);
+
     const handleSingleValuation = async () => {
         if (!singleForm.fixedAssetId || !singleForm.valuationDate || !singleForm.fairValue) {
             toast({ title: 'Validation', description: 'Please fill all required fields.', variant: 'destructive' });
+            return;
+        }
+        if (singleForm.valuationType === 'ImpairmentReversal' &&
+            (!singleForm.sourceImpairmentValuationId || !singleForm.unimpairedCarryingAmountCap ||
+             !singleForm.valuationMethod || !singleForm.valuationReportReference)) {
+            toast({
+                title: 'Impairment reversal evidence required',
+                description: 'Select the source impairment and provide the no-impairment cap, method, and report reference.',
+                variant: 'destructive'
+            });
             return;
         }
         try {
@@ -165,6 +197,66 @@ export default function AssetValuationsPage() {
             toast({ title: 'Posted', description: 'Valuation journal posted to GL.' });
         } catch (error: unknown) {
             toast({ title: 'Error', description: error instanceof Error ? error.message : 'GL posting failed.', variant: 'destructive' });
+        }
+    };
+
+    const openCorrectionWorkspace = async (valuation: AssetValuation) => {
+        setCorrectionValuation(valuation);
+        setCorrectionDialogOpen(true);
+        try {
+            setCorrections(await fixedAssetsDataService.getValuationCorrections(valuation.id));
+        } catch (error: unknown) {
+            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Could not load corrections.', variant: 'destructive' });
+        }
+    };
+
+    const requestCorrection = async () => {
+        if (!correctionValuation || correctionReason.trim().length < 10 || correctionImpact.trim().length < 20) {
+            toast({ title: 'More evidence required', description: 'Provide a substantive reason and an impact assessment of at least 20 characters.', variant: 'destructive' });
+            return;
+        }
+        try {
+            setIsSubmitting(true);
+            const item = await fixedAssetsDataService.requestValuationCorrection(correctionValuation.id, {
+                reason: correctionReason,
+                impactAssessment: correctionImpact,
+            });
+            setCorrections(prev => [item, ...prev]);
+            setCorrectionReason('');
+            setCorrectionImpact('');
+            toast({ title: 'Submitted', description: 'Valuation correction submitted for independent review.' });
+        } catch (error: unknown) {
+            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Correction request failed.', variant: 'destructive' });
+        } finally { setIsSubmitting(false); }
+    };
+
+    const reviewCorrection = async (item: AssetValuationCorrection, approved: boolean) => {
+        if (!correctionValuation || correctionReview.trim().length < 20) {
+            toast({ title: 'Review evidence required', description: 'Enter a review comment of at least 20 characters.', variant: 'destructive' });
+            return;
+        }
+        try {
+            const updated = await fixedAssetsDataService.reviewValuationCorrection(
+                correctionValuation.id, item.id, { approved, reviewComment: correctionReview }
+            );
+            setCorrections(prev => prev.map(c => c.id === item.id ? updated : c));
+            setCorrectionReview('');
+        } catch (error: unknown) {
+            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Review failed.', variant: 'destructive' });
+        }
+    };
+
+    const postCorrection = async (item: AssetValuationCorrection) => {
+        if (!correctionValuation) return;
+        try {
+            const updated = await fixedAssetsDataService.postValuationCorrection(correctionValuation.id, item.id);
+            setCorrections(prev => prev.map(c => c.id === item.id ? updated : c));
+            setValuations(prev => prev.map(v => v.id === correctionValuation.id
+                ? { ...v, isCorrected: true, correctionId: item.id, correctedAt: updated.postedAt }
+                : v));
+            toast({ title: 'Corrected', description: 'Compensating journal posted and the prior book snapshot restored.' });
+        } catch (error: unknown) {
+            toast({ title: 'Error', description: error instanceof Error ? error.message : 'Correction posting failed.', variant: 'destructive' });
         }
     };
 
@@ -255,7 +347,14 @@ export default function AssetValuationsPage() {
                                     </div>
                                     <div className="space-y-2">
                                         <Label>Valuation Type *</Label>
-                                        <Select value={singleForm.valuationType} onValueChange={(v) => setSingleForm({ ...singleForm, valuationType: v as ValuationType })}>
+                                        <Select value={singleForm.valuationType} onValueChange={(v) => setSingleForm({
+                                            ...singleForm,
+                                            valuationType: v as ValuationType,
+                                            // Source and cap belong only to an IAS 36 reversal; clearing them
+                                            // prevents stale evidence leaking into an ordinary valuation request.
+                                            sourceImpairmentValuationId: undefined,
+                                            unimpairedCarryingAmountCap: undefined,
+                                        })}>
                                             <SelectTrigger><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="Revaluation">Revaluation (Upward/Downward)</SelectItem>
@@ -272,6 +371,36 @@ export default function AssetValuationsPage() {
                                         <Label>Fair Value *</Label>
                                         <Input type="number" min={0} step={0.01} value={singleForm.fairValue} onChange={(e) => setSingleForm({ ...singleForm, fairValue: parseFloat(e.target.value) || 0 })} />
                                     </div>
+                                    {singleForm.valuationType === 'ImpairmentReversal' && (
+                                        <>
+                                            <div className="space-y-2">
+                                                <Label>Source Posted Impairment *</Label>
+                                                <Select
+                                                    value={singleForm.sourceImpairmentValuationId}
+                                                    onValueChange={(value) => setSingleForm({ ...singleForm, sourceImpairmentValuationId: value })}
+                                                >
+                                                    <SelectTrigger><SelectValue placeholder="Select impairment to reverse" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {eligibleSourceImpairments.map(v => (
+                                                            <SelectItem key={v.id} value={v.id}>
+                                                                {new Date(v.valuationDate).toLocaleDateString()} — {formatMoney(v.impairmentLoss)}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <p className="text-xs text-muted-foreground">Only posted impairments with an outstanding balance are shown.</p>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>No-prior-impairment NBV cap *</Label>
+                                                <Input
+                                                    type="number" min={0} step={0.01}
+                                                    value={singleForm.unimpairedCarryingAmountCap || ''}
+                                                    onChange={(e) => setSingleForm({ ...singleForm, unimpairedCarryingAmountCap: parseFloat(e.target.value) || undefined })}
+                                                />
+                                                <p className="text-xs text-muted-foreground">Documented carrying amount had the impairment never occurred, net of depreciation.</p>
+                                            </div>
+                                        </>
+                                    )}
                                     <div className="space-y-2">
                                         <Label>Revised Useful Life (Months)</Label>
                                         <Input type="number" min={0} value={singleForm.revisedUsefulLifeMonths || ''} onChange={(e) => setSingleForm({ ...singleForm, revisedUsefulLifeMonths: parseInt(e.target.value) || undefined })} placeholder="Leave blank if unchanged" />
@@ -477,7 +606,9 @@ export default function AssetValuationsPage() {
                                                 {netEffect >= 0 ? '' : '('}{formatMoney(Math.abs(netEffect))}{netEffect < 0 ? ')' : ''}
                                             </TableCell>
                                             <TableCell>
-                                                {v.isPostedToGL ? (
+                                                {v.isCorrected ? (
+                                                    <Badge variant="outline" className="bg-slate-100 text-slate-700">Corrected</Badge>
+                                                ) : v.isPostedToGL ? (
                                                     <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1"><CheckCircle className="h-3 w-3" />Posted</Badge>
                                                 ) : (
                                                     <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Pending</Badge>
@@ -489,6 +620,11 @@ export default function AssetValuationsPage() {
                                                         Post to GL
                                                     </Button>
                                                 )}
+                                                {v.isPostedToGL && !v.isCorrected && (
+                                                    <Button size="sm" variant="ghost" onClick={() => openCorrectionWorkspace(v)}>
+                                                        Correct
+                                                    </Button>
+                                                )}
                                             </TableCell>
                                         </TableRow>
                                     );
@@ -498,6 +634,65 @@ export default function AssetValuationsPage() {
                     </Table>
                 </CardContent>
             </Card>
+
+            <Dialog open={correctionDialogOpen} onOpenChange={setCorrectionDialogOpen}>
+                <DialogContent className="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Controlled Valuation Correction</DialogTitle>
+                        <DialogDescription>
+                            {correctionValuation?.assetCode} — the original valuation and journal remain visible; posting creates a linked compensating entry.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-5">
+                        {corrections.length === 0 && (
+                            <Card>
+                                <CardHeader><CardTitle className="text-base">Request correction</CardTitle></CardHeader>
+                                <CardContent className="space-y-3">
+                                    <div className="space-y-2">
+                                        <Label>Reason *</Label>
+                                        <Textarea value={correctionReason} onChange={e => setCorrectionReason(e.target.value)} placeholder="Explain the posting error and required correction." />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Impact assessment *</Label>
+                                        <Textarea value={correctionImpact} onChange={e => setCorrectionImpact(e.target.value)} placeholder="Describe affected reports, depreciation, disposal work, and the intended repost." />
+                                    </div>
+                                    <Button onClick={requestCorrection} disabled={isSubmitting}>Submit for independent review</Button>
+                                </CardContent>
+                            </Card>
+                        )}
+                        {corrections.map(item => (
+                            <Card key={item.id}>
+                                <CardHeader className="pb-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <CardTitle className="text-base">{item.requestedByUserName}</CardTitle>
+                                        <Badge variant="outline">{item.status}</Badge>
+                                    </div>
+                                    <CardDescription>{item.reason}</CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-3">
+                                    <p className="text-sm">{item.impactAssessment}</p>
+                                    {item.failureReason && <p className="text-sm text-red-600">Last posting error: {item.failureReason}</p>}
+                                    {item.status === 'PendingApproval' && (
+                                        <>
+                                            <Textarea value={correctionReview} onChange={e => setCorrectionReview(e.target.value)} placeholder="Independent review comment (minimum 20 characters)" />
+                                            <div className="flex gap-2">
+                                                <Button size="sm" onClick={() => reviewCorrection(item, true)}>Approve</Button>
+                                                <Button size="sm" variant="destructive" onClick={() => reviewCorrection(item, false)}>Reject</Button>
+                                            </div>
+                                        </>
+                                    )}
+                                    {item.status === 'Approved' && (
+                                        <Button size="sm" onClick={() => postCorrection(item)}>Post compensating journal</Button>
+                                    )}
+                                    {item.reversalJournalEntryId && (
+                                        <p className="text-xs text-muted-foreground font-mono">Reversal journal: {item.reversalJournalEntryId}</p>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
