@@ -132,6 +132,7 @@ public static class FinancePermissionPolicyMap
             "FinanceApprovals" => FinanceApprovalPolicy(action),
             "Finance" => FinanceControllerPolicy(action),
             "FinanceReportExports" => One(FinancePermissions.ExportFinanceReports),
+            "FinanceReportAutomation" => FinanceReportAutomationPolicy(action),
             "FinancialStatementLayouts" => FinancialStatementLayoutPolicy(action),
             "FinancePurchaseOrder" => FinancePurchaseOrderPolicy(action),
             "FinancePurchaseOrderReceipt" => FinancePurchaseOrderReceiptPolicy(action),
@@ -587,6 +588,14 @@ public static class FinancePermissionPolicyMap
             "ValidateVersion" => One(FinancePermissions.ManageFinancialStatementLayouts),
             "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
+        };
+
+    private static IReadOnlyList<string> FinanceReportAutomationPolicy(string action)
+        => action switch
+        {
+            "GetWorkspace" or "DownloadArtifact" => One(FinancePermissions.ViewReportSchedules),
+            "RunNow" or "ProcessDue" => One(FinancePermissions.RunReportSchedules),
+            _ => One(FinancePermissions.ManageReportSchedules)
         };
 
     private static IReadOnlyList<string> FallbackPolicy(string action, IReadOnlyCollection<string> methods)

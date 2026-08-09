@@ -537,6 +537,10 @@ public partial class LocalFileStorageService : IFileStorageService
                 || category.StartsWith("estate-land-acquisition-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-managed-asset-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("procedure-case-documents", StringComparison.OrdinalIgnoreCase)
+                // Scheduled Finance outputs can contain ledgers, balances and
+                // personal counterparty data. They must only be served through
+                // the tenant- and permission-checked download endpoint.
+                || category.StartsWith("finance-report-artifacts", StringComparison.OrdinalIgnoreCase)
                 // Every HR document family is personal data: CVs, identity documents,
                 // sick-note certificates, disciplinary evidence, medical exam results.
                 // A prefix rule rather than a list, so a future hr-* category is private

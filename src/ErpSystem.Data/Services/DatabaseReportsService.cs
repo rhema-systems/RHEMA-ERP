@@ -546,6 +546,7 @@ public class DatabaseReportsService : IReportsService
 
             return new ReportExportResultDto
             {
+                ExportId = export.Id,
                 ReportId = reportId,
                 Status = "completed",
                 ExportedAt = export.ExportedAt,

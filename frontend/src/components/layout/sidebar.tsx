@@ -2235,6 +2235,11 @@ export const navigationItems: NavItem[] = [
         icon: CreditCard,
       },
       {
+        title: 'Report Automation',
+        href: '/reports/automation',
+        icon: CalendarClock,
+      },
+      {
         title: 'Procurement Reports',
         href: '/reports/purchasing',
         icon: ShoppingCart,
