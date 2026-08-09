@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Calculator, Loader2, PlayCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
+import { FixedAssetDepreciationReversalPanel } from '@/components/finance/FixedAssetDepreciationReversalPanel';
 import type { FiscalPeriod } from '@/types/finance';
 import type { AssetDepreciationSchedule, FixedAsset } from '@/types/fixed-assets';
 
@@ -41,6 +42,46 @@ export default function DepreciationPage() {
 
     loadData();
   }, []);
+
+  const loadPeriodResults = useCallback(async () => {
+    if (!selectedPeriod) {
+      setResults([]);
+      return;
+    }
+
+    try {
+      setResults(await fixedAssetsDataService.getPeriodSchedule(selectedPeriod));
+    } catch (error) {
+      console.error('Failed to load period depreciation schedules:', error);
+      toast({
+        title: 'Could not load depreciation history',
+        description: error instanceof Error ? error.message : 'The selected period schedule could not be loaded.',
+        variant: 'destructive',
+      });
+    }
+  }, [selectedPeriod, toast]);
+
+  useEffect(() => { void loadPeriodResults(); }, [loadPeriodResults]);
+
+  const reversalRuns = useMemo(() => {
+    const groups = new Map<string, AssetDepreciationSchedule[]>();
+    for (const schedule of results) {
+      if (!schedule.fixedAssetDepreciationRunId || !schedule.isPosted) continue;
+      const group = groups.get(schedule.fixedAssetDepreciationRunId) ?? [];
+      group.push(schedule);
+      groups.set(schedule.fixedAssetDepreciationRunId, group);
+    }
+
+    return Array.from(groups.entries()).map(([id, schedules]) => {
+      const amount = schedules.reduce((sum, schedule) => sum + schedule.depreciationAmount, 0);
+      const first = schedules[0];
+      return {
+        id,
+        label: `${first.bookClassification} · revision ${first.correctionSequence} · ${amount.toFixed(2)} · ${schedules.length} line${schedules.length === 1 ? '' : 's'}`,
+        reversed: schedules.every(schedule => schedule.isReversed),
+      };
+    });
+  }, [results]);
 
   const handleRun = async () => {
     if (!selectedPeriod) {
@@ -168,7 +209,7 @@ export default function DepreciationPage() {
                 <TableHead className="text-right">Depreciation</TableHead>
                 <TableHead className="text-right">Accumulated</TableHead>
                 <TableHead className="text-right">Net Book</TableHead>
-                <TableHead>Posted</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -185,7 +226,7 @@ export default function DepreciationPage() {
                     <TableCell className="text-right">{row.depreciationAmount.toFixed(2)}</TableCell>
                     <TableCell className="text-right">{row.accumulatedDepreciation.toFixed(2)}</TableCell>
                     <TableCell className="text-right">{row.netBookValue.toFixed(2)}</TableCell>
-                    <TableCell>{row.isPosted ? 'Yes' : 'No'}</TableCell>
+                    <TableCell>{row.isReversed ? 'Reversed' : row.isPosted ? 'Posted' : row.isProjected ? 'Projected' : 'Pending'}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -193,6 +234,8 @@ export default function DepreciationPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <FixedAssetDepreciationReversalPanel runs={reversalRuns} onChanged={loadPeriodResults} />
     </div>
   );
 }

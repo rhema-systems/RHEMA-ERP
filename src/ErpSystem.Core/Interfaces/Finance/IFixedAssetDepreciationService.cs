@@ -6,6 +6,10 @@ public interface IFixedAssetDepreciationService
 {
     Task<IReadOnlyList<AssetDepreciationScheduleDto>> RunDepreciationAsync(RunDepreciationDto dto, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AssetDepreciationScheduleDto>> PostApprovedRunAsync(Guid runId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FixedAssetDepreciationReversalDto>> GetReversalsAsync(Guid runId, CancellationToken cancellationToken = default);
+    Task<FixedAssetDepreciationReversalDto> RequestReversalAsync(Guid runId, RequestFixedAssetDepreciationReversalDto dto, CancellationToken cancellationToken = default);
+    Task<FixedAssetDepreciationReversalDto> ReviewReversalAsync(Guid runId, Guid reversalId, ReviewFixedAssetDepreciationReversalDto dto, CancellationToken cancellationToken = default);
+    Task<FixedAssetDepreciationReversalDto> PostReversalAsync(Guid runId, Guid reversalId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AssetDepreciationScheduleDto>> GetSchedulesForAssetAsync(Guid fixedAssetId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AssetDepreciationScheduleDto>> GetSchedulesForPeriodAsync(Guid fiscalPeriodId, CancellationToken cancellationToken = default);
 }

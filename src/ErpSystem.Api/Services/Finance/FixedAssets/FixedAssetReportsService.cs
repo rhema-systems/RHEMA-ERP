@@ -842,7 +842,9 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     private IQueryable<AssetDepreciationSchedule> BuildDepreciationQuery(FixedAssetReportQueryDto query)
     {
         var dbQuery = _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == TenantId);
+            // Reversed schedules remain immutable source evidence, but current depreciation and
+            // reconciliation reports must follow the net accounting position after correction.
+            .Where(s => s.TenantId == TenantId && !s.IsDeleted && !s.IsReversed);
 
         if (query.AssetId.HasValue)
             dbQuery = dbQuery.Where(s => s.FixedAssetId == query.AssetId.Value);

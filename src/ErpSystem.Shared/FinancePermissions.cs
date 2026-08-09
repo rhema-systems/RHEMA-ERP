@@ -108,6 +108,8 @@ public static class FinancePermissions
     public const string DisposeFixedAssets = "Finance.FixedAssets.Disposal.Run";
     public const string ReverseFixedAssetCapitalization = "Finance.FixedAssets.Capitalization.Reverse";
     public const string ApproveFixedAssetCapitalizationReversal = "Finance.FixedAssets.Capitalization.Reversal.Approve";
+    public const string ReverseFixedAssetDepreciation = "Finance.FixedAssets.Depreciation.Reverse";
+    public const string ApproveFixedAssetDepreciationReversal = "Finance.FixedAssets.Depreciation.Reversal.Approve";
 
     public const string RunFinanceReports = "Finance.Reports.Run";
     public const string ExportFinanceReports = "Finance.Reports.Export";
@@ -233,6 +235,8 @@ public static class FinancePermissions
         new(DisposeFixedAssets, "Dispose Fixed Assets", "Request, approve, complete, and process fixed asset disposals.", CategoryFixedAssets),
         new(ReverseFixedAssetCapitalization, "Reverse Fixed Asset Capitalization", "Request and post linked fixed asset capitalization correction journals.", CategoryFixedAssets),
         new(ApproveFixedAssetCapitalizationReversal, "Approve Fixed Asset Capitalization Reversal", "Independently approve or reject fixed asset capitalization reversal requests.", CategoryFixedAssets),
+        new(ReverseFixedAssetDepreciation, "Reverse Fixed Asset Depreciation", "Request and post linked fixed asset depreciation correction journals.", CategoryFixedAssets),
+        new(ApproveFixedAssetDepreciationReversal, "Approve Fixed Asset Depreciation Reversal", "Independently approve or reject fixed asset depreciation reversal requests.", CategoryFixedAssets),
 
         new(RunFinanceReports, "Run Finance Reports", "Run finance statements, aging, cash, bank, tax, FX, and fixed asset reports.", CategoryReporting),
         new(ExportFinanceReports, "Export/Print Finance Reports", "Export or print finance reports and finance-controlled documents.", CategoryReporting),

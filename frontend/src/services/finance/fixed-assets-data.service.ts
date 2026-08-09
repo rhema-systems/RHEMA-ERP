@@ -31,6 +31,9 @@ import type {
   FixedAssetCapitalizationReversal,
   RequestFixedAssetCapitalizationReversalDto,
   ReviewFixedAssetCapitalizationReversalDto,
+  FixedAssetDepreciationReversal,
+  RequestFixedAssetDepreciationReversalDto,
+  ReviewFixedAssetDepreciationReversalDto,
 } from '@/types/fixed-assets';
 import {
   FixedAssetReportQuery,
@@ -150,6 +153,45 @@ class FixedAssetsDataService {
 
   async getPeriodSchedule(fiscalPeriodId: string): Promise<AssetDepreciationSchedule[]> {
     return apiService.get<AssetDepreciationSchedule[]>(`/finance/fixed-assets/depreciation/period/${fiscalPeriodId}`);
+  }
+
+  // A posted depreciation correction is deliberately split into request, independent review,
+  // and posting calls. Keeping the stages explicit prevents the UI from presenting a destructive
+  // one-click "undo" that would bypass Finance maker-checker evidence.
+  async getDepreciationReversals(runId: string): Promise<FixedAssetDepreciationReversal[]> {
+    return apiService.get<FixedAssetDepreciationReversal[]>(
+      `/finance/fixed-assets/depreciation/runs/${runId}/reversals`
+    );
+  }
+
+  async requestDepreciationReversal(
+    runId: string,
+    dto: RequestFixedAssetDepreciationReversalDto
+  ): Promise<FixedAssetDepreciationReversal> {
+    return apiService.post<FixedAssetDepreciationReversal>(
+      `/finance/fixed-assets/depreciation/runs/${runId}/reversals`,
+      dto
+    );
+  }
+
+  async reviewDepreciationReversal(
+    runId: string,
+    reversalId: string,
+    dto: ReviewFixedAssetDepreciationReversalDto
+  ): Promise<FixedAssetDepreciationReversal> {
+    return apiService.post<FixedAssetDepreciationReversal>(
+      `/finance/fixed-assets/depreciation/runs/${runId}/reversals/${reversalId}/review`,
+      dto
+    );
+  }
+
+  async postDepreciationReversal(
+    runId: string,
+    reversalId: string
+  ): Promise<FixedAssetDepreciationReversal> {
+    return apiService.post<FixedAssetDepreciationReversal>(
+      `/finance/fixed-assets/depreciation/runs/${runId}/reversals/${reversalId}/post`
+    );
   }
 
   async getGlAccounts(): Promise<FixedAssetGlAccountOptions> {

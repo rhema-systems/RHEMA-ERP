@@ -14541,6 +14541,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<int>("CorrectionSequence")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -14565,6 +14568,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("DepreciationMethodSnapshot")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("DepreciationReversalId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("FiscalPeriodId")
                         .HasColumnType("uniqueidentifier");
 
@@ -14581,6 +14587,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsProjected")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReversed")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("JournalEntryId")
@@ -14620,6 +14629,15 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("ResidualValueSnapshot")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReversedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("SubmittedAt")
                         .HasColumnType("datetime2");
 
@@ -14642,6 +14660,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("AccountingBookId");
 
+                    b.HasIndex("DepreciationReversalId");
+
                     b.HasIndex("FiscalPeriodId");
 
                     b.HasIndex("FixedAssetDepreciationRunId");
@@ -14652,13 +14672,21 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("PostingEventId");
 
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("ReversalPostingEventId");
+
+                    b.HasIndex("TenantId", "DepreciationReversalId");
+
                     b.HasIndex("TenantId", "FixedAssetDepreciationRunId");
 
                     b.HasIndex("TenantId", "JournalEntryId");
 
                     b.HasIndex("TenantId", "PostingEventId");
 
-                    b.HasIndex("TenantId", "FixedAssetId", "FiscalPeriodId", "BookClassification")
+                    b.HasIndex("TenantId", "ReversalPostingEventId");
+
+                    b.HasIndex("TenantId", "FixedAssetId", "FiscalPeriodId", "BookClassification", "CorrectionSequence")
                         .IsUnique();
 
                     b.ToTable("AssetDepreciationSchedules", (string)null);
@@ -16104,6 +16132,130 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("FixedAssetCategories");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetDepreciationReversal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ImpactAssessment")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OriginalDepreciationRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OriginalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OriginalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PostedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("RequestedReversalDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReviewComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReviewedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OriginalDepreciationRunId");
+
+                    b.HasIndex("OriginalJournalEntryId");
+
+                    b.HasIndex("OriginalPostingEventId");
+
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("ReversalPostingEventId");
+
+                    b.HasIndex("TenantId", "OriginalPostingEventId");
+
+                    b.HasIndex("TenantId", "ReversalPostingEventId")
+                        .IsUnique()
+                        .HasFilter("[ReversalPostingEventId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "OriginalDepreciationRunId", "Status");
+
+                    b.ToTable("FixedAssetDepreciationReversals", (string)null);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetDepreciationRun", b =>
                 {
                     b.Property<Guid>("Id")
@@ -16117,6 +16269,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime?>("CalculatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<int>("CorrectionSequence")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -147813,6 +147968,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("AccountingBookId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetDepreciationReversal", "DepreciationReversal")
+                        .WithMany()
+                        .HasForeignKey("DepreciationReversalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
                         .HasForeignKey("FiscalPeriodId")
@@ -147839,6 +147999,16 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("PostingEventId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -147846,6 +148016,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("AccountingBook");
+
+                    b.Navigation("DepreciationReversal");
 
                     b.Navigation("DepreciationRun");
 
@@ -148376,6 +148548,55 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("RevaluationLossAccount");
 
                     b.Navigation("RevaluationSurplusAccount");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetDepreciationReversal", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetDepreciationRun", "OriginalDepreciationRun")
+                        .WithMany("Reversals")
+                        .HasForeignKey("OriginalDepreciationRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "OriginalJournalEntry")
+                        .WithMany()
+                        .HasForeignKey("OriginalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", "OriginalPostingEvent")
+                        .WithMany()
+                        .HasForeignKey("OriginalPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "ReversalJournalEntry")
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", "ReversalPostingEvent")
+                        .WithMany()
+                        .HasForeignKey("ReversalPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OriginalDepreciationRun");
+
+                    b.Navigation("OriginalJournalEntry");
+
+                    b.Navigation("OriginalPostingEvent");
+
+                    b.Navigation("ReversalJournalEntry");
+
+                    b.Navigation("ReversalPostingEvent");
 
                     b.Navigation("Tenant");
                 });
@@ -184278,6 +184499,8 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetDepreciationRun", b =>
                 {
                     b.Navigation("Lines");
+
+                    b.Navigation("Reversals");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.LeaseContract", b =>

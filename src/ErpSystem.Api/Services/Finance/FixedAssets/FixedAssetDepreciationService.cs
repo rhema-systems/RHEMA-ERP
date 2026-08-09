@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
-public class FixedAssetDepreciationService : IFixedAssetDepreciationService
+public partial class FixedAssetDepreciationService : IFixedAssetDepreciationService
 {
     private const string SourceModule = "FixedAssets";
     private const string SourceDocumentType = "FixedAssetDepreciationRun";
@@ -22,6 +22,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
     private readonly IFinancePostingEngine? _financePostingEngine;
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowService? _workflowService;
+    private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
 
     public FixedAssetDepreciationService(
         ApplicationDbContext context,
@@ -30,7 +31,8 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         IAccountingBookService? accountingBookService = null,
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
-        IWorkflowService? workflowService = null)
+        IWorkflowService? workflowService = null,
+        IFinanceReversalPolicyService? financeReversalPolicyService = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -38,6 +40,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
+        _financeReversalPolicyService = financeReversalPolicyService;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -82,11 +85,25 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         var runBookClassification = postAllBooks
             ? "ALL_ACTIVE_BOOKS"
             : requestedBook ?? defaultBook.Code;
-        var idempotencyKey = BuildRunIdempotencyKey(tenantId, fiscalPeriod.Id, runBookClassification, dto.FixedAssetId, dto.PostToGl);
-
-        var existingRun = await _context.FixedAssetDepreciationRuns
+        var baseIdempotencyKey = BuildRunIdempotencyKey(
+            tenantId,
+            fiscalPeriod.Id,
+            runBookClassification,
+            dto.FixedAssetId,
+            dto.PostToGl,
+            correctionSequence: 0);
+        var scopeRuns = await _context.FixedAssetDepreciationRuns
             .Include(r => r.Lines)
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.IdempotencyKey == idempotencyKey, cancellationToken);
+            .Where(r => r.TenantId == tenantId &&
+                (r.IdempotencyKey == baseIdempotencyKey || r.IdempotencyKey.StartsWith(baseIdempotencyKey + ":C")))
+            .OrderByDescending(r => r.CorrectionSequence)
+            .ToListAsync(cancellationToken);
+
+        // A posted revision must be reversed before another run for the same scope is allowed.
+        // Reversed revisions remain in scopeRuns so the next correction sequence is monotonic and
+        // every idempotency key stays unique without rewriting the historical run.
+        var existingRun = scopeRuns.FirstOrDefault(r =>
+            !string.Equals(r.Status, "Reversed", StringComparison.OrdinalIgnoreCase));
         if (existingRun != null)
         {
             if (string.Equals(existingRun.Status, "Posted", StringComparison.OrdinalIgnoreCase) ||
@@ -101,6 +118,17 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
 
             throw new InvalidOperationException("A depreciation run already exists for this tenant, period, and scope and must be reviewed before retry.");
         }
+
+        var correctionSequence = scopeRuns.Count == 0
+            ? 0
+            : scopeRuns.Max(r => r.CorrectionSequence) + 1;
+        var idempotencyKey = BuildRunIdempotencyKey(
+            tenantId,
+            fiscalPeriod.Id,
+            runBookClassification,
+            dto.FixedAssetId,
+            dto.PostToGl,
+            correctionSequence);
 
         var assetsQuery = _context.FixedAssets
             .Include(a => a.Category)
@@ -125,7 +153,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         }
 
         var existingScheduleKeys = await _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted)
+            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed)
             .Select(s => new { s.FixedAssetId, s.BookClassification })
             .ToListAsync(cancellationToken);
 
@@ -210,6 +238,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
                     ResidualValueSnapshot = bookValue.ResidualValue,
                     UsefulLifeMonthsSnapshot = bookValue.UsefulLifeMonths,
                     DepreciationMethodSnapshot = bookValue.DepreciationMethod,
+                    CorrectionSequence = correctionSequence,
                     PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
                     IsPosted = false,
                     IsProjected = !dto.PostToGl,
@@ -242,6 +271,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             PostingDate = postingDate,
             Status = dto.PostToGl ? "Calculated" : "Calculated",
             TotalDepreciationAmount = RoundMoney(depreciationLines.Sum(line => line.Schedule.DepreciationAmount)),
+            CorrectionSequence = correctionSequence,
             IdempotencyKey = idempotencyKey,
             CalculatedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -810,8 +840,12 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         Guid fiscalPeriodId,
         string bookClassification,
         Guid? fixedAssetId,
-        bool postToGl)
-        => $"FA:Depreciation:{tenantId:N}:{fiscalPeriodId:N}:{bookClassification}:{fixedAssetId?.ToString("N") ?? "ALL"}:{(postToGl ? "Post" : "Calculate")}";
+        bool postToGl,
+        int correctionSequence)
+    {
+        var baseKey = $"FA:Depreciation:{tenantId:N}:{fiscalPeriodId:N}:{bookClassification}:{fixedAssetId?.ToString("N") ?? "ALL"}:{(postToGl ? "Post" : "Calculate")}";
+        return correctionSequence == 0 ? baseKey : $"{baseKey}:C{correctionSequence}";
+    }
 
     private bool EnsureAssetEligibleForDepreciation(
         FixedAsset asset,
@@ -1118,7 +1152,13 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             PostingDate = schedule.PostingDate,
             JournalEntryId = schedule.JournalEntryId,
             PostingEventId = schedule.PostingEventId,
-            IsProjected = schedule.IsProjected
+            IsProjected = schedule.IsProjected,
+            CorrectionSequence = schedule.CorrectionSequence,
+            IsReversed = schedule.IsReversed,
+            ReversedAt = schedule.ReversedAt,
+            ReversalJournalEntryId = schedule.ReversalJournalEntryId,
+            ReversalPostingEventId = schedule.ReversalPostingEventId,
+            DepreciationReversalId = schedule.DepreciationReversalId
         };
     }
 
