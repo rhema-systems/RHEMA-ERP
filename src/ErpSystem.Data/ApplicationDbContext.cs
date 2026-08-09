@@ -128,6 +128,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<FixedAssetBookValue> FixedAssetBookValues { get; set; }
     public DbSet<FixedAssetCapitalizationReversal> FixedAssetCapitalizationReversals { get; set; }
+    public DbSet<FixedAssetDepreciationReversal> FixedAssetDepreciationReversals { get; set; }
     public DbSet<AssetDisposal> AssetDisposals { get; set; }
     public DbSet<AssetTransfer> AssetTransfers { get; set; }
     public DbSet<AssetTransaction> AssetTransactions { get; set; }
@@ -3315,6 +3316,43 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FixedAssetDepreciationReversal>(entity =>
+        {
+            entity.ToTable("FixedAssetDepreciationReversals");
+            entity.HasIndex(e => new { e.TenantId, e.OriginalDepreciationRunId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.OriginalPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId })
+                .IsUnique()
+                .HasFilter("[ReversalPostingEventId] IS NOT NULL");
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.RequestedByUserName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ReviewedByUserName).HasMaxLength(200);
+            entity.Property(e => e.ReviewComment).HasMaxLength(2000);
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.HasOne(e => e.OriginalDepreciationRun)
+                .WithMany(run => run.Reversals)
+                .HasForeignKey(e => e.OriginalDepreciationRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<FixedAssetBookValue>(entity =>
         {
             entity.ToTable("FixedAssetBookValues");
@@ -3420,10 +3458,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.NetBookValue).HasColumnType("decimal(18,2)");
             entity.Property(e => e.DepreciableAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ResidualValueSnapshot).HasColumnType("decimal(18,2)");
-            entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification, e.CorrectionSequence }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetDepreciationRunId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.DepreciationReversalId });
             entity.HasOne(e => e.DepreciationRun)
                 .WithMany(e => e.Lines)
                 .HasForeignKey(e => e.FixedAssetDepreciationRunId)
@@ -3435,6 +3475,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.PostingEvent)
                 .WithMany()
                 .HasForeignKey(e => e.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.DepreciationReversal)
+                .WithMany()
+                .HasForeignKey(e => e.DepreciationReversalId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

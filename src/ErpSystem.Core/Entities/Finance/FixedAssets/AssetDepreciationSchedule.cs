@@ -18,6 +18,12 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? FixedAssetDepreciationRunId { get; set; }
         public virtual FixedAssetDepreciationRun? DepreciationRun { get; set; }
 
+        /// <summary>
+        /// Matches the owning run revision. Including this value in the uniqueness key allows a
+        /// corrected run for the same asset/book/period while retaining every earlier revision.
+        /// </summary>
+        public int CorrectionSequence { get; set; }
+
         public Guid? AccountingBookId { get; set; }
         public virtual AccountingBook? AccountingBook { get; set; }
 
@@ -97,6 +103,15 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public Guid? PostingEventId { get; set; }
         public virtual FinancePostingEvent? PostingEvent { get; set; }
+
+        // Reversal evidence is additive. IsPosted remains true because the original journal did
+        // post; IsReversed tells current-balance reports not to treat it as an outstanding charge.
+        public bool IsReversed { get; set; }
+        public DateTime? ReversedAt { get; set; }
+        public Guid? ReversalJournalEntryId { get; set; }
+        public Guid? ReversalPostingEventId { get; set; }
+        public Guid? DepreciationReversalId { get; set; }
+        public virtual FixedAssetDepreciationReversal? DepreciationReversal { get; set; }
 
         public bool IsProjected { get; set; } = false; // True if this is a future forecast
     }

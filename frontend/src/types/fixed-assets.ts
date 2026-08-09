@@ -221,6 +221,7 @@ export interface RunDepreciationDto {
 export interface AssetDepreciationSchedule {
   id: string;
   fixedAssetId: string;
+  fixedAssetDepreciationRunId?: string;
   accountingBookId?: string;
   bookClassification: string;
   fiscalPeriodId: string;
@@ -231,6 +232,60 @@ export interface AssetDepreciationSchedule {
   postedDate?: string;
   journalEntryId?: string;
   isProjected: boolean;
+  correctionSequence: number;
+  isReversed: boolean;
+  reversedAt?: string;
+  reversalJournalEntryId?: string;
+  reversalPostingEventId?: string;
+  depreciationReversalId?: string;
+}
+
+export type FixedAssetDepreciationReversalStatus =
+  | 'PendingApproval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Posted'
+  | 'Failed';
+
+/**
+ * Maker-checker and journal lineage for a posted depreciation correction.
+ * Original run evidence is retained even after the compensating entry is posted.
+ */
+export interface FixedAssetDepreciationReversal {
+  id: string;
+  originalDepreciationRunId: string;
+  periodCode: string;
+  bookClassification: string;
+  totalDepreciationAmount: number;
+  originalCorrectionSequence: number;
+  originalPostingEventId: string;
+  originalJournalEntryId: string;
+  reversalPostingEventId?: string;
+  reversalJournalEntryId?: string;
+  status: FixedAssetDepreciationReversalStatus;
+  reason: string;
+  impactAssessment: string;
+  requestedReversalDate: string;
+  requestedByUserId: string;
+  requestedByUserName: string;
+  requestedAt: string;
+  reviewedByUserId?: string;
+  reviewedByUserName?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  postedAt?: string;
+  failureReason?: string;
+}
+
+export interface RequestFixedAssetDepreciationReversalDto {
+  reversalDate: string;
+  reason: string;
+  impactAssessment: string;
+}
+
+export interface ReviewFixedAssetDepreciationReversalDto {
+  approved: boolean;
+  reviewComment: string;
 }
 
 export interface FixedAssetGlAccountOption {

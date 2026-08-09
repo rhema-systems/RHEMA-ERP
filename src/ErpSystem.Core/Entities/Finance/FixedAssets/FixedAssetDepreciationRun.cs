@@ -28,6 +28,12 @@ public class FixedAssetDepreciationRun : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal TotalDepreciationAmount { get; set; }
 
+    /// <summary>
+    /// Zero is the original calculation. Each successfully reversed run permits a new revision
+    /// for the same period and scope without deleting or reusing the original schedule evidence.
+    /// </summary>
+    public int CorrectionSequence { get; set; }
+
     public Guid? JournalEntryId { get; set; }
     public virtual JournalEntry? JournalEntry { get; set; }
 
@@ -45,4 +51,5 @@ public class FixedAssetDepreciationRun : TenantEntity
     public string? FailureReason { get; set; }
 
     public virtual ICollection<AssetDepreciationSchedule> Lines { get; set; } = new List<AssetDepreciationSchedule>();
+    public virtual ICollection<FixedAssetDepreciationReversal> Reversals { get; set; } = new List<FixedAssetDepreciationReversal>();
 }

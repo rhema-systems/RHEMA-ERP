@@ -266,6 +266,99 @@ public class FixedAssetsController : ControllerBase
         }
     }
 
+    [HttpGet("depreciation/runs/{runId}/reversals")]
+    public async Task<ActionResult<IReadOnlyList<FixedAssetDepreciationReversalDto>>> GetDepreciationReversals(
+        Guid runId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _depreciationService.GetReversalsAsync(runId, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
+    /// Starts the maker-checker correction workflow without altering the posted run. The original
+    /// schedules and journal remain immutable until a different authorised user approves the
+    /// request and the posting endpoint creates the compensating journal.
+    /// </summary>
+    [HttpPost("depreciation/runs/{runId}/reversals")]
+    [Authorize(Policy = FinancePermissions.ReverseFixedAssetDepreciation)]
+    public async Task<ActionResult<FixedAssetDepreciationReversalDto>> RequestDepreciationReversal(
+        Guid runId,
+        [FromBody] RequestFixedAssetDepreciationReversalDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _depreciationService.RequestReversalAsync(runId, dto, cancellationToken);
+            return CreatedAtAction(nameof(GetDepreciationReversals), new { runId }, result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("depreciation/runs/{runId}/reversals/{reversalId}/review")]
+    [Authorize(Policy = FinancePermissions.ApproveFixedAssetDepreciationReversal)]
+    public async Task<ActionResult<FixedAssetDepreciationReversalDto>> ReviewDepreciationReversal(
+        Guid runId,
+        Guid reversalId,
+        [FromBody] ReviewFixedAssetDepreciationReversalDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _depreciationService.ReviewReversalAsync(runId, reversalId, dto, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("depreciation/runs/{runId}/reversals/{reversalId}/post")]
+    [Authorize(Policy = FinancePermissions.ReverseFixedAssetDepreciation)]
+    public async Task<ActionResult<FixedAssetDepreciationReversalDto>> PostDepreciationReversal(
+        Guid runId,
+        Guid reversalId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _depreciationService.PostReversalAsync(runId, reversalId, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
     [HttpGet("{id}/depreciation-schedule")]
     public async Task<ActionResult<IReadOnlyList<AssetDepreciationScheduleDto>>> GetAssetSchedule(Guid id)
     {

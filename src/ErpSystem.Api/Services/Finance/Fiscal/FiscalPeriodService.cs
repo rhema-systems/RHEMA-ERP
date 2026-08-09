@@ -3505,7 +3505,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             var postedAssetIds = _unitOfWork.Repository<AssetDepreciationSchedule>()
                 .GetQueryable(schedule => schedule.TenantId == TenantId && !schedule.IsDeleted &&
-                    schedule.FiscalPeriodId == period.Id && schedule.IsPosted && !schedule.IsProjected)
+                    schedule.FiscalPeriodId == period.Id && schedule.IsPosted && !schedule.IsProjected && !schedule.IsReversed)
                 .Select(schedule => schedule.FixedAssetId);
             var incompleteAssetCount = await dueAssetIds
                 .CountAsync(assetId => !postedAssetIds.Contains(assetId), cancellationToken);
@@ -3524,7 +3524,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 .Select(postingEvent => postingEvent.Id);
             var invalidPostingEvidenceCount = await _unitOfWork.Repository<AssetDepreciationSchedule>()
                 .GetQueryable(schedule => schedule.TenantId == TenantId && !schedule.IsDeleted &&
-                    schedule.FiscalPeriodId == period.Id && schedule.IsPosted && !schedule.IsProjected &&
+                    schedule.FiscalPeriodId == period.Id && schedule.IsPosted && !schedule.IsProjected && !schedule.IsReversed &&
                     (!schedule.JournalEntryId.HasValue || !schedule.PostingEventId.HasValue ||
                         !validPostedJournalIds.Contains(schedule.JournalEntryId.Value) ||
                         !validDepreciationPostingEventIds.Contains(schedule.PostingEventId.Value)))

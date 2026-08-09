@@ -286,6 +286,12 @@ public class AssetDepreciationScheduleDto
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public bool IsProjected { get; set; }
+    public int CorrectionSequence { get; set; }
+    public bool IsReversed { get; set; }
+    public DateTime? ReversedAt { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? DepreciationReversalId { get; set; }
 }
 
 public class FixedAssetDepreciationRunDto
@@ -297,6 +303,7 @@ public class FixedAssetDepreciationRunDto
     public DateTime PostingDate { get; set; }
     public string Status { get; set; } = string.Empty;
     public decimal TotalDepreciationAmount { get; set; }
+    public int CorrectionSequence { get; set; }
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public DateTime? CalculatedAt { get; set; }
@@ -304,6 +311,46 @@ public class FixedAssetDepreciationRunDto
     public DateTime? FailedAt { get; set; }
     public string? FailureReason { get; set; }
     public List<AssetDepreciationScheduleDto> Lines { get; set; } = new();
+}
+
+public sealed class RequestFixedAssetDepreciationReversalDto
+{
+    public DateTime ReversalDate { get; set; } = DateTime.UtcNow.Date;
+    public string Reason { get; set; } = string.Empty;
+    public string ImpactAssessment { get; set; } = string.Empty;
+}
+
+public sealed class ReviewFixedAssetDepreciationReversalDto
+{
+    public bool Approved { get; set; }
+    public string ReviewComment { get; set; } = string.Empty;
+}
+
+public sealed class FixedAssetDepreciationReversalDto
+{
+    public Guid Id { get; set; }
+    public Guid OriginalDepreciationRunId { get; set; }
+    public string PeriodCode { get; set; } = string.Empty;
+    public string BookClassification { get; set; } = string.Empty;
+    public decimal TotalDepreciationAmount { get; set; }
+    public int OriginalCorrectionSequence { get; set; }
+    public Guid OriginalPostingEventId { get; set; }
+    public Guid OriginalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string ImpactAssessment { get; set; } = string.Empty;
+    public DateTime RequestedReversalDate { get; set; }
+    public Guid RequestedByUserId { get; set; }
+    public string RequestedByUserName { get; set; } = string.Empty;
+    public DateTime RequestedAt { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    public string? ReviewedByUserName { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public string? ReviewComment { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public string? FailureReason { get; set; }
 }
 
 public class FixedAssetGlAccountOptionDto
