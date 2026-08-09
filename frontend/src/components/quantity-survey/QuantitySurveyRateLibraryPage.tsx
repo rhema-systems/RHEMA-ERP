@@ -3,7 +3,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ArchiveRestore,
   BookOpenCheck,
+  Calculator,
   Edit3,
   History,
   LineChart,
@@ -45,14 +47,18 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
+import { QuantitySurveyRateBuildUpDialog } from '@/components/quantity-survey/QuantitySurveyRateBuildUpDialog';
 import {
   QuantitySurveyRateItemCategory,
   QuantitySurveyRateLifecycleStatus,
   QuantitySurveyMarketSurveyPriceBasis,
+  QuantitySurveyHistoricalRateSourceType,
   QuantitySurveyRateSourceType,
   quantitySurveyRateLibraryService,
   type QuantitySurveyLookupOption,
+  type PrepareQuantitySurveyHistoricalRate,
   type PrepareQuantitySurveyMarketSurveyUpdate,
+  type QuantitySurveyHistoricalRateSource,
   type QuantitySurveyRate,
   type QuantitySurveyRateLibraryItem,
   type SaveQuantitySurveyRate,
@@ -99,10 +105,34 @@ const SOURCES = [
   [QuantitySurveyRateSourceType.LabourSchedule, 'Labour schedule'],
   [QuantitySurveyRateSourceType.PlantHire, 'Plant hire'],
   [QuantitySurveyRateSourceType.MarketSurvey, 'Market survey'],
+  [QuantitySurveyRateSourceType.RateBuildUp, 'Rate build-up'],
 ] as const;
 const DIRECT_RATE_SOURCES = SOURCES.filter(
-  ([value]) => value !== QuantitySurveyRateSourceType.MarketSurvey
+  ([value]) =>
+    value !== QuantitySurveyRateSourceType.MarketSurvey &&
+    value !== QuantitySurveyRateSourceType.HistoricalProject &&
+    value !== QuantitySurveyRateSourceType.PurchaseOrder &&
+    value !== QuantitySurveyRateSourceType.RateBuildUp
 );
+
+const HISTORICAL_SOURCE_TYPES = [
+  [
+    QuantitySurveyHistoricalRateSourceType.CompletedBoqLine,
+    'Completed BoQ line',
+  ],
+  [
+    QuantitySurveyHistoricalRateSourceType.CertifiedValuation,
+    'Certified valuation',
+  ],
+  [
+    QuantitySurveyHistoricalRateSourceType.ProcurementPrice,
+    'Procurement price',
+  ],
+  [
+    QuantitySurveyHistoricalRateSourceType.ActualProjectCost,
+    'Actual project cost',
+  ],
+] as const;
 
 const MARKET_PRICE_BASES = [
   [
@@ -185,6 +215,18 @@ const emptyMarketUpdate = (): PrepareQuantitySurveyMarketSurveyUpdate => ({
   changeReason: '',
 });
 
+const emptyHistoricalRate = (): PrepareQuantitySurveyHistoricalRate => ({
+  sourceType: QuantitySurveyHistoricalRateSourceType.CompletedBoqLine,
+  sourceId: '',
+  sourceIntegrityHash: '',
+  effectiveFrom: today(),
+  effectiveTo: null,
+  projectTypeId: null,
+  locationId: null,
+  centralDocumentVersionId: null,
+  changeReason: '',
+});
+
 type RowCell<T> = { row: { original: T } };
 
 function LookupSelect({
@@ -193,15 +235,18 @@ function LookupSelect({
   options,
   placeholder,
   allowNone = true,
+  disabled = false,
 }: {
   value?: string | null;
   onChange: (value: string | null) => void;
   options: QuantitySurveyLookupOption[];
   placeholder: string;
   allowNone?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Select
+      disabled={disabled}
       value={value || (allowNone ? NONE : undefined)}
       onValueChange={(next) => onChange(next === NONE ? null : next)}
     >
@@ -250,6 +295,12 @@ export default function QuantitySurveyRateLibraryPage() {
   const [marketOpen, setMarketOpen] = useState(false);
   const [marketForm, setMarketForm] =
     useState<PrepareQuantitySurveyMarketSurveyUpdate>(emptyMarketUpdate);
+  const [historicalOpen, setHistoricalOpen] = useState(false);
+  const [buildUpOpen, setBuildUpOpen] = useState(false);
+  const [historicalSourceType, setHistoricalSourceType] = useState('all');
+  const [historicalSearch, setHistoricalSearch] = useState('');
+  const [historicalForm, setHistoricalForm] =
+    useState<PrepareQuantitySurveyHistoricalRate>(emptyHistoricalRate);
   const [lifecycle, setLifecycle] = useState<{
     action: 'publish' | 'retire';
     rate: QuantitySurveyRate;
@@ -303,6 +354,27 @@ export default function QuantitySurveyRateLibraryPage() {
     },
     enabled: Boolean(selectedId && historyOpen && canAudit),
   });
+  const historicalSources = useQuery({
+    queryKey: [
+      'quantity-survey-historical-rate-sources',
+      selectedId,
+      historicalSourceType,
+      historicalSearch,
+    ],
+    queryFn: () => {
+      if (!selectedId) throw new Error('A rate-library item is required.');
+      return quantitySurveyRateLibraryService.historicalSources(
+        selectedId,
+        historicalSourceType === 'all'
+          ? undefined
+          : (Number(
+              historicalSourceType
+            ) as QuantitySurveyHistoricalRateSourceType),
+        historicalSearch
+      );
+    },
+    enabled: Boolean(selectedId && historicalOpen && canManage),
+  });
 
   const options = (key: string) => lookups.data?.sources?.[key] ?? [];
   const invalidate = async (id?: string | null) => {
@@ -315,6 +387,12 @@ export default function QuantitySurveyRateLibraryPage() {
       });
       await client.invalidateQueries({
         queryKey: ['quantity-survey-rate-library-history', id],
+      });
+      await client.invalidateQueries({
+        queryKey: ['quantity-survey-historical-rate-sources', id],
+      });
+      await client.invalidateQueries({
+        queryKey: ['quantity-survey-rate-build-ups', id],
       });
     }
   };
@@ -396,6 +474,34 @@ export default function QuantitySurveyRateLibraryPage() {
       }),
   });
 
+  const prepareHistoricalRate = useMutation({
+    mutationFn: () => {
+      if (!selectedId) throw new Error('Select a rate-library item first.');
+      return quantitySurveyRateLibraryService.prepareHistoricalRate(
+        selectedId,
+        historicalForm
+      );
+    },
+    onSuccess: async () => {
+      setHistoricalOpen(false);
+      setHistoricalForm(emptyHistoricalRate());
+      setHistoricalSearch('');
+      setHistoricalSourceType('all');
+      await invalidate(selectedId);
+      toast({
+        title: 'Historical rate draft prepared',
+        description: 'An independent reviewer must publish the draft.',
+        variant: 'success',
+      });
+    },
+    onError: (error: Error) =>
+      toast({
+        title: 'Unable to prepare historical rate',
+        description: error.message,
+        variant: 'destructive',
+      }),
+  });
+
   const changeLifecycle = useMutation({
     mutationFn: () => {
       if (!selectedId || !lifecycle)
@@ -457,6 +563,12 @@ export default function QuantitySurveyRateLibraryPage() {
   const beginMarketUpdate = () => {
     setMarketForm(emptyMarketUpdate());
     setMarketOpen(true);
+  };
+  const beginHistoricalRate = () => {
+    setHistoricalForm(emptyHistoricalRate());
+    setHistoricalSearch('');
+    setHistoricalSourceType('all');
+    setHistoricalOpen(true);
   };
   const beginEditRate = (rate: QuantitySurveyRate) => {
     setEditingRate(rate);
@@ -573,6 +685,16 @@ export default function QuantitySurveyRateLibraryPage() {
     !marketForm.changeReason.trim() ||
     !marketProposedRate ||
     marketProposedRate <= 0;
+  const selectedHistoricalSource = historicalSources.data?.find(
+    (source) => source.sourceId === historicalForm.sourceId
+  );
+  const historicalSaveDisabled =
+    prepareHistoricalRate.isPending ||
+    !selectedHistoricalSource?.canPromote ||
+    !historicalForm.sourceId ||
+    !historicalForm.sourceIntegrityHash ||
+    !historicalForm.effectiveFrom ||
+    !historicalForm.changeReason.trim();
   const selected = detail.data;
 
   return (
@@ -713,6 +835,20 @@ export default function QuantitySurveyRateLibraryPage() {
                 >
                   <LineChart className="mr-2 h-4 w-4" /> Market survey update
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={beginHistoricalRate}
+                  disabled={!selected}
+                >
+                  <ArchiveRestore className="mr-2 h-4 w-4" /> Historical cost
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setBuildUpOpen(true)}
+                  disabled={!selected}
+                >
+                  <Calculator className="mr-2 h-4 w-4" /> Rate build-up
+                </Button>
                 <Button onClick={beginCreateRate} disabled={!selected}>
                   <Plus className="mr-2 h-4 w-4" /> New rate draft
                 </Button>
@@ -781,6 +917,22 @@ export default function QuantitySurveyRateLibraryPage() {
                             : ` · ${rate.variancePercent >= 0 ? '+' : ''}${rate.variancePercent}%`}
                         </div>
                       ) : null}
+                      {rate.historicalSourceId ? (
+                        <div className="mt-1 text-muted-foreground">
+                          {rate.historicalProjectCode} ·{' '}
+                          {rate.historicalSourceLabel} ·{' '}
+                          {rate.historicalQuantity?.toLocaleString()}{' '}
+                          {rate.historicalUnitOfMeasure} · total{' '}
+                          {rate.currencyCode}{' '}
+                          {rate.historicalTotalAmount?.toLocaleString()}
+                        </div>
+                      ) : null}
+                      {rate.rateBuildUpId ? (
+                        <div className="mt-1 text-muted-foreground">
+                          Governed component calculation · immutable build-up
+                          lineage
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
@@ -788,7 +940,11 @@ export default function QuantitySurveyRateLibraryPage() {
                         Number(rate.lifecycleStatus) ===
                           QuantitySurveyRateLifecycleStatus.Draft &&
                         Number(rate.sourceType) !==
-                          QuantitySurveyRateSourceType.MarketSurvey ? (
+                          QuantitySurveyRateSourceType.MarketSurvey &&
+                        Number(rate.sourceType) !==
+                          QuantitySurveyRateSourceType.HistoricalProject &&
+                        Number(rate.sourceType) !==
+                          QuantitySurveyRateSourceType.RateBuildUp ? (
                           <Button
                             size="sm"
                             variant="outline"
@@ -843,6 +999,23 @@ export default function QuantitySurveyRateLibraryPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <QuantitySurveyRateBuildUpDialog
+        open={buildUpOpen}
+        onOpenChange={setBuildUpOpen}
+        itemId={selectedId}
+        itemLabel={
+          selected ? `${selected.code} · ${selected.name}` : 'Rate item'
+        }
+        lookups={{
+          currencies: options('currencies'),
+          projectTypes: options('projectTypes'),
+          locations: options('locations'),
+          businessPartners: options('businessPartners'),
+          evidenceDocuments: options('evidenceDocuments'),
+        }}
+        onPrepared={() => invalidate(selectedId)}
+      />
 
       <Dialog open={itemOpen} onOpenChange={setItemOpen}>
         <DialogContent className="max-w-2xl">
@@ -1187,6 +1360,230 @@ export default function QuantitySurveyRateLibraryPage() {
               disabled={marketSaveDisabled}
             >
               {prepareMarketUpdate.isPending ? 'Preparing…' : 'Prepare update'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historicalOpen} onOpenChange={setHistoricalOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Promote a historical project cost</DialogTitle>
+            <DialogDescription>
+              Select an eligible completed-project source. The server locks its
+              project dimensions, recalculates its value and verifies its
+              integrity before preparing an independently publishable draft.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[68vh] pr-3">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Historical source family</Label>
+                <Select
+                  value={historicalSourceType}
+                  onValueChange={(value) => {
+                    setHistoricalSourceType(value);
+                    setHistoricalForm(emptyHistoricalRate());
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All eligible sources</SelectItem>
+                    {HISTORICAL_SOURCE_TYPES.map(([value, label]) => (
+                      <SelectItem key={value} value={String(value)}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Search source</Label>
+                <Input
+                  value={historicalSearch}
+                  onChange={(event) => setHistoricalSearch(event.target.value)}
+                  placeholder="Project, source or reference"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Verified project cost source</Label>
+                <Select
+                  value={
+                    historicalForm.sourceId
+                      ? `${historicalForm.sourceType}:${historicalForm.sourceId}`
+                      : undefined
+                  }
+                  onValueChange={(value) => {
+                    const source = historicalSources.data?.find(
+                      (candidate) =>
+                        `${candidate.sourceType}:${candidate.sourceId}` ===
+                        value
+                    );
+                    if (!source) return;
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      sourceType: source.sourceType,
+                      sourceId: source.sourceId,
+                      sourceIntegrityHash: source.integrityHash,
+                      projectTypeId: source.projectTypeId ?? null,
+                      locationId: source.locationId ?? null,
+                    }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        historicalSources.isLoading
+                          ? 'Loading governed historical sources…'
+                          : 'Select an eligible project cost'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(historicalSources.data ?? []).map((source) => (
+                      <SelectItem
+                        key={`${source.sourceType}-${source.sourceId}`}
+                        value={`${source.sourceType}:${source.sourceId}`}
+                        disabled={!source.canPromote}
+                      >
+                        {source.projectCode} · {source.sourceReference} ·{' '}
+                        {source.currencyCode} {source.unitRate.toLocaleString()}
+                        /{source.unitOfMeasure}
+                        {source.canPromote ? '' : ' · already promoted'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!historicalSources.isLoading &&
+                (historicalSources.data?.length ?? 0) === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No accessible completed-project source matches this rate
+                    item and unit of measure.
+                  </p>
+                ) : null}
+                {historicalSources.isError ? (
+                  <p className="text-xs text-destructive">
+                    Historical project costs could not be loaded. Refresh and
+                    try again.
+                  </p>
+                ) : null}
+              </div>
+              {selectedHistoricalSource ? (
+                <div className="rounded-md border bg-muted/30 p-3 text-sm md:col-span-2">
+                  <div className="font-medium">
+                    {selectedHistoricalSource.projectCode} ·{' '}
+                    {selectedHistoricalSource.projectTitle}
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {selectedHistoricalSource.sourceLabel} ·{' '}
+                    {formatDate(selectedHistoricalSource.sourceDate)} ·{' '}
+                    {selectedHistoricalSource.quantity.toLocaleString()}{' '}
+                    {selectedHistoricalSource.unitOfMeasure} · unit rate{' '}
+                    {selectedHistoricalSource.currencyCode}{' '}
+                    {selectedHistoricalSource.unitRate.toLocaleString()} · total{' '}
+                    {selectedHistoricalSource.currencyCode}{' '}
+                    {selectedHistoricalSource.totalAmount.toLocaleString()}
+                  </div>
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                <Label>Effective from</Label>
+                <Input
+                  type="date"
+                  value={historicalForm.effectiveFrom}
+                  onChange={(event) =>
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      effectiveFrom: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Effective to</Label>
+                <Input
+                  type="date"
+                  value={historicalForm.effectiveTo ?? ''}
+                  onChange={(event) =>
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      effectiveTo: event.target.value || null,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Source project type</Label>
+                <LookupSelect
+                  value={historicalForm.projectTypeId}
+                  onChange={(value) =>
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      projectTypeId: value,
+                    }))
+                  }
+                  options={options('projectTypes')}
+                  placeholder="No project type"
+                  disabled={Boolean(selectedHistoricalSource?.projectTypeId)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Source region or location</Label>
+                <LookupSelect
+                  value={historicalForm.locationId}
+                  onChange={(value) =>
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      locationId: value,
+                    }))
+                  }
+                  options={options('locations')}
+                  placeholder="No project location"
+                  disabled={Boolean(selectedHistoricalSource?.locationId)}
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Published central-DMS evidence (optional)</Label>
+                <LookupSelect
+                  value={historicalForm.centralDocumentVersionId}
+                  onChange={(value) =>
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      centralDocumentVersionId: value,
+                    }))
+                  }
+                  options={options('evidenceDocuments')}
+                  placeholder="Select supporting evidence"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Promotion reason</Label>
+                <Textarea
+                  value={historicalForm.changeReason}
+                  onChange={(event) =>
+                    setHistoricalForm((form) => ({
+                      ...form,
+                      changeReason: event.target.value,
+                    }))
+                  }
+                  placeholder="Explain why this verified historical cost should enter the reusable library"
+                />
+              </div>
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoricalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => prepareHistoricalRate.mutate()}
+              disabled={historicalSaveDisabled}
+            >
+              {prepareHistoricalRate.isPending
+                ? 'Preparing…'
+                : 'Prepare historical draft'}
             </Button>
           </DialogFooter>
         </DialogContent>

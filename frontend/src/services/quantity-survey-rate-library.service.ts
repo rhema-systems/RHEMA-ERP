@@ -24,6 +24,34 @@ export enum QuantitySurveyRateSourceType {
   LabourSchedule = 9,
   PlantHire = 10,
   MarketSurvey = 11,
+  RateBuildUp = 12,
+}
+
+export enum QuantitySurveyRateComponent {
+  Material = 0,
+  Labour = 1,
+  Plant = 2,
+  Equipment = 3,
+  Subcontract = 4,
+  Overhead = 5,
+  Profit = 6,
+  Attendance = 7,
+  Contingency = 8,
+  Wastage = 9,
+  Transport = 10,
+  Other = 11,
+}
+
+export enum QuantitySurveyRateBuildUpCalculationMethod {
+  QuantityTimesPublishedRate = 0,
+  Percentage = 1,
+  FixedAmount = 2,
+}
+
+export enum QuantitySurveyRateBuildUpPercentageBasis {
+  MaterialSubtotal = 0,
+  DirectCost = 1,
+  RunningTotal = 2,
 }
 
 export enum QuantitySurveyRateLifecycleStatus {
@@ -38,6 +66,13 @@ export enum QuantitySurveyMarketSurveyPriceBasis {
   LowestSurveyPrice = 2,
   HighestSurveyPrice = 3,
   ForecastedPrice = 4,
+}
+
+export enum QuantitySurveyHistoricalRateSourceType {
+  CompletedBoqLine = 0,
+  CertifiedValuation = 1,
+  ProcurementPrice = 2,
+  ActualProjectCost = 3,
 }
 
 export interface QuantitySurveyLookupOption {
@@ -80,6 +115,16 @@ export interface QuantitySurveyRate {
   variancePercent?: number | null;
   marketSurveyQuoteCount?: number | null;
   nextReviewDueAt?: string | null;
+  historicalSourceType?: QuantitySurveyHistoricalRateSourceType | null;
+  historicalSourceId?: string | null;
+  historicalProjectId?: string | null;
+  historicalProjectCode?: string | null;
+  historicalSourceLabel?: string | null;
+  historicalUnitOfMeasure?: string | null;
+  historicalQuantity?: number | null;
+  historicalTotalAmount?: number | null;
+  historicalSourceHash?: string | null;
+  rateBuildUpId?: string | null;
   lifecycleStatus: QuantitySurveyRateLifecycleStatus;
   changeReason?: string | null;
   preparedById: string;
@@ -205,6 +250,166 @@ export interface PrepareQuantitySurveyMarketSurveyUpdate {
   changeReason: string;
 }
 
+export interface QuantitySurveyHistoricalRateSource {
+  sourceType: QuantitySurveyHistoricalRateSourceType;
+  sourceId: string;
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectTypeId?: string | null;
+  locationId?: string | null;
+  businessPartnerId?: string | null;
+  sourceReference: string;
+  sourceLabel: string;
+  sourceDate: string;
+  unitOfMeasure: string;
+  quantity: number;
+  unitRate: number;
+  totalAmount: number;
+  currencyCode: string;
+  integrityHash: string;
+  existingRateId?: string | null;
+  canPromote: boolean;
+}
+
+export interface PrepareQuantitySurveyHistoricalRate {
+  sourceType: QuantitySurveyHistoricalRateSourceType;
+  sourceId: string;
+  sourceIntegrityHash: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  projectTypeId?: string | null;
+  locationId?: string | null;
+  centralDocumentVersionId?: string | null;
+  changeReason: string;
+}
+
+export interface QuantitySurveyRateBuildUpSource {
+  rateLibraryItemId: string;
+  rateId: string;
+  itemCode: string;
+  itemName: string;
+  category: QuantitySurveyRateItemCategory;
+  unitOfMeasure: string;
+  rateVersion: number;
+  unitRate: number;
+  currencyId: string;
+  currencyCode: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  projectTypeId?: string | null;
+  locationId?: string | null;
+  businessPartnerId?: string | null;
+}
+
+export interface QuantitySurveyRateBuildUpContext {
+  allowedComponents: QuantitySurveyRateComponent[];
+  requireProjectType: boolean;
+  requireLocation: boolean;
+  allowBusinessPartner: boolean;
+  requireBusinessPartner: boolean;
+  allowedProjectTypeIds: string[];
+  allowedLocationIds: string[];
+  maximumOverheadPercent: number;
+  maximumProfitPercent: number;
+  maximumContingencyPercent: number;
+  maximumWastagePercent: number;
+  decimalPlaces: number;
+  sources: QuantitySurveyRateBuildUpSource[];
+}
+
+export interface QuantitySurveyRateBuildUpLineRequest {
+  sequence: number;
+  component: QuantitySurveyRateComponent;
+  calculationMethod: QuantitySurveyRateBuildUpCalculationMethod;
+  percentageBasis?: QuantitySurveyRateBuildUpPercentageBasis | null;
+  description?: string;
+  sourceRateId?: string | null;
+  quantity?: number | null;
+  percentage?: number | null;
+  fixedAmount?: number | null;
+}
+
+export interface PreviewQuantitySurveyRateBuildUp {
+  sourceDate: string;
+  currencyId: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  projectTypeId?: string | null;
+  locationId?: string | null;
+  businessPartnerId?: string | null;
+  centralDocumentVersionId?: string | null;
+  lines: QuantitySurveyRateBuildUpLineRequest[];
+}
+
+export interface PrepareQuantitySurveyRateBuildUp extends PreviewQuantitySurveyRateBuildUp {
+  clientRequestId: string;
+  previewIntegrityHash: string;
+  changeReason: string;
+}
+
+export interface QuantitySurveyRateBuildUpPreviewLine {
+  sequence: number;
+  component: QuantitySurveyRateComponent;
+  calculationMethod: QuantitySurveyRateBuildUpCalculationMethod;
+  percentageBasis?: QuantitySurveyRateBuildUpPercentageBasis | null;
+  description: string;
+  sourceRateLibraryItemId?: string | null;
+  sourceRateId?: string | null;
+  sourceItemCode?: string | null;
+  sourceItemName?: string | null;
+  sourceUnitOfMeasure?: string | null;
+  sourceRateVersion?: number | null;
+  sourceUnitRate?: number | null;
+  quantity?: number | null;
+  percentage?: number | null;
+  fixedAmount?: number | null;
+  basisAmount: number;
+  calculatedAmount: number;
+}
+
+export interface QuantitySurveyRateBuildUpPreview {
+  rateLibraryItemId: string;
+  sourceDate: string;
+  currencyId: string;
+  currencyCode: string;
+  configurationProfileId: string;
+  configurationDecisionId: string;
+  configurationProfileVersion: number;
+  decimalPlaces: number;
+  materialSubtotal: number;
+  directCost: number;
+  addOnCost: number;
+  unitRate: number;
+  integrityHash: string;
+  lines: QuantitySurveyRateBuildUpPreviewLine[];
+}
+
+export interface QuantitySurveyRateBuildUp {
+  id: string;
+  rateLibraryItemId: string;
+  version: number;
+  clientRequestId: string;
+  buildUpNumber: string;
+  sourceDate: string;
+  currencyId: string;
+  currencyCode: string;
+  configurationProfileVersion: number;
+  decimalPlaces: number;
+  materialSubtotal: number;
+  directCost: number;
+  addOnCost: number;
+  unitRate: number;
+  calculationHash: string;
+  centralDocumentRecordId?: string | null;
+  centralDocumentVersionId?: string | null;
+  changeReason: string;
+  preparedById: string;
+  preparedAt: string;
+  generatedRate: QuantitySurveyRate;
+  lines: QuantitySurveyRateBuildUpPreviewLine[];
+}
+
 export const quantitySurveyRateLibraryService = {
   lookups: () =>
     apiService.get<QuantitySurveyRateLibraryLookups>(`${root}/lookups`),
@@ -219,6 +424,53 @@ export const quantitySurveyRateLibraryService = {
     apiService.get<QuantitySurveyMarketSurveySource[]>(
       `${root}/market-survey-sources`
     ),
+  historicalSources: (
+    itemId: string,
+    sourceType?: QuantitySurveyHistoricalRateSourceType,
+    search?: string
+  ) =>
+    apiService.get<QuantitySurveyHistoricalRateSource[]>(
+      `${root}/${itemId}/historical-sources`,
+      {
+        sourceType,
+        search: search?.trim() || undefined,
+      }
+    ),
+  rateBuildUpContext: (
+    itemId: string,
+    query: {
+      sourceDate: string;
+      effectiveAt: string;
+      currencyId: string;
+      projectTypeId?: string;
+      locationId?: string;
+      businessPartnerId?: string;
+    }
+  ) =>
+    apiService.get<QuantitySurveyRateBuildUpContext>(
+      `${root}/${itemId}/rate-build-up-context`,
+      query
+    ),
+  rateBuildUps: (itemId: string) =>
+    apiService.get<QuantitySurveyRateBuildUp[]>(
+      `${root}/${itemId}/rate-build-ups`
+    ),
+  previewRateBuildUp: (
+    itemId: string,
+    request: PreviewQuantitySurveyRateBuildUp
+  ) =>
+    apiService.post<QuantitySurveyRateBuildUpPreview>(
+      `${root}/${itemId}/rate-build-ups/preview`,
+      request
+    ),
+  prepareRateBuildUp: (
+    itemId: string,
+    request: PrepareQuantitySurveyRateBuildUp
+  ) =>
+    apiService.post<QuantitySurveyRateBuildUp>(
+      `${root}/${itemId}/rate-build-ups`,
+      request
+    ),
   createItem: (request: SaveQuantitySurveyRateLibraryItem) =>
     apiService.post<QuantitySurveyRateLibraryItem>(root, request),
   updateItem: (id: string, request: SaveQuantitySurveyRateLibraryItem) =>
@@ -231,6 +483,14 @@ export const quantitySurveyRateLibraryService = {
   ) =>
     apiService.post<QuantitySurveyRate>(
       `${root}/${itemId}/market-survey-updates`,
+      request
+    ),
+  prepareHistoricalRate: (
+    itemId: string,
+    request: PrepareQuantitySurveyHistoricalRate
+  ) =>
+    apiService.post<QuantitySurveyRate>(
+      `${root}/${itemId}/historical-rate-promotions`,
       request
     ),
   updateRate: (

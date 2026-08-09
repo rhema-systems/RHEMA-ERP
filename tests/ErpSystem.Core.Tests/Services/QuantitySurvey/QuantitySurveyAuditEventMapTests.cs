@@ -19,7 +19,7 @@ public sealed class QuantitySurveyAuditEventMapTests
     {
         var definitions = QuantitySurveyAuditEventMap.Definitions;
 
-        definitions.Should().HaveCount(31);
+        definitions.Should().HaveCount(38);
         definitions.Select(value => value.Action).Should().OnlyHaveUniqueItems();
         definitions.Should().OnlyContain(value =>
             AuditOperationClassifier.Classify(value.Action) == value.Operation);
@@ -36,6 +36,8 @@ public sealed class QuantitySurveyAuditEventMapTests
                      QuantitySurveyAuditEventMap.CreateRateDraft,
                      QuantitySurveyAuditEventMap.UpdateRateDraft,
                      QuantitySurveyAuditEventMap.CreateMarketSurveyUpdate,
+                     QuantitySurveyAuditEventMap.PromoteHistoricalRate,
+                     QuantitySurveyAuditEventMap.CreateRateBuildUp,
                      QuantitySurveyAuditEventMap.PublishRate,
                      QuantitySurveyAuditEventMap.RetireRate
                  })
@@ -103,6 +105,27 @@ public sealed class QuantitySurveyAuditEventMapTests
                      QuantitySurveyAuditEventMap.RecallBoqVersion,
                      QuantitySurveyAuditEventMap.PublishBoqVersion,
                      QuantitySurveyAuditEventMap.RetireBoqPublication
+                 })
+        {
+            QuantitySurveyAuditEventMap.GetRequired(action).RequiredFacets
+                .Should().HaveFlag(QuantitySurveyAuditFacet.ApprovalState);
+        }
+    }
+
+    [Fact]
+    public void Estimate_version_actions_capture_formula_lineage_reason_and_approval_state()
+    {
+        var create = QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.CreateEstimateVersion);
+        create.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.FormulaInputs);
+        create.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.EvidenceLinks);
+        create.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.Reason);
+
+        foreach (var action in new[]
+                 {
+                     QuantitySurveyAuditEventMap.SubmitEstimateVersion,
+                     QuantitySurveyAuditEventMap.ApproveEstimateVersion,
+                     QuantitySurveyAuditEventMap.RejectEstimateVersion,
+                     QuantitySurveyAuditEventMap.RetireEstimateVersion
                  })
         {
             QuantitySurveyAuditEventMap.GetRequired(action).RequiredFacets

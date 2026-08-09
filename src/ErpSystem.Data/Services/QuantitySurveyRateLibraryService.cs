@@ -1,21 +1,28 @@
+using System.Data;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
+using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Core.Services.QuantitySurvey;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Services;
 
-public sealed class QuantitySurveyRateLibraryService(
+public sealed partial class QuantitySurveyRateLibraryService(
     ApplicationDbContext db,
-    ICurrentUserService currentUser) : IQuantitySurveyRateLibraryService
+    ICurrentUserService currentUser,
+    IProjectService projectService) : IQuantitySurveyRateLibraryService
 {
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
@@ -123,6 +130,235 @@ public sealed class QuantitySurveyRateLibraryService(
         return analyses
             .Select(value => MapMarketSurveySource(value, policy.UpdateCadenceMonths, now))
             .Where(value => value.QuoteCount > 0)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<QuantitySurveyHistoricalRateSourceDto>> GetHistoricalRateSourcesAsync(
+        Guid itemId,
+        QuantitySurveyHistoricalRateSourceType? sourceType = null,
+        string? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        var item = await FindItemAsync(itemId, tracking: false, cancellationToken);
+        return await GetHistoricalRateSourcesCoreAsync(item, sourceType, null, search, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<QuantitySurveyHistoricalRateSourceDto>> GetHistoricalRateSourcesCoreAsync(
+        QuantitySurveyRateLibraryItem item,
+        QuantitySurveyHistoricalRateSourceType? sourceType,
+        Guid? sourceId,
+        string? search,
+        CancellationToken cancellationToken)
+    {
+        var completed = await projectService.LookupProjectsAsync(
+            status: ProjectStatuses.Completed, take: 5000);
+        var closed = await projectService.LookupProjectsAsync(
+            status: ProjectStatuses.Closed, take: 5000);
+        var accessibleProjectIds = completed.Concat(closed)
+            .Select(value => value.Id)
+            .Distinct()
+            .ToList();
+        if (accessibleProjectIds.Count == 0) return [];
+
+        var projects = await db.Projects.AsNoTracking()
+            .Where(value => value.TenantId == TenantId && accessibleProjectIds.Contains(value.Id) &&
+                !value.IsDeleted && (value.Status == ProjectStatuses.Completed || value.Status == ProjectStatuses.Closed))
+            .ToDictionaryAsync(value => value.Id, cancellationToken);
+        var candidates = new List<QuantitySurveyHistoricalRateSourceDto>();
+
+        if (!sourceType.HasValue || sourceType == QuantitySurveyHistoricalRateSourceType.CompletedBoqLine)
+        {
+            var lines = await db.ProjectBoqVersionLines.AsNoTracking()
+                .Include(value => value.Version)
+                .Where(value => value.TenantId == TenantId && accessibleProjectIds.Contains(value.ProjectId) &&
+                    !value.IsDeleted && value.UnitRate > 0 && value.Quantity > 0 &&
+                    value.Currency != string.Empty &&
+                    value.Version.TenantId == TenantId && !value.Version.IsDeleted &&
+                    value.Version.VersionType == QuantitySurveyBoqVersionType.Approved &&
+                    value.Version.Status == ProjectBoqVersionStatuses.Approved &&
+                    value.Version.PublishedAt != null &&
+                    (!sourceId.HasValue || value.Id == sourceId.Value))
+                .OrderByDescending(value => value.Version.PublishedAt)
+                .Take(sourceId.HasValue ? 2 : 1000)
+                .ToListAsync(cancellationToken);
+            candidates.AddRange(lines
+                .Where(value => HistoricalCodeMatches(item, value.ItemCode) &&
+                    MatchesUnit(value.UnitOfMeasure, item.UnitOfMeasure.Code, item.UnitOfMeasure.Name))
+                .Where(value => projects.ContainsKey(value.ProjectId))
+                .Select(value => Candidate(
+                    QuantitySurveyHistoricalRateSourceType.CompletedBoqLine,
+                    value.Id,
+                    projects[value.ProjectId],
+                    $"BOQ-{value.Version.VersionNumber}:{value.LineNumber ?? value.ItemCode ?? value.Id.ToString("N")}",
+                    value.Description,
+                    value.Version.PublishedAt!.Value,
+                    value.UnitOfMeasure!,
+                    value.Quantity,
+                    value.UnitRate!.Value,
+                    value.LineAmount ?? decimal.Round(value.Quantity * value.UnitRate.Value, 2),
+                    value.Currency)));
+        }
+
+        if (!sourceType.HasValue || sourceType == QuantitySurveyHistoricalRateSourceType.CertifiedValuation)
+        {
+            var valuations = await db.ProjectInterimValuations.AsNoTracking()
+                .Include(value => value.CompletedProjectPackages)
+                .Where(value => value.TenantId == TenantId && accessibleProjectIds.Contains(value.ProjectId) &&
+                    !value.IsDeleted && value.ProjectPackageId != null && value.GrossWorkValue > 0 &&
+                    value.Currency != string.Empty &&
+                    value.CompletedProjectPackages.Count(completion =>
+                        completion.TenantId == TenantId && !completion.IsDeleted) == 1 &&
+                    value.CompletedProjectPackages.Any(completion =>
+                        completion.TenantId == TenantId && !completion.IsDeleted &&
+                        completion.ProjectPackageId == value.ProjectPackageId) &&
+                    (value.Status == ProjectInterimValuationStatuses.Certified || value.Status == ProjectInterimValuationStatuses.Paid) &&
+                    (!sourceId.HasValue || value.Id == sourceId.Value))
+                .OrderByDescending(value => value.ValuationDate)
+                .Take(sourceId.HasValue ? 2 : 500)
+                .ToListAsync(cancellationToken);
+            var packageIds = valuations.Select(value => value.ProjectPackageId!.Value).Distinct().ToList();
+            var valuationLines = packageIds.Count == 0
+                ? []
+                : await db.ProjectBoqVersionLines.AsNoTracking()
+                    .Include(value => value.Version)
+                    .Where(value => value.TenantId == TenantId && !value.IsDeleted &&
+                        value.ProjectPackageId != null && packageIds.Contains(value.ProjectPackageId.Value) &&
+                        value.Quantity > 0 &&
+                        value.Version.TenantId == TenantId && !value.Version.IsDeleted &&
+                        value.Version.VersionType == QuantitySurveyBoqVersionType.Approved &&
+                        value.Version.Status == ProjectBoqVersionStatuses.Approved &&
+                        value.Version.PublishedAt != null)
+                    .ToListAsync(cancellationToken);
+            var linesByPackage = valuationLines
+                .GroupBy(value => value.ProjectPackageId!.Value)
+                .ToDictionary(group => group.Key, group => group.ToList());
+            foreach (var valuation in valuations.Where(value => projects.ContainsKey(value.ProjectId)))
+            {
+                if (!linesByPackage.TryGetValue(valuation.ProjectPackageId!.Value, out var packageLines)) continue;
+                var latestPublicationId = packageLines.OrderByDescending(value => value.Version.PublishedAt)
+                    .ThenByDescending(value => value.Version.VersionNumber)
+                    .Select(value => value.ProjectBoqVersionId)
+                    .FirstOrDefault();
+                var applicable = packageLines.Where(value => value.ProjectBoqVersionId == latestPublicationId &&
+                        HistoricalCodeMatches(item, value.ItemCode) &&
+                        MatchesUnit(value.UnitOfMeasure, item.UnitOfMeasure.Code, item.UnitOfMeasure.Name))
+                    .ToList();
+                var allPublishedLines = packageLines.Count(value => value.ProjectBoqVersionId == latestPublicationId);
+                if (applicable.Count != 1 || allPublishedLines != 1) continue;
+                var line = applicable[0];
+                var unitRate = decimal.Round(valuation.GrossWorkValue / line.Quantity, 4);
+                candidates.Add(Candidate(
+                    QuantitySurveyHistoricalRateSourceType.CertifiedValuation,
+                    valuation.Id,
+                    projects[valuation.ProjectId],
+                    valuation.ValuationNumber ?? $"VAL-{valuation.Id:N}",
+                    $"{valuation.Title} · single-line certified package valuation",
+                    valuation.ValuationDate,
+                    line.UnitOfMeasure!,
+                    line.Quantity,
+                    unitRate,
+                    valuation.GrossWorkValue,
+                    valuation.Currency));
+            }
+        }
+
+        if ((!sourceType.HasValue || sourceType == QuantitySurveyHistoricalRateSourceType.ProcurementPrice) &&
+            item.InventoryItemId.HasValue)
+        {
+            var orderLines = await db.PurchaseOrderItems.AsNoTracking()
+                .Include(value => value.PurchaseOrder)
+                    .ThenInclude(value => value.SourceRequisition)
+                .Where(value => value.TenantId == TenantId && !value.IsDeleted &&
+                    value.InventoryItemId == item.InventoryItemId && value.UnitPrice > 0 &&
+                    (value.ReceivedQuantity > 0 || value.OrderedQuantity > 0) &&
+                    value.PurchaseOrder.Currency != string.Empty &&
+                    value.PurchaseOrder.TenantId == TenantId && !value.PurchaseOrder.IsDeleted &&
+                    value.PurchaseOrder.SourceRequisition != null &&
+                    value.PurchaseOrder.SourceRequisition.TenantId == TenantId &&
+                    !value.PurchaseOrder.SourceRequisition.IsDeleted &&
+                    value.PurchaseOrder.SourceRequisition.ProjectId != null &&
+                    accessibleProjectIds.Contains(value.PurchaseOrder.SourceRequisition.ProjectId.Value) &&
+                    (value.PurchaseOrder.Status == "Approved" || value.PurchaseOrder.Status == "Sent" ||
+                     value.PurchaseOrder.Status == "Acknowledged" || value.PurchaseOrder.Status == "PartiallyReceived" ||
+                     value.PurchaseOrder.Status == "Received") &&
+                    (!sourceId.HasValue || value.Id == sourceId.Value))
+                .OrderByDescending(value => value.PurchaseOrder.ReceivedDate ?? value.PurchaseOrder.ApprovedAt ?? value.PurchaseOrder.OrderDate)
+                .Take(sourceId.HasValue ? 2 : 1000)
+                .ToListAsync(cancellationToken);
+            candidates.AddRange(orderLines
+                .Where(value => MatchesUnit(value.UnitOfMeasure, item.UnitOfMeasure.Code, item.UnitOfMeasure.Name))
+                .Where(value => projects.ContainsKey(value.PurchaseOrder.SourceRequisition!.ProjectId!.Value))
+                .Select(value =>
+                {
+                    var quantity = value.ReceivedQuantity > 0 ? value.ReceivedQuantity : value.OrderedQuantity;
+                    var unitRate = value.LandedUnitCost > 0 ? value.LandedUnitCost : value.UnitPrice;
+                    return Candidate(
+                        QuantitySurveyHistoricalRateSourceType.ProcurementPrice,
+                        value.Id,
+                        projects[value.PurchaseOrder.SourceRequisition!.ProjectId!.Value],
+                        $"{value.PurchaseOrder.OrderNumber}:{value.BusinessPartnerItemCode ?? value.Id.ToString("N")}",
+                        value.ItemDescription ?? item.Name,
+                        value.PurchaseOrder.ReceivedDate ?? value.PurchaseOrder.ApprovedAt ?? value.PurchaseOrder.OrderDate,
+                        value.UnitOfMeasure,
+                        quantity,
+                        unitRate,
+                        decimal.Round(quantity * unitRate, 2),
+                        value.PurchaseOrder.Currency,
+                        value.PurchaseOrder.BusinessPartnerId);
+                }));
+        }
+
+        if ((!sourceType.HasValue || sourceType == QuantitySurveyHistoricalRateSourceType.ActualProjectCost) &&
+            item.InventoryItemId.HasValue)
+        {
+            var costs = await db.ProjectMaterialCostEntries.AsNoTracking()
+                .Where(value => value.TenantId == TenantId && accessibleProjectIds.Contains(value.ProjectId) &&
+                    !value.IsDeleted && value.InventoryItemId == item.InventoryItemId && value.Quantity > 0 &&
+                    value.UnitCost > 0 && value.Amount > 0 && value.PostingState == "Posted" &&
+                    value.Currency != string.Empty &&
+                    value.AffectsActualCost && !value.IsReversed && !value.HasMissingSourceLink && !value.HasReversalGap &&
+                    (!sourceId.HasValue || value.Id == sourceId.Value))
+                .OrderByDescending(value => value.EntryDate)
+                .Take(sourceId.HasValue ? 2 : 1000)
+                .ToListAsync(cancellationToken);
+            candidates.AddRange(costs
+                .Where(value => MatchesUnit(value.UnitOfMeasure, item.UnitOfMeasure.Code, item.UnitOfMeasure.Name))
+                .Where(value => projects.ContainsKey(value.ProjectId))
+                .Select(value => Candidate(
+                    QuantitySurveyHistoricalRateSourceType.ActualProjectCost,
+                    value.Id,
+                    projects[value.ProjectId],
+                    value.SourceDocumentNumber ?? value.SourceTransactionType ?? $"COST-{value.Id:N}",
+                    value.InventoryItemName ?? item.Name,
+                    value.EntryDate,
+                    value.UnitOfMeasure!,
+                    value.Quantity,
+                    value.UnitCost,
+                    value.Amount,
+                    value.Currency)));
+        }
+
+        var promoted = await db.QuantitySurveyRateLibraryRates.IgnoreQueryFilters().AsNoTracking()
+            .Where(value => value.TenantId == TenantId &&
+                value.HistoricalSourceType != null && value.HistoricalSourceId != null)
+            .Select(value => new { value.Id, value.HistoricalSourceType, value.HistoricalSourceId })
+            .ToListAsync(cancellationToken);
+        var promotedLookup = promoted
+            .GroupBy(value => (value.HistoricalSourceType!.Value, value.HistoricalSourceId!.Value))
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(value => value.Id).First().Id);
+        var normalizedSearch = search?.Trim();
+        return candidates
+            .Select(value => promotedLookup.TryGetValue((value.SourceType, value.SourceId), out var rateId)
+                ? value with { ExistingRateId = rateId }
+                : value)
+            .Where(value => string.IsNullOrWhiteSpace(normalizedSearch) ||
+                value.ProjectCode.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase) ||
+                value.ProjectTitle.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase) ||
+                value.SourceReference.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase) ||
+                value.SourceLabel.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(value => value.SourceDate)
+            .ThenBy(value => value.ProjectCode)
+            .Take(sourceId.HasValue ? 2 : 500)
             .ToList();
     }
 
@@ -261,9 +497,16 @@ public sealed class QuantitySurveyRateLibraryService(
         var item = await FindItemAsync(itemId, tracking: false, cancellationToken);
         if (request.SourceType == QuantitySurveyRateSourceType.MarketSurvey)
             throw new QuantitySurveyRateLibraryValidationException(
-                "Use the governed market-survey update action so the published Procurement analysis, prior value, cadence and DMS evidence are retained.");
+                "Use the governed market-survey update so authoritative source lineage, prior value and audit evidence are retained.");
+        if (request.SourceType == QuantitySurveyRateSourceType.RateBuildUp)
+            throw new QuantitySurveyRateLibraryValidationException(
+                "Use the governed component calculation workflow so rate inputs, policy caps and audit lineage are retained.");
+        if (request.SourceType is QuantitySurveyRateSourceType.HistoricalProject or
+            QuantitySurveyRateSourceType.PurchaseOrder)
+            throw new QuantitySurveyRateLibraryValidationException(
+                "Use the governed source action so authoritative source lineage, prior value and audit evidence are retained.");
         return await CreateRateCoreAsync(item, request, QuantitySurveyAuditEventMap.CreateRateDraft,
-            before: null, marketSurvey: null, correlationId, cancellationToken);
+            before: null, marketSurvey: null, historical: null, buildUp: null, correlationId, cancellationToken);
     }
 
     public async Task<QuantitySurveyRateDto> PrepareMarketSurveyUpdateAsync(
@@ -355,7 +598,133 @@ public sealed class QuantitySurveyRateLibraryService(
             ? new { PreviousRate = (object?)null, Survey = source, PriceBasis = request.PriceBasis }
             : new { PreviousRate = Snapshot(previous), Survey = source, PriceBasis = request.PriceBasis };
         return await CreateRateCoreAsync(item, save, QuantitySurveyAuditEventMap.CreateMarketSurveyUpdate,
-            before, lineage, correlationId, cancellationToken);
+            before, lineage, historical: null, buildUp: null, correlationId, cancellationToken);
+    }
+
+    public async Task<QuantitySurveyRateDto> PrepareHistoricalRateAsync(
+        Guid itemId,
+        PrepareQuantitySurveyHistoricalRateRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            var result = await PrepareHistoricalRateCoreAsync(
+                itemId, request, correlationId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        });
+    }
+
+    private async Task<QuantitySurveyRateDto> PrepareHistoricalRateCoreAsync(
+        Guid itemId,
+        PrepareQuantitySurveyHistoricalRateRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        var item = await FindItemAsync(itemId, tracking: false, cancellationToken);
+        if (request.SourceId == Guid.Empty)
+            throw new QuantitySurveyRateLibraryValidationException("Select an eligible historical source record.");
+        var sources = await GetHistoricalRateSourcesCoreAsync(
+            item, request.SourceType, request.SourceId, null, cancellationToken);
+        var source = sources.SingleOrDefault(value => value.SourceId == request.SourceId &&
+            value.SourceType == request.SourceType)
+            ?? throw new QuantitySurveyRateLibraryValidationException(
+                "The historical source is no longer eligible, accessible, completed or compatible with this rate item.");
+        if (source.ExistingRateId.HasValue)
+            throw new QuantitySurveyRateLibraryConflictException(
+                "This historical source has already been promoted into the controlled rate library.");
+        if (!FixedHashEquals(source.IntegrityHash, request.SourceIntegrityHash))
+            throw new QuantitySurveyRateLibraryConflictException(
+                "The historical source changed after it was selected. Refresh the source list and review the current values.");
+
+        if (source.ProjectTypeId.HasValue && request.ProjectTypeId.HasValue &&
+            source.ProjectTypeId != request.ProjectTypeId)
+            throw new QuantitySurveyRateLibraryValidationException(
+                "Project type is fixed by the historical project and cannot be replaced.");
+        if (source.LocationId.HasValue && request.LocationId.HasValue &&
+            source.LocationId != request.LocationId)
+            throw new QuantitySurveyRateLibraryValidationException(
+                "Location is fixed by the historical project and cannot be replaced.");
+        var currency = await db.Currencies.AsNoTracking().SingleOrDefaultAsync(value =>
+            value.TenantId == TenantId && !value.IsDeleted && value.Status == "Active" &&
+            value.CurrencyCode == source.CurrencyCode, cancellationToken)
+            ?? throw new QuantitySurveyRateLibraryValidationException(
+                $"The historical currency '{source.CurrencyCode}' is not an active Finance currency for this tenant.");
+        var effectiveFrom = Utc(request.EffectiveFrom);
+        if (effectiveFrom == default)
+            throw new QuantitySurveyRateLibraryValidationException("Effective from is required.");
+        if (source.SourceDate > effectiveFrom)
+            throw new QuantitySurveyRateLibraryValidationException(
+                "The historical source date must be on or before the rate effective date.");
+        var policy = await GetPolicyAsync(effectiveFrom, cancellationToken);
+        var projectTypeId = policy.Dimensions.Contains(QuantitySurveyRateDimension.ProjectType)
+            ? source.ProjectTypeId ?? request.ProjectTypeId
+            : null;
+        var locationId = policy.Dimensions.Contains(QuantitySurveyRateDimension.Location)
+            ? source.LocationId ?? request.LocationId
+            : null;
+        Guid? businessPartnerId = null;
+        if (source.BusinessPartnerId.HasValue &&
+            (policy.Dimensions.Contains(QuantitySurveyRateDimension.Supplier) ||
+             policy.Dimensions.Contains(QuantitySurveyRateDimension.Contractor)))
+        {
+            var partner = await db.BusinessPartners.AsNoTracking().SingleOrDefaultAsync(value =>
+                value.TenantId == TenantId && value.Id == source.BusinessPartnerId &&
+                !value.IsDeleted && value.IsActive, cancellationToken);
+            var partnerDimensionEnabled = partner?.PartnerType.Trim().ToUpperInvariant() switch
+            {
+                "SUPPLIER" => policy.Dimensions.Contains(QuantitySurveyRateDimension.Supplier),
+                "CONTRACTOR" => policy.Dimensions.Contains(QuantitySurveyRateDimension.Contractor),
+                "BOTH" => policy.Dimensions.Contains(QuantitySurveyRateDimension.Supplier) ||
+                          policy.Dimensions.Contains(QuantitySurveyRateDimension.Contractor),
+                _ => false
+            };
+            if (partnerDimensionEnabled) businessPartnerId = partner!.Id;
+        }
+        var previous = await db.QuantitySurveyRateLibraryRates.AsNoTracking()
+            .Where(value => value.TenantId == TenantId && value.RateLibraryItemId == itemId && !value.IsDeleted &&
+                value.LifecycleStatus == QuantitySurveyRateLifecycleStatus.Published &&
+                value.EffectiveFrom < effectiveFrom && value.ProjectTypeId == projectTypeId &&
+                value.LocationId == locationId && value.BusinessPartnerId == businessPartnerId)
+            .OrderByDescending(value => value.EffectiveFrom)
+            .FirstOrDefaultAsync(cancellationToken);
+        var save = new SaveQuantitySurveyRateRequest
+        {
+            UnitRate = source.UnitRate,
+            CurrencyId = currency.Id,
+            EffectiveFrom = effectiveFrom,
+            EffectiveTo = request.EffectiveTo,
+            ProjectTypeId = projectTypeId,
+            LocationId = locationId,
+            BusinessPartnerId = businessPartnerId,
+            SourceType = QuantitySurveyRateSourceType.HistoricalProject,
+            SourceReference = source.SourceReference,
+            SourceDate = source.SourceDate,
+            CentralDocumentVersionId = request.CentralDocumentVersionId,
+            ChangeReason = request.ChangeReason
+        };
+        var lineage = new HistoricalPreparation(
+            source.SourceType,
+            source.SourceId,
+            source.ProjectId,
+            source.ProjectCode,
+            source.SourceLabel,
+            source.UnitOfMeasure,
+            source.Quantity,
+            source.TotalAmount,
+            source.IntegrityHash,
+            previous?.Id,
+            previous?.UnitRate,
+            previous?.CurrencyCodeSnapshot);
+        var before = previous is null
+            ? new { PreviousRate = (object?)null, HistoricalSource = source }
+            : new { PreviousRate = Snapshot(previous), HistoricalSource = source };
+        return await CreateRateCoreAsync(item, save, QuantitySurveyAuditEventMap.PromoteHistoricalRate,
+            before, marketSurvey: null, lineage, buildUp: null, correlationId, cancellationToken);
     }
 
     private async Task<QuantitySurveyRateDto> CreateRateCoreAsync(
@@ -364,6 +733,8 @@ public sealed class QuantitySurveyRateLibraryService(
         string auditAction,
         object? before,
         MarketSurveyPreparation? marketSurvey,
+        HistoricalPreparation? historical,
+        RateBuildUpPreparation? buildUp,
         string correlationId,
         CancellationToken cancellationToken)
     {
@@ -371,6 +742,12 @@ public sealed class QuantitySurveyRateLibraryService(
         if ((request.SourceType == QuantitySurveyRateSourceType.MarketSurvey) != (marketSurvey is not null))
             throw new QuantitySurveyRateLibraryValidationException(
                 "Market-survey rates must be prepared through the governed survey update workflow.");
+        if ((request.SourceType == QuantitySurveyRateSourceType.HistoricalProject) != (historical is not null))
+            throw new QuantitySurveyRateLibraryValidationException(
+                "Historical project rates must be prepared through the governed historical-cost promotion workflow.");
+        if ((request.SourceType == QuantitySurveyRateSourceType.RateBuildUp) != (buildUp is not null))
+            throw new QuantitySurveyRateLibraryValidationException(
+                "Rate build-ups must be prepared through the governed component calculation workflow.");
         var references = await ValidateRateAsync(item, request, cancellationToken);
         var version = (await db.QuantitySurveyRateLibraryRates.IgnoreQueryFilters()
             .Where(value => value.TenantId == TenantId && value.RateLibraryItemId == item.Id)
@@ -396,11 +773,21 @@ public sealed class QuantitySurveyRateLibraryService(
             CentralDocumentVersionId = references.Evidence?.Id,
             MarketAnalysisId = marketSurvey?.MarketAnalysisId,
             MarketAnalysisCodeSnapshot = marketSurvey?.MarketAnalysisCode,
-            PreviousRateId = marketSurvey?.PreviousRateId,
-            PreviousUnitRate = marketSurvey?.PreviousUnitRate,
-            PreviousCurrencyCodeSnapshot = marketSurvey?.PreviousCurrencyCode,
             MarketSurveyQuoteCount = marketSurvey?.QuoteCount,
             NextReviewDueAt = marketSurvey?.NextReviewDueAt,
+            HistoricalSourceType = historical?.SourceType,
+            HistoricalSourceId = historical?.SourceId,
+            HistoricalProjectId = historical?.ProjectId,
+            HistoricalProjectCodeSnapshot = historical?.ProjectCode,
+            HistoricalSourceLabelSnapshot = historical?.SourceLabel,
+            HistoricalUnitOfMeasureSnapshot = historical?.UnitOfMeasure,
+            HistoricalQuantity = historical?.Quantity,
+            HistoricalTotalAmount = historical?.TotalAmount,
+            HistoricalSourceHash = historical?.IntegrityHash,
+            RateBuildUpId = buildUp?.BuildUpId,
+            PreviousRateId = buildUp?.PreviousRateId ?? historical?.PreviousRateId ?? marketSurvey?.PreviousRateId,
+            PreviousUnitRate = buildUp?.PreviousUnitRate ?? historical?.PreviousUnitRate ?? marketSurvey?.PreviousUnitRate,
+            PreviousCurrencyCodeSnapshot = buildUp?.PreviousCurrencyCode ?? historical?.PreviousCurrencyCode ?? marketSurvey?.PreviousCurrencyCode,
             LifecycleStatus = QuantitySurveyRateLifecycleStatus.Draft,
             ChangeReason = Required(request.ChangeReason, "Change reason", 1000),
             PreparedById = UserId,
@@ -413,7 +800,10 @@ public sealed class QuantitySurveyRateLibraryService(
             CreatedById = UserId
         };
         db.QuantitySurveyRateLibraryRates.Add(entity);
-        AddRevision(item.Id, entity.Id, entity.AuditAction, correlationId, entity.ChangeReason, before, Snapshot(entity));
+        object after = buildUp is null
+            ? Snapshot(entity)
+            : new { Rate = Snapshot(entity), RateBuildUp = buildUp.AuditSnapshot };
+        AddRevision(item.Id, entity.Id, entity.AuditAction, correlationId, entity.ChangeReason, before, after);
         await SaveAsync(cancellationToken);
         return MapRate(await FindRateAsync(item.Id, entity.Id, tracking: false, cancellationToken));
     }
@@ -429,10 +819,10 @@ public sealed class QuantitySurveyRateLibraryService(
         var entity = await FindRateAsync(itemId, rateId, tracking: true, cancellationToken);
         if (entity.LifecycleStatus != QuantitySurveyRateLifecycleStatus.Draft)
             throw new QuantitySurveyRateLibraryConflictException("Only a draft rate can be amended. Create a new rate version instead.");
-        if (entity.SourceType == QuantitySurveyRateSourceType.MarketSurvey ||
-            request.SourceType == QuantitySurveyRateSourceType.MarketSurvey)
+        if (entity.SourceType is QuantitySurveyRateSourceType.MarketSurvey or QuantitySurveyRateSourceType.HistoricalProject or QuantitySurveyRateSourceType.RateBuildUp ||
+            request.SourceType is QuantitySurveyRateSourceType.MarketSurvey or QuantitySurveyRateSourceType.HistoricalProject or QuantitySurveyRateSourceType.RateBuildUp or QuantitySurveyRateSourceType.PurchaseOrder)
             throw new QuantitySurveyRateLibraryValidationException(
-                "Market-survey drafts preserve immutable source and comparison snapshots. Prepare a replacement market-survey update instead.");
+                "Governed source drafts preserve immutable source and comparison snapshots. Prepare a replacement source update instead.");
         CheckVersion(entity.RowVersion, request.RowVersion, "rate version");
         var references = await ValidateRateAsync(item, request, cancellationToken);
         var before = Snapshot(entity);
@@ -718,7 +1108,8 @@ public sealed class QuantitySurveyRateLibraryService(
             .Include(value => value.Rates.Where(rate => !rate.IsDeleted)).ThenInclude(rate => rate.BusinessPartner)
             .Include(value => value.Rates.Where(rate => !rate.IsDeleted)).ThenInclude(rate => rate.CentralDocumentRecord)
             .Include(value => value.Rates.Where(rate => !rate.IsDeleted)).ThenInclude(rate => rate.CentralDocumentVersion)
-            .Include(value => value.Rates.Where(rate => !rate.IsDeleted)).ThenInclude(rate => rate.MarketAnalysis);
+            .Include(value => value.Rates.Where(rate => !rate.IsDeleted)).ThenInclude(rate => rate.MarketAnalysis)
+            .Include(value => value.Rates.Where(rate => !rate.IsDeleted)).ThenInclude(rate => rate.HistoricalProject);
         return await query.SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == id && !value.IsDeleted, cancellationToken)
             ?? throw new QuantitySurveyRateLibraryNotFoundException("The rate-library item was not found for this tenant.");
     }
@@ -732,7 +1123,8 @@ public sealed class QuantitySurveyRateLibraryService(
             .Include(value => value.BusinessPartner)
             .Include(value => value.CentralDocumentRecord)
             .Include(value => value.CentralDocumentVersion)
-            .Include(value => value.MarketAnalysis);
+            .Include(value => value.MarketAnalysis)
+            .Include(value => value.HistoricalProject);
         return await query.SingleOrDefaultAsync(value => value.TenantId == TenantId && value.RateLibraryItemId == itemId &&
                 value.Id == rateId && !value.IsDeleted, cancellationToken)
             ?? throw new QuantitySurveyRateLibraryNotFoundException("The rate version was not found for this tenant and rate item.");
@@ -840,6 +1232,16 @@ public sealed class QuantitySurveyRateLibraryService(
             : null,
         MarketSurveyQuoteCount = entity.MarketSurveyQuoteCount,
         NextReviewDueAt = entity.NextReviewDueAt,
+        HistoricalSourceType = entity.HistoricalSourceType,
+        HistoricalSourceId = entity.HistoricalSourceId,
+        HistoricalProjectId = entity.HistoricalProjectId,
+        HistoricalProjectCode = entity.HistoricalProjectCodeSnapshot,
+        HistoricalSourceLabel = entity.HistoricalSourceLabelSnapshot,
+        HistoricalUnitOfMeasure = entity.HistoricalUnitOfMeasureSnapshot,
+        HistoricalQuantity = entity.HistoricalQuantity,
+        HistoricalTotalAmount = entity.HistoricalTotalAmount,
+        HistoricalSourceHash = entity.HistoricalSourceHash,
+        RateBuildUpId = entity.RateBuildUpId,
         LifecycleStatus = entity.LifecycleStatus,
         ChangeReason = entity.ChangeReason,
         PreparedById = entity.PreparedById,
@@ -865,10 +1267,94 @@ public sealed class QuantitySurveyRateLibraryService(
         value.SourceDate, value.CentralDocumentRecordId, value.CentralDocumentVersionId,
         value.MarketAnalysisId, value.MarketAnalysisCodeSnapshot, value.PreviousRateId,
         value.PreviousUnitRate, value.PreviousCurrencyCodeSnapshot, value.MarketSurveyQuoteCount,
-        value.NextReviewDueAt,
+        value.NextReviewDueAt, value.HistoricalSourceType, value.HistoricalSourceId,
+        value.HistoricalProjectId, value.HistoricalProjectCodeSnapshot,
+        value.HistoricalSourceLabelSnapshot, value.HistoricalUnitOfMeasureSnapshot,
+        value.HistoricalQuantity, value.HistoricalTotalAmount, value.HistoricalSourceHash,
+        value.RateBuildUpId,
         value.LifecycleStatus, value.PreparedById, value.PreparedAt, value.PublishedById,
         value.PublishedAt, value.RetiredById, value.RetiredAt
     };
+
+    private static QuantitySurveyHistoricalRateSourceDto Candidate(
+        QuantitySurveyHistoricalRateSourceType sourceType,
+        Guid sourceId,
+        Project project,
+        string sourceReference,
+        string sourceLabel,
+        DateTime sourceDate,
+        string unitOfMeasure,
+        decimal quantity,
+        decimal unitRate,
+        decimal totalAmount,
+        string currencyCode,
+        Guid? businessPartnerId = null)
+    {
+        var candidate = new QuantitySurveyHistoricalRateSourceDto
+        {
+            SourceType = sourceType,
+            SourceId = sourceId,
+            ProjectId = project.Id,
+            ProjectCode = project.ProjectCode,
+            ProjectTitle = project.Title,
+            ProjectTypeId = project.ProjectTypeId,
+            LocationId = project.LocationId,
+            BusinessPartnerId = businessPartnerId ?? project.BusinessPartnerId,
+            SourceReference = Required(sourceReference, "Historical source reference", 250),
+            SourceLabel = Required(sourceLabel, "Historical source label", 250),
+            SourceDate = Utc(sourceDate),
+            UnitOfMeasure = Required(unitOfMeasure, "Historical source unit", 20),
+            Quantity = quantity,
+            UnitRate = unitRate,
+            TotalAmount = totalAmount,
+            CurrencyCode = NormalizeCurrency(currencyCode)
+        };
+        return candidate with { IntegrityHash = HistoricalHash(candidate) };
+    }
+
+    private static string HistoricalHash(QuantitySurveyHistoricalRateSourceDto value)
+    {
+        var canonical = string.Join("|",
+            (int)value.SourceType,
+            value.SourceId.ToString("N"),
+            value.ProjectId.ToString("N"),
+            value.ProjectTypeId?.ToString("N") ?? string.Empty,
+            value.LocationId?.ToString("N") ?? string.Empty,
+            value.BusinessPartnerId?.ToString("N") ?? string.Empty,
+            Utc(value.SourceDate).Ticks.ToString(CultureInfo.InvariantCulture),
+            value.SourceReference.Trim().ToUpperInvariant(),
+            value.SourceLabel.Trim().ToUpperInvariant(),
+            value.UnitOfMeasure.Trim().ToUpperInvariant(),
+            value.Quantity.ToString("0.####", CultureInfo.InvariantCulture),
+            value.UnitRate.ToString("0.####", CultureInfo.InvariantCulture),
+            value.TotalAmount.ToString("0.##", CultureInfo.InvariantCulture),
+            value.CurrencyCode.Trim().ToUpperInvariant());
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private static bool FixedHashEquals(string current, string supplied)
+    {
+        if (current.Length != 64 || supplied?.Trim().Length != 64) return false;
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(current),
+                Convert.FromHexString(supplied.Trim()));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HistoricalCodeMatches(QuantitySurveyRateLibraryItem item, string? sourceCode)
+    {
+        var normalized = sourceCode?.Trim();
+        return !string.IsNullOrWhiteSpace(normalized) &&
+            (normalized.Equals(item.Code, StringComparison.OrdinalIgnoreCase) ||
+             (item.ProjectCatalogEntry is not null &&
+              normalized.Equals(item.ProjectCatalogEntry.Code, StringComparison.OrdinalIgnoreCase)));
+    }
 
     private static QuantitySurveyMarketSurveySourceDto MapMarketSurveySource(
         MarketAnalysis analysis,
@@ -985,4 +1471,18 @@ public sealed class QuantitySurveyRateLibraryService(
         string? PreviousCurrencyCode,
         int QuoteCount,
         DateTime NextReviewDueAt);
+
+    private sealed record HistoricalPreparation(
+        QuantitySurveyHistoricalRateSourceType SourceType,
+        Guid SourceId,
+        Guid ProjectId,
+        string ProjectCode,
+        string SourceLabel,
+        string UnitOfMeasure,
+        decimal Quantity,
+        decimal TotalAmount,
+        string IntegrityHash,
+        Guid? PreviousRateId,
+        decimal? PreviousUnitRate,
+        string? PreviousCurrencyCode);
 }

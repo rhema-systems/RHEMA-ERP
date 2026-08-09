@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Projects;
+using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Projects;
@@ -550,6 +551,43 @@ public class ProjectsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+    }
+
+    [HttpGet("{id:guid}/quantity-survey-estimates")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<ActionResult<QuantitySurveyEstimateWorkspaceDto>> GetQuantitySurveyEstimates(Guid id)
+        => ExecuteProjectEstimateAsync(() => _projectService.GetQuantitySurveyEstimateWorkspaceAsync(id));
+
+    [HttpGet("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> GetQuantitySurveyEstimate(Guid id, Guid estimateVersionId)
+        => ExecuteProjectEstimateAsync(() => _projectService.GetQuantitySurveyEstimateVersionAsync(id, estimateVersionId));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.EstimatesManage)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> CreateQuantitySurveyEstimate(Guid id, [FromBody] CreateQuantitySurveyEstimateRequest request)
+        => ExecuteProjectEstimateAsync(() => _projectService.CreateQuantitySurveyEstimateVersionAsync(id, request, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}/submit")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.EstimatesManage)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> SubmitQuantitySurveyEstimate(Guid id, Guid estimateVersionId)
+        => ExecuteProjectEstimateAsync(() => _projectService.SubmitQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}/approve")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> ApproveQuantitySurveyEstimate(Guid id, Guid estimateVersionId, [FromBody] QuantitySurveyEstimateWorkflowRequest? request = null)
+        => ExecuteProjectEstimateAsync(() => _projectService.ApproveQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, request?.Comments, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}/reject")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> RejectQuantitySurveyEstimate(Guid id, Guid estimateVersionId, [FromBody] RejectQuantitySurveyEstimateRequest request)
+        => ExecuteProjectEstimateAsync(() => _projectService.RejectQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, request.Reason, HttpContext.TraceIdentifier));
+
+    private async Task<ActionResult<T>> ExecuteProjectEstimateAsync<T>(Func<Task<T>> action)
+    {
+        try { return Ok(await action()); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException exception) { return BadRequest(exception.Message); }
     }
 
     [HttpGet("{id:guid}/approval-register")]

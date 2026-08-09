@@ -32,7 +32,8 @@ public enum QuantitySurveyRateSourceType
     HistoricalProject = 8,
     LabourSchedule = 9,
     PlantHire = 10,
-    MarketSurvey = 11
+    MarketSurvey = 11,
+    RateBuildUp = 12
 }
 
 public enum QuantitySurveyRateLifecycleStatus
@@ -49,6 +50,14 @@ public enum QuantitySurveyMarketSurveyPriceBasis
     LowestSurveyPrice = 2,
     HighestSurveyPrice = 3,
     ForecastedPrice = 4
+}
+
+public enum QuantitySurveyHistoricalRateSourceType
+{
+    CompletedBoqLine = 0,
+    CertifiedValuation = 1,
+    ProcurementPrice = 2,
+    ActualProjectCost = 3
 }
 
 [Table("QuantitySurveyRateLibraryItems")]
@@ -75,7 +84,7 @@ public sealed class QuantitySurveyRateLibraryRate : TenantEntity
 {
     public Guid RateLibraryItemId { get; set; }
     public int Version { get; set; } = 1;
-    [Column(TypeName = "decimal(18,4)")] public decimal UnitRate { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal UnitRate { get; set; }
     public Guid CurrencyId { get; set; }
     [Required, StringLength(3)] public string CurrencyCodeSnapshot { get; set; } = string.Empty;
     public DateTime EffectiveFrom { get; set; }
@@ -91,10 +100,20 @@ public sealed class QuantitySurveyRateLibraryRate : TenantEntity
     public Guid? MarketAnalysisId { get; set; }
     [StringLength(50)] public string? MarketAnalysisCodeSnapshot { get; set; }
     public Guid? PreviousRateId { get; set; }
-    [Column(TypeName = "decimal(18,4)")] public decimal? PreviousUnitRate { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? PreviousUnitRate { get; set; }
     [StringLength(3)] public string? PreviousCurrencyCodeSnapshot { get; set; }
     public int? MarketSurveyQuoteCount { get; set; }
     public DateTime? NextReviewDueAt { get; set; }
+    public QuantitySurveyHistoricalRateSourceType? HistoricalSourceType { get; set; }
+    public Guid? HistoricalSourceId { get; set; }
+    public Guid? HistoricalProjectId { get; set; }
+    [StringLength(50)] public string? HistoricalProjectCodeSnapshot { get; set; }
+    [StringLength(250)] public string? HistoricalSourceLabelSnapshot { get; set; }
+    [StringLength(20)] public string? HistoricalUnitOfMeasureSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,4)")] public decimal? HistoricalQuantity { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? HistoricalTotalAmount { get; set; }
+    [StringLength(64)] public string? HistoricalSourceHash { get; set; }
+    public Guid? RateBuildUpId { get; set; }
     public QuantitySurveyRateLifecycleStatus LifecycleStatus { get; set; }
     [StringLength(1000)] public string? ChangeReason { get; set; }
     public Guid PreparedById { get; set; }
@@ -117,6 +136,8 @@ public sealed class QuantitySurveyRateLibraryRate : TenantEntity
     public CentralDocumentVersion? CentralDocumentVersion { get; set; }
     public MarketAnalysis? MarketAnalysis { get; set; }
     public QuantitySurveyRateLibraryRate? PreviousRate { get; set; }
+    public Project? HistoricalProject { get; set; }
+    public QuantitySurveyRateBuildUp? RateBuildUp { get; set; }
 }
 
 [Table("QuantitySurveyRateLibraryRevisions")]

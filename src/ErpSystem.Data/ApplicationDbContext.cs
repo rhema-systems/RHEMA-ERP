@@ -4567,6 +4567,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // Configure decimal precision globally
         ConfigureDecimalPrecision(builder);
+        ConfigureQuantitySurveyRateDecimalPrecision(builder);
 
         // The legacy global precision pass above intentionally normalizes most decimals to four
         // places, but Finance FX evidence requires the approved six-place quote and an eight-place

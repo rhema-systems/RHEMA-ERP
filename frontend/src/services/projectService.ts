@@ -2226,6 +2226,107 @@ export interface ProjectBoqVersionComparisonDto {
   lines: ProjectBoqVersionLineComparisonDto[];
 }
 
+export type QuantitySurveyEstimateType =
+  'CostPlan' | 'TenderEstimate' | 'BudgetEstimate';
+
+export interface QuantitySurveyEstimateAssumptionRequest {
+  code: string;
+  description: string;
+  value: string;
+  unit?: string;
+}
+
+export interface QuantitySurveyEstimateMarkupRequest {
+  component: number;
+  percentage: number;
+}
+
+export interface CreateQuantitySurveyEstimateRequest {
+  clientRequestId: string;
+  projectBoqVersionId: string;
+  sourceEstimateVersionId?: string;
+  estimateType: QuantitySurveyEstimateType;
+  name: string;
+  estimateDate?: string;
+  changeReason: string;
+  centralDocumentVersionId?: string;
+  assumptions: QuantitySurveyEstimateAssumptionRequest[];
+  markups: QuantitySurveyEstimateMarkupRequest[];
+}
+
+export interface QuantitySurveyEstimateLineDto {
+  id: string;
+  sequence: number;
+  projectBoqVersionLineId: string;
+  sourceRateId?: string;
+  lineNumber: string;
+  itemCode?: string;
+  description: string;
+  unitOfMeasure?: string;
+  quantity: number;
+  unitRate: number;
+  lineAmount: number;
+  sourceRateItemCode?: string;
+  sourceRateVersion?: number;
+  rateSource: string;
+}
+
+export interface QuantitySurveyEstimateVersionDto {
+  id: string;
+  projectId: string;
+  projectBoqVersionId: string;
+  sourceEstimateVersionId?: string;
+  versionNumber: number;
+  estimateType: QuantitySurveyEstimateType;
+  name: string;
+  estimateDate: string;
+  currencyId: string;
+  currencyCode: string;
+  directCost: number;
+  markupTotal: number;
+  totalAmount: number;
+  status: string;
+  approvalStatus: string;
+  workflowInstanceId?: string;
+  submittedAt?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  changeReason: string;
+  snapshotHash: string;
+  configurationProfileVersion: number;
+  lines: QuantitySurveyEstimateLineDto[];
+  assumptions: Array<{
+    id: string;
+    sequence: number;
+    code: string;
+    description: string;
+    value: string;
+    unit?: string;
+  }>;
+  markups: Array<{
+    id: string;
+    sequence: number;
+    component: number;
+    percentage: number;
+    basisAmount: number;
+    amount: number;
+  }>;
+  approvalHistory: Array<{
+    id: string;
+    action: string;
+    actorName: string;
+    actorRoles?: string;
+    reason?: string;
+    createdAt: string;
+  }>;
+}
+
+export interface QuantitySurveyEstimateWorkspaceDto {
+  versions: QuantitySurveyEstimateVersionDto[];
+  approvedBoqVersionIds: string[];
+  allowedTypes: QuantitySurveyEstimateType[];
+}
+
 export interface QuantitySurveyBoqImportIssueDto {
   rowNumber?: number;
   clientLineKey?: string;
@@ -5177,6 +5278,59 @@ class ProjectService {
         await this.readProblemMessage(
           response,
           'Failed to compare the selected BoQ versions'
+        )
+      );
+    return response.json();
+  }
+
+  async getQuantitySurveyEstimateWorkspace(
+    projectId: string
+  ): Promise<QuantitySurveyEstimateWorkspaceDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/quantity-survey-estimates`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(response, 'Failed to load QS estimates')
+      );
+    return response.json();
+  }
+
+  async createQuantitySurveyEstimate(
+    projectId: string,
+    dto: CreateQuantitySurveyEstimateRequest
+  ): Promise<QuantitySurveyEstimateVersionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/quantity-survey-estimates`,
+      { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(dto) }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(response, 'Failed to create QS estimate')
+      );
+    return response.json();
+  }
+
+  async runQuantitySurveyEstimateAction(
+    projectId: string,
+    estimateVersionId: string,
+    action: 'submit' | 'approve' | 'reject',
+    body?: { comments?: string; reason?: string }
+  ): Promise<QuantitySurveyEstimateVersionDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/quantity-survey-estimates/${estimateVersionId}/${action}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          `Failed to ${action} QS estimate`
         )
       );
     return response.json();

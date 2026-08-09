@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.QuantitySurvey;
+using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
 using Microsoft.AspNetCore.Authorization;
@@ -25,6 +26,57 @@ public sealed class QuantitySurveyRateLibraryController(IQuantitySurveyRateLibra
     [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]
     public Task<IActionResult> MarketSurveySources(CancellationToken token)
         => ExecuteAsync(async () => Ok(await service.GetMarketSurveySourcesAsync(token)));
+
+    [HttpGet("{id:guid}/historical-sources")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]
+    public Task<IActionResult> HistoricalSources(
+        Guid id,
+        [FromQuery] QuantitySurveyHistoricalRateSourceType? sourceType,
+        [FromQuery] string? search,
+        CancellationToken token)
+        => ExecuteAsync(async () => Ok(await service.GetHistoricalRateSourcesAsync(id, sourceType, search, token)));
+
+    [HttpGet("{id:guid}/rate-build-up-context")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]
+    public Task<IActionResult> RateBuildUpContext(
+        Guid id,
+        [FromQuery] DateTime sourceDate,
+        [FromQuery] DateTime effectiveAt,
+        [FromQuery] Guid currencyId,
+        [FromQuery] Guid? projectTypeId,
+        [FromQuery] Guid? locationId,
+        [FromQuery] Guid? businessPartnerId,
+        CancellationToken token)
+        => ExecuteAsync(async () => Ok(await service.GetRateBuildUpContextAsync(
+            id,
+            sourceDate,
+            effectiveAt,
+            currencyId,
+            projectTypeId,
+            locationId,
+            businessPartnerId,
+            token)));
+
+    [HttpGet("{id:guid}/rate-build-ups")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> RateBuildUps(Guid id, CancellationToken token)
+        => ExecuteAsync(async () => Ok(await service.GetRateBuildUpsAsync(id, token)));
+
+    [HttpPost("{id:guid}/rate-build-ups/preview")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]
+    public Task<IActionResult> PreviewRateBuildUp(
+        Guid id,
+        [FromBody] PreviewQuantitySurveyRateBuildUpRequest request,
+        CancellationToken token)
+        => ExecuteAsync(async () => Ok(await service.PreviewRateBuildUpAsync(id, request, token)));
+
+    [HttpPost("{id:guid}/rate-build-ups")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]
+    public Task<IActionResult> PrepareRateBuildUp(
+        Guid id,
+        [FromBody] PrepareQuantitySurveyRateBuildUpRequest request,
+        CancellationToken token)
+        => ExecuteAsync(async () => Ok(await service.PrepareRateBuildUpAsync(id, request, CorrelationId, token)));
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
@@ -57,6 +109,14 @@ public sealed class QuantitySurveyRateLibraryController(IQuantitySurveyRateLibra
         [FromBody] PrepareQuantitySurveyMarketSurveyUpdateRequest request,
         CancellationToken token)
         => ExecuteAsync(async () => Ok(await service.PrepareMarketSurveyUpdateAsync(id, request, CorrelationId, token)));
+
+    [HttpPost("{id:guid}/historical-rate-promotions")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]
+    public Task<IActionResult> PrepareHistoricalRate(
+        Guid id,
+        [FromBody] PrepareQuantitySurveyHistoricalRateRequest request,
+        CancellationToken token)
+        => ExecuteAsync(async () => Ok(await service.PrepareHistoricalRateAsync(id, request, CorrelationId, token)));
 
     [HttpPut("{id:guid}/rates/{rateId:guid}")]
     [Authorize(Policy = QuantitySurveyAccessControlRegistry.RatesManage)]

@@ -64,6 +64,13 @@ public static class QuantitySurveyAuditEventMap
     public const string PublishRate = "PublishRate";
     public const string RetireRate = "RetireRate";
     public const string CreateMarketSurveyUpdate = "CreateMarketSurveyRate";
+    public const string PromoteHistoricalRate = "CreateHistoricalRatePromotion";
+    public const string CreateRateBuildUp = "CreateRateBuildUp";
+    public const string CreateEstimateVersion = "CreateEstimateVersion";
+    public const string SubmitEstimateVersion = "SubmitEstimateVersion";
+    public const string ApproveEstimateVersion = "ApproveEstimateVersion";
+    public const string RejectEstimateVersion = "RejectEstimateVersion";
+    public const string RetireEstimateVersion = "RetireEstimateVersion";
 
     private const QuantitySurveyAuditFacet Context =
         QuantitySurveyAuditFacet.Actor |
@@ -103,7 +110,14 @@ public static class QuantitySurveyAuditEventMap
         Definition(UpdateRateDraft, AuditOperationKind.Update, "QS draft-rate amendment", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.Reason),
         Definition(PublishRate, AuditOperationKind.Approve, "Independent QS rate publication", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
         Definition(RetireRate, AuditOperationKind.Update, "Controlled QS rate retirement", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
-        Definition(CreateMarketSurveyUpdate, AuditOperationKind.Create, "Evidence-backed QS market-survey rate preparation", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason)
+        Definition(CreateMarketSurveyUpdate, AuditOperationKind.Create, "Evidence-backed QS market-survey rate preparation", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
+        Definition(PromoteHistoricalRate, AuditOperationKind.Create, "Historical project-cost promotion into a governed QS rate draft", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
+        Definition(CreateRateBuildUp, AuditOperationKind.Create, "Policy-controlled QS rate build-up calculation", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
+        Definition(CreateEstimateVersion, AuditOperationKind.Create, "Immutable QS estimate version snapshot", QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
+        Definition(SubmitEstimateVersion, AuditOperationKind.Create, "QS estimate workflow submission", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.ApprovalState),
+        Definition(ApproveEstimateVersion, AuditOperationKind.Approve, "QS estimate workflow approval", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.FormulaInputs | QuantitySurveyAuditFacet.EvidenceLinks | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
+        Definition(RejectEstimateVersion, AuditOperationKind.Reject, "QS estimate workflow rejection", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason),
+        Definition(RetireEstimateVersion, AuditOperationKind.Update, "QS estimate version retirement", QuantitySurveyAuditFacet.BeforeValues | QuantitySurveyAuditFacet.AfterValues | QuantitySurveyAuditFacet.ApprovalState | QuantitySurveyAuditFacet.Reason)
     ];
 
     private static readonly IReadOnlyDictionary<string, QuantitySurveyAuditEventDefinition> ByAction =

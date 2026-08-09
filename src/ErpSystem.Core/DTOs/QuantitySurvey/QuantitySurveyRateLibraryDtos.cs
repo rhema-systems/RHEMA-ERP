@@ -76,6 +76,16 @@ public sealed class QuantitySurveyRateDto
     public decimal? VariancePercent { get; init; }
     public int? MarketSurveyQuoteCount { get; init; }
     public DateTime? NextReviewDueAt { get; init; }
+    public QuantitySurveyHistoricalRateSourceType? HistoricalSourceType { get; init; }
+    public Guid? HistoricalSourceId { get; init; }
+    public Guid? HistoricalProjectId { get; init; }
+    public string? HistoricalProjectCode { get; init; }
+    public string? HistoricalSourceLabel { get; init; }
+    public string? HistoricalUnitOfMeasure { get; init; }
+    public decimal? HistoricalQuantity { get; init; }
+    public decimal? HistoricalTotalAmount { get; init; }
+    public string? HistoricalSourceHash { get; init; }
+    public Guid? RateBuildUpId { get; init; }
     public QuantitySurveyRateLifecycleStatus LifecycleStatus { get; init; }
     public string? ChangeReason { get; init; }
     public Guid PreparedById { get; init; }
@@ -162,6 +172,42 @@ public sealed class PrepareQuantitySurveyMarketSurveyUpdateRequest
     public Guid? ProjectTypeId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid CentralDocumentVersionId { get; set; }
+    [Required, StringLength(1000)] public string ChangeReason { get; set; } = string.Empty;
+}
+
+public sealed record QuantitySurveyHistoricalRateSourceDto
+{
+    public QuantitySurveyHistoricalRateSourceType SourceType { get; init; }
+    public Guid SourceId { get; init; }
+    public Guid ProjectId { get; init; }
+    public string ProjectCode { get; init; } = string.Empty;
+    public string ProjectTitle { get; init; } = string.Empty;
+    public Guid? ProjectTypeId { get; init; }
+    public Guid? LocationId { get; init; }
+    public Guid? BusinessPartnerId { get; init; }
+    public string SourceReference { get; init; } = string.Empty;
+    public string SourceLabel { get; init; } = string.Empty;
+    public DateTime SourceDate { get; init; }
+    public string UnitOfMeasure { get; init; } = string.Empty;
+    public decimal Quantity { get; init; }
+    public decimal UnitRate { get; init; }
+    public decimal TotalAmount { get; init; }
+    public string CurrencyCode { get; init; } = string.Empty;
+    public string IntegrityHash { get; init; } = string.Empty;
+    public Guid? ExistingRateId { get; init; }
+    public bool CanPromote => !ExistingRateId.HasValue;
+}
+
+public sealed class PrepareQuantitySurveyHistoricalRateRequest
+{
+    public QuantitySurveyHistoricalRateSourceType SourceType { get; set; }
+    public Guid SourceId { get; set; }
+    [Required, StringLength(64)] public string SourceIntegrityHash { get; set; } = string.Empty;
+    public DateTime EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public Guid? ProjectTypeId { get; set; }
+    public Guid? LocationId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
     [Required, StringLength(1000)] public string ChangeReason { get; set; } = string.Empty;
 }
 

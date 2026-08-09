@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ProjectPackageDialogs } from '@/components/projects/ProjectPackageDialogs';
 import { QuantitySurveyBoqImportActions } from '@/components/quantity-survey/QuantitySurveyBoqImportDialog';
 import { QuantitySurveyBoqVersionActions } from '@/components/quantity-survey/QuantitySurveyBoqVersionDialog';
+import { QuantitySurveyEstimateVersionsDialog } from '@/components/quantity-survey/QuantitySurveyEstimateVersionsDialog';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
 import type { ContractDto } from '@/services/contractService';
 import type {
@@ -605,6 +606,7 @@ export function ProjectPackagesTab({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <QuantitySurveyEstimateVersionsDialog projectId={project.id} />
               <QuantitySurveyBoqVersionActions projectId={project.id} />
               <QuantitySurveyBoqImportActions
                 projectId={project.id}

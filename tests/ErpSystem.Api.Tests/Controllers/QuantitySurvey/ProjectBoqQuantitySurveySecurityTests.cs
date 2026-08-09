@@ -24,6 +24,12 @@ public sealed class ProjectBoqQuantitySurveySecurityTests
     [InlineData(nameof(ProjectsController.RejectProjectBoqVersion), QuantitySurveyAccessControlRegistry.TransactionsApprove)]
     [InlineData(nameof(ProjectsController.RecallProjectBoqVersion), QuantitySurveyAccessControlRegistry.BoqManage)]
     [InlineData(nameof(ProjectsController.CompareProjectBoqVersions), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    [InlineData(nameof(ProjectsController.GetQuantitySurveyEstimates), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    [InlineData(nameof(ProjectsController.GetQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    [InlineData(nameof(ProjectsController.CreateQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.EstimatesManage)]
+    [InlineData(nameof(ProjectsController.SubmitQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.EstimatesManage)]
+    [InlineData(nameof(ProjectsController.ApproveQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    [InlineData(nameof(ProjectsController.RejectQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.TransactionsApprove)]
     public void BoqRoutesRequireTheExpectedCentralQuantitySurveyPermission(string action, string permission)
     {
         typeof(ProjectsController).GetMethod(action)!
