@@ -352,6 +352,15 @@ public static class FinanceAuditEvents
     public const string FixedAssetImpairmentPosted = "Finance.FixedAsset.ImpairmentPosted";
     public const string FixedAssetImpairmentPostingFailed = "Finance.FixedAsset.ImpairmentPostingFailed";
     public const string FixedAssetImpairmentReversed = "Finance.FixedAsset.ImpairmentReversed";
+    public const string FixedAssetImpairmentReversalCalculated = "Finance.FixedAsset.ImpairmentReversalCalculated";
+    public const string FixedAssetImpairmentReversalPosted = "Finance.FixedAsset.ImpairmentReversalPosted";
+    public const string FixedAssetImpairmentReversalPostingFailed = "Finance.FixedAsset.ImpairmentReversalPostingFailed";
+    public const string FixedAssetValuationCorrectionRequested = "Finance.FixedAsset.ValuationCorrectionRequested";
+    public const string FixedAssetValuationCorrectionApproved = "Finance.FixedAsset.ValuationCorrectionApproved";
+    public const string FixedAssetValuationCorrectionRejected = "Finance.FixedAsset.ValuationCorrectionRejected";
+    public const string FixedAssetValuationCorrected = "Finance.FixedAsset.ValuationCorrected";
+    public const string FixedAssetValuationCorrectionBlocked = "Finance.FixedAsset.ValuationCorrectionBlocked";
+    public const string FixedAssetValuationCorrectionFailed = "Finance.FixedAsset.ValuationCorrectionFailed";
     public const string FixedAssetValuationConfigurationUsed = "Finance.FixedAsset.ValuationConfigurationUsed";
     public const string FixedAssetValuationAccountMappingChanged = "Finance.FixedAsset.ValuationAccountMappingChanged";
     public const string FixedAssetValuationBlockedClosedPeriod = "Finance.FixedAsset.ValuationBlockedClosedPeriod";

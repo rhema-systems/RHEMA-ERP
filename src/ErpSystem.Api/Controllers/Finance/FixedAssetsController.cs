@@ -737,6 +737,54 @@ public class FixedAssetsController : ControllerBase
         }
     }
 
+    [HttpGet("valuations/{valuationId}/corrections")]
+    public async Task<IActionResult> GetValuationCorrections(Guid valuationId, CancellationToken cancellationToken)
+    {
+        try { return Ok(await _valuationService.GetCorrectionsAsync(valuationId, cancellationToken)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+    }
+
+    /// <summary>
+    /// Captures the correction rationale without changing a posted valuation. A different user
+    /// must approve the request before the compensating journal can be posted.
+    /// </summary>
+    [HttpPost("valuations/{valuationId}/corrections")]
+    [Authorize(Policy = FinancePermissions.ReverseFixedAssetValuation)]
+    public async Task<IActionResult> RequestValuationCorrection(
+        Guid valuationId, [FromBody] RequestAssetValuationCorrectionDto dto, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _valuationService.RequestCorrectionAsync(valuationId, dto, cancellationToken);
+            return CreatedAtAction(nameof(GetValuationCorrections), new { valuationId }, result);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    [HttpPost("valuations/{valuationId}/corrections/{correctionId}/review")]
+    [Authorize(Policy = FinancePermissions.ApproveFixedAssetValuationReversal)]
+    public async Task<IActionResult> ReviewValuationCorrection(
+        Guid valuationId, Guid correctionId, [FromBody] ReviewAssetValuationCorrectionDto dto,
+        CancellationToken cancellationToken)
+    {
+        try { return Ok(await _valuationService.ReviewCorrectionAsync(valuationId, correctionId, dto, cancellationToken)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    [HttpPost("valuations/{valuationId}/corrections/{correctionId}/post")]
+    [Authorize(Policy = FinancePermissions.ReverseFixedAssetValuation)]
+    public async Task<IActionResult> PostValuationCorrection(
+        Guid valuationId, Guid correctionId, CancellationToken cancellationToken)
+    {
+        try { return Ok(await _valuationService.PostCorrectionAsync(valuationId, correctionId, cancellationToken)); }
+        catch (KeyNotFoundException ex) { return NotFound(new { error = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
     // ========== Disposal Complete ==========
 
     [HttpPost("disposals/{disposalId}/complete")]

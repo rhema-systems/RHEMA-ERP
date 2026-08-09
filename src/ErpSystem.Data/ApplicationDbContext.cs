@@ -133,6 +133,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AssetTransfer> AssetTransfers { get; set; }
     public DbSet<AssetTransaction> AssetTransactions { get; set; }
     public DbSet<AssetValuation> AssetValuations { get; set; }
+    public DbSet<AssetValuationCorrection> AssetValuationCorrections { get; set; }
     public DbSet<AssetDepreciationSchedule> AssetDepreciationSchedules { get; set; }
     public DbSet<FixedAssetDepreciationRun> FixedAssetDepreciationRuns { get; set; }
     public DbSet<AssetVerificationSession> AssetVerificationSessions { get; set; }
@@ -3418,6 +3419,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.RevaluationDeficit).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ImpairmentLoss).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ImpairmentReversal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.OutstandingImpairmentBefore).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnimpairedCarryingAmountCap).HasColumnType("decimal(18,2)");
             entity.Property(e => e.AdjustmentAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusApplied).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationLossRecognized).HasColumnType("decimal(18,2)");
@@ -3436,6 +3439,40 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.PostingEvent)
                 .WithMany()
                 .HasForeignKey(e => e.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SourceImpairmentValuation)
+                .WithMany()
+                .HasForeignKey(e => e.SourceImpairmentValuationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AssetValuationCorrection>(entity =>
+        {
+            entity.ToTable("AssetValuationCorrections");
+            entity.HasIndex(e => new { e.TenantId, e.OriginalValuationId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.HasOne(e => e.OriginalValuation)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalValuationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

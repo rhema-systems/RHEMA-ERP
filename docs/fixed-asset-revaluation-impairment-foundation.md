@@ -2,7 +2,7 @@
 
 Date: 2026-07-08
 
-Scope boundary: this batch implements Fixed Assets Batch 21A only: tenant-scoped revaluation and impairment calculation records, posting through `IFinancePostingEngine`, category account mappings, valuation audit events, book-value/NBV updates, depreciation interaction for prospective straight-line depreciation, diagnostics, and focused tests. It does not implement transfers, disposals, frontend UI, broad fixed asset reporting, data migration/sign-off, print/export, capitalization reversal, depreciation reversal, impairment reversal, or revaluation/impairment workflow routing.
+Scope boundary: the original Batch 21A foundation now includes the 2026-08-09 impairment-reversal and posted-valuation-correction extension. It supports tenant-scoped revaluation, impairment loss, capped impairment reversal, central posting, maker-checker correction, category mappings, audit evidence, book-value/NBV updates, UI, diagnostics, and focused tests.
 
 ## Architecture Decision
 
@@ -51,7 +51,7 @@ Historical capitalization and depreciation records are not rewritten to simulate
 - posted/failed timestamps and reason
 - valuation evidence/reference fields
 
-Impairment reversal is intentionally rejected in this batch and tracked as `FIN-LIM-0035`.
+Impairment reversal now records its source impairment, outstanding source balance, and the accountant-supported no-prior-impairment carrying-value ceiling. See `docs/fixed-asset-valuation-correction-foundation.md`.
 
 ## Account Mappings
 
@@ -61,7 +61,7 @@ Fixed asset categories now support tenant-owned mappings for:
 - revaluation loss
 - impairment loss
 - accumulated impairment or impairment allowance
-- impairment reversal income, reserved for a later supported reversal batch
+- impairment reversal income
 
 Posting validates that accounts are same-tenant, active, direct-posting, and compatible with the posting purpose. No revaluation or impairment account is hardcoded.
 
@@ -82,6 +82,12 @@ Impairment loss:
 
 - Dr impairment loss
 - Cr accumulated impairment or impairment allowance
+
+Impairment reversal:
+
+- Dr accumulated impairment or impairment allowance
+- Cr impairment reversal income
+- carrying amount after reversal is capped by the lower of the outstanding source impairment and the IAS 36 no-prior-impairment NBV
 
 All postings use:
 
@@ -286,9 +292,9 @@ The suite covers capitalization/disposal guards, posting-engine Dr/Cr lines, mis
 
 ## Known Limitations
 
-- `FIN-LIM-0035`: impairment reversal remains unsupported and is rejected.
+- `FIN-LIM-0035`: resolved by linked, dual-capped, evidenced impairment reversals.
 - `FIN-LIM-0036`: valuation workflow routing is not integrated with the configurable workflow engine.
-- `FIN-LIM-0037`: posted valuation correction/reversal/supersession is not implemented.
+- `FIN-LIM-0037`: resolved by the maker-checker compensating-journal correction workspace.
 - `FIN-LIM-0025`: asset transfers remain open.
 - `FIN-LIM-0026`: disposals remain open.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open.
