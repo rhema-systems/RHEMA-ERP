@@ -17,11 +17,20 @@ const SESSION_KEY = 'tdc-supplier-applicant-session';
 async function read<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const correlationId =
+      body.correlationId || body.extensions?.correlationId || body.traceId;
+    const detail =
+      body.detail || body.message || 'The supplier application request failed.';
     const error = new Error(
-      body.detail || body.message || 'The supplier application request failed.'
-    ) as Error & { status?: number; code?: string };
+      correlationId ? `${detail} Reference: ${correlationId}` : detail
+    ) as Error & {
+      status?: number;
+      code?: string;
+      correlationId?: string;
+    };
     error.status = response.status;
     error.code = body.code || body.extensions?.code;
+    error.correlationId = correlationId;
     throw error;
   }
   return body as T;
