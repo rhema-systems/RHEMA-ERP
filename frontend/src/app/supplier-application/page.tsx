@@ -31,6 +31,9 @@ import type {
 
 export default function SupplierApplicationAccessPage() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'apply' | 'login'>('apply');
+  const [paymentAwaitingVerification, setPaymentAwaitingVerification] =
+    useState(false);
   const [busy, setBusy] = useState(false);
   const [challengeSent, setChallengeSent] = useState(false);
   const [issued, setIssued] = useState<SupplierApplicantIssueResult | null>(
@@ -59,6 +62,12 @@ export default function SupplierApplicationAccessPage() {
   );
   const applyCaptchaRef = useRef<PublicCaptchaChallengeHandle>(null);
   const loginCaptchaRef = useRef<PublicCaptchaChallengeHandle>(null);
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    if (parameters.get('tab') === 'login') setActiveTab('login');
+    setPaymentAwaitingVerification(parameters.get('payment') === 'pending');
+  }, []);
 
   useEffect(() => {
     const retainedId = new URLSearchParams(window.location.search).get(
@@ -106,13 +115,13 @@ export default function SupplierApplicationAccessPage() {
     }
     setBusy(true);
     try {
-      await service.requestChallenge({
+      const preparation = await service.requestChallenge({
         channel,
         contact,
         recaptchaToken: applyCaptchaToken ?? undefined,
       });
       setChallengeSent(true);
-      toast.success('Verification code sent.');
+      toast.success(preparation.message);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : 'Could not send code.'
@@ -225,7 +234,13 @@ export default function SupplierApplicationAccessPage() {
           </div>
         </div>
 
-        <Tabs defaultValue="apply" className="grid gap-5">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) =>
+            setActiveTab(value === 'login' ? 'login' : 'apply')
+          }
+          className="grid gap-5"
+        >
           <TabsList className="w-full max-w-md border bg-white">
             <TabsTrigger
               value="apply"
@@ -481,6 +496,15 @@ export default function SupplierApplicationAccessPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-4">
+                {paymentAwaitingVerification && (
+                  <Alert className="border-blue-300 bg-blue-50 text-blue-950">
+                    <AlertDescription>
+                      Payment was submitted and is awaiting trusted
+                      verification. Your application token will be sent by email
+                      or SMS after verification. Enter it here when it arrives.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="grid gap-2">
                   <Label
                     htmlFor="supplier-application-token"

@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces.QuantitySurvey;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -30,6 +31,7 @@ public class TenderBidService : ITenderBidService
     private readonly IProcurementTenderControlService _tenderControlService;
     private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly IProcurementExceptionalSourcingControlService _exceptionalSourcingControlService;
+    private readonly IQuantitySurveyTenderBoqSubmissionService _quantitySurveyTenderBoqSubmissions;
 
     public TenderBidService(
         ITenderBidRepository bidRepository,
@@ -50,6 +52,7 @@ public class TenderBidService : ITenderBidService
         IProcurementTenderControlService tenderControlService,
         IProcurementTenderDocumentControlService tenderDocumentControlService,
         IProcurementExceptionalSourcingControlService exceptionalSourcingControlService,
+        IQuantitySurveyTenderBoqSubmissionService quantitySurveyTenderBoqSubmissions,
         ILogger<TenderBidService> logger)
     {
         _bidRepository = bidRepository;
@@ -70,6 +73,7 @@ public class TenderBidService : ITenderBidService
         _tenderControlService = tenderControlService;
         _tenderDocumentControlService = tenderDocumentControlService;
         _exceptionalSourcingControlService = exceptionalSourcingControlService;
+        _quantitySurveyTenderBoqSubmissions = quantitySurveyTenderBoqSubmissions;
         _logger = logger;
     }
 
@@ -581,6 +585,12 @@ public class TenderBidService : ITenderBidService
             {
                 throw new InvalidOperationException("All bid items must have valid unit price (greater than 0) and offered quantity (greater than 0) before submission");
             }
+
+            // Project-linked tenders must pass the shared QS intake gate. Non-project
+            // procurement remains unchanged; the gate is a deliberate no-op there.
+            await _quantitySurveyTenderBoqSubmissions.EnsureReadyForTenderSubmissionAsync(
+                id,
+                Guid.NewGuid().ToString("N"));
 
             bid.Status = "Submitted";
             bid.SubmittedDate = submittedAtUtc;

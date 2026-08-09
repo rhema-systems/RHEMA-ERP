@@ -116,6 +116,26 @@ describe('supplier application CAPTCHA lifecycle', () => {
     });
   });
 
+  it('opens token login with a clear pending-verification message after payment', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/supplier-application?tab=login&payment=pending'
+    );
+
+    render(<SupplierApplicationAccessPage />);
+
+    expect(
+      await screen.findByText(
+        /payment was submitted and is awaiting trusted verification/i
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Token login' })).toHaveAttribute(
+      'data-state',
+      'active'
+    );
+  });
+
   it('migrates a retained draft through verified contact without requesting replacement profile data', async () => {
     const retainedRegistrationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     window.history.replaceState(

@@ -3,6 +3,15 @@ using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Procurement;
 
+public sealed class SupplierApplicantVerificationPreparationDto
+{
+    public Guid TenantId { get; set; }
+    public ProcurementSupplierApplicantVerificationChannel Channel { get; set; }
+    public string NormalizedContact { get; set; } = string.Empty;
+    public string MaskedContact { get; set; } = string.Empty;
+    public bool ResumesExistingApplication { get; set; }
+}
+
 public sealed class VerifyAndIssueSupplierApplicantTokenRequest
 {
     [Required]
@@ -140,6 +149,41 @@ public sealed class SupplierApplicantAccessListItemDto
     public DateTime? CredentialActivatedAtUtc { get; set; }
     public int NotificationAttemptCount { get; set; }
     public string? LastNotificationStatus { get; set; }
+}
+
+public class PrepareSupplierApplicantContactCorrectionRequest
+{
+    [Required]
+    public ProcurementSupplierApplicantVerificationChannel Channel { get; set; }
+
+    [Required, StringLength(200)]
+    public string Contact { get; set; } = string.Empty;
+}
+
+public sealed class SupplierApplicantContactCorrectionPreparationDto
+{
+    public Guid TenantId { get; set; }
+    public ProcurementSupplierApplicantVerificationChannel Channel { get; set; }
+    public string NormalizedContact { get; set; } = string.Empty;
+    public string MaskedContact { get; set; } = string.Empty;
+}
+
+public sealed class CorrectSupplierApplicantVerifiedContactRequest :
+    PrepareSupplierApplicantContactCorrectionRequest
+{
+    [Required, StringLength(500, MinimumLength = 10)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class SupplierApplicantContactCorrectionResultDto
+{
+    public Guid RegistrationId { get; set; }
+    public string MaskedContact { get; set; } = string.Empty;
+    public ProcurementSupplierApplicantAccessStatus Status { get; set; }
+    public bool ContactCorrected { get; set; }
+    public bool ProvisioningRetried { get; set; }
+    public bool CredentialDelivered { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
 
 public sealed class SupplierApplicantAccessOptions

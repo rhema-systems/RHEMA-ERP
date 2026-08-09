@@ -22,6 +22,8 @@ public class TenantController : ControllerBase
     private readonly FinanceCloseTemplateBaselineSeeder _financeCloseTemplateBaselineSeeder;
     private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+    private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
+    private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
     private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
     private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
@@ -36,6 +38,8 @@ public class TenantController : ControllerBase
         FinanceCloseTemplateBaselineSeeder financeCloseTemplateBaselineSeeder,
         ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
         ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+        QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
+        QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
         InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
         AuditComplianceReportSeeder? auditComplianceReportSeeder = null)
@@ -49,6 +53,8 @@ public class TenantController : ControllerBase
         _financeCloseTemplateBaselineSeeder = financeCloseTemplateBaselineSeeder;
         _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
+        _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
+        _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
         _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
         _auditComplianceReportSeeder = auditComplianceReportSeeder;
@@ -218,6 +224,17 @@ public class TenantController : ControllerBase
                     ? parsedInitializerActorId
                     : (Guid?)null;
                 await _procurementAccessControlSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+            if (_quantitySurveyConfigurationProfileSeeder is not null)
+            {
+                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedQsInitializerActorId)
+                    ? parsedQsInitializerActorId
+                    : (Guid?)null;
+                await _quantitySurveyConfigurationProfileSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+            if (_quantitySurveyAccessControlSeeder is not null)
+            {
+                await _quantitySurveyAccessControlSeeder.SeedAsync();
             }
             if (_procurementStatutoryReportSeeder is not null)
             {

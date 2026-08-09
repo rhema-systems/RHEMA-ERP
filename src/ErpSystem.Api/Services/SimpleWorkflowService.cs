@@ -19,6 +19,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Interfaces.Workflow;
+using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Core.Services.Workflow;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -903,6 +904,42 @@ public class SimpleWorkflowService : IWorkflowService
             ["entityType"] = entityTypeRecord.Code ?? entityTypeRecord.Name
         };
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+
+        if (IsEntityType(entityTypeRecord, QuantitySurveyWorkflowBindingRegistry.Boq, "QS BoQ"))
+        {
+            var version = await _unitOfWork.Repository<ProjectBoqVersion>()
+                .FirstOrDefaultAsync(
+                    item => item.TenantId == tenantId && item.Id == entityId,
+                    item => item.Project)
+                ?? throw new InvalidOperationException("QS BoQ version not found");
+            var lines = (await _unitOfWork.Repository<ProjectBoqVersionLine>().FindAsync(item =>
+                    item.TenantId == tenantId
+                    && item.ProjectId == version.ProjectId
+                    && item.ProjectBoqVersionId == version.Id))
+                .ToList();
+            var currencies = lines
+                .Where(item => item.LineAmount.HasValue && !string.IsNullOrWhiteSpace(item.Currency))
+                .Select(item => item.Currency.Trim().ToUpperInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            context["module"] = "QuantitySurvey";
+            context["category"] = "BoQ";
+            context["projectId"] = version.ProjectId;
+            context["projectCode"] = version.Project?.ProjectCode ?? string.Empty;
+            context["projectName"] = version.Project?.Title ?? string.Empty;
+            context["versionNumber"] = version.VersionNumber;
+            context["versionType"] = version.VersionType.ToString();
+            context["status"] = version.Status;
+            context["approvalStatus"] = version.ApprovalStatus;
+            context["lineCount"] = version.LineCount;
+            context["snapshotHash"] = version.SnapshotHash;
+            context["snapshotAt"] = version.SnapshotAt;
+            context["amount"] = lines.Sum(item => item.LineAmount ?? 0m);
+            context["totalAmount"] = context["amount"];
+            context["currencyCode"] = currencies.SingleOrDefault() ?? string.Empty;
+            context["submittedById"] = version.SubmittedById ?? version.CreatedById ?? Guid.Empty;
+            context["createdById"] = version.CreatedById ?? Guid.Empty;
+        }
 
         if (IsEntityType(entityTypeRecord, "BankDepositBatch", "Bank Deposit"))
         {
@@ -1808,6 +1845,31 @@ public class SimpleWorkflowService : IWorkflowService
             catch
             {
                 // ignore and fall through
+            }
+        }
+
+        if (IsEntityType(entityTypeRecord, QuantitySurveyWorkflowBindingRegistry.Boq, "QS BoQ"))
+        {
+            try
+            {
+                var version = await _unitOfWork.Repository<ProjectBoqVersion>()
+                    .FirstOrDefaultAsync(
+                        item => item.TenantId == (_currentUserService.TenantId ?? Guid.Empty)
+                                && item.Id == entityId,
+                        item => item.Project);
+                if (version != null)
+                {
+                    var projectLabel = string.IsNullOrWhiteSpace(version.Project?.ProjectCode)
+                        ? version.Project?.Title ?? "Project"
+                        : version.Project.ProjectCode;
+                    item.EntityTitle = $"{projectLabel} BoQ v{version.VersionNumber} ({version.VersionType})";
+                    item.EntityDescription = version.ChangeSummary;
+                    return;
+                }
+            }
+            catch
+            {
+                // Ignore display enrichment failure and fall through to the entity identifier.
             }
         }
 

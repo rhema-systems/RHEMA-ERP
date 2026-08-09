@@ -103,11 +103,15 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
                 Email = "retained@example.test",
                 RegistrationCategory =
                     ProcurementSupplierRegistrationCategory.Goods,
-                RegistrationData = "{}"
+                RegistrationData =
+                    "{\"taxNumber\":\"TAX-001\",\"legacyField\":\"retained\"}"
             },
             systemActorId);
 
         updated.CompanyName.Should().Be("Retained Supplier Updated");
+        updated.TaxNumber.Should().Be("TAX-001");
+        registration.RegistrationDataJson.Should().Be(
+            "{\"taxNumber\":\"TAX-001\",\"legacyField\":\"retained\"}");
         registration.CreatedById.Should().Be(originalOwnerId);
         registrations.Verify(item => item.UpdateAsync(registration), Times.Once);
 
@@ -125,6 +129,70 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
         await crossApplication.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*permission to update*");
         registrations.Verify(item => item.UpdateAsync(registration), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegistrationDetailIncludesEffectiveEvidenceRequirements()
+    {
+        var registration = new BusinessPartnerRegistration
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            RegistrationNumber = "APP-EVIDENCE-001",
+            ApplicantName = "Evidence Supplier",
+            PartnerType = "Supplier",
+            RegistrationCategory = ProcurementSupplierRegistrationCategory.Services,
+            Status = "Draft",
+            RegistrationDataJson = "{\"taxNumber\":\"TAX-200\"}"
+        };
+        var registrations = new Mock<IBusinessPartnerRegistrationRepository>();
+        registrations.Setup(item => item.GetWithDocumentsAsync(registration.Id))
+            .ReturnsAsync(registration);
+        var statusHistory =
+            new Mock<IBusinessPartnerRegistrationStatusHistoryRepository>();
+        statusHistory.Setup(item => item.GetHistoryByRegistrationAsync(registration.Id))
+            .ReturnsAsync([]);
+        var evidence = new Mock<IProcurementSupplierEvidencePackService>();
+        evidence.Setup(item => item.GetRegistrationReadinessAsync(
+                registration.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementSupplierEvidenceReadinessDto
+            {
+                RegistrationId = registration.Id,
+                Category = ProcurementSupplierRegistrationCategory.Services,
+                PackCode = "SUP-SERVICES-TEST",
+                PackVersion = 1,
+                Requirements =
+                [
+                    new ProcurementSupplierEvidenceRequirementReadinessDto
+                    {
+                        RequirementCode = "SUP-SERVICES-TAX",
+                        Name = "Tax clearance"
+                    }
+                ]
+            });
+        var service = new BusinessPartnerRegistrationService(
+            registrations.Object,
+            Mock.Of<IBusinessPartnerRegistrationDocumentRepository>(),
+            statusHistory.Object,
+            Mock.Of<IBusinessPartnerRepository>(),
+            Mock.Of<IBusinessPartnerContactRepository>(),
+            Mock.Of<IBusinessPartnerFinancialRepository>(),
+            Mock.Of<IBusinessPartnerDocumentRepository>(),
+            Mock.Of<IBusinessPartnerLicenseRepository>(),
+            Mock.Of<IUnitOfWork>(),
+            Mock.Of<ICurrentUserProvider>(),
+            Mock.Of<IAppEventBus>(),
+            Mock.Of<IProcurementAccessControlService>(),
+            NullLogger<BusinessPartnerRegistrationService>.Instance,
+            evidencePackService: evidence.Object);
+
+        var result = await service.GetByIdAsync(registration.Id);
+
+        result.Should().NotBeNull();
+        result!.EvidenceReadiness.Should().NotBeNull();
+        result.EvidenceReadiness!.PackCode.Should().Be("SUP-SERVICES-TEST");
+        result.EvidenceReadiness.Requirements.Should().ContainSingle()
+            .Which.RequirementCode.Should().Be("SUP-SERVICES-TAX");
     }
 
     [Fact]

@@ -16,9 +16,9 @@ public static class AuditOperationClassifier
         if (ContainsAny(value, "dispatch", "dispatched", "issue", "issued", "send", "sent")) return AuditOperationKind.Dispatch;
         if (ContainsAny(value, "receive", "received", "receipt", "acknowledge", "acknowledged")) return AuditOperationKind.Receive;
         if (ContainsAny(value, "post", "posted", "posting", "capitalize", "capitalized")) return AuditOperationKind.Post;
-        if (ContainsAny(value, "approve", "approved", "authorize", "authorized", "accept", "accepted")) return AuditOperationKind.Approve;
-        if (ContainsAny(value, "update", "updated", "amend", "amended", "edit", "edited", "change", "changed", "revise", "revised", "correct", "corrected")) return AuditOperationKind.Update;
-        if (ContainsAny(value, "create", "created", "register", "registered", "generate", "generated", "submit", "submitted")) return AuditOperationKind.Create;
+        if (ContainsAny(value, "approve", "approved", "authorize", "authorized", "accept", "accepted", "publish", "published")) return AuditOperationKind.Approve;
+        if (ContainsAny(value, "update", "updated", "amend", "amended", "edit", "edited", "change", "changed", "revise", "revised", "correct", "corrected", "save", "saved", "link", "linked", "unlink", "unlinked", "retire", "retired", "recall", "recalled", "delete", "deleted", "commit", "committed")) return AuditOperationKind.Update;
+        if (ContainsAny(value, "create", "created", "register", "registered", "generate", "generated", "submit", "submitted", "clone", "cloned", "seed", "seeded", "stage", "staged")) return AuditOperationKind.Create;
         return AuditOperationKind.Other;
     }
 

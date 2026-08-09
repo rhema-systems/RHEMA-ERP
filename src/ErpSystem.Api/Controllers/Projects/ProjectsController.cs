@@ -3,9 +3,11 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Projects;
+using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -346,10 +348,21 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/boq-items")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     public async Task<ActionResult<IEnumerable<ProjectBoqItemDto>>> GetProjectBoqItems(Guid id)
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectBoqItemsAsync(id), "Error loading project BOQ items");
 
+    [HttpGet("{id:guid}/boq-classifications")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public async Task<ActionResult<ProjectBoqClassificationOptionsDto>> GetProjectBoqClassifications(
+        Guid id,
+        [FromQuery] DateTime? effectiveAtUtc = null)
+        => await ExecuteProjectReadAsync(
+            () => _projectService.GetProjectBoqClassificationOptionsAsync(id, effectiveAtUtc),
+            "Error loading project BOQ classification options");
+
     [HttpPost("{id:guid}/boq-items")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
     public async Task<ActionResult<ProjectBoqItemDto>> AddProjectBoqItem(Guid id, [FromBody] CreateProjectBoqItemDto dto)
     {
         try
@@ -367,6 +380,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpPut("boq-items/{boqItemId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
     public async Task<ActionResult<ProjectBoqItemDto>> UpdateProjectBoqItem(Guid boqItemId, [FromBody] UpdateProjectBoqItemDto dto)
     {
         try
@@ -384,6 +398,7 @@ public class ProjectsController : ControllerBase
     }
 
     [HttpDelete("boq-items/{boqItemId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
     public async Task<IActionResult> DeleteProjectBoqItem(Guid boqItemId)
     {
         try
@@ -399,6 +414,180 @@ public class ProjectsController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+    }
+
+    [HttpGet("{id:guid}/boq-versions")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public async Task<ActionResult<ProjectBoqVersionWorkspaceDto>> GetProjectBoqVersions(Guid id)
+        => await ExecuteProjectReadAsync(
+            () => _projectService.GetProjectBoqVersionWorkspaceAsync(id),
+            "Error loading project BoQ versions");
+
+    [HttpGet("{id:guid}/boq-versions/published")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> GetPublishedProjectBoqVersion(Guid id)
+        => await ExecuteProjectReadAsync(
+            () => _projectService.GetPublishedProjectBoqVersionAsync(id),
+            "Error loading the approved published project BoQ");
+
+    [HttpGet("{id:guid}/boq-versions/{versionId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> GetProjectBoqVersion(Guid id, Guid versionId)
+        => await ExecuteProjectReadAsync(
+            () => _projectService.GetProjectBoqVersionAsync(id, versionId),
+            "Error loading project BoQ version");
+
+    [HttpPost("{id:guid}/boq-versions")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> CreateProjectBoqVersion(
+        Guid id,
+        [FromBody] CreateProjectBoqVersionDto dto)
+    {
+        try
+        {
+            var result = await _projectService.CreateProjectBoqVersionAsync(
+                id,
+                dto,
+                HttpContext.TraceIdentifier);
+            return CreatedAtAction(
+                nameof(GetProjectBoqVersion),
+                new { id, versionId = result.Id },
+                result);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("{id:guid}/boq-versions/{versionId:guid}/submit")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> SubmitProjectBoqVersion(Guid id, Guid versionId)
+        => await ExecuteProjectBoqWorkflowAsync(() => _projectService.SubmitProjectBoqVersionAsync(
+            id,
+            versionId,
+            _currentUserProvider.UserId,
+            HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/boq-versions/{versionId:guid}/approve")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> ApproveProjectBoqVersion(
+        Guid id,
+        Guid versionId,
+        [FromBody] ProjectBoqWorkflowActionDto? request = null)
+        => await ExecuteProjectBoqWorkflowAsync(() => _projectService.ApproveProjectBoqVersionAsync(
+            id,
+            versionId,
+            _currentUserProvider.UserId,
+            request?.Comments,
+            HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/boq-versions/{versionId:guid}/reject")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> RejectProjectBoqVersion(
+        Guid id,
+        Guid versionId,
+        [FromBody] RejectProjectBoqVersionDto request)
+        => await ExecuteProjectBoqWorkflowAsync(() => _projectService.RejectProjectBoqVersionAsync(
+            id,
+            versionId,
+            _currentUserProvider.UserId,
+            request.Reason,
+            HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/boq-versions/{versionId:guid}/recall")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
+    public async Task<ActionResult<ProjectBoqVersionDetailDto>> RecallProjectBoqVersion(
+        Guid id,
+        Guid versionId,
+        [FromBody] RecallProjectBoqVersionDto request)
+        => await ExecuteProjectBoqWorkflowAsync(() => _projectService.RecallProjectBoqVersionAsync(
+            id,
+            versionId,
+            _currentUserProvider.UserId,
+            request.Reason,
+            HttpContext.TraceIdentifier));
+
+    [HttpGet("{id:guid}/boq-versions/compare")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public async Task<ActionResult<ProjectBoqVersionComparisonDto>> CompareProjectBoqVersions(
+        Guid id,
+        [FromQuery] Guid baselineVersionId,
+        [FromQuery] Guid comparisonVersionId)
+    {
+        try
+        {
+            return Ok(await _projectService.CompareProjectBoqVersionsAsync(
+                id,
+                baselineVersionId,
+                comparisonVersionId));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    private async Task<ActionResult<ProjectBoqVersionDetailDto>> ExecuteProjectBoqWorkflowAsync(
+        Func<Task<ProjectBoqVersionDetailDto>> action)
+    {
+        try
+        {
+            return Ok(await action());
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("{id:guid}/quantity-survey-estimates")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<ActionResult<QuantitySurveyEstimateWorkspaceDto>> GetQuantitySurveyEstimates(Guid id)
+        => ExecuteProjectEstimateAsync(() => _projectService.GetQuantitySurveyEstimateWorkspaceAsync(id));
+
+    [HttpGet("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> GetQuantitySurveyEstimate(Guid id, Guid estimateVersionId)
+        => ExecuteProjectEstimateAsync(() => _projectService.GetQuantitySurveyEstimateVersionAsync(id, estimateVersionId));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.EstimatesManage)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> CreateQuantitySurveyEstimate(Guid id, [FromBody] CreateQuantitySurveyEstimateRequest request)
+        => ExecuteProjectEstimateAsync(() => _projectService.CreateQuantitySurveyEstimateVersionAsync(id, request, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}/submit")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.EstimatesManage)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> SubmitQuantitySurveyEstimate(Guid id, Guid estimateVersionId)
+        => ExecuteProjectEstimateAsync(() => _projectService.SubmitQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}/approve")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> ApproveQuantitySurveyEstimate(Guid id, Guid estimateVersionId, [FromBody] QuantitySurveyEstimateWorkflowRequest? request = null)
+        => ExecuteProjectEstimateAsync(() => _projectService.ApproveQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, request?.Comments, HttpContext.TraceIdentifier));
+
+    [HttpPost("{id:guid}/quantity-survey-estimates/{estimateVersionId:guid}/reject")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.TransactionsApprove)]
+    public Task<ActionResult<QuantitySurveyEstimateVersionDto>> RejectQuantitySurveyEstimate(Guid id, Guid estimateVersionId, [FromBody] RejectQuantitySurveyEstimateRequest request)
+        => ExecuteProjectEstimateAsync(() => _projectService.RejectQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, request.Reason, HttpContext.TraceIdentifier));
+
+    private async Task<ActionResult<T>> ExecuteProjectEstimateAsync<T>(Func<Task<T>> action)
+    {
+        try { return Ok(await action()); }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException exception) { return BadRequest(exception.Message); }
     }
 
     [HttpGet("{id:guid}/approval-register")]

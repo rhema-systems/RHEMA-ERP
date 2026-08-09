@@ -534,6 +534,7 @@ public partial class LocalFileStorageService : IFileStorageService
             && (category.StartsWith("central-dms", StringComparison.OrdinalIgnoreCase)
                 || category.Equals(ControlledFileUploadCategories.DocumentManagement, StringComparison.OrdinalIgnoreCase)
                 || category.Equals(ControlledFileUploadCategories.SupplierRegistrationEvidence, StringComparison.OrdinalIgnoreCase)
+                || category.StartsWith("quantity-survey-", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-land-acquisition-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("estate-managed-asset-documents", StringComparison.OrdinalIgnoreCase)
                 || category.StartsWith("procedure-case-documents", StringComparison.OrdinalIgnoreCase)

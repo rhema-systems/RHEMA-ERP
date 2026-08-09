@@ -485,8 +485,8 @@ function Compare-MigrationState {
         }
     }
     Assert-True ($uncoveredGuards.Count -eq 0) `
-        ("Pending guarded migrations lack a fail-fast VPS data probe: {0}. " +
-         "Extend Invoke-RhemaVpsRemote.ps1 before deployment." -f `
+        (("Pending guarded migrations lack a fail-fast VPS data probe: {0}. " +
+          "Extend Invoke-RhemaVpsRemote.ps1 before deployment.") -f `
             ($uncoveredGuards -join ', '))
     Assert-True ($unexpectedExtra.Count -eq 0) `
         ("The VPS contains unknown migrations not present in this repository: {0}" -f `

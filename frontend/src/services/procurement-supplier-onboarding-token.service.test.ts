@@ -14,6 +14,7 @@ describe('supplier-onboarding token API client', () => {
 
   it('uses the dedicated tenant-safe register and applicant-owned routes', async () => {
     await service.summary();
+    await service.issueOptions();
     await service.search({ status: 'Active', page: 2 });
     await service.get('token-1');
     await service.getForRegistration('registration-1');
@@ -21,6 +22,7 @@ describe('supplier-onboarding token API client', () => {
 
     expect(api.get.mock.calls.map(([path]) => path)).toEqual([
       '/procurement/supplier-onboarding-tokens/summary',
+      '/procurement/supplier-onboarding-tokens/issue-options',
       '/procurement/supplier-onboarding-tokens',
       '/procurement/supplier-onboarding-tokens/token-1',
       '/procurement/supplier-onboarding-tokens/registrations/registration-1',
@@ -29,10 +31,12 @@ describe('supplier-onboarding token API client', () => {
   });
 
   it('maps issue, rotation, Finance payment, reconciliation, and shared-workflow exemption actions', async () => {
-    const evidence = [{
-      referenceKind: 'ExternalReference' as const,
-      reference: 'EXEMPTION-MINUTE-001',
-    }];
+    const evidence = [
+      {
+        referenceKind: 'ExternalReference' as const,
+        reference: 'EXEMPTION-MINUTE-001',
+      },
+    ];
 
     await service.issue('registration-1');
     await service.reissue('token-1', 'Applicant reported compromise.', 'AAAA');
@@ -41,7 +45,13 @@ describe('supplier-onboarding token API client', () => {
       paymentReference: 'MOMO-001',
       rowVersion: 'AAAA',
     });
-    await service.reconcile('token-1', 'payment-1', 'BANK-001', undefined, 'BBBB');
+    await service.reconcile(
+      'token-1',
+      'payment-1',
+      'BANK-001',
+      undefined,
+      'BBBB'
+    );
     await service.requestExemption('token-1', {
       reason: 'Approved public-interest exemption.',
       evidence,

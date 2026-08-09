@@ -92,6 +92,7 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715205906_AddCentralDocumentManagement")] partial class AddCentralDocumentManagement { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715212107_AddEstateDocumentCentralDmsPublication")] partial class AddEstateDocumentCentralDmsPublication { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715230135_AddCentralDocumentMetadataValues")] partial class AddCentralDocumentMetadataValues { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260719120000_FixFinanceWorkflowConformance")] partial class FixFinanceWorkflowConformance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260720010326_AddRecurringJournalWorkflow")] partial class AddRecurringJournalWorkflow { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260720221046_AddProcurementPolicyDomain")] partial class AddProcurementPolicyDomain { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260721012643_AddProcurementAccessControls")] partial class AddProcurementAccessControls { }
@@ -171,3 +172,5 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806010613_TDC0706SharedAuditGovernance")] partial class TDC0706SharedAuditGovernance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806082400_TDC0809HrIdentityReconciliation")] partial class TDC0809HrIdentityReconciliation { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806091039_TDC0808ProcurementCentralDmsAdoption")] partial class TDC0808ProcurementCentralDmsAdoption { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260808143557_AddQuantitySurveyTenderBoqSubmissions")] partial class AddQuantitySurveyTenderBoqSubmissions { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260808155330_AddQuantitySurveyRateLibrary")] partial class AddQuantitySurveyRateLibrary { }

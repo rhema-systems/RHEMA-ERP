@@ -103,6 +103,10 @@ public sealed class ProjectCatalogEntryConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(x => new { x.TenantId, x.CatalogType, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.CatalogType, x.SortOrder });
         builder.HasIndex(x => new { x.TenantId, x.CatalogType, x.IsActive });
+        builder.HasIndex(x => new { x.TenantId, x.CatalogType, x.EffectiveFrom, x.EffectiveTo });
+        builder.ToTable(table => table.HasCheckConstraint(
+            "CK_ProjectCatalogEntries_EffectivePeriod",
+            "[EffectiveTo] IS NULL OR [EffectiveFrom] IS NULL OR [EffectiveTo] >= [EffectiveFrom]"));
     }
 }
 
@@ -204,6 +208,10 @@ public sealed class ProjectBoqItemConfiguration : IEntityTypeConfiguration<Proje
         builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId, x.SortOrder });
         builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId, x.LineNumber });
         builder.HasIndex(x => new { x.ProjectId, x.ItemType });
+        builder.HasIndex(x => new { x.TenantId, x.SectionCatalogEntryId });
+        builder.HasIndex(x => new { x.TenantId, x.TradeCatalogEntryId });
+        builder.HasIndex(x => new { x.TenantId, x.CostCodeCatalogEntryId });
+        builder.HasIndex(x => new { x.TenantId, x.MeasurementCodeCatalogEntryId });
 
         builder.HasOne(x => x.Project)
             .WithMany(x => x.BoqItems)
@@ -214,6 +222,26 @@ public sealed class ProjectBoqItemConfiguration : IEntityTypeConfiguration<Proje
             .WithMany(x => x.BoqItems)
             .HasForeignKey(x => x.ProjectPackageId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.SectionCatalogEntry)
+            .WithMany()
+            .HasForeignKey(x => x.SectionCatalogEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.TradeCatalogEntry)
+            .WithMany()
+            .HasForeignKey(x => x.TradeCatalogEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.CostCodeCatalogEntry)
+            .WithMany()
+            .HasForeignKey(x => x.CostCodeCatalogEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.MeasurementCodeCatalogEntry)
+            .WithMany()
+            .HasForeignKey(x => x.MeasurementCodeCatalogEntryId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

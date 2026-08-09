@@ -655,6 +655,18 @@ public class ProjectCatalogEntry : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    [MaxLength(30)]
+    public string? StandardCode { get; set; }
+
+    [MaxLength(2000)]
+    public string? MeasurementRule { get; set; }
+
+    [MaxLength(20)]
+    public string? DefaultUnitOfMeasure { get; set; }
+
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
 }
@@ -982,6 +994,44 @@ public class ProjectBoqItem : TenantEntity
     public Guid ProjectId { get; set; }
     public Guid ProjectPackageId { get; set; }
 
+    /// <summary>
+    /// Stable identity carried into every BoQ snapshot so a line can be compared
+    /// even after its editable working record is changed or removed.
+    /// </summary>
+    public Guid VersionLineKey { get; set; } = Guid.NewGuid();
+
+    public Guid? SectionCatalogEntryId { get; set; }
+    public Guid? TradeCatalogEntryId { get; set; }
+    public Guid? CostCodeCatalogEntryId { get; set; }
+    public Guid? MeasurementCodeCatalogEntryId { get; set; }
+
+    [MaxLength(50)]
+    public string? SectionCode { get; set; }
+
+    [MaxLength(150)]
+    public string? SectionName { get; set; }
+
+    [MaxLength(50)]
+    public string? TradeCode { get; set; }
+
+    [MaxLength(150)]
+    public string? TradeName { get; set; }
+
+    [MaxLength(50)]
+    public string? CostCode { get; set; }
+
+    [MaxLength(150)]
+    public string? CostCodeName { get; set; }
+
+    [MaxLength(30)]
+    public string? MeasurementStandard { get; set; }
+
+    [MaxLength(50)]
+    public string? MeasurementCode { get; set; }
+
+    [MaxLength(2000)]
+    public string? MeasurementRule { get; set; }
+
     [MaxLength(50)]
     public string? LineNumber { get; set; }
 
@@ -1042,6 +1092,18 @@ public class ProjectBoqItem : TenantEntity
 
     [ForeignKey(nameof(ProjectPackageId))]
     public virtual ProjectPackage ProjectPackage { get; set; } = null!;
+
+    [ForeignKey(nameof(SectionCatalogEntryId))]
+    public virtual ProjectCatalogEntry? SectionCatalogEntry { get; set; }
+
+    [ForeignKey(nameof(TradeCatalogEntryId))]
+    public virtual ProjectCatalogEntry? TradeCatalogEntry { get; set; }
+
+    [ForeignKey(nameof(CostCodeCatalogEntryId))]
+    public virtual ProjectCatalogEntry? CostCodeCatalogEntry { get; set; }
+
+    [ForeignKey(nameof(MeasurementCodeCatalogEntryId))]
+    public virtual ProjectCatalogEntry? MeasurementCodeCatalogEntry { get; set; }
 }
 
 public class ProjectApprovalRegisterItem : TenantEntity

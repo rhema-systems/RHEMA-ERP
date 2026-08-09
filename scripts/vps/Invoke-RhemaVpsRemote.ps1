@@ -132,6 +132,7 @@ function Set-TestServerConfiguration {
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' 'true'
     Set-ServiceEnvironmentValue $xml 'CandidatePortal__PortalUrl' `
         $ExpectedPublicOrigin
+    Set-ServiceEnvironmentValue $xml 'FrontendUrl' $ExpectedPublicOrigin
 
     $settings = New-Object System.Xml.XmlWriterSettings
     $settings.Indent = $true
@@ -224,6 +225,7 @@ function Invoke-Preflight {
         'StartupInitialization__SeedDevelopmentData' = 'true'
         'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
         'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
+        'FrontendUrl' = $ExpectedPublicOrigin
     }
     foreach ($entry in $requiredSettings.GetEnumerator()) {
         $actual = [string](($xml.service.env | Where-Object {
@@ -243,6 +245,10 @@ function Invoke-Preflight {
     foreach ($row in $history) { Write-Output "MIGRATION_ID|$($row.MigrationId)" }
     Write-Output 'GUARD_COVERAGE|20260720181131_AddHRModule'
     Write-Output 'GUARD_COVERAGE|20260720193903_AddHRPerformanceModule'
+    # These migrations only define immutable-row trigger bodies. Their THROW statements
+    # are not executed while applying the migrations and have no legacy-data precondition.
+    Write-Output 'GUARD_COVERAGE|20260807202000_AddQuantitySurveyConfigurationRegister'
+    Write-Output 'GUARD_COVERAGE|20260808124500_AddProjectBoqApprovalPublication'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"

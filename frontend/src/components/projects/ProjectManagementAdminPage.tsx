@@ -19,7 +19,7 @@ import {
   loadProjectCurrencyContext,
   type ProjectCurrencyReference,
 } from '@/lib/project-currency';
-import { inventoryManagementService, type InventoryItemDto } from '@/services/inventoryManagementService';
+import { inventoryManagementService, type InventoryItemDto, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { type CurrencyListDto } from '@/services/financeCommonService';
 import {
   CreateProjectCatalogEntryDto,
@@ -460,6 +460,13 @@ const emptyCatalog: CreateProjectCatalogEntryDto = {
   sortOrder: 10,
   isActive: true,
 };
+const QUANTITY_SURVEY_CATALOG_TYPES = new Set(['qs-sections', 'qs-trades', 'qs-cost-codes', 'qs-measurement-codes']);
+const QUANTITY_SURVEY_MEASUREMENT_STANDARDS = [
+  { value: 'Smm7', label: 'SMM7' },
+  { value: 'Cesmm3', label: 'CESMM3' },
+  { value: 'Cesmm4', label: 'CESMM4' },
+  { value: 'TdcLocal', label: 'TDC Local' },
+];
 
 export default function ProjectManagementAdminPage({ initialTab = 'overview', initialCatalogType }: Props) {
   const [tab, setTab] = useState<AdminTab>(initialTab);
@@ -470,6 +477,7 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
   const [templates, setTemplates] = useState<ProjectTemplateDto[]>([]);
   const [unitTypeTemplates, setUnitTypeTemplates] = useState<ProjectUnitTypeTemplateDto[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
+  const [unitOfMeasures, setUnitOfMeasures] = useState<UnitOfMeasureDto[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [unitTypeBaseCurrency, setUnitTypeBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [masterDataOverview, setMasterDataOverview] = useState<ProjectMasterDataOverviewDto | null>(null);
@@ -493,6 +501,8 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
   const [editingCatalogId, setEditingCatalogId] = useState<string | null>(null);
   const [selectedCatalogType, setSelectedCatalogType] = useState<string>(initialCatalogType || 'methodologies');
   const [seedingCatalogs, setSeedingCatalogs] = useState(false);
+  const isQuantitySurveyCatalog = QUANTITY_SURVEY_CATALOG_TYPES.has(selectedCatalogType);
+  const isQuantitySurveyMeasurementCatalog = selectedCatalogType === 'qs-measurement-codes';
   const unitTypeCurrencyOptions = useMemo(
     () => buildProjectCurrencyOptions(currencies, unitTypeBaseCurrency, unitTypeTemplateForm.currency),
     [currencies, unitTypeBaseCurrency, unitTypeTemplateForm.currency],
@@ -557,7 +567,7 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
   const loadData = async () => {
     try {
       setLoading(true);
-      const [loadedOverview, loadedTypes, loadedPriorities, loadedTemplates, loadedUnitTypes, loadedSettings, loadedInventoryItems, currencyContext] = await Promise.all([
+      const [loadedOverview, loadedTypes, loadedPriorities, loadedTemplates, loadedUnitTypes, loadedSettings, loadedInventoryItems, loadedUnitsOfMeasure, currencyContext] = await Promise.all([
         projectService.getMasterDataOverview(),
         projectService.getProjectTypes(),
         projectService.getProjectPriorities(),
@@ -565,6 +575,7 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
         projectService.getProjectUnitTypeTemplates().catch(() => []),
         projectService.getSettings(),
         inventoryManagementService.getInventoryItems({ isActive: true }).catch(() => []),
+        inventoryManagementService.getUnitsOfMeasure(true).catch(() => []),
         loadProjectCurrencyContext().catch(() => ({ activeCurrencies: [], baseCurrency: DEFAULT_PROJECT_CURRENCY, rawBaseCurrency: null })),
       ]);
       setMasterDataOverview(loadedOverview);
@@ -581,6 +592,7 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
       setUnitTypeTemplates(loadedUnitTypes);
       setSettings(loadedSettings);
       setInventoryItems(loadedInventoryItems);
+      setUnitOfMeasures(loadedUnitsOfMeasure);
       setCurrencies(currencyContext.activeCurrencies);
       setUnitTypeBaseCurrency(currencyContext.baseCurrency);
       setSettingsForm({
@@ -989,14 +1001,21 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
                     <Select value={selectedCatalogType} onValueChange={setSelectedCatalogType}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {(masterDataOverview?.recommendedCatalogs || []).map((group) => (
+                        {(masterDataOverview?.recommendedCatalogs || [])
+                          .filter((group) => !QUANTITY_SURVEY_CATALOG_TYPES.has(group.key))
+                          .map((group) => (
                           <SelectItem key={group.key} value={group.key}>{group.displayName}</SelectItem>
-                        ))}
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button variant="outline" onClick={seedCatalogDefaults} disabled={seedingCatalogs}>
-                    Seed Recommended
+                  <Button
+                    variant="outline"
+                    onClick={seedCatalogDefaults}
+                    disabled={seedingCatalogs || isQuantitySurveyCatalog}
+                    title={isQuantitySurveyCatalog ? 'QS catalogues must be entered from an approved tenant standard.' : undefined}
+                  >
+                    {isQuantitySurveyCatalog ? 'No bundled QS defaults' : 'Seed Recommended'}
                   </Button>
                 </div>
                 <div className="space-y-3">
@@ -1012,6 +1031,13 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
                           </div>
                           <div className="text-sm text-muted-foreground">Sort order {item.sortOrder}</div>
                           {item.description ? <div className="mt-2 text-sm text-muted-foreground">{item.description}</div> : null}
+                          {item.standardCode ? <div className="mt-1 text-xs text-muted-foreground">Standard {item.standardCode}</div> : null}
+                          {item.measurementRule ? <div className="mt-1 text-xs text-muted-foreground">Rule: {item.measurementRule}</div> : null}
+                          {(item.effectiveFrom || item.effectiveTo) ? (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Effective {item.effectiveFrom?.slice(0, 10) || 'open'} to {item.effectiveTo?.slice(0, 10) || 'open'}
+                            </div>
+                          ) : null}
                         </div>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={() => {
@@ -1021,6 +1047,11 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
                               code: item.code,
                               name: item.name,
                               description: item.description || '',
+                              standardCode: item.standardCode,
+                              measurementRule: item.measurementRule,
+                              defaultUnitOfMeasure: item.defaultUnitOfMeasure,
+                              effectiveFrom: item.effectiveFrom?.slice(0, 10),
+                              effectiveTo: item.effectiveTo?.slice(0, 10),
                               sortOrder: item.sortOrder,
                               isActive: item.isActive,
                             });
@@ -1036,22 +1067,63 @@ export default function ProjectManagementAdminPage({ initialTab = 'overview', in
                 <div className="font-semibold">{editingCatalogId ? 'Edit Catalog Entry' : 'New Catalog Entry'}</div>
                 <div className="grid gap-2">
                   <Label>Catalog Type</Label>
-                  <Select value={catalogForm.catalogType} onValueChange={(value) => { setSelectedCatalogType(value); setCatalogForm((prev) => ({ ...prev, catalogType: value })); }}>
+                  <Select value={catalogForm.catalogType} onValueChange={(value) => {
+                    setSelectedCatalogType(value);
+                    setCatalogForm({ ...emptyCatalog, catalogType: value });
+                    setEditingCatalogId(null);
+                  }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {(masterDataOverview?.recommendedCatalogs || []).map((group) => (
+                      {(masterDataOverview?.recommendedCatalogs || [])
+                        .filter((group) => !QUANTITY_SURVEY_CATALOG_TYPES.has(group.key))
+                        .map((group) => (
                         <SelectItem key={group.key} value={group.key}>{group.displayName}</SelectItem>
-                      ))}
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="grid gap-2"><Label>Code</Label><Input value={catalogForm.code} onChange={(e) => setCatalogForm((prev) => ({ ...prev, code: e.target.value }))} /></div>
                 <div className="grid gap-2"><Label>Name</Label><Input value={catalogForm.name} onChange={(e) => setCatalogForm((prev) => ({ ...prev, name: e.target.value }))} /></div>
                 <div className="grid gap-2"><Label>Description</Label><Textarea rows={3} value={catalogForm.description || ''} onChange={(e) => setCatalogForm((prev) => ({ ...prev, description: e.target.value }))} /></div>
+                {isQuantitySurveyMeasurementCatalog ? (
+                  <>
+                    <div className="grid gap-2">
+                      <Label>Measurement Standard</Label>
+                      <Select value={catalogForm.standardCode || 'none'} onValueChange={(value) => setCatalogForm((prev) => ({ ...prev, standardCode: value === 'none' ? undefined : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Select measurement standard" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Select measurement standard</SelectItem>
+                          {QUANTITY_SURVEY_MEASUREMENT_STANDARDS.map((standard) => (
+                            <SelectItem key={standard.value} value={standard.value}>{standard.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2"><Label>Measurement Rule</Label><Textarea rows={4} value={catalogForm.measurementRule || ''} onChange={(e) => setCatalogForm((prev) => ({ ...prev, measurementRule: e.target.value || undefined }))} /></div>
+                    <div className="grid gap-2">
+                      <Label>Default Unit of Measure</Label>
+                      <Select value={catalogForm.defaultUnitOfMeasure || 'none'} onValueChange={(value) => setCatalogForm((prev) => ({ ...prev, defaultUnitOfMeasure: value === 'none' ? undefined : value }))}>
+                        <SelectTrigger><SelectValue placeholder="Select default UOM" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No default UOM</SelectItem>
+                          {[...unitOfMeasures]
+                            .sort((left, right) => left.sortOrder - right.sortOrder || left.code.localeCompare(right.code))
+                            .map((unit) => <SelectItem key={unit.id} value={unit.code}>{unit.code} - {unit.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                ) : null}
+                {isQuantitySurveyCatalog ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2"><Label>Effective From</Label><Input type="date" value={catalogForm.effectiveFrom?.slice(0, 10) || ''} onChange={(e) => setCatalogForm((prev) => ({ ...prev, effectiveFrom: e.target.value || undefined }))} /></div>
+                    <div className="grid gap-2"><Label>Effective To</Label><Input type="date" value={catalogForm.effectiveTo?.slice(0, 10) || ''} onChange={(e) => setCatalogForm((prev) => ({ ...prev, effectiveTo: e.target.value || undefined }))} /></div>
+                  </div>
+                ) : null}
                 <div className="grid gap-2"><Label>Sort Order</Label><Input type="number" value={catalogForm.sortOrder ?? 0} onChange={(e) => setCatalogForm((prev) => ({ ...prev, sortOrder: Number(e.target.value || '0') }))} /></div>
                 <div className="flex items-center justify-between border rounded-md p-3"><span className="text-sm">Active</span><Switch checked={catalogForm.isActive !== false} onCheckedChange={(checked) => setCatalogForm((prev) => ({ ...prev, isActive: checked }))} /></div>
                 <div className="flex gap-2">
-                  <Button onClick={saveCatalogEntry} disabled={saving || !catalogForm.catalogType || !catalogForm.code || !catalogForm.name}>Save Entry</Button>
+                  <Button onClick={saveCatalogEntry} disabled={saving || !catalogForm.catalogType || !catalogForm.code || !catalogForm.name || (isQuantitySurveyMeasurementCatalog && !catalogForm.standardCode)}>Save Entry</Button>
                   {editingCatalogId && <Button variant="outline" onClick={() => { setEditingCatalogId(null); setCatalogForm({ ...emptyCatalog, catalogType: selectedCatalogType }); }}>Cancel</Button>}
                 </div>
               </div>

@@ -27,6 +27,197 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class SupplierApplicantLifecycleControllerTests
 {
     [Fact]
+    public async Task ExistingIdentityIsRejectedBeforeVerificationCodeIsCreated()
+    {
+        var tenantId = Guid.NewGuid();
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.PrepareVerificationChallengeAsync(
+                tenantId,
+                ProcurementSupplierApplicantVerificationChannel.Email,
+                "existing@example.test",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementSupplierApplicantAccessException(
+                "SUPPLIER_APPLICANT_CONTACT_ALREADY_REGISTERED",
+                "This contact is already assigned to an ERP account.",
+                409));
+        var tenants = new Mock<ITenantService>();
+        tenants.Setup(item => item.GetTenantByCodeAsync("TDC"))
+            .ReturnsAsync(new Tenant
+            {
+                Id = tenantId,
+                Code = "TDC",
+                Name = "TDC",
+                Status = TenantStatus.Active,
+                AllowSelfRegistration = true
+            });
+        var captcha = new Mock<ICaptchaVerificationService>();
+        captcha.Setup(item => item.EnsureCaptchaValidAsync(
+                tenantId,
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var otp = new Mock<IOtpService>();
+        var controller = new SupplierApplicantAccessController(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            tenants.Object,
+            otp.Object,
+            Mock.Of<ITenantSmsSender>(),
+            Mock.Of<INotificationService>(),
+            captcha.Object,
+            Mock.Of<IProcurementSupplierApplicantJwtService>(),
+            Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
+            Mock.Of<IFileStorageService>(),
+            TransactionalUnitOfWork().Object,
+            NullLogger<SupplierApplicantAccessController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
+
+        var result = await controller.RequestVerificationChallenge(
+            new SupplierApplicantVerificationChallengeRequest
+            {
+                TenantCode = "TDC",
+                Channel = "Email",
+                Contact = "existing@example.test"
+            },
+            CancellationToken.None);
+
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(409);
+        otp.Verify(item => item.CreateOtpAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<OtpPurpose>(),
+            It.IsAny<OtpChannel>(),
+            It.IsAny<string>(),
+            It.IsAny<TimeSpan>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ContactCorrectionOtpIsBoundToRegistrationAndContactScope()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        const string contact = "supplier.owner@example.test";
+        string? challengeTarget = null;
+        string? confirmTarget = null;
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.PrepareVerifiedContactCorrectionAsync(
+                registrationId,
+                It.IsAny<PrepareSupplierApplicantContactCorrectionRequest>(),
+                actorId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantContactCorrectionPreparationDto
+            {
+                TenantId = tenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                NormalizedContact = contact,
+                MaskedContact = "su***@example.test"
+            });
+        access.Setup(item => item.CorrectVerifiedContactAndRetryAsync(
+                registrationId,
+                It.IsAny<CorrectSupplierApplicantVerifiedContactRequest>(),
+                actorId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantContactCorrectionResultDto
+            {
+                RegistrationId = registrationId,
+                ContactCorrected = true,
+                ProvisioningRetried = true,
+                CredentialDelivered = true
+            });
+        var otp = new Mock<IOtpService>();
+        otp.Setup(item => item.CreateOtpAsync(
+                tenantId,
+                OtpPurpose.SupplierApplicantContactCorrection,
+                OtpChannel.Email,
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, OtpPurpose, OtpChannel, string, TimeSpan, int, CancellationToken>(
+                (_, _, _, target, _, _, _) => challengeTarget = target)
+            .ReturnsAsync("123456");
+        otp.Setup(item => item.VerifyOtpAsync(
+                tenantId,
+                OtpPurpose.SupplierApplicantContactCorrection,
+                OtpChannel.Email,
+                It.IsAny<string>(),
+                "123456",
+                true,
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, OtpPurpose, OtpChannel, string, string, bool, CancellationToken>(
+                (_, _, _, target, _, _, _) => confirmTarget = target)
+            .ReturnsAsync(new OtpVerifyResult(true, null));
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(item => item.SendEmailAsync(
+                contact,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                true))
+            .Returns(Task.CompletedTask);
+        var controller = new SupplierApplicantAccessController(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            Mock.Of<ITenantService>(),
+            otp.Object,
+            Mock.Of<ITenantSmsSender>(),
+            notifications.Object,
+            Mock.Of<ICaptchaVerificationService>(),
+            Mock.Of<IProcurementSupplierApplicantJwtService>(),
+            Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
+            Mock.Of<IFileStorageService>(),
+            TransactionalUnitOfWork().Object,
+            NullLogger<SupplierApplicantAccessController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = AuthenticatedContext(actorId)
+            }
+        };
+
+        (await controller.RequestContactCorrectionChallenge(
+                registrationId,
+                new SupplierApplicantContactCorrectionChallengeRequest
+                {
+                    Channel = "Email",
+                    Contact = contact
+                },
+                CancellationToken.None))
+            .Should().BeOfType<AcceptedResult>();
+        (await controller.ConfirmContactCorrection(
+                registrationId,
+                new SupplierApplicantContactCorrectionConfirmRequest
+                {
+                    Channel = "Email",
+                    Contact = contact,
+                    OtpCode = "123456",
+                    Reason = "Correct the approved supplier contact."
+                },
+                CancellationToken.None))
+            .Should().BeOfType<OkObjectResult>();
+
+        challengeTarget.Should().NotBeNull();
+        confirmTarget.Should().Be(challengeTarget);
+        challengeTarget.Should().Contain(registrationId.ToString("N"));
+        challengeTarget.Should().NotContain(contact);
+    }
+
+    [Fact]
     public async Task RetainedDraftIdentifierIsForwardedAfterContactVerification()
     {
         var tenantId = Guid.NewGuid();
@@ -383,6 +574,14 @@ public sealed class SupplierApplicantLifecycleControllerTests
 
         CreateBusinessPartnerDocumentDto? capturedDocument = null;
         var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.GetByIdAsync(registrationId))
+            .ReturnsAsync(new BusinessPartnerRegistrationDetailDto
+            {
+                Id = registrationId,
+                ApplicationNumber = "APP26DOC01",
+                CompanyName = "Document Supplier",
+                Status = "Draft"
+            });
         var document = new BusinessPartnerRegistrationDocumentDto
         {
             Id = documentId,

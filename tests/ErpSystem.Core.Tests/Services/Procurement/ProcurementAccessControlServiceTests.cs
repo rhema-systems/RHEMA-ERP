@@ -78,6 +78,32 @@ public sealed class ProcurementAccessControlServiceTests
     }
 
     [Fact]
+    public async Task RepeatedCapabilityEnforcementAppendsDistinctAuditEventsForTheSameCorrelation()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_PROCUREMENT_OFFICER");
+        var request = new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission,
+            SourceType = "SupplierDocument",
+            SourceReference = "DOC-001"
+        };
+
+        var first = await fixture.Service.EnforceCapabilityAsync(request, "trace-repeated-decision");
+        var second = await fixture.Service.EnforceCapabilityAsync(request, "trace-repeated-decision");
+
+        first.Allowed.Should().BeTrue();
+        second.Allowed.Should().BeTrue();
+        var events = await fixture.Context.ProcurementControlEvents
+            .Where(item => item.EventType == "AccessDecision" &&
+                           item.CorrelationId == "trace-repeated-decision")
+            .ToListAsync();
+        events.Should().HaveCount(2);
+        events.Select(item => item.EventKey).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task ActiveContextScopeCannotBeCreatedBeforeTheSecurityRoleIsGranted()
     {
         await using var fixture = new Fixture();
