@@ -418,144 +418,146 @@ export default function SupplierApplicantAccessAdministrationPage() {
             data-testid="supplier-contact-correction-form"
             onSubmit={(event) => void confirmCorrection(event)}
           >
-          <div className="space-y-4 py-2">
-            <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
-              <div className="space-y-2">
-                <Label htmlFor="correction-channel">Channel</Label>
-                <Select
-                  value={correction?.channel ?? 'Email'}
-                  disabled={correction?.challengeSent}
-                  onValueChange={(value: 'Email' | 'Sms') =>
-                    setCorrection((current) =>
-                      current
-                        ? {
-                            ...current,
-                            channel: value,
-                            challengeSent: false,
-                            maskedContact: undefined,
-                          }
-                        : current
-                    )
-                  }
-                >
-                  <SelectTrigger id="correction-channel">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Email">Email</SelectItem>
-                    <SelectItem value="Sms">SMS / phone</SelectItem>
-                  </SelectContent>
-                </Select>
+            <div className="space-y-4 py-2">
+              <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
+                <div className="space-y-2">
+                  <Label htmlFor="correction-channel">Channel</Label>
+                  <Select
+                    value={correction?.channel ?? 'Email'}
+                    disabled={correction?.challengeSent}
+                    onValueChange={(value: 'Email' | 'Sms') =>
+                      setCorrection((current) =>
+                        current
+                          ? {
+                              ...current,
+                              channel: value,
+                              challengeSent: false,
+                              maskedContact: undefined,
+                            }
+                          : current
+                      )
+                    }
+                  >
+                    <SelectTrigger id="correction-channel">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Email">Email</SelectItem>
+                      <SelectItem value="Sms">SMS / phone</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="correction-contact">
+                    New supplier contact
+                  </Label>
+                  <Input
+                    id="correction-contact"
+                    type={correction?.channel === 'Email' ? 'email' : 'tel'}
+                    value={correction?.contact || ''}
+                    disabled={correction?.challengeSent}
+                    placeholder={
+                      correction?.channel === 'Email'
+                        ? 'supplier@example.com'
+                        : '+233...'
+                    }
+                    onChange={(event) =>
+                      setCorrection((current) =>
+                        current
+                          ? {
+                              ...current,
+                              contact: event.target.value,
+                              challengeSent: false,
+                              maskedContact: undefined,
+                            }
+                          : current
+                      )
+                    }
+                  />
+                </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="correction-contact">New supplier contact</Label>
-                <Input
-                  id="correction-contact"
-                  type={correction?.channel === 'Email' ? 'email' : 'tel'}
-                  value={correction?.contact || ''}
-                  disabled={correction?.challengeSent}
-                  placeholder={
-                    correction?.channel === 'Email'
-                      ? 'supplier@example.com'
-                      : '+233...'
-                  }
+                <Label htmlFor="correction-reason">Correction reason</Label>
+                <Textarea
+                  id="correction-reason"
+                  value={correction?.reason || ''}
+                  maxLength={500}
+                  placeholder="Explain why the verified supplier contact must be corrected."
                   onChange={(event) =>
                     setCorrection((current) =>
                       current
-                        ? {
-                            ...current,
-                            contact: event.target.value,
-                            challengeSent: false,
-                            maskedContact: undefined,
-                          }
+                        ? { ...current, reason: event.target.value }
                         : current
                     )
                   }
                 />
               </div>
+              {correction?.challengeSent && (
+                <div className="space-y-2">
+                  <Label htmlFor="correction-otp">
+                    Verification code sent to {correction.maskedContact}
+                  </Label>
+                  <Input
+                    id="correction-otp"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={correction.otpCode}
+                    onChange={(event) =>
+                      setCorrection((current) =>
+                        current
+                          ? {
+                              ...current,
+                              otpCode: event.target.value
+                                .replace(/\D/g, '')
+                                .slice(0, 6),
+                            }
+                          : current
+                      )
+                    }
+                  />
+                </div>
+              )}
+              {correctionError && (
+                <Alert variant="destructive" role="alert">
+                  <AlertTitle>Contact correction failed</AlertTitle>
+                  <AlertDescription>{correctionError}</AlertDescription>
+                </Alert>
+              )}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="correction-reason">Correction reason</Label>
-              <Textarea
-                id="correction-reason"
-                value={correction?.reason || ''}
-                maxLength={500}
-                placeholder="Explain why the verified supplier contact must be corrected."
-                onChange={(event) =>
-                  setCorrection((current) =>
-                    current
-                      ? { ...current, reason: event.target.value }
-                      : current
-                  )
-                }
-              />
-            </div>
-            {correction?.challengeSent && (
-              <div className="space-y-2">
-                <Label htmlFor="correction-otp">
-                  Verification code sent to {correction.maskedContact}
-                </Label>
-                <Input
-                  id="correction-otp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  value={correction.otpCode}
-                  onChange={(event) =>
-                    setCorrection((current) =>
-                      current
-                        ? {
-                            ...current,
-                            otpCode: event.target.value
-                              .replace(/\D/g, '')
-                              .slice(0, 6),
-                          }
-                        : current
-                    )
-                  }
-                />
-              </div>
-            )}
-            {correctionError && (
-              <Alert variant="destructive" role="alert">
-                <AlertTitle>Contact correction failed</AlertTitle>
-                <AlertDescription>{correctionError}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={Boolean(busyId)}
-              onClick={() => {
-                setCorrectionError(undefined);
-                setCorrection(undefined);
-              }}
-            >
-              Cancel
-            </Button>
-            {!correction?.challengeSent ? (
+            <DialogFooter>
               <Button
                 type="button"
-                disabled={
-                  Boolean(busyId) ||
-                  !correction?.contact.trim() ||
-                  (correction?.reason.trim().length ?? 0) < 10
-                }
-                onClick={() => void sendCorrectionChallenge()}
+                variant="outline"
+                disabled={Boolean(busyId)}
+                onClick={() => {
+                  setCorrectionError(undefined);
+                  setCorrection(undefined);
+                }}
               >
-                Send verification code
+                Cancel
               </Button>
-            ) : (
-              <Button
-                type="submit"
-                disabled={Boolean(busyId) || correction.otpCode.length !== 6}
-              >
-                Verify, correct and provision
-              </Button>
-            )}
-          </DialogFooter>
+              {!correction?.challengeSent ? (
+                <Button
+                  type="button"
+                  disabled={
+                    Boolean(busyId) ||
+                    !correction?.contact.trim() ||
+                    (correction?.reason.trim().length ?? 0) < 10
+                  }
+                  onClick={() => void sendCorrectionChallenge()}
+                >
+                  Send verification code
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={Boolean(busyId) || correction.otpCode.length !== 6}
+                >
+                  Verify, correct and provision
+                </Button>
+              )}
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

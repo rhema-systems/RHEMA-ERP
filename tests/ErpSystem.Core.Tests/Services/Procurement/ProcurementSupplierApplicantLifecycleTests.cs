@@ -685,6 +685,15 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         eventJson.Should().NotContain("approved@example.test");
         eventJson.Should().NotContain("supplier.owner@example.test");
         correctionEvent.Reason.Should().Contain("[redacted contact]");
+        fixture.ContactCorrectionStore.Verify(item =>
+            item.SetVerifiedContactCorrectionContextAsync(
+                access.Id,
+                fixture.ActorId,
+                access.VerifiedContactHashSha256,
+                It.IsAny<CancellationToken>()), Times.Once);
+        fixture.ContactCorrectionStore.Verify(item =>
+            item.ClearVerifiedContactCorrectionContextAsync(
+                It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -978,6 +987,8 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
         public string LastTemporaryPassword { get; private set; } = string.Empty;
         public List<string> DeliveredMessages { get; } = [];
         public List<ProcurementControlEventWriteRequest> RecordedControlEvents { get; } = [];
+        public Mock<IProcurementSupplierApplicantContactCorrectionStore>
+            ContactCorrectionStore { get; } = new();
         public ApplicationDbContext Context { get; }
         public ProcurementSupplierApplicantAccessService Service { get; }
 
@@ -1140,10 +1151,25 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     ActorUserId = ActorId
                 });
 
+            ContactCorrectionStore.SetupGet(item => item.HasRequiredTransaction)
+                .Returns(true);
+            ContactCorrectionStore.Setup(item =>
+                    item.SetVerifiedContactCorrectionContextAsync(
+                        It.IsAny<Guid>(),
+                        It.IsAny<Guid>(),
+                        It.IsAny<string>(),
+                        It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            ContactCorrectionStore.Setup(item =>
+                    item.ClearVerifiedContactCorrectionContextAsync(
+                        It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
             Service = new ProcurementSupplierApplicantAccessService(
                 _unitOfWork,
                 _tokenService.Object,
                 _registrations.Object,
+                ContactCorrectionStore.Object,
                 events.Object,
                 access.Object,
                 current.Object,

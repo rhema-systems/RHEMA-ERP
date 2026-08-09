@@ -168,6 +168,7 @@ public sealed class ProcurementSupplierApplicantAuthorizationTests
                 Mock.Of<IUnitOfWork>(),
                 Mock.Of<IProcurementSupplierOnboardingTokenService>(),
                 Mock.Of<IBusinessPartnerRegistrationService>(),
+                Mock.Of<IProcurementSupplierApplicantContactCorrectionStore>(),
                 Mock.Of<IProcurementControlEventService>(),
                 Access.Object,
                 current.Object,

@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
+using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.Otp;
 using ErpSystem.Api.Services.Sms;
@@ -965,9 +966,6 @@ public sealed class SupplierApplicantAccessController : ControllerBase
 
     private IActionResult Problem(Exception exception)
     {
-        _logger.LogWarning(
-            "Supplier applicant access request failed with {ExceptionType}",
-            exception.GetType().Name);
         var (status, code) = exception switch
         {
             ProcurementSupplierApplicantAccessException applicant =>
@@ -980,6 +978,14 @@ public sealed class SupplierApplicantAccessController : ControllerBase
                 (StatusCodes.Status409Conflict, token.Code),
             ProcurementSupplierOnboardingTokenNotFoundException token =>
                 (StatusCodes.Status404NotFound, token.Code),
+            ProcurementSupplierEvidencePackValidationException evidence =>
+                (StatusCodes.Status422UnprocessableEntity, evidence.Code),
+            ProcurementSupplierEvidencePackConflictException evidence =>
+                (StatusCodes.Status409Conflict, evidence.Code),
+            ProcurementSupplierEvidencePackNotFoundException evidence =>
+                (StatusCodes.Status404NotFound, evidence.Code),
+            ProcurementSupplierEvidencePackAuthorizationException =>
+                (StatusCodes.Status403Forbidden, "SUPPLIER_APPLICANT_EVIDENCE_FORBIDDEN"),
             CaptchaVerificationException =>
                 (StatusCodes.Status400BadRequest, "CAPTCHA_INVALID"),
             ControlledFileUploadException upload =>
@@ -989,6 +995,23 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             _ => (StatusCodes.Status500InternalServerError,
                 "SUPPLIER_APPLICANT_UNEXPECTED")
         };
+        var correlationId = Correlation("failure");
+        HttpContext.Items[SystemExceptionResultLoggingFilter.HandledExceptionItemKey] =
+            exception;
+        if (status >= StatusCodes.Status500InternalServerError)
+        {
+            _logger.LogError(
+                exception,
+                "Supplier applicant access request failed ({CorrelationId})",
+                correlationId);
+        }
+        else
+        {
+            _logger.LogWarning(
+                exception,
+                "Supplier applicant access request was rejected ({CorrelationId})",
+                correlationId);
+        }
         return StatusCode(status, new ProblemDetails
         {
             Type = $"https://tdc.gov.gh/problems/{code.ToLowerInvariant()}",
@@ -1000,7 +1023,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             Extensions =
             {
                 ["code"] = code,
-                ["correlationId"] = Correlation("failure")
+                ["correlationId"] = correlationId
             }
         });
     }

@@ -15,6 +15,9 @@ namespace ErpSystem.Api.Filters;
 /// </summary>
 public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
 {
+    public const string HandledExceptionItemKey =
+        "ErpSystem.Api.HandledExceptionForSystemLog";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<SystemExceptionResultLoggingFilter> _logger;
 
@@ -57,12 +60,18 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
             var http = context.HttpContext;
             var tenantId = currentUser.TenantId ?? Guid.Empty;
             var now = DateTime.UtcNow;
-            var detail = string.IsNullOrWhiteSpace(problem.Detail)
+            var problemDetail = string.IsNullOrWhiteSpace(problem.Detail)
                 ? problem.Title ?? $"HTTP {statusCode} request failure"
                 : problem.Detail;
-            var exceptionType = problem is ValidationProblemDetails
-                ? "HandledApiValidationProblem"
-                : "HandledApiProblem";
+            var handledException = http.Items.TryGetValue(
+                    HandledExceptionItemKey, out var captured)
+                ? captured as Exception
+                : null;
+            var detail = handledException?.Message ?? problemDetail;
+            var exceptionType = handledException?.GetType().FullName ??
+                (problem is ValidationProblemDetails
+                    ? "HandledApiValidationProblem"
+                    : "HandledApiProblem");
             var payload = problem is ValidationProblemDetails validation
                 ? JsonSerializer.Serialize(new
                 {
@@ -84,8 +93,15 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
                     problem.Extensions
                 });
 
+            var diagnosticPayload = handledException is null
+                ? payload
+                : $"ProblemDetails: {payload}\n\nHandled exception:\n{handledException}";
             var redactedDetail = SensitiveDataRedactor.Redact(detail);
-            var redactedPayload = SensitiveDataRedactor.Redact(Truncate(payload, 20000));
+            var redactedPayload = SensitiveDataRedactor.Redact(
+                Truncate(diagnosticPayload, 20000));
+            var redactedStackTrace = handledException?.StackTrace is { Length: > 0 } stackTrace
+                ? SensitiveDataRedactor.Redact(Truncate(stackTrace, 20000))
+                : null;
             var requestPath = http.Request.Path.Value;
             var fingerprint = ExceptionFingerprint.Compute(
                 exceptionType,
@@ -99,66 +115,35 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
                 ? "Critical"
                 : "Warning";
             var repository = unitOfWork.Repository<SystemExceptionLog>();
-            var existing = await repository.FirstOrDefaultAsync(item =>
-                item.TenantId == tenantId && item.Fingerprint == fingerprint);
-
-            if (existing is not null && !existing.IsDeleted)
+            await repository.AddAsync(new SystemExceptionLog
             {
-                existing.OccurrenceCount += 1;
-                existing.LastOccurredAt = now;
-                existing.Level = level;
-                existing.Logger = Truncate(context.ActionDescriptor.DisplayName, 200);
-                existing.ShortMessage = Truncate(redactedDetail, 1000);
-                existing.FullMessage = redactedPayload;
-                existing.ExceptionType = exceptionType;
-                existing.StackTrace = null;
-                existing.TraceId = http.TraceIdentifier;
-                existing.RequestMethod = http.Request.Method;
-                existing.RequestPath = requestPath;
-                existing.QueryString = SensitiveDataRedactor.Redact(
-                    Truncate(http.Request.QueryString.Value, 2000));
-                existing.ReferrerUrl = SensitiveDataRedactor.Redact(
-                    Truncate(http.Request.Headers.Referer.FirstOrDefault(), 500));
-                existing.RemoteIpAddress = http.Connection.RemoteIpAddress?.ToString();
-                existing.UserAgent = SensitiveDataRedactor.Redact(
-                    Truncate(http.Request.Headers.UserAgent.FirstOrDefault(), 500));
-                existing.UserId = userId;
-                existing.Username = http.User.FindFirstValue(ClaimTypes.Name);
-                existing.UpdatedAt = now;
-                existing.LastModifiedById = userId;
-                await repository.UpdateAsync(existing);
-            }
-            else
-            {
-                await repository.AddAsync(new SystemExceptionLog
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    Fingerprint = fingerprint,
-                    OccurrenceCount = 1,
-                    FirstOccurredAt = now,
-                    LastOccurredAt = now,
-                    Level = level,
-                    Logger = Truncate(context.ActionDescriptor.DisplayName, 200),
-                    ShortMessage = Truncate(redactedDetail, 1000),
-                    FullMessage = redactedPayload,
-                    ExceptionType = exceptionType,
-                    TraceId = http.TraceIdentifier,
-                    RequestMethod = http.Request.Method,
-                    RequestPath = requestPath,
-                    QueryString = SensitiveDataRedactor.Redact(
-                        Truncate(http.Request.QueryString.Value, 2000)),
-                    ReferrerUrl = SensitiveDataRedactor.Redact(
-                        Truncate(http.Request.Headers.Referer.FirstOrDefault(), 500)),
-                    RemoteIpAddress = http.Connection.RemoteIpAddress?.ToString(),
-                    UserAgent = SensitiveDataRedactor.Redact(
-                        Truncate(http.Request.Headers.UserAgent.FirstOrDefault(), 500)),
-                    UserId = userId,
-                    Username = http.User.FindFirstValue(ClaimTypes.Name),
-                    CreatedAt = now,
-                    CreatedById = userId
-                });
-            }
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                Fingerprint = fingerprint,
+                OccurrenceCount = 1,
+                FirstOccurredAt = now,
+                LastOccurredAt = now,
+                Level = level,
+                Logger = Truncate(context.ActionDescriptor.DisplayName, 200),
+                ShortMessage = Truncate(redactedDetail, 1000),
+                FullMessage = redactedPayload,
+                ExceptionType = exceptionType,
+                StackTrace = redactedStackTrace,
+                TraceId = http.TraceIdentifier,
+                RequestMethod = http.Request.Method,
+                RequestPath = requestPath,
+                QueryString = SensitiveDataRedactor.Redact(
+                    Truncate(http.Request.QueryString.Value, 2000)),
+                ReferrerUrl = SensitiveDataRedactor.Redact(
+                    Truncate(http.Request.Headers.Referer.FirstOrDefault(), 500)),
+                RemoteIpAddress = http.Connection.RemoteIpAddress?.ToString(),
+                UserAgent = SensitiveDataRedactor.Redact(
+                    Truncate(http.Request.Headers.UserAgent.FirstOrDefault(), 500)),
+                UserId = userId,
+                Username = http.User.FindFirstValue(ClaimTypes.Name),
+                CreatedAt = now,
+                CreatedById = userId
+            });
 
             await unitOfWork.SaveChangesAsync();
         }
