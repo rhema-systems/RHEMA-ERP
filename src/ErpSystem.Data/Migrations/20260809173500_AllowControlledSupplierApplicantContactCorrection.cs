@@ -19,7 +19,9 @@ public partial class AllowControlledSupplierApplicantContactCorrection : Migrati
         migrationBuilder.Sql(BaselineTriggerSql);
     }
 
-    private const string ControlledTriggerSql =
+    // Retained as the exact down target for the follow-up migration that widens
+    // only the governed recovery gate to the pre-provisioning state.
+    internal const string ControlledTriggerSql =
         """
         CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementSupplierApplicantAccesses_Protected]
         ON [dbo].[ProcurementSupplierApplicantAccesses]

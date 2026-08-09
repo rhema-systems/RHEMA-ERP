@@ -56,6 +56,22 @@ public sealed class ProcurementSupplierEvidenceBindingLineageMigrationTests
         sql.Should().Contain("outside a verified contact-correction transaction");
     }
 
+    [Fact]
+    public void PreProvisioningCorrectionKeepsSubjectImmutableWhileAllowingMissingAccessLink()
+    {
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        new TestPreProvisioningContactCorrectionMigration().ApplyUp(builder);
+
+        var sql = builder.Operations.OfType<SqlOperation>()
+            .Single().Sql;
+
+        sql.Should().Contain("registration.BusinessPartnerId IS NOT NULL");
+        sql.Should().Contain("i.BusinessPartnerId IS NULL");
+        sql.Should().Contain("ISNULL(i.BusinessPartnerId");
+        sql.Should().Contain("ISNULL(d.BusinessPartnerId");
+        sql.Should().NotContain("AND d.BusinessPartnerId IS NOT NULL");
+    }
+
     private sealed class TestMigration :
         FixSupplierEvidencePackBindingLineageTrigger
     {
@@ -70,6 +86,12 @@ public sealed class ProcurementSupplierEvidenceBindingLineageMigrationTests
 
     private sealed class TestContactCorrectionMigration :
         AllowControlledSupplierApplicantContactCorrection
+    {
+        public void ApplyUp(MigrationBuilder builder) => Up(builder);
+    }
+
+    private sealed class TestPreProvisioningContactCorrectionMigration :
+        AllowPreProvisioningSupplierContactCorrection
     {
         public void ApplyUp(MigrationBuilder builder) => Up(builder);
     }
