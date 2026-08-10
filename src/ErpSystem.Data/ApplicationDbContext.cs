@@ -3270,6 +3270,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FiscalPeriodId });
             entity.HasIndex(e => new { e.TenantId, e.AccountingBookId });
             entity.HasIndex(e => new { e.TenantId, e.ProceedsAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.RevaluationSurplusAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.RetainedEarningsAccountId });
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.ProceedsCurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.IdempotencyKey).HasMaxLength(150);
@@ -3281,6 +3283,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.AccumulatedDepreciationAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.AccumulatedImpairmentAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusAtDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RevaluationSurplusTransferAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetProceeds).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetBookValueAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.GainOrLoss).HasColumnType("decimal(18,2)");
@@ -3299,6 +3302,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.ProceedsAccount)
                 .WithMany()
                 .HasForeignKey(e => e.ProceedsAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Disposal evidence retains both equity accounts even if configuration changes later.
+            entity.HasOne(e => e.RevaluationSurplusAccount)
+                .WithMany()
+                .HasForeignKey(e => e.RevaluationSurplusAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.RetainedEarningsAccount)
+                .WithMany()
+                .HasForeignKey(e => e.RetainedEarningsAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()

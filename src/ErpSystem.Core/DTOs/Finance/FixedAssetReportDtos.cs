@@ -70,6 +70,7 @@ public class AssetDisposalReportDto
     public decimal AccumulatedDepreciationAtDisposal { get; set; }
     public decimal AccumulatedImpairmentAtDisposal { get; set; }
     public decimal RevaluationSurplusAtDisposal { get; set; }
+    public decimal RevaluationSurplusTransferAmount { get; set; }
     public decimal NetBookValue { get; set; }
     public decimal GainLoss { get; set; }
     public string? BuyerName { get; set; }

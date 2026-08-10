@@ -64,6 +64,18 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal RevaluationSurplusAtDisposal { get; set; }
 
+        // IAS 16 permits the asset-specific reserve remaining on derecognition to move directly
+        // within equity. These account and amount snapshots preserve the exact TDC policy evidence
+        // approved by the checker; the transfer is part of the disposal journal and never P&L.
+        public Guid? RevaluationSurplusAccountId { get; set; }
+        public virtual Account? RevaluationSurplusAccount { get; set; }
+
+        public Guid? RetainedEarningsAccountId { get; set; }
+        public virtual Account? RetainedEarningsAccount { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RevaluationSurplusTransferAmount { get; set; }
+
         [Column(TypeName = "decimal(18,2)")]
         public decimal NetBookValueAtDisposal { get; set; }
 

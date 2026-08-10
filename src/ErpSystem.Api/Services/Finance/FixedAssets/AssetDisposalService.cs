@@ -85,6 +85,7 @@ public class AssetDisposalService : IAssetDisposalService
         var bookValue = ResolveDefaultBookValue(asset);
         var fiscalPeriod = await ResolveFiscalPeriodAsync(dto.DisposalDate);
         var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, dto);
+        var surplusTransfer = await ResolveRevaluationSurplusTransferAsync(asset, snapshot.RevaluationSurplusBalance);
 
         var existingActiveDisposal = await _context.AssetDisposals
             .Where(d => d.TenantId == TenantId
@@ -120,6 +121,9 @@ public class AssetDisposalService : IAssetDisposalService
             AccumulatedDepreciationAtDisposal = snapshot.AccumulatedDepreciation,
             AccumulatedImpairmentAtDisposal = snapshot.AccumulatedImpairment,
             RevaluationSurplusAtDisposal = snapshot.RevaluationSurplusBalance,
+            RevaluationSurplusAccountId = surplusTransfer.RevaluationSurplusAccountId,
+            RetainedEarningsAccountId = surplusTransfer.RetainedEarningsAccountId,
+            RevaluationSurplusTransferAmount = snapshot.RevaluationSurplusBalance,
             NetBookValueAtDisposal = snapshot.NetBookValue,
             GainOrLoss = snapshot.GainOrLoss,
             BuyerName = dto.BuyerName?.Trim(),
@@ -258,11 +262,11 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
         }
 
-        var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, disposal);
-        ApplySnapshot(disposal, snapshot);
-
         try
         {
+            var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, disposal);
+            await ValidateApprovedRevaluationSurplusTransferAsync(disposal, asset, snapshot);
+            ApplySnapshot(disposal, snapshot);
             var postingRequest = await BuildDisposalPostingRequestAsync(disposal, asset, fiscalPeriod, functionalCurrency, snapshot);
 
             await RecordDisposalAuditAsync(
@@ -276,7 +280,12 @@ public class AssetDisposalService : IAssetDisposalService
                     asset.Category.AccumulatedImpairmentAccountId,
                     asset.Category.GainOnDisposalAccountId,
                     asset.Category.LossOnDisposalAccountId,
-                    disposal.ProceedsAccountId
+                    disposal.ProceedsAccountId,
+                    // These are request-time snapshots, not mutable settings resolved after the
+                    // checker decision. Completion separately verifies that policy has not drifted.
+                    disposal.RevaluationSurplusAccountId,
+                    disposal.RetainedEarningsAccountId,
+                    disposal.RevaluationSurplusTransferAmount
                 },
                 comment: "Fixed asset disposal account mappings used for posting.");
             await RecordDisposalAuditAsync(
@@ -333,11 +342,31 @@ public class AssetDisposalService : IAssetDisposalService
                     comment: "Fixed asset sale proceeds recorded to the configured clearing account.");
             }
 
+            if (disposal.RevaluationSurplusTransferAmount > 0m)
+            {
+                await RecordDisposalAuditAsync(
+                    FinanceAuditEvents.FixedAssetDisposalRevaluationSurplusTransferred,
+                    disposal,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        disposal.RevaluationSurplusTransferAmount,
+                        disposal.RevaluationSurplusAccountId,
+                        disposal.RetainedEarningsAccountId
+                    },
+                    comment: "Asset-specific revaluation surplus transferred directly within equity on derecognition.");
+            }
+
             return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to complete disposal.");
         }
         catch (Exception ex)
         {
-            disposal.Status = AssetDisposalStatus.Approved;
+            // Evidence or account-policy drift invalidates the checker decision and must permit a
+            // fresh request. Operational failures retain Approved status for idempotent retry.
+            disposal.Status = ex is StaleDisposalApprovalException
+                ? AssetDisposalStatus.Cancelled
+                : AssetDisposalStatus.Approved;
             disposal.FailedAt = DateTime.UtcNow;
             disposal.FailureReason = ex.Message;
             disposal.UpdatedAt = DateTime.UtcNow;
@@ -634,6 +663,12 @@ public class AssetDisposalService : IAssetDisposalService
         var gainAccount = snapshot.GainOrLoss > 0m
             ? await ResolveDisposalAccountAsync(category.GainOnDisposalAccountId, "gain on disposal account", AccountType.Expense)
             : null;
+        var revaluationSurplusAccount = snapshot.RevaluationSurplusBalance > 0m
+            ? await ResolveDisposalAccountAsync(disposal.RevaluationSurplusAccountId, "revaluation surplus disposal-transfer account", AccountType.Equity)
+            : null;
+        var retainedEarningsAccount = snapshot.RevaluationSurplusBalance > 0m
+            ? await ResolveDisposalAccountAsync(disposal.RetainedEarningsAccountId, "retained earnings disposal-transfer account", AccountType.Equity)
+            : null;
 
         var reference = BuildDisposalReference(asset, disposal);
         var lineNumber = 1;
@@ -645,6 +680,10 @@ public class AssetDisposalService : IAssetDisposalService
         AddPostingLine(lines, lossAccount?.Id, Math.Abs(Math.Min(snapshot.GainOrLoss, 0m)), 0m, "Loss on disposal", reference, lineNumber++, "FA-DisposalLoss", disposal, asset, functionalCurrency);
         AddPostingLine(lines, assetAccount.Id, 0m, snapshot.AssetCarryingAccountAmount, "Derecognize fixed asset carrying account", reference, lineNumber++, "FA-DisposalAsset", disposal, asset, functionalCurrency);
         AddPostingLine(lines, gainAccount?.Id, 0m, Math.Max(snapshot.GainOrLoss, 0m), "Gain on disposal", reference, lineNumber++, "FA-DisposalGain", disposal, asset, functionalCurrency);
+        // IAS 16 equity transfer: this does not alter the disposal gain/loss. The remaining
+        // asset-specific reserve is debited and retained earnings is credited in the same journal.
+        AddPostingLine(lines, revaluationSurplusAccount?.Id, snapshot.RevaluationSurplusBalance, 0m, "Transfer revaluation surplus on derecognition", reference, lineNumber++, "FA-DisposalRevaluationSurplus", disposal, asset, functionalCurrency);
+        AddPostingLine(lines, retainedEarningsAccount?.Id, 0m, snapshot.RevaluationSurplusBalance, "Transfer revaluation surplus to retained earnings", reference, lineNumber++, "FA-DisposalRetainedEarnings", disposal, asset, functionalCurrency);
 
         if (lines.Count < 2)
         {
@@ -765,6 +804,7 @@ public class AssetDisposalService : IAssetDisposalService
         disposal.AccumulatedDepreciationAtDisposal = snapshot.AccumulatedDepreciation;
         disposal.AccumulatedImpairmentAtDisposal = snapshot.AccumulatedImpairment;
         disposal.RevaluationSurplusAtDisposal = snapshot.RevaluationSurplusBalance;
+        disposal.RevaluationSurplusTransferAmount = snapshot.RevaluationSurplusBalance;
         disposal.NetBookValueAtDisposal = snapshot.NetBookValue;
         disposal.GainOrLoss = snapshot.GainOrLoss;
     }
@@ -884,6 +924,62 @@ public class AssetDisposalService : IAssetDisposalService
             b.BookClassification.Equals(normalizedBook, StringComparison.OrdinalIgnoreCase));
 
         return bookValue ?? throw new InvalidOperationException("Fixed asset disposal book value was not found.");
+    }
+
+    private async Task<RevaluationSurplusTransferPreparation> ResolveRevaluationSurplusTransferAsync(
+        FixedAsset asset,
+        decimal surplusBalance)
+    {
+        if (RoundMoney(surplusBalance) <= 0m)
+        {
+            return new RevaluationSurplusTransferPreparation(null, null);
+        }
+
+        // TDC default: transfer the entire remaining asset-specific reserve on derecognition.
+        // FinanceSettings already owns the tenant retained-earnings account, so this extends the
+        // established configuration instead of introducing a second fixed-asset policy register.
+        var retainedEarningsAccountId = await _context.FinanceSettings
+            .Where(settings => settings.TenantId == TenantId && !settings.IsDeleted)
+            .Select(settings => settings.RetainedEarningsAccountId)
+            .FirstOrDefaultAsync();
+        var surplusAccount = await ResolveDisposalAccountAsync(
+            asset.Category.RevaluationSurplusAccountId,
+            "revaluation surplus disposal-transfer account",
+            AccountType.Equity);
+        var retainedEarningsAccount = await ResolveDisposalAccountAsync(
+            retainedEarningsAccountId,
+            "retained earnings disposal-transfer account",
+            AccountType.Equity);
+
+        if (surplusAccount.Id == retainedEarningsAccount.Id)
+        {
+            throw new InvalidOperationException(
+                "Revaluation surplus and retained earnings must use different equity accounts for disposal transfer.");
+        }
+
+        return new RevaluationSurplusTransferPreparation(surplusAccount.Id, retainedEarningsAccount.Id);
+    }
+
+    private async Task ValidateApprovedRevaluationSurplusTransferAsync(
+        AssetDisposal disposal,
+        FixedAsset asset,
+        DisposalSnapshot currentSnapshot)
+    {
+        if (RoundMoney(disposal.RevaluationSurplusAtDisposal) != currentSnapshot.RevaluationSurplusBalance)
+        {
+            throw new StaleDisposalApprovalException(
+                "The asset-specific revaluation surplus changed after approval. Submit a new disposal request.");
+        }
+
+        var currentPolicy = await ResolveRevaluationSurplusTransferAsync(asset, currentSnapshot.RevaluationSurplusBalance);
+        if (disposal.RevaluationSurplusAccountId != currentPolicy.RevaluationSurplusAccountId ||
+            disposal.RetainedEarningsAccountId != currentPolicy.RetainedEarningsAccountId)
+        {
+            // Category and Finance settings are mutable. Posting new account mappings under an old
+            // approval would defeat maker-checker, so retire the stale request rather than rebuild it.
+            throw new StaleDisposalApprovalException(
+                "The revaluation-surplus disposal policy accounts changed after approval. Submit a new disposal request.");
+        }
     }
 
     private async Task<Account> ResolveDisposalAccountAsync(Guid? accountId, string label, params AccountType[] allowedTypes)
@@ -1032,6 +1128,9 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.AccumulatedDepreciationAtDisposal,
             disposal.AccumulatedImpairmentAtDisposal,
             disposal.RevaluationSurplusAtDisposal,
+            disposal.RevaluationSurplusAccountId,
+            disposal.RetainedEarningsAccountId,
+            disposal.RevaluationSurplusTransferAmount,
             disposal.NetBookValueAtDisposal,
             disposal.GainOrLoss,
             disposal.JournalEntryId,
@@ -1104,6 +1203,9 @@ public class AssetDisposalService : IAssetDisposalService
             AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
             AccumulatedImpairmentAtDisposal = d.AccumulatedImpairmentAtDisposal,
             RevaluationSurplusAtDisposal = d.RevaluationSurplusAtDisposal,
+            RevaluationSurplusAccountId = d.RevaluationSurplusAccountId,
+            RetainedEarningsAccountId = d.RetainedEarningsAccountId,
+            RevaluationSurplusTransferAmount = d.RevaluationSurplusTransferAmount,
             NetBookValueAtDisposal = d.NetBookValueAtDisposal,
             GainOrLoss = d.GainOrLoss,
             BuyerName = d.BuyerName,
@@ -1136,4 +1238,14 @@ public class AssetDisposalService : IAssetDisposalService
         decimal GainOrLoss,
         string ProceedsCurrencyCode,
         Guid? ProceedsAccountId);
+
+    private sealed record RevaluationSurplusTransferPreparation(
+        Guid? RevaluationSurplusAccountId,
+        Guid? RetainedEarningsAccountId);
+
+    /// <summary>
+    /// Identifies a checker decision whose reserve balance or account policy no longer matches
+    /// current authoritative data. Unlike a transient posting failure, it must not be retried.
+    /// </summary>
+    private sealed class StaleDisposalApprovalException(string message) : InvalidOperationException(message);
 }

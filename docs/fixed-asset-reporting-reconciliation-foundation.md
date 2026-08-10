@@ -100,6 +100,8 @@ The GL reconciliation report compares posted GL balances against fixed asset sub
 - disposal proceeds clearing accounts
 - disposal gain/loss accounts
 
+For revaluation surplus, the remaining subledger reserve is posted valuation surplus less completed whole-asset disposal transfers to retained earnings. This keeps an authorised `FIN-LIM-0041` equity transfer aligned with the reserve GL instead of reporting a false reconciliation variance.
+
 Each reconciliation row includes:
 
 - GL balance

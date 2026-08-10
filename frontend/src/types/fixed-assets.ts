@@ -460,6 +460,10 @@ export interface AssetDisposal {
   disposalCost: number;
   netBookValueAtDisposal: number;
   gainOrLoss: number;
+  revaluationSurplusAtDisposal: number;
+  revaluationSurplusAccountId?: string;
+  retainedEarningsAccountId?: string;
+  revaluationSurplusTransferAmount: number;
   buyerName?: string;
   referenceNumber?: string;
   requestedById?: string;
