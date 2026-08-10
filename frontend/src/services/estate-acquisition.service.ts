@@ -21,6 +21,7 @@ export type AcquisitionWorkspaceKind =
   | 'ownership-verification'
   | 'agreement-negotiation'
   | 'agreement-approval'
+  | 'vendor-payment'
   | 'execution'
   | 'statutory-consent'
   | 'statutory-consent-approval'
@@ -214,14 +215,15 @@ export const ACQUISITION_STAGES: LandAcquisitionStageDefinition[] = [
   stage(5, 'Ownership Verification', 'ownership-verification', '/LandParcel/OwnershipVerification', 'Compare ownership and cadastral boundaries, clear overlaps and encumbrances, and verify title, identity, searches, authority to sell, and ownership history.', 'Approve Ownership Verification', 'Reject Ownership Verification', 'Legal Manager', 24, 'POST', 5),
   stage(6, 'Agreement Negotiation', 'agreement-negotiation', '/LandParcel/AgreementNegotiation', 'Record offers, counteroffers, negotiated value, conditions, and negotiation notes.', 'Submit for Agreement Approval', 'Return Negotiation', 'Acquisition Committee', 32, 'POST', 6),
   stage(7, 'Agreement Approval', 'agreement-approval', '/LandParcel/AgreementApproval', 'Approve negotiated agreement terms before land instrument execution.', 'Approve Agreement', 'Reject Agreement', 'Executive Approver', 16, 'POST', 7),
-  stage(8, 'Land Instrument Execution', 'execution', '/LandParcel/Execution', 'Capture execution details for the conveyance, assignment, lease, or acquisition instrument.', 'Submit Executed Instrument', 'Return Execution', 'Legal Officer', 16, 'GET', 8),
-  stage(9, 'Statutory Consent', 'statutory-consent', '/LandParcel/StatutoryConsent', 'Prepare and submit statutory consent application to the appropriate authority.', 'Submit Statutory Consent', 'Return Consent Application', 'Lands Commission Liaison', 24, 'GET', 9),
-  stage(10, 'Statutory Consent Approval', 'statutory-consent-approval', '/LandParcel/StatutoryConsentApproval', 'Review statutory consent approval reference, conditions, approval date, and documents.', 'Approve Statutory Consent', 'Reject Statutory Consent', 'Legal Manager', 12, 'GET', 10),
-  stage(11, 'Stamp Duty Assessment', 'stamp-duty-assessment', '/LandParcel/StampDutyAssessment', 'Record valuation, assessed value, stamp duty amount, and assessment reference.', 'Submit Stamp Duty Assessment', 'Return Assessment', 'Finance Officer', 12, 'GET', 11),
-  stage(12, 'Stamp Duty Approval', 'stamp-duty-approval', '/LandParcel/StampDutyApproval', 'Approve the stamp duty assessment before payment is processed.', 'Approve Stamp Duty Assessment', 'Reject Stamp Duty Assessment', 'Finance Manager', 8, 'GET', 12),
-  stage(13, 'Stamp Duty Payment', 'stamp-duty-payment', '/LandParcel/StampDutyPaymentPage', 'Track the linked Accounts Payable request and continue after its payment is processed.', 'Confirm Accounts Payable Payment', 'Return Payment', 'Accounts Payable', 8, 'GET', 13),
-  stage(14, 'Registration', 'registration', '/LandParcel/RegistrationStage', 'Capture registry, registration number, volume, folio, instrument date, and archive details.', 'Submit Registration', 'Return Registration', 'Land Registry Officer', 24, 'GET', 14),
-  stage(15, 'Asset Creation', 'asset-creation', '/LandParcel/AssetCreation', 'Create the estate asset, assign asset code, GL account, capitalization value, and custodian.', 'Create Estate Asset', 'Return Asset Creation', 'Fixed Asset Officer', 12, 'GET', 15),
+  stage(8, 'Vendor Payment', 'vendor-payment', '/LandParcel/VendorPayment', 'Create the Accounts Payable request for the approved vendor consideration and confirm payment before instrument execution.', 'Confirm Vendor Payment', 'Return Vendor Payment', 'Accounts Payable', 8, 'GET', 8),
+  stage(9, 'Land Instrument Execution', 'execution', '/LandParcel/Execution', 'Capture execution details for the conveyance, assignment, lease, or acquisition instrument.', 'Submit Executed Instrument', 'Return Execution', 'Legal Officer', 16, 'GET', 9),
+  stage(10, 'Statutory Consent', 'statutory-consent', '/LandParcel/StatutoryConsent', 'Prepare and submit statutory consent application to the appropriate authority.', 'Submit Statutory Consent', 'Return Consent Application', 'Lands Commission Liaison', 24, 'GET', 10),
+  stage(11, 'Statutory Consent Approval', 'statutory-consent-approval', '/LandParcel/StatutoryConsentApproval', 'Review statutory consent approval reference, conditions, approval date, and documents.', 'Approve Statutory Consent', 'Reject Statutory Consent', 'Legal Manager', 12, 'GET', 11),
+  stage(12, 'Stamp Duty Assessment', 'stamp-duty-assessment', '/LandParcel/StampDutyAssessment', 'Record valuation, assessed value, stamp duty amount, and assessment reference.', 'Submit Stamp Duty Assessment', 'Return Assessment', 'Finance Officer', 12, 'GET', 12),
+  stage(13, 'Stamp Duty Approval', 'stamp-duty-approval', '/LandParcel/StampDutyApproval', 'Approve the stamp duty assessment before payment is processed.', 'Approve Stamp Duty Assessment', 'Reject Stamp Duty Assessment', 'Finance Manager', 8, 'GET', 13),
+  stage(14, 'Stamp Duty Payment', 'stamp-duty-payment', '/LandParcel/StampDutyPaymentPage', 'Track the linked Accounts Payable request and continue after its payment is processed.', 'Confirm Accounts Payable Payment', 'Return Payment', 'Accounts Payable', 8, 'GET', 14),
+  stage(15, 'Registration', 'registration', '/LandParcel/RegistrationStage', 'Capture registry, registration number, volume, folio, instrument date, and archive details.', 'Submit Registration', 'Return Registration', 'Land Registry Officer', 24, 'GET', 15),
+  stage(16, 'Asset Creation', 'asset-creation', '/LandParcel/AssetCreation', 'Create the estate asset, assign asset code, GL account, capitalization value, and custodian.', 'Create Estate Asset', 'Return Asset Creation', 'Fixed Asset Officer', 12, 'GET', 16),
 ];
 
 const tf = (
@@ -448,6 +450,28 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
   },
   8: {
     documents: [
+      { key: 'vendor-payment-approval', name: 'Approved Vendor Payment Request', type: 'Finance' },
+      { key: 'vendor-payment-evidence', name: 'Vendor Payment Evidence', type: 'Payment Evidence' },
+      { key: 'vendor-receipt', name: 'Vendor Receipt / Acknowledgement', type: 'Receipt' },
+    ],
+    checklist: [
+      { name: 'Vendor payable created', description: 'The approved vendor consideration has been converted into an Accounts Payable invoice.' },
+      { name: 'Vendor payment processed', description: 'The linked AP invoice has been paid before instrument execution.' },
+    ],
+    fields: [
+      tf('vendorName', 'Vendor / Seller'),
+      tf('agreedAmount', 'Agreed Amount', WorkflowFieldType.Number),
+      tf('accountsPayableInvoiceNumber', 'Accounts Payable Invoice'),
+      tf('accountsPayableInvoiceStatus', 'Invoice Status'),
+      tf('accountsPayablePaymentNumber', 'Accounts Payable Payment'),
+      tf('accountsPayablePaymentStatus', 'Payment Status'),
+      tf('paymentReference', 'Payment Reference'),
+      tf('paymentDate', 'Payment Date', WorkflowFieldType.Date),
+      tf('amountPaid', 'Amount Paid', WorkflowFieldType.Number),
+    ],
+  },
+  9: {
+    documents: [
       { key: 'executed-instrument', name: 'Executed Instrument', type: 'Instrument' },
       { key: 'witness-page', name: 'Witness Page', type: 'Witness' },
       { key: 'counterparty-id', name: 'Counterparty Identification', type: 'Identity' },
@@ -465,7 +489,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('isExecuted', 'Instrument Executed', WorkflowFieldType.Boolean),
     ],
   },
-  9: {
+  10: {
     documents: [
       { key: 'consent-application', name: 'Consent Application', type: 'Application' },
       { key: 'supporting-land-documents', name: 'Supporting Land Documents', type: 'Supporting Document' },
@@ -482,7 +506,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('consentNotes', 'Consent Notes', WorkflowFieldType.TextArea),
     ],
   },
-  10: {
+  11: {
     documents: [
       { key: 'consent-approval-letter', name: 'Consent Approval Letter', type: 'Approval' },
       { key: 'conditions-schedule', name: 'Consent Conditions Schedule', type: 'Conditions' },
@@ -497,7 +521,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('consentConditions', 'Consent Conditions', WorkflowFieldType.TextArea),
     ],
   },
-  11: {
+  12: {
     documents: [
       { key: 'valuation-report', name: 'Valuation Report', type: 'Valuation' },
       { key: 'stamp-duty-assessment-notice', name: 'Stamp Duty Assessment Notice', type: 'Assessment' },
@@ -514,7 +538,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('assessmentDate', 'Assessment Date', WorkflowFieldType.Date),
     ],
   },
-  12: {
+  13: {
     documents: [
       { key: 'finance-approval-memo', name: 'Finance Approval Memo', type: 'Finance' },
       { key: 'approved-assessment-notice', name: 'Approved Assessment Notice', type: 'Assessment' },
@@ -530,7 +554,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('approvalNotes', 'Approval Notes', WorkflowFieldType.TextArea),
     ],
   },
-  13: {
+  14: {
     documents: [
       { key: 'payment-receipt', name: 'Payment Receipt', type: 'Receipt' },
       { key: 'bank-payment-evidence', name: 'Bank Payment Evidence', type: 'Payment Evidence' },
@@ -552,7 +576,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('paymentMethod', 'Payment Method', WorkflowFieldType.Select, true, ['Bank Transfer', 'Cheque', 'Cash', 'Mobile Money']),
     ],
   },
-  14: {
+  15: {
     documents: [
       { key: 'registration-certificate', name: 'Lands Commission Registration Certificate', type: 'Certificate' },
       { key: 'registered-instrument', name: 'Registered Instrument', type: 'Instrument' },
@@ -570,7 +594,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('registrationDate', 'Registration Date', WorkflowFieldType.Date),
     ],
   },
-  15: {
+  16: {
     documents: [
       { key: 'asset-creation-memo', name: 'Asset Creation Memo', type: 'Memo' },
       { key: 'capitalization-approval', name: 'GL / Capitalization Approval', type: 'Finance' },

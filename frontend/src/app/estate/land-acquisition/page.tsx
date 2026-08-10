@@ -96,7 +96,7 @@ const ProcedurePdfViewer = dynamic(
   { ssr: false }
 );
 
-const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 10, 12]);
+const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 11, 13]);
 
 type FieldType =
   | 'text'
@@ -152,6 +152,7 @@ const stageIcons: Record<
   'ownership-verification': FileCheck2,
   'agreement-negotiation': WalletCards,
   'agreement-approval': BadgeCheck,
+  'vendor-payment': WalletCards,
   execution: FileSignature,
   'statutory-consent': Landmark,
   'statutory-consent-approval': CheckCircle2,
@@ -510,6 +511,25 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       undefined,
       2
     ),
+  ],
+  'vendor-payment': [
+    field('vendorName', 'Vendor / Seller', 'text', undefined, 1, true),
+    field('paymentPurpose', 'Payment Purpose', 'text', undefined, 1, true),
+    field('agreedAmount', 'Agreed Amount', 'text', undefined, 1, true),
+    field('vendorPaymentDueDate', 'Payment Due Date', 'date', undefined, 1, true),
+    field('vendorPaymentMethod', 'Agreement Payment Method', 'text', undefined, 1, true),
+    field('boardApprovalReference', 'Approval Reference', 'text', undefined, 1, true),
+    field('accountsPayableInvoiceNumber', 'AP Invoice', 'text', undefined, 1, true),
+    field('accountsPayableInvoiceStatus', 'Invoice Status', 'text', undefined, 1, true),
+    field('accountsPayablePaymentNumber', 'AP Payment', 'text', undefined, 1, true),
+    field('accountsPayablePaymentStatus', 'Payment Status', 'text', undefined, 1, true),
+    field('receiptNumber', 'Receipt Number', 'text', undefined, 1, true),
+    field('paymentReference', 'Payment Reference', 'text', undefined, 1, true),
+    field('paymentDate', 'Payment Date', 'date', undefined, 1, true),
+    field('amountPaid', 'Amount Paid', 'text', undefined, 1, true),
+    field('paymentMethod', 'Processed Payment Method', 'text', undefined, 1, true),
+    field('isPaid', 'Paid', 'check', undefined, 1, true),
+    field('paymentNotes', 'Payment Notes', 'textarea', undefined, 2, true),
   ],
   execution: [
     field('instrumentType', 'Instrument Type', 'select', [
@@ -919,6 +939,46 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
   ],
+  'vendor-payment': [
+    {
+      title: 'Approved vendor consideration',
+      description:
+        'Review the seller, approved amount, due date, payment method, and approval reference from the negotiated agreement.',
+      keys: [
+        'vendorName',
+        'paymentPurpose',
+        'agreedAmount',
+        'vendorPaymentDueDate',
+        'vendorPaymentMethod',
+        'boardApprovalReference',
+      ],
+    },
+    {
+      title: 'Accounts Payable status',
+      description:
+        'Create the AP request and process the vendor payment before moving to instrument execution.',
+      keys: [
+        'accountsPayableInvoiceNumber',
+        'accountsPayableInvoiceStatus',
+        'accountsPayablePaymentNumber',
+        'accountsPayablePaymentStatus',
+      ],
+    },
+    {
+      title: 'Processed vendor payment',
+      description:
+        'Payment evidence is synchronized from Accounts Payable after the vendor payment is completed.',
+      keys: [
+        'receiptNumber',
+        'paymentReference',
+        'paymentDate',
+        'amountPaid',
+        'paymentMethod',
+        'isPaid',
+        'paymentNotes',
+      ],
+    },
+  ],
   execution: [
     {
       title: 'Instrument execution',
@@ -1124,7 +1184,7 @@ function defaultsFor(
 }
 
 function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: WorkspaceValues) {
-  if (kind === 'stamp-duty-payment') {
+  if (kind === 'vendor-payment' || kind === 'stamp-duty-payment') {
     const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
     const paid = values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
     if (!invoiceId) return [field('accountsPayableRequest', 'Accounts Payable Request')];
@@ -3158,6 +3218,11 @@ function WorkspaceDialog({
   const accountsPayablePaid =
     Boolean(accountsPayableInvoiceId) &&
     (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+  const isAccountsPayableWorkspace =
+    stage.workspaceKind === 'vendor-payment' ||
+    stage.workspaceKind === 'stamp-duty-payment';
+  const accountsPayableSubject =
+    stage.workspaceKind === 'vendor-payment' ? 'vendor payment' : 'stamp duty payment';
   const isPublishedAssetWorkspace =
     stage.workspaceKind === 'asset-creation' && item.status === 'Approved';
   const workspaceCanEdit = canEdit && !isPublishedAssetWorkspace;
@@ -3222,7 +3287,7 @@ function WorkspaceDialog({
       invoiceId: accountsPayableInvoiceId,
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
-      description: `Stamp duty payment for ${item.projectReference}`,
+      description: `${accountsPayableSubject} for ${item.projectReference}`,
     });
     router.push(`/finance/ap/payments/create?${params.toString()}`);
   };
@@ -3560,7 +3625,7 @@ function WorkspaceDialog({
                 }
               />
             )}
-            {stage.workspaceKind === 'stamp-duty-payment' && (
+            {isAccountsPayableWorkspace && (
               <section className="rounded-lg border bg-card p-4">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
@@ -3579,7 +3644,9 @@ function WorkspaceDialog({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {accountsPayableInvoiceId
                         ? `Invoice ${values.accountsPayableInvoiceNumber || accountsPayableInvoiceId} is the payment source for this acquisition.`
-                        : 'Create the payable from the approved stamp duty assessment before processing payment.'}
+                        : stage.workspaceKind === 'vendor-payment'
+                          ? 'Create the payable from the approved agreement amount before processing vendor payment.'
+                          : 'Create the payable from the approved stamp duty assessment before processing payment.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
