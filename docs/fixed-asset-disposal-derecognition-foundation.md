@@ -42,7 +42,7 @@ Whole-asset write-off/no-proceeds disposal:
 
 Unsupported and rejected or deferred:
 
-- Partial/component disposal.
+- Partial/component disposal was added later under `FIN-LIM-0042`; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
 - Foreign-currency disposal proceeds.
 - Sale proceeds through AR invoice, cash/bank receipt, or tax document creation.
 - Final/partial-period depreciation at disposal is now implemented under `FIN-LIM-0039`; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
@@ -335,7 +335,7 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 - `FIN-LIM-0039`: resolved by controlled disposal-date depreciation; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
 - `FIN-LIM-0041`: resolved for full remaining asset-specific surplus transfer directly to retained earnings on whole-asset disposal.
-- `FIN-LIM-0042`: opened for partial/component disposal.
+- `FIN-LIM-0042`: resolved by controlled proportional partial/component derecognition; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
 - `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open and is the natural next batch.
 

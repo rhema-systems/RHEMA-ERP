@@ -92,6 +92,23 @@ namespace ErpSystem.Core.Enums
         DamageTheft = 4
     }
 
+    /// <summary>
+    /// Identifies whether derecognition removes the complete asset or only an evidenced portion.
+    /// Component and percentage disposals share the same allocation engine, but a component also
+    /// requires a stable business reference so Finance can explain exactly what left service.
+    /// </summary>
+    public enum AssetDisposalScope
+    {
+        [Display(Name = "Whole Asset")]
+        WholeAsset = 1,
+
+        [Display(Name = "Partial Portion")]
+        PartialPortion = 2,
+
+        [Display(Name = "Identified Component")]
+        Component = 3
+    }
+
     public enum AssetTransferStatus
     {
         [Display(Name = "Draft")]

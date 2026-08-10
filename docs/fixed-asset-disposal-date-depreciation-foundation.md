@@ -54,7 +54,7 @@ therefore see the final charge without a parallel report path or a synthetic sec
 
 ## Deliberate boundaries
 
-- Partial/component disposal remains `FIN-LIM-0042`.
+- Partial/component disposal is now resolved under `FIN-LIM-0042`; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
 - Foreign-currency disposal proceeds remain `FIN-LIM-0043`.
 - Sale invoice, tax, AR, and cash/bank settlement integration remains `FIN-LIM-0040`.
 - Existing development records are not backfilled; only new disposal requests use this evidence.

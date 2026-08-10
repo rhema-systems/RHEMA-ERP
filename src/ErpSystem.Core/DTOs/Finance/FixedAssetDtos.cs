@@ -514,6 +514,12 @@ public class AssetDisposalDto
     public DateTime DisposalDate { get; set; }
     public DisposalType DisposalType { get; set; }
     public AssetDisposalStatus Status { get; set; }
+    public AssetDisposalScope DisposalScope { get; set; }
+    public decimal DisposedPortionPercent { get; set; }
+    public string? ComponentReference { get; set; }
+    public string? ComponentDescription { get; set; }
+    public string? AllocationEvidenceReference { get; set; }
+    public string? AllocationEvidenceNotes { get; set; }
     public DateTime? AccountingDate { get; set; }
     public Guid? FiscalPeriodId { get; set; }
     public Guid? AccountingBookId { get; set; }
@@ -525,6 +531,11 @@ public class AssetDisposalDto
     public string ProceedsCurrencyCode { get; set; } = "GHS";
     public Guid? ProceedsAccountId { get; set; }
     public decimal CostAtDisposal { get; set; }
+    public decimal AcquisitionCostAllocated { get; set; }
+    public decimal RevaluationAdjustmentAllocated { get; set; }
+    public decimal ResidualValueAllocated { get; set; }
+    public decimal ProductionCapacityAllocated { get; set; }
+    public decimal AccumulatedProductionUnitsAllocated { get; set; }
     public decimal AccumulatedDepreciationAtDisposal { get; set; }
     public decimal FinalDepreciationAmount { get; set; }
     public DateTime? FinalDepreciationFromDate { get; set; }
@@ -548,6 +559,9 @@ public class AssetDisposalDto
     public decimal RevaluationSurplusTransferAmount { get; set; }
     public decimal NetBookValueAtDisposal { get; set; }
     public decimal GainOrLoss { get; set; }
+    public decimal RemainingAcquisitionCostAfterDisposal { get; set; }
+    public decimal RemainingAccumulatedDepreciationAfterDisposal { get; set; }
+    public decimal RemainingNetBookValueAfterDisposal { get; set; }
     public string? BuyerName { get; set; }
     public string? ReferenceNumber { get; set; }
     public Guid? RequestedById { get; set; }
@@ -572,6 +586,12 @@ public class RequestAssetDisposalDto
     public Guid FixedAssetId { get; set; }
     public DateTime DisposalDate { get; set; }
     public DisposalType DisposalType { get; set; }
+    public AssetDisposalScope DisposalScope { get; set; } = AssetDisposalScope.WholeAsset;
+    public decimal DisposedPortionPercent { get; set; } = 100m;
+    public string? ComponentReference { get; set; }
+    public string? ComponentDescription { get; set; }
+    public string? AllocationEvidenceReference { get; set; }
+    public string? AllocationEvidenceNotes { get; set; }
     public string? Reason { get; set; }
     public decimal SaleProceeds { get; set; }
     public decimal DisposalCost { get; set; }

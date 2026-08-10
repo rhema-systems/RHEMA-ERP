@@ -108,7 +108,7 @@ This slice resolves only `FIN-LIM-0041`. The following remain separately control
 
 - `FIN-LIM-0039`: resolved by automatic final/partial-period depreciation through disposal date;
 - `FIN-LIM-0040`: VAT, AR and cash/bank integration for sale proceeds;
-- `FIN-LIM-0042`: component or partial disposal; and
+- `FIN-LIM-0042`: proportional component or partial disposal is now resolved; and
 - `FIN-LIM-0043`: foreign-currency disposal proceeds.
 
 The migration must be applied to the target database and representative TDC data must complete UAT before production use.

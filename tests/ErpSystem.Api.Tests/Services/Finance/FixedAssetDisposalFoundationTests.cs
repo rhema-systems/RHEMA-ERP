@@ -223,6 +223,112 @@ public sealed class FixedAssetDisposalFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
     [Trait("Category", "FixedAssets")]
+    public async Task PartialDisposalAllocatesPostingLayersAndKeepsRemainderActive()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(
+            db, tenantId, acquisitionCost: 1200m, accumulatedDepreciation: 200m, netBookValue: 1000m);
+        var services = CreateServices(db, tenantId);
+        var request = RequestWriteOff(fixture.Asset.Id);
+        request.DisposalScope = AssetDisposalScope.PartialPortion;
+        request.DisposedPortionPercent = 25m;
+        request.AllocationEvidenceReference = "TDC-ENG-2026-041";
+        request.AllocationEvidenceNotes = "Engineering quantity survey identifies one quarter of the installation.";
+
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, request);
+
+        completed.DisposalScope.Should().Be(AssetDisposalScope.PartialPortion);
+        completed.DisposedPortionPercent.Should().Be(25m);
+        completed.AcquisitionCostAllocated.Should().Be(300m);
+        completed.AccumulatedDepreciationAtDisposal.Should().Be(58.07m);
+        completed.NetBookValueAtDisposal.Should().Be(241.93m);
+        completed.RemainingAcquisitionCostAfterDisposal.Should().Be(900m);
+        completed.FinalDepreciationAmount.Should().Be(8.07m);
+        completed.RemainingAccumulatedDepreciationAfterDisposal.Should().Be(150m);
+        completed.RemainingNetBookValueAfterDisposal.Should().Be(750m);
+
+        var asset = await db.FixedAssets.Include(a => a.BookValues).SingleAsync(a => a.Id == fixture.Asset.Id);
+        asset.Status.Should().Be(FixedAssetStatus.Active);
+        asset.DisposalDate.Should().BeNull();
+        asset.AcquisitionCost.Should().Be(900m);
+        asset.NetBookValue.Should().Be(750m);
+        asset.BookValues.Single().AccumulatedDepreciation.Should().Be(150m);
+
+        var lines = await PostedLinesAsync(db);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.DepreciationExpense.Id, DebitAmount = 8.07m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.AccumulatedDepreciation.Id, DebitAmount = 58.07m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.LossOnDisposal.Id, DebitAmount = 241.93m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 300m });
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetPartialDisposalAllocationCalculated)).Should().Be(1);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetPartialDisposalAllocationPosted)).Should().Be(1);
+
+        // The disposal-linked schedule covers only the portion that left service. The ordinary
+        // period run must still calculate the retained asset's charge instead of treating the
+        // disposal schedule as a duplicate full-asset schedule.
+        var retainedSchedules = await services.Depreciation.RunDepreciationAsync(new RunDepreciationDto
+        {
+            FiscalPeriodId = fixture.OpenPeriod.Id,
+            FixedAssetId = fixture.Asset.Id,
+            PostToGl = false
+        });
+        retainedSchedules.Should().ContainSingle();
+        retainedSchedules.Single().DepreciationAmount.Should().Be(75m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ComponentDisposalRequiresAndPersistsComponentAllocationEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var request = RequestWriteOff(fixture.Asset.Id);
+        request.DisposalScope = AssetDisposalScope.Component;
+        request.DisposedPortionPercent = 20m;
+
+        var missingEvidence = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+        await missingEvidence.Should().ThrowAsync<InvalidOperationException>().WithMessage("*allocation evidence*");
+
+        request.ComponentReference = "LIFT-MOTOR-01";
+        request.ComponentDescription = "East-wing lift traction motor";
+        request.AllocationEvidenceReference = "VALUATION-TDC-2026-109";
+        var requested = await services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        requested.DisposalScope.Should().Be(AssetDisposalScope.Component);
+        requested.ComponentReference.Should().Be("LIFT-MOTOR-01");
+        requested.ComponentDescription.Should().Be("East-wing lift traction motor");
+        requested.AllocationEvidenceReference.Should().Be("VALUATION-TDC-2026-109");
+        requested.DisposedPortionPercent.Should().Be(20m);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100)]
+    [InlineData(120)]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task PartialDisposalRejectsInvalidPercentage(decimal percentage)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var request = RequestWriteOff(fixture.Asset.Id);
+        request.DisposalScope = AssetDisposalScope.PartialPortion;
+        request.DisposedPortionPercent = percentage;
+        request.AllocationEvidenceReference = "ALLOC-001";
+
+        var act = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*percentage*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
     public async Task AccumulatedImpairmentIsClearedThroughDerecognitionLines()
     {
         var tenantId = Guid.NewGuid();
