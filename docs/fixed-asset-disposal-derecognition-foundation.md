@@ -98,7 +98,7 @@ Disposal gain is not classified as revenue. The current chart-of-account enum ha
 
 ## Revaluation Surplus Handling
 
-Batch 21C does not recycle revaluation surplus through profit or loss. Disposal journals do not post to the revaluation surplus account. Equity transfer policy is tracked as `FIN-LIM-0041`.
+The original Batch 21C did not recycle revaluation surplus through profit or loss. The `FIN-LIM-0041` follow-up now transfers the full remaining posted asset-specific surplus directly from the category revaluation-surplus account to the tenant retained-earnings account within the same disposal journal. The approved accounts and amount are frozen on the disposal record, rechecked before posting, and remain entirely outside disposal gain/loss. See `docs/fixed-asset-disposal-revaluation-surplus-policy-foundation.md`.
 
 ## Depreciation Interaction
 
@@ -322,7 +322,10 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 | Cross-tenant disposal account rejected | `CrossTenantDisposalAccountRejected` |
 | Duplicate disposal is idempotent or safely rejected | `DuplicateDisposalIsIdempotentOrSafelyRejected` |
 | Missing required depreciation blocks disposal | `DisposalWithMissingRequiredDepreciationIsRejected` |
-| Revaluation surplus is not recycled to P&L | `RevaluationSurplusIsNotRecycledToProfitAndLoss` |
+| Revaluation surplus transfers within equity and never affects P&L | `RevaluationSurplusTransfersDirectlyToRetainedEarningsWithoutAffectingProfitAndLoss` |
+| Missing retained-earnings policy blocks applicable disposal | `RevaluedAssetDisposalRequiresConfiguredRetainedEarningsAccount` |
+| Changed policy account invalidates stale approval | `ChangedSurplusPolicyAccountCancelsStaleDisposalApproval` |
+| Changed asset-specific reserve invalidates stale approval | `ChangedRevaluationSurplusBalanceCancelsStaleDisposalApproval` |
 | Foreign-currency proceeds rejected clearly | `ForeignCurrencyProceedsRejectedClearly` |
 | Disposal audit events are emitted | `DisposalAuditEventsAreEmitted` |
 
@@ -331,7 +334,7 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 - `FIN-LIM-0026`: resolved for whole-asset sale/write-off disposal foundation.
 - `FIN-LIM-0039`: opened for final/partial-period depreciation on disposal.
 - `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
-- `FIN-LIM-0041`: opened for revaluation surplus equity transfer policy.
+- `FIN-LIM-0041`: resolved for full remaining asset-specific surplus transfer directly to retained earnings on whole-asset disposal.
 - `FIN-LIM-0042`: opened for partial/component disposal.
 - `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open and is the natural next batch.

@@ -201,7 +201,7 @@ export default function AssetDisposalsPage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Asset Disposals</h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Manage asset retirement, sales, and scrap processes.</p>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">Control derecognition, gain/loss, proceeds, and direct revaluation-reserve transfer within equity.</p>
                 </div>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
@@ -214,7 +214,7 @@ export default function AssetDisposalsPage() {
                         <DialogHeader>
                             <DialogTitle className="text-xl">Request Asset Disposal</DialogTitle>
                             <DialogDescription>
-                                Initiate the retirement or sale of a fixed asset.
+                                Initiate the retirement or sale of a fixed asset. Any remaining asset-specific revaluation surplus is transferred directly to retained earnings after approval, never through profit or loss.
                             </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleRequestDisposal} className="space-y-4 py-4">
@@ -412,6 +412,7 @@ export default function AssetDisposalsPage() {
                                 <TableHead className="font-semibold text-right">NBV</TableHead>
                                 <TableHead className="font-semibold text-right">Proceeds</TableHead>
                                 <TableHead className="font-semibold text-right">Gain/Loss</TableHead>
+                                <TableHead className="font-semibold text-right">Equity Transfer</TableHead>
                                 <TableHead className="font-semibold">Status</TableHead>
                                 <TableHead className="text-right font-semibold">Actions</TableHead>
                             </TableRow>
@@ -419,7 +420,7 @@ export default function AssetDisposalsPage() {
                         <TableBody>
                             {filteredDisposals.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={9} className="h-48 text-center text-slate-400">
+                                    <TableCell colSpan={10} className="h-48 text-center text-slate-400">
                                         <div className="flex flex-col items-center justify-center">
                                             <Trash2 className="h-10 w-10 mb-2 opacity-20" />
                                             <p>No asset disposals found matching your search.</p>
@@ -444,6 +445,14 @@ export default function AssetDisposalsPage() {
                                         <TableCell className="text-right text-sm">₵ {disposal.saleProceeds.toLocaleString()}</TableCell>
                                         <TableCell className={`text-right text-sm font-semibold ${disposal.gainOrLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                             ₵ {Math.abs(disposal.gainOrLoss).toLocaleString()}
+                                        </TableCell>
+                                        <TableCell className="text-right text-sm">
+                                            {disposal.revaluationSurplusTransferAmount > 0 ? (
+                                                <div className="flex flex-col">
+                                                    <span className="font-semibold text-indigo-700">₵ {disposal.revaluationSurplusTransferAmount.toLocaleString()}</span>
+                                                    <span className="text-[11px] text-slate-500">reserve → retained earnings</span>
+                                                </div>
+                                            ) : '—'}
                                         </TableCell>
                                         <TableCell>{getStatusBadge(disposal.status)}</TableCell>
                                         <TableCell className="text-right">

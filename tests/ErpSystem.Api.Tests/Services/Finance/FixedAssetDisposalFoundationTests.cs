@@ -345,7 +345,7 @@ public sealed class FixedAssetDisposalFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
     [Trait("Category", "FixedAssets")]
-    public async Task RevaluationSurplusIsNotRecycledToProfitAndLoss()
+    public async Task RevaluationSurplusTransfersDirectlyToRetainedEarningsWithoutAffectingProfitAndLoss()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -354,11 +354,88 @@ public sealed class FixedAssetDisposalFoundationTests
         await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId);
 
-        await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
 
         var lines = await PostedLinesAsync(db);
-        lines.Should().NotContain(l => l.AccountId == fixture.Accounts.RevaluationSurplus.Id);
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.RevaluationSurplus.Id, DebitAmount = 300m, CreditAmount = 0m });
+        lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.RetainedEarnings.Id, DebitAmount = 0m, CreditAmount = 300m });
         lines.Should().ContainEquivalentOf(new { AccountId = fixture.Accounts.Asset.Id, DebitAmount = 0m, CreditAmount = 1500m });
+        completed.GainOrLoss.Should().Be(-1300m);
+        completed.RevaluationSurplusTransferAmount.Should().Be(300m);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.FixedAssetDisposalRevaluationSurplusTransferred)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task RevaluedAssetDisposalRequiresConfiguredRetainedEarningsAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId, netBookValue: 1300m);
+        SeedPostedRevaluation(db, fixture, surplus: 300m);
+        (await db.FinanceSettings.SingleAsync()).RetainedEarningsAccountId = null;
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+
+        var act = () => services.Disposals.RequestDisposalAsync(RequestWriteOff(fixture.Asset.Id), fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*retained earnings disposal-transfer account is required*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedSurplusPolicyAccountCancelsStaleDisposalApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId, netBookValue: 1300m);
+        SeedPostedRevaluation(db, fixture, surplus: 300m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var approved = await RequestAndApproveAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+
+        // Finance configuration can change legitimately, but an old checker decision must never
+        // be silently rebuilt with the replacement retained-earnings account.
+        var replacementRetainedEarnings = SeedAccount(db, tenantId, "3199", AccountType.Equity);
+        (await db.FinanceSettings.SingleAsync()).RetainedEarningsAccountId = replacementRetainedEarnings.Id;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*policy accounts changed*");
+        var cancelled = await db.AssetDisposals.SingleAsync(d => d.Id == approved.Id);
+        cancelled.Status.Should().Be(AssetDisposalStatus.Cancelled);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedRevaluationSurplusBalanceCancelsStaleDisposalApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId, netBookValue: 1300m);
+        SeedPostedRevaluation(db, fixture, surplus: 300m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var approved = await RequestAndApproveAsync(services.Disposals, fixture, RequestWriteOff(fixture.Asset.Id));
+
+        // A posted valuation after checker approval changes the equity reserve that the disposal
+        // would derecognise. The service must invalidate the stale approval instead of silently
+        // transferring an amount that the checker never reviewed.
+        SeedPostedRevaluation(db, fixture, surplus: 50m);
+        await db.SaveChangesAsync();
+
+        var act = () => services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*revaluation surplus changed*");
+        var cancelled = await db.AssetDisposals.SingleAsync(d => d.Id == approved.Id);
+        cancelled.Status.Should().Be(AssetDisposalStatus.Cancelled);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -584,7 +661,8 @@ public sealed class FixedAssetDisposalFoundationTests
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            BaseCurrency = "GHS"
+            BaseCurrency = "GHS",
+            RetainedEarningsAccountId = accounts.RetainedEarnings.Id
         });
 
         var category = new FixedAssetCategory
@@ -862,7 +940,8 @@ public sealed class FixedAssetDisposalFoundationTests
             SeedAccount(db, tenantId, $"32{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Equity),
             SeedAccount(db, tenantId, $"78{codePrefix[..Math.Min(2, codePrefix.Length)]}3", AccountType.Expense),
             SeedAccount(db, tenantId, $"78{codePrefix[..Math.Min(2, codePrefix.Length)]}4", AccountType.Expense),
-            SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}8", AccountType.Asset));
+            SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}8", AccountType.Asset),
+            SeedAccount(db, tenantId, $"31{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Equity));
     }
 
     private static Account SeedAccount(ApplicationDbContext db, Guid tenantId, string accountNumber, AccountType accountType)
@@ -910,5 +989,6 @@ public sealed class FixedAssetDisposalFoundationTests
         Account RevaluationSurplus,
         Account RevaluationLoss,
         Account ImpairmentLoss,
-        Account AccumulatedImpairment);
+        Account AccumulatedImpairment,
+        Account RetainedEarnings);
 }

@@ -527,6 +527,9 @@ public class AssetDisposalDto
     public decimal AccumulatedDepreciationAtDisposal { get; set; }
     public decimal AccumulatedImpairmentAtDisposal { get; set; }
     public decimal RevaluationSurplusAtDisposal { get; set; }
+    public Guid? RevaluationSurplusAccountId { get; set; }
+    public Guid? RetainedEarningsAccountId { get; set; }
+    public decimal RevaluationSurplusTransferAmount { get; set; }
     public decimal NetBookValueAtDisposal { get; set; }
     public decimal GainOrLoss { get; set; }
     public string? BuyerName { get; set; }

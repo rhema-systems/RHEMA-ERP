@@ -384,6 +384,7 @@ public static class FinanceAuditEvents
     public const string FixedAssetDisposalPostingFailed = "Finance.FixedAsset.DisposalPostingFailed";
     public const string FixedAssetWrittenOff = "Finance.FixedAsset.WrittenOff";
     public const string FixedAssetDisposalSaleProceedsRecorded = "Finance.FixedAsset.DisposalSaleProceedsRecorded";
+    public const string FixedAssetDisposalRevaluationSurplusTransferred = "Finance.FixedAsset.DisposalRevaluationSurplusTransferred";
     public const string FixedAssetDisposalBlockedClosedPeriod = "Finance.FixedAsset.DisposalBlockedClosedPeriod";
     public const string FixedAssetDisposalBlockedMissingDepreciation = "Finance.FixedAsset.DisposalBlockedMissingDepreciation";
     public const string FixedAssetDisposalBlockedInvalidTenantAccountProceeds = "Finance.FixedAsset.DisposalBlockedInvalidTenantAccountProceeds";

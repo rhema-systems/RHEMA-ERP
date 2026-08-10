@@ -75,7 +75,7 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 | Cross-tenant disposal account rejected | `CrossTenantDisposalAccountRejected` |
 | Duplicate disposal is idempotent/safe | `DuplicateDisposalIsIdempotentOrSafelyRejected` |
 | Missing required depreciation blocks disposal | `DisposalWithMissingRequiredDepreciationIsRejected` |
-| Revaluation surplus is not recycled to P&L | `RevaluationSurplusIsNotRecycledToProfitAndLoss` |
+| Revaluation surplus transfers within equity and never affects P&L | `RevaluationSurplusTransfersDirectlyToRetainedEarningsWithoutAffectingProfitAndLoss` |
 | Foreign-currency proceeds rejected clearly | `ForeignCurrencyProceedsRejectedClearly` |
 | Disposal audit events are emitted | `DisposalAuditEventsAreEmitted` |
 
@@ -102,7 +102,7 @@ Results:
 - Whole-asset write-off/no-proceeds disposal derecognizes carrying amount and recognizes write-off loss.
 - Accumulated depreciation and accumulated impairment are cleared through derecognition lines.
 - Acquisition cost, prior depreciation schedules, prior valuation/impairment records, and acquisition FX snapshots are not rewritten.
-- Revaluation surplus is not recycled to profit or loss.
+- Revaluation surplus is not recycled to profit or loss. The later `FIN-LIM-0041` slice now transfers the remaining asset-specific reserve directly to retained earnings in the same disposal journal.
 
 ## Supported Disposal Behavior
 
@@ -117,7 +117,7 @@ Unsupported and tracked:
 
 - Final/partial-period depreciation on disposal: `FIN-LIM-0039`.
 - Disposal sale VAT/AR/cash integration: `FIN-LIM-0040`.
-- Revaluation surplus equity transfer policy: `FIN-LIM-0041`.
+- Revaluation surplus equity transfer policy: resolved by the follow-up documented in `docs/fixed-asset-disposal-revaluation-surplus-policy-foundation.md`.
 - Partial/component disposal: `FIN-LIM-0042`.
 - Foreign-currency disposal proceeds: `FIN-LIM-0043`.
 
@@ -175,7 +175,7 @@ Implemented/emitted where applicable:
 - `FIN-LIM-0026`: resolved for whole-asset disposal/write-off foundation.
 - `FIN-LIM-0039`: opened for final/partial-period depreciation on disposal.
 - `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
-- `FIN-LIM-0041`: opened for revaluation surplus equity transfer policy.
+- `FIN-LIM-0041`: resolved by the dedicated whole-asset disposal equity-transfer policy slice.
 - `FIN-LIM-0042`: opened for partial/component disposal.
 - `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open.

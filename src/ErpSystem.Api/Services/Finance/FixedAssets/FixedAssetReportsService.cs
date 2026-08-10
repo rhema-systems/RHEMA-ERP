@@ -344,6 +344,7 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                 AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
                 AccumulatedImpairmentAtDisposal = d.AccumulatedImpairmentAtDisposal,
                 RevaluationSurplusAtDisposal = d.RevaluationSurplusAtDisposal,
+                RevaluationSurplusTransferAmount = d.RevaluationSurplusTransferAmount,
                 NetBookValue = d.NetBookValueAtDisposal,
                 GainLoss = d.GainOrLoss,
                 BuyerName = d.BuyerName,
@@ -556,7 +557,11 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             if (category.RevaluationSurplusAccountId.HasValue)
             {
                 AddReconciliationRow(rows, diagnostics, "Revaluation Surplus", category.RevaluationSurplusAccountId.Value, accounts, glLines,
-                    RoundMoney(valuations.Where(v => assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied)),
+                    // Completed disposal transfers reduce the asset-specific reserve directly in
+                    // equity. Subtract the retained transfer evidence so subledger reconciliation
+                    // follows the same balance as the posted revaluation-surplus account.
+                    RoundMoney(valuations.Where(v => assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied)
+                        - disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.RevaluationSurplusTransferAmount)),
                     valuations.Count(v => v.ValuationType == ValuationType.Revaluation && assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)),
                     0,
                     0,
