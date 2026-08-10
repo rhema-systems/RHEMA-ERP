@@ -17,12 +17,13 @@ import { cn } from "@/lib/utils";
 import { format } from 'date-fns';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { maintenanceDataService, Employee } from '@/services/maintenanceDataService';
-import { AssetTransfer, AssetTransferStatus, RequestAssetTransferDto, FixedAsset } from '@/types/fixed-assets';
+import { AssetTransfer, AssetTransferStatus, AssetTransferType, RequestAssetTransferDto, FixedAsset, FixedAssetCategory } from '@/types/fixed-assets';
 import { useToast } from "@/components/ui/use-toast";
 
 export default function AssetTransfersPage() {
     const [transfers, setTransfers] = useState<AssetTransfer[]>([]);
     const [assets, setAssets] = useState<FixedAsset[]>([]);
+    const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -35,7 +36,14 @@ export default function AssetTransfersPage() {
     const [formData, setFormData] = useState<Partial<RequestAssetTransferDto>>({
         transferType: 'Internal',
         transferDate: new Date().toISOString().split('T')[0],
+        bookClassification: 'IFRS',
     });
+
+    const selectedAsset = useMemo(
+        () => assets.find(asset => asset.id === formData.fixedAssetId),
+        [assets, formData.fixedAssetId]
+    );
+    const isGlReclassification = formData.transferType === 'GlReclassification';
 
     useEffect(() => {
         loadData();
@@ -58,6 +66,12 @@ export default function AssetTransfersPage() {
             console.error('Failed to load assets:', error);
         }
         try {
+            const categoriesData = await fixedAssetsDataService.getCategories();
+            setCategories(categoriesData || []);
+        } catch (error) {
+            console.error('Failed to load fixed asset categories:', error);
+        }
+        try {
             const employeesData = await maintenanceDataService.getEmployees();
             setEmployees(employeesData || []);
         } catch (error) {
@@ -68,10 +82,19 @@ export default function AssetTransfersPage() {
 
     const handleRequestTransfer = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.fixedAssetId || !formData.toLocation || !formData.transferDate) {
+        const reclassificationTargetMissing = isGlReclassification &&
+            !formData.toFixedAssetCategoryId &&
+            !formData.toSegmentString;
+        const shortReclassificationReason = isGlReclassification &&
+            (!formData.reason || formData.reason.trim().length < 20);
+        if (!formData.fixedAssetId || !formData.transferDate ||
+            (!isGlReclassification && !formData.toLocation) ||
+            reclassificationTargetMissing || shortReclassificationReason) {
             toast({
                 title: "Validation Error",
-                description: "Please fill in all required fields.",
+                description: isGlReclassification
+                    ? "Choose a target category or segment and provide an accounting reason of at least 20 characters."
+                    : "Please fill in all required fields.",
                 variant: "destructive",
             });
             return;
@@ -88,13 +111,14 @@ export default function AssetTransfersPage() {
             setFormData({
                 transferType: 'Internal',
                 transferDate: new Date().toISOString().split('T')[0],
+                bookClassification: 'IFRS',
             });
             loadData();
         } catch (error) {
             console.error('Failed to submit transfer request:', error);
             toast({
                 title: "Error",
-                description: "Failed to submit transfer request.",
+                description: error instanceof Error ? error.message : "Failed to submit transfer request.",
                 variant: "destructive",
             });
         } finally {
@@ -114,7 +138,7 @@ export default function AssetTransfersPage() {
             console.error('Failed to approve transfer:', error);
             toast({
                 title: "Error",
-                description: "Failed to approve transfer.",
+                description: error instanceof Error ? error.message : "Failed to approve transfer.",
                 variant: "destructive",
             });
         }
@@ -132,7 +156,7 @@ export default function AssetTransfersPage() {
             console.error('Failed to reject transfer:', error);
             toast({
                 title: "Error",
-                description: "Failed to reject transfer.",
+                description: error instanceof Error ? error.message : "Failed to reject transfer.",
                 variant: "destructive",
             });
         }
@@ -143,7 +167,9 @@ export default function AssetTransfersPage() {
             t.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             t.fixedAssetName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             t.assetCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            t.toLocation.toLowerCase().includes(searchTerm.toLowerCase())
+            t.toLocation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            t.fromFixedAssetCategoryName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            t.toFixedAssetCategoryName?.toLowerCase().includes(searchTerm.toLowerCase())
         );
     }, [transfers, searchTerm]);
 
@@ -177,7 +203,7 @@ export default function AssetTransfersPage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Asset Transfers</h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Track and manage movement of assets between locations and custodians.</p>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">Control physical, custody, segment, and GL classification changes through one auditable workflow.</p>
                 </div>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
@@ -188,9 +214,9 @@ export default function AssetTransfersPage() {
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
-                            <DialogTitle className="text-xl">Request Asset Transfer</DialogTitle>
+                            <DialogTitle className="text-xl">Request Asset Transfer or Reclassification</DialogTitle>
                             <DialogDescription>
-                                Fill in the details to move an asset to a new location or custodian.
+                                Physical moves update custody details; GL reclassifications move current balances only after independent approval.
                             </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleRequestTransfer} className="space-y-4 py-4">
@@ -222,7 +248,13 @@ export default function AssetTransfersPage() {
                                                                 key={asset.id}
                                                                 value={`${asset.assetCode} ${asset.name}`}
                                                                 onSelect={() => {
-                                                                    setFormData({ ...formData, fixedAssetId: asset.id });
+                                                                    const defaultBook = asset.bookValues?.find(book => book.bookClassification === 'IFRS') ?? asset.bookValues?.[0];
+                                                                    setFormData({
+                                                                        ...formData,
+                                                                        fixedAssetId: asset.id,
+                                                                        accountingBookId: defaultBook?.accountingBookId,
+                                                                        bookClassification: defaultBook?.bookClassification ?? 'IFRS',
+                                                                    });
                                                                     setAssetComboOpen(false);
                                                                 }}
                                                             >
@@ -250,7 +282,16 @@ export default function AssetTransfersPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="transferType">Transfer Type</Label>
-                                    <Select value={formData.transferType} onValueChange={(val: any) => setFormData({ ...formData, transferType: val })}>
+                                    <Select value={formData.transferType} onValueChange={(value) => {
+                                        const transferType = value as AssetTransferType;
+                                        setFormData({
+                                            ...formData,
+                                            transferType,
+                                            // Financial reclassification must not accidentally carry over physical fields
+                                            // entered for a previous form mode. The API independently preserves current custody.
+                                            ...(transferType === 'GlReclassification' ? { toLocation: '', toCustodianId: undefined, transferCost: undefined } : {}),
+                                        });
+                                    }}>
                                         <SelectTrigger id="transferType">
                                             <SelectValue placeholder="Select type" />
                                         </SelectTrigger>
@@ -258,50 +299,82 @@ export default function AssetTransfersPage() {
                                             <SelectItem value="Internal">Internal (Same Org)</SelectItem>
                                             <SelectItem value="External">External (Outside Org)</SelectItem>
                                             <SelectItem value="Custodial">Custodial (Owner Change)</SelectItem>
+                                            <SelectItem value="GlReclassification">GL Reclassification (Finance)</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="toLocation">Destination Location <span className="text-red-500">*</span></Label>
-                                    <Input
-                                        id="toLocation"
-                                        placeholder="Building, Floor, Room..."
-                                        value={formData.toLocation}
-                                        onChange={(e) => setFormData({ ...formData, toLocation: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="custodian">New Custodian</Label>
-                                    <Select value={formData.toCustodianId} onValueChange={(val) => setFormData({ ...formData, toCustodianId: val === "none" ? undefined : val })}>
-                                        <SelectTrigger id="custodian">
-                                            <SelectValue placeholder="Select Employee" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="none">None</SelectItem>
-                                            {employees.map(emp => (
-                                                <SelectItem key={emp.id} value={emp.id}>
-                                                    {emp.firstName} {emp.lastName}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="cost">Estimated Cost (GHS)</Label>
-                                    <Input
-                                        id="cost"
-                                        type="number"
-                                        placeholder="0.00"
-                                        value={formData.transferCost || ''}
-                                        onChange={(e) => setFormData({ ...formData, transferCost: parseFloat(e.target.value) })}
-                                    />
-                                </div>
+                                {isGlReclassification ? (
+                                    <>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="targetCategory">Target Asset Category</Label>
+                                            <Select value={formData.toFixedAssetCategoryId} onValueChange={(value) => setFormData({ ...formData, toFixedAssetCategoryId: value === 'same' ? undefined : value })}>
+                                                <SelectTrigger id="targetCategory"><SelectValue placeholder="Keep current category" /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="same">Keep current category (segment-only)</SelectItem>
+                                                    {categories.map(category => (
+                                                        <SelectItem key={category.id} value={category.id} disabled={category.id === selectedAsset?.fixedAssetCategoryId}>
+                                                            {category.code} - {category.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="accountingBook">Accounting Book</Label>
+                                            <Select value={formData.accountingBookId} onValueChange={(value) => {
+                                                const book = selectedAsset?.bookValues?.find(item => item.accountingBookId === value);
+                                                setFormData({ ...formData, accountingBookId: value, bookClassification: book?.bookClassification ?? 'IFRS' });
+                                            }}>
+                                                <SelectTrigger id="accountingBook"><SelectValue placeholder="Select posting book" /></SelectTrigger>
+                                                <SelectContent>
+                                                    {(selectedAsset?.bookValues || []).map(book => (
+                                                        <SelectItem key={book.id} value={book.accountingBookId}>
+                                                            {book.accountingBookName || book.bookClassification} ({book.bookClassification})
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="accountingDate">Accounting Date</Label>
+                                            <Input id="accountingDate" type="date" value={formData.accountingDate || formData.transferDate} onChange={(e) => setFormData({ ...formData, accountingDate: e.target.value })} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="targetSegment">Target Segment</Label>
+                                            <Input id="targetSegment" placeholder={selectedAsset?.currentSegmentString || 'e.g. DEPT-ESTATES'} value={formData.toSegmentString || ''} onChange={(e) => setFormData({ ...formData, toSegmentString: e.target.value })} />
+                                        </div>
+                                        <div className="md:col-span-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                                            Current category: <strong>{selectedAsset?.fixedAssetCategoryName || 'Select an asset'}</strong>. The approved journal moves gross cost and the related accumulated depreciation, impairment, and revaluation reserve without rewriting historical entries.
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="toLocation">Destination Location <span className="text-red-500">*</span></Label>
+                                            <Input id="toLocation" placeholder="Building, Floor, Room..." value={formData.toLocation || ''} onChange={(e) => setFormData({ ...formData, toLocation: e.target.value })} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="custodian">New Custodian</Label>
+                                            <Select value={formData.toCustodianId} onValueChange={(val) => setFormData({ ...formData, toCustodianId: val === "none" ? undefined : val })}>
+                                                <SelectTrigger id="custodian"><SelectValue placeholder="Select Employee" /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">None</SelectItem>
+                                                    {employees.map(emp => <SelectItem key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="cost">Estimated Cost (GHS)</Label>
+                                            <Input id="cost" type="number" placeholder="0.00" value={formData.transferCost || ''} onChange={(e) => setFormData({ ...formData, transferCost: parseFloat(e.target.value) })} />
+                                        </div>
+                                    </>
+                                )}
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="reason">Reason for Transfer</Label>
+                                <Label htmlFor="reason">Reason {isGlReclassification && <span className="text-red-500">* (minimum 20 characters)</span>}</Label>
                                 <Textarea
                                     id="reason"
-                                    placeholder="Explain why this transfer is needed..."
+                                    placeholder={isGlReclassification ? "Explain the accounting classification correction and business rationale..." : "Explain why this transfer is needed..."}
                                     rows={3}
                                     value={formData.reason || ''}
                                     onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
@@ -403,12 +476,25 @@ export default function AssetTransfersPage() {
                                             <div className="flex items-center gap-2">
                                                 <div className="flex flex-col min-w-[100px]">
                                                     <span className="text-xs text-slate-400 uppercase">From</span>
-                                                    <span className="font-medium truncate max-w-[150px]">{transfer.fromLocation || '—'}</span>
+                                                    <span className="font-medium truncate max-w-[150px]">
+                                                        {transfer.transferType === 'GlReclassification'
+                                                            ? (transfer.fromFixedAssetCategoryName || transfer.fromSegmentString || 'Current')
+                                                            : (transfer.fromLocation || '—')}
+                                                    </span>
                                                 </div>
                                                 <ArrowLeftRight className="h-3 w-3 text-slate-300" />
                                                 <div className="flex flex-col min-w-[100px]">
                                                     <span className="text-xs text-slate-400 uppercase">To</span>
-                                                    <span className="font-medium truncate max-w-[150px]">{transfer.toLocation}</span>
+                                                    <span className="font-medium truncate max-w-[150px]">
+                                                        {transfer.transferType === 'GlReclassification'
+                                                            ? (transfer.toFixedAssetCategoryName || transfer.toSegmentString || 'Reclassified')
+                                                            : transfer.toLocation}
+                                                    </span>
+                                                    {transfer.transferType === 'GlReclassification' && (
+                                                        <span className="text-xs text-slate-500">
+                                                            Gross {transfer.reclassificationAssetCarryingAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </TableCell>
@@ -419,6 +505,8 @@ export default function AssetTransfersPage() {
                                                     <Button variant="ghost" size="sm" className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 h-8 font-semibold" onClick={() => handleApprove(transfer.id)}>Approve</Button>
                                                     <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 font-semibold" onClick={() => handleReject(transfer.id)}>Reject</Button>
                                                 </div>
+                                            ) : transfer.status === 'Approved' && transfer.transferType === 'GlReclassification' && transfer.failureReason ? (
+                                                <Button variant="outline" size="sm" className="text-blue-700" title={transfer.failureReason} onClick={() => handleApprove(transfer.id)}>Retry posting</Button>
                                             ) : (
                                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-blue-600">
                                                     <Info className="h-4 w-4" />

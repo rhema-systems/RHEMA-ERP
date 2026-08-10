@@ -20,6 +20,7 @@ public class FixedAssetsController : ControllerBase
     private readonly IFixedAssetReportsService _reportsService;
     private readonly IAssetValuationService _valuationService;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAuthorizationService _authorizationService;
 
     public FixedAssetsController(
         IFixedAssetService fixedAssetService,
@@ -29,7 +30,8 @@ public class FixedAssetsController : ControllerBase
         IAssetVerificationService verificationService,
         IFixedAssetReportsService reportsService,
         IAssetValuationService valuationService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IAuthorizationService authorizationService)
     {
         _fixedAssetService = fixedAssetService;
         _depreciationService = depreciationService;
@@ -39,6 +41,7 @@ public class FixedAssetsController : ControllerBase
         _reportsService = reportsService;
         _valuationService = valuationService;
         _currentUser = currentUser;
+        _authorizationService = authorizationService;
     }
 
     [HttpGet]
@@ -400,6 +403,12 @@ public class FixedAssetsController : ControllerBase
     [HttpPost("transfers")]
     public async Task<ActionResult<AssetTransferDto>> RequestTransfer(RequestAssetTransferDto dto)
     {
+        if (dto.TransferType == ErpSystem.Core.Enums.AssetTransferType.GlReclassification &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ReclassifyFixedAssets)).Succeeded)
+        {
+            return Forbid();
+        }
+
         var employeeId = _currentUser.EmployeeId ?? Guid.Empty;
         var result = await _transferService.RequestTransferAsync(dto, employeeId);
         return CreatedAtAction(nameof(GetTransferById), new { id = result.Id }, result);
@@ -408,6 +417,14 @@ public class FixedAssetsController : ControllerBase
     [HttpPost("transfers/{id}/approve")]
     public async Task<ActionResult<AssetTransferDto>> ApproveTransfer(Guid id, ApproveAssetTransferDto dto)
     {
+        var requestedTransfer = await _transferService.GetByIdAsync(id);
+        if (requestedTransfer == null) return NotFound();
+        if (requestedTransfer.TransferType == ErpSystem.Core.Enums.AssetTransferType.GlReclassification &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveFixedAssetReclassification)).Succeeded)
+        {
+            return Forbid();
+        }
+
         var employeeId = _currentUser.EmployeeId ?? Guid.Empty;
         try
         {
@@ -427,6 +444,14 @@ public class FixedAssetsController : ControllerBase
     [HttpPost("transfers/{id}/reject")]
     public async Task<ActionResult<AssetTransferDto>> RejectTransfer(Guid id, ApproveAssetTransferDto dto)
     {
+        var requestedTransfer = await _transferService.GetByIdAsync(id);
+        if (requestedTransfer == null) return NotFound();
+        if (requestedTransfer.TransferType == ErpSystem.Core.Enums.AssetTransferType.GlReclassification &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveFixedAssetReclassification)).Succeeded)
+        {
+            return Forbid();
+        }
+
         var employeeId = _currentUser.EmployeeId ?? Guid.Empty;
         try
         {

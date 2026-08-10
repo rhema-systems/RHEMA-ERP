@@ -4,6 +4,8 @@ Date: 2026-07-08
 
 Scope boundary: this batch implements Fixed Assets Batch 21B only: tenant-scoped transfer requests, custody/location transfer history, prospective segment movement, workflow approval through the existing workflow service, Finance audit events, diagnostics, and focused tests. It does not implement disposals, sale proceeds, fixed asset reporting, data migration/sign-off, frontend UI, depreciation reversal, capitalization reversal, valuation correction, or GL-impacting fixed asset reclassification journals.
 
+> **Follow-up status (9 August 2026):** the historical Batch 21B boundary below remains useful context, but `FIN-LIM-0038` is now resolved by the controlled GL reclassification extension documented in `docs/fixed-asset-gl-reclassification-foundation.md`. It reuses this same transfer record/workflow and adds posting-engine journals, immutable balance/account snapshots, maker-checker permissions and the Asset Transfers UI.
+
 ## Architecture Decision
 
 Posted GL remains the accounting source of truth. Custody/location transfers and prospective segment movements are subledger/control events and do not create GL journals unless a later dedicated GL reclassification transfer model is implemented.

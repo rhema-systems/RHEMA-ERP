@@ -437,6 +437,24 @@ public class AssetTransferDto
     public Guid? FromSegmentLookupValueId { get; set; }
     public string? ToSegmentString { get; set; }
     public Guid? ToSegmentLookupValueId { get; set; }
+    public Guid? FromFixedAssetCategoryId { get; set; }
+    public string? FromFixedAssetCategoryName { get; set; }
+    public Guid? ToFixedAssetCategoryId { get; set; }
+    public string? ToFixedAssetCategoryName { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public Guid? FromAssetAccountId { get; set; }
+    public Guid? ToAssetAccountId { get; set; }
+    public Guid? FromAccumulatedDepreciationAccountId { get; set; }
+    public Guid? ToAccumulatedDepreciationAccountId { get; set; }
+    public Guid? FromAccumulatedImpairmentAccountId { get; set; }
+    public Guid? ToAccumulatedImpairmentAccountId { get; set; }
+    public Guid? FromRevaluationSurplusAccountId { get; set; }
+    public Guid? ToRevaluationSurplusAccountId { get; set; }
+    public decimal ReclassificationAssetCarryingAmount { get; set; }
+    public decimal ReclassificationAccumulatedDepreciation { get; set; }
+    public decimal ReclassificationAccumulatedImpairment { get; set; }
+    public decimal ReclassificationRevaluationSurplus { get; set; }
     public DateTime? AccountingDate { get; set; }
     public Guid? FiscalPeriodId { get; set; }
     public string? Reason { get; set; }
@@ -468,6 +486,13 @@ public class RequestAssetTransferDto
     public Guid? ToCustodianId { get; set; }
     public string? ToSegmentString { get; set; }
     public Guid? ToSegmentLookupValueId { get; set; }
+    /// <summary>
+    /// Target category for a GL reclassification. It is optional only for a pure dimension move,
+    /// where current balances stay in the same accounts but move to a different segment.
+    /// </summary>
+    public Guid? ToFixedAssetCategoryId { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
     public DateTime? AccountingDate { get; set; }
     public string? Reason { get; set; }
     public decimal? TransferCost { get; set; }

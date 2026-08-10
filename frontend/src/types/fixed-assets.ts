@@ -73,6 +73,10 @@ export interface FixedAsset {
   name: string;
   description?: string;
   location?: string;
+  currentCustodianId?: string;
+  currentCustodianName?: string;
+  currentSegmentString?: string;
+  currentSegmentLookupValueId?: string;
   fixedAssetCategoryId: string;
   fixedAssetCategoryName?: string;
   purchaseDate: string;
@@ -347,7 +351,8 @@ export type AssetTransferStatus =
 export type AssetTransferType =
   | 'Internal'
   | 'External'
-  | 'Custodial';
+  | 'Custodial'
+  | 'GlReclassification';
 
 export interface AssetTransfer {
   id: string;
@@ -363,6 +368,30 @@ export interface AssetTransfer {
   toLocation: string;
   toCustodianId?: string;
   toCustodianName?: string;
+  fromSegmentString?: string;
+  fromSegmentLookupValueId?: string;
+  toSegmentString?: string;
+  toSegmentLookupValueId?: string;
+  fromFixedAssetCategoryId?: string;
+  fromFixedAssetCategoryName?: string;
+  toFixedAssetCategoryId?: string;
+  toFixedAssetCategoryName?: string;
+  accountingBookId?: string;
+  bookClassification: string;
+  fromAssetAccountId?: string;
+  toAssetAccountId?: string;
+  fromAccumulatedDepreciationAccountId?: string;
+  toAccumulatedDepreciationAccountId?: string;
+  fromAccumulatedImpairmentAccountId?: string;
+  toAccumulatedImpairmentAccountId?: string;
+  fromRevaluationSurplusAccountId?: string;
+  toRevaluationSurplusAccountId?: string;
+  reclassificationAssetCarryingAmount: number;
+  reclassificationAccumulatedDepreciation: number;
+  reclassificationAccumulatedImpairment: number;
+  reclassificationRevaluationSurplus: number;
+  accountingDate?: string;
+  fiscalPeriodId?: string;
   reason?: string;
   transferCost?: number;
   requestedById?: string;
@@ -370,8 +399,16 @@ export interface AssetTransfer {
   approvedById?: string;
   approvedByName?: string;
   approvedAt?: string;
+  completedAt?: string;
+  postedAt?: string;
+  failedAt?: string;
   comments?: string;
+  failureReason?: string;
   referenceNumber?: string;
+  idempotencyKey?: string;
+  workflowInstanceId?: string;
+  journalEntryId?: string;
+  postingEventId?: string;
   createdAt: string;
 }
 
@@ -381,8 +418,15 @@ export interface RequestAssetTransferDto {
   transferType: AssetTransferType;
   toLocation: string;
   toCustodianId?: string;
+  toSegmentString?: string;
+  toSegmentLookupValueId?: string;
+  toFixedAssetCategoryId?: string;
+  accountingBookId?: string;
+  bookClassification?: string;
+  accountingDate?: string;
   reason?: string;
   transferCost?: number;
+  idempotencyKey?: string;
 }
 
 export interface ApproveAssetTransferDto {

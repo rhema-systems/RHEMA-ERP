@@ -1,5 +1,7 @@
 # Fixed Asset Transfer and Custody/Segment Movement Foundation - PR Summary
 
+> **Follow-up status (9 August 2026):** this is the historical Batch 21B PR record. The formerly deferred GL-impacting transfer described below is now implemented under `FIN-LIM-0038`; see `docs/fixed-asset-gl-reclassification-foundation.md` and migration `20260809223000_AddFixedAssetGlReclassificationControls`.
+
 Date: 2026-07-08
 
 ## Scope

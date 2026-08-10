@@ -14991,11 +14991,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("AccountingDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BookClassification")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("Comments")
                         .HasMaxLength(2000)
@@ -15032,12 +15040,27 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("FixedAssetId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("FromAccumulatedDepreciationAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FromAccumulatedImpairmentAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FromAssetAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("FromCustodianId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FromFixedAssetCategoryId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("FromLocation")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("FromRevaluationSurplusAccountId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("FromSegmentLookupValueId")
                         .HasColumnType("uniqueidentifier");
@@ -15069,6 +15092,18 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<decimal>("ReclassificationAccumulatedDepreciation")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ReclassificationAccumulatedImpairment")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ReclassificationAssetCarryingAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ReclassificationRevaluationSurplus")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("ReferenceNumber")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -15082,13 +15117,28 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ToAccumulatedDepreciationAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ToAccumulatedImpairmentAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ToAssetAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("ToCustodianId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ToFixedAssetCategoryId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ToLocation")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("ToRevaluationSurplusAccountId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ToSegmentLookupValueId")
                         .HasColumnType("uniqueidentifier");
@@ -15117,13 +15167,25 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountingBookId");
+
                     b.HasIndex("ApprovedById");
 
                     b.HasIndex("FiscalPeriodId");
 
                     b.HasIndex("FixedAssetId");
 
+                    b.HasIndex("FromAccumulatedDepreciationAccountId");
+
+                    b.HasIndex("FromAccumulatedImpairmentAccountId");
+
+                    b.HasIndex("FromAssetAccountId");
+
                     b.HasIndex("FromCustodianId");
+
+                    b.HasIndex("FromFixedAssetCategoryId");
+
+                    b.HasIndex("FromRevaluationSurplusAccountId");
 
                     b.HasIndex("FromSegmentLookupValueId");
 
@@ -15135,17 +15197,31 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ToCustodianId");
 
+                    b.HasIndex("ToAccumulatedDepreciationAccountId");
+
+                    b.HasIndex("ToAccumulatedImpairmentAccountId");
+
+                    b.HasIndex("ToAssetAccountId");
+
+                    b.HasIndex("ToFixedAssetCategoryId");
+
+                    b.HasIndex("ToRevaluationSurplusAccountId");
+
                     b.HasIndex("ToSegmentLookupValueId");
 
                     b.HasIndex("TenantId", "IdempotencyKey")
                         .IsUnique()
                         .HasFilter("[IdempotencyKey] IS NOT NULL");
 
+                    b.HasIndex("TenantId", "AccountingBookId");
+
                     b.HasIndex("TenantId", "JournalEntryId");
 
                     b.HasIndex("TenantId", "PostingEventId");
 
                     b.HasIndex("TenantId", "ToSegmentLookupValueId");
+
+                    b.HasIndex("TenantId", "ToFixedAssetCategoryId");
 
                     b.HasIndex("TenantId", "FixedAssetId", "TransferDate");
 
@@ -148159,9 +148235,34 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("ApprovedById");
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("FromAccumulatedDepreciationAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("FromAccumulatedImpairmentAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("FromAssetAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
                         .HasForeignKey("FiscalPeriodId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetCategory", "FromFixedAssetCategory")
+                        .WithMany()
+                        .HasForeignKey("FromFixedAssetCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("FromRevaluationSurplusAccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset", "FixedAsset")
@@ -148242,6 +148343,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.AssetTransfer", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("AccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
                         .WithMany()
                         .HasForeignKey("ApprovedById");
@@ -148290,10 +148396,37 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("ToCustodianId");
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ToAccumulatedDepreciationAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ToAccumulatedImpairmentAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ToAssetAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetCategory", "ToFixedAssetCategory")
+                        .WithMany()
+                        .HasForeignKey("ToFixedAssetCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ToRevaluationSurplusAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.SegmentLookupValue", "ToSegmentLookupValue")
                         .WithMany()
                         .HasForeignKey("ToSegmentLookupValueId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingBook");
 
                     b.Navigation("ApprovedBy");
 
@@ -148302,6 +148435,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("FixedAsset");
 
                     b.Navigation("FromCustodian");
+
+                    b.Navigation("FromFixedAssetCategory");
 
                     b.Navigation("FromSegmentLookupValue");
 
@@ -148314,6 +148449,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
 
                     b.Navigation("ToCustodian");
+
+                    b.Navigation("ToFixedAssetCategory");
 
                     b.Navigation("ToSegmentLookupValue");
                 });
