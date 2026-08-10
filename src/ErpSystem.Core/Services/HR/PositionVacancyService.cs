@@ -134,6 +134,20 @@ public class PositionVacancyService : IPositionVacancyService
 
     // ── Mutations ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Maps a vacancy for a write response with its live headcount, the way
+    /// <see cref="GetByIdAsync"/> does.
+    ///
+    /// <para>The mutations used to call <c>ToDto()</c> bare, and that overload defaults
+    /// <c>currentActiveHeadcount</c> to 0 — so changing a vacancy's status or notes made the
+    /// headcount on screen drop to zero until the next read put it back.</para>
+    /// </summary>
+    private async Task<PositionVacancyDto> ToDtoWithHeadcountAsync(PositionVacancy entity)
+    {
+        var currentHeadcount = await _repository.CountActiveOnPositionAsync(entity.TenantId, entity.PositionId);
+        return entity.ToDto(currentHeadcount);
+    }
+
     public async Task<PositionVacancyDto> UpdateStatusAsync(
         UpdatePositionVacancyStatusDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
@@ -158,7 +172,7 @@ public class PositionVacancyService : IPositionVacancyService
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithHeadcountAsync(entity);
     }
 
     public async Task<PositionVacancyDto> UpdateNotesAsync(
@@ -171,7 +185,7 @@ public class PositionVacancyService : IPositionVacancyService
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithHeadcountAsync(entity);
     }
 
     public async Task<PositionVacancyDto> CloseAsync(
@@ -189,7 +203,7 @@ public class PositionVacancyService : IPositionVacancyService
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ToDtoWithHeadcountAsync(entity);
     }
 
     public async Task<RaiseRequisitionResultDto> RaiseRequisitionAsync(

@@ -15,9 +15,24 @@ public class JobPostingRepository : GenericRepository<JobPosting>, IJobPostingRe
 {
     public JobPostingRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// <c>JobPostingDto</c> reads the vacancy number and the poster's name through navigations, and
+    /// the base implementation loads neither — so the detail read, and every write response built
+    /// from a tracked entity, came back with an empty <c>vacancyNumber</c> and a null
+    /// <c>postedByName</c> while the by-status and by-channel lists showed both.
+    /// </summary>
+    public override async Task<JobPosting?> GetByIdAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(p => p.JobVacancy)
+            .Include(p => p.PostedBy)
+            .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+    }
+
     public async Task<IEnumerable<JobPosting>> GetByVacancyIdAsync(Guid vacancyId)
     {
         return await _dbSet
+            .Include(p => p.JobVacancy)
             .Include(p => p.PostedBy)
             .Where(p => p.JobVacancyId == vacancyId && !p.IsDeleted)
             .OrderByDescending(p => p.PublishDate)

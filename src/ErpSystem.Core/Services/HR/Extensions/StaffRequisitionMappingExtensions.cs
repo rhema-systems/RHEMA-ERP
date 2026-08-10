@@ -353,20 +353,9 @@ public static class StaffRequisitionMappingExtensions
         };
     }
 
-    public static StaffRequisitionAttachment ToEntity(this CreateStaffRequisitionAttachmentDto dto, Guid tenantId, Guid uploadedById)
-    {
-        return new StaffRequisitionAttachment
-        {
-            TenantId      = tenantId,
-            RequisitionId = dto.RequisitionId,
-            FileName      = dto.FileName,
-            FilePath      = dto.FilePath,
-            Description   = dto.Description,
-            UploadDate    = DateTime.UtcNow,
-            UploadedById  = uploadedById,
-            CreatedBy     = uploadedById.ToString(),
-        };
-    }
+    // The ToEntity mapper for attachments is gone with its DTO: the row is now built in
+    // StaffRequisitionService.AddAttachmentAsync from the scanned document the upload gate returns,
+    // so there is no caller payload left to map.
 
     #endregion
 

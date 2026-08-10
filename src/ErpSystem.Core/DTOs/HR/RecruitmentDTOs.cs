@@ -305,22 +305,10 @@ public class JobVacancyAttachmentDto : BaseDto
     public string UploadedByName { get; set; } = string.Empty;
 }
 
-public class CreateJobVacancyAttachmentDto : CreateDtoBase
-{
-    [Required]
-    public Guid JobVacancyId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-}
+// CreateJobVacancyAttachmentDto was deleted deliberately, not left unused. It carried a
+// caller-supplied FilePath, so the endpoint recorded a path to a file it had never received or
+// scanned. Attachments now arrive as multipart through the controlled-upload gate and the row is
+// written from the stored document's own metadata — see IJobVacancyService.AddAttachmentAsync.
 
 #endregion
 
@@ -560,22 +548,8 @@ public class JobPostingAttachmentDto : BaseDto
     public string UploadedByName { get; set; } = string.Empty;
 }
 
-public class CreateJobPostingAttachmentDto : CreateDtoBase
-{
-    [Required]
-    public Guid JobPostingId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-}
+// CreateJobPostingAttachmentDto was deleted deliberately — same reason as its vacancy sibling
+// above. See IJobPostingService.AddAttachmentAsync.
 
 public class PublishJobPostingDto
 {

@@ -143,6 +143,22 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   breached: 'destructive',
   settled: 'default',
   waived: 'outline',
+
+  // Recruitment. The live, work-in-hand states carry weight; the ones that mean "nothing is
+  // happening here any more" (Filled, Expired, Withdrawn) read as neutral rather than as a
+  // problem — a filled vacancy is a success, not an alert.
+  partiallyfulfilled: 'secondary',
+  published: 'default',
+  closedforapplications: 'secondary',
+  shortlisting: 'secondary',
+  interviewing: 'secondary',
+  offerstage: 'secondary',
+  filled: 'default',
+  withdrawn: 'outline',
+
+  // Position vacancies (establishment gaps), before a requisition exists.
+  anticipated: 'outline',
+  requisitionraised: 'default',
 };
 
 interface StatusBadgeProps {

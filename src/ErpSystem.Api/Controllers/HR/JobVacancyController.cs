@@ -1,25 +1,64 @@
+using ErpSystem.Api.Filters;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Job vacancies — the advertised role a requisition turns into.
+///
+/// <para>Vacancy status deliberately stays off the generic workflow engine, unlike
+/// <c>StaffRequisition</c>. It has several writers — the edit-resets-to-Draft rule, publication's
+/// auto-created postings, closing for applications, and the hiring stages that follow — which is
+/// the <c>AppraisalStatus</c> shape, not the single-writer approval lifecycle the engine is for.
+/// The approval gate it does have is enforced by the service's transition map instead.</para>
+///
+/// <para>Reads are open to the tenant: a vacancy is an internal advert, and the hiring managers,
+/// recruiters and candidates-to-be all need to see it. Everything that changes one is HR's.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-vacancies")]
 [Authorize]
+[RecruitmentBusinessRules]
 public class JobVacancyController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IJobVacancyService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<JobVacancyController> _logger;
 
-    public JobVacancyController(IJobVacancyService service, ICurrentUserService currentUser)
+    public JobVacancyController(
+        IJobVacancyService service,
+        ICurrentUserService currentUser,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorageService,
+        ApplicationDbContext db,
+        ILogger<JobVacancyController> logger)
     {
         _service = service;
         _currentUser = currentUser;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorageService = fileStorageService;
+        _db = db;
+        _logger = logger;
     }
 
     // =========================================================================
@@ -90,6 +129,7 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<JobVacancyDto>> Create([FromBody] CreateJobVacancyDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -107,6 +147,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<JobVacancyDto>> Update(Guid id, [FromBody] UpdateJobVacancyDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -120,6 +161,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -136,6 +178,7 @@ public class JobVacancyController : ControllerBase
     /// + ChangeStatusAsync pair to avoid partial-failure risk.
     /// </summary>
     [HttpPost("{id:guid}/transition")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<JobVacancyDto>> Transition(Guid id, [FromBody] TransitionJobVacancyDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -151,6 +194,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPost("{id:guid}/change-status")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeJobVacancyStatusDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -164,6 +208,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPost("{id:guid}/close")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> Close(Guid id, [FromBody] CloseJobVacancyDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -177,6 +222,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPost("{id:guid}/close-for-applications")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> CloseForApplications(Guid id, [FromBody] CloseForApplicationsDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -197,24 +243,66 @@ public class JobVacancyController : ControllerBase
     public async Task<ActionResult<IEnumerable<JobVacancyAttachmentDto>>> GetAttachments(Guid vacancyId)
         => Ok(await _service.GetAttachmentsAsync(vacancyId));
 
+    /// <summary>
+    /// Attaches a document to a vacancy through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// Replaced a JSON endpoint that accepted a caller-supplied <c>filePath</c>: it stored no file,
+    /// scanned nothing, and recorded whatever path was posted.
+    ///
+    /// <para>⚠ Requires a working ClamAV — <c>hr-recruitment-attachments</c> is scan-mandatory and
+    /// tenant policy cannot turn that off.</para>
+    /// </remarks>
     [HttpPost("{vacancyId:guid}/attachments")]
-    public async Task<ActionResult<JobVacancyAttachmentDto>> AddAttachment(
-        Guid vacancyId, [FromBody] CreateJobVacancyAttachmentDto dto)
+    [Authorize(Roles = HrRoles)]
+    [ProducesResponseType(typeof(JobVacancyAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddAttachment(
+        Guid vacancyId, IFormFile file, [FromForm] string? description, CancellationToken ct)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "JobVacancy",
+            sourceRecordId: vacancyId,
+            sourceLabel: "Job vacancy attachment",
+            documentType: "JobVacancyAttachment",
+            description: description,
+            persist: (uploadedById, document) => _service.AddAttachmentAsync(
+                vacancyId, uploadedById, document.OriginalFileName, document.FileSize, description, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrRecruitmentAttachments);
+    }
 
-        var tenantId = _currentUser.TenantId;
-        var employeeId = _currentUser.EmployeeId;
+    /// <summary>Streams a vacancy attachment — the file lives outside the web root.</summary>
+    [HttpGet("{vacancyId:guid}/attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid vacancyId, Guid attachmentId, CancellationToken ct)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
 
-        if (tenantId == null)
-            return BadRequest("Tenant context could not be resolved.");
-        if (employeeId == null)
-            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        var attachment = await _db.Set<JobVacancyAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.JobVacancyId == vacancyId && a.TenantId == tenantId && !a.IsDeleted,
+                ct);
 
-        return Ok(await _service.AddAttachmentAsync(dto, tenantId.Value, employeeId.Value));
+        if (attachment is null)
+            return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken: ct);
     }
 
     [HttpDelete("attachments/{attachmentId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
     {
         await _service.DeleteAttachmentAsync(attachmentId);
@@ -246,6 +334,7 @@ public class JobVacancyController : ControllerBase
         => Ok(await _service.GetMandatoryCriteriaAsync(vacancyId));
 
     [HttpPost("{vacancyId:guid}/criteria")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<JobShortlistingCriteriaDto>> AddCriteria(
         Guid vacancyId, [FromBody] CreateJobShortlistingCriteriaDto dto)
     {
@@ -263,6 +352,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPut("criteria/{criteriaId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<JobShortlistingCriteriaDto>> UpdateCriteria(
         Guid criteriaId, [FromBody] UpdateJobShortlistingCriteriaDto dto)
     {
@@ -277,6 +367,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("criteria/{criteriaId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> DeleteCriteria(Guid criteriaId)
     {
         await _service.DeleteCriteriaAsync(criteriaId);
@@ -290,6 +381,7 @@ public class JobVacancyController : ControllerBase
         => Ok(await _service.GetStageAssignmentsAsync(vacancyId));
 
     [HttpPost("{vacancyId:guid}/stage-assignments")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<VacancyPipelineStageAssignmentDto>> UpsertStageAssignment(
         Guid vacancyId, [FromBody] CreateVacancyPipelineStageAssignmentDto dto)
     {
@@ -307,6 +399,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpPut("stage-assignments/{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<VacancyPipelineStageAssignmentDto>> UpdateStageAssignment(
         Guid id, [FromBody] UpdateVacancyPipelineStageAssignmentDto dto)
     {
@@ -346,6 +439,7 @@ public class JobVacancyController : ControllerBase
     }
 
     [HttpDelete("stage-assignments/{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> DeleteStageAssignment(Guid id)
     {
         var deleted = await _service.DeleteStageAssignmentAsync(id);

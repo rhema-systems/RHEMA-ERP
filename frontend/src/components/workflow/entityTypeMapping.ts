@@ -34,6 +34,7 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'SalaryReviewProposal',
     'EmploymentActionProposal',
     'PerformanceImprovementPlan',
+    'StaffRequisition',
   ],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],

@@ -42,6 +42,7 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("SalaryReviewProposal", "Human Resources", "Merit increase and bonus proposals raised from appraisal outcomes", "BadgeDollarSign", "#16A34A", 79),
             new("EmploymentActionProposal", "Human Resources", "Promotion, demotion, renewal, termination and recognition proposals from appraisal outcomes", "UserCog", "#DC2626", 79),
             new("PerformanceImprovementPlan", "Human Resources", "Performance improvement plans approved before they are served on the employee", "ClipboardList", "#EA580C", 79),
+            new("StaffRequisition", "Human Resources", "Headcount requisitions approved before a vacancy is opened for recruitment", "UserPlus", "#0891B2", 79),
             new("Project", "Projects", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Projects", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Projects", "Project closure approval and close-out governance", "Flag", "#15803D", 84),

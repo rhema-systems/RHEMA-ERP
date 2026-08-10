@@ -100,6 +100,7 @@ import {
   Handshake,
   FastForward,
   HandCoins,
+  UserPlus,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -489,6 +490,20 @@ export const navigationItems: NavItem[] = [
             href: '/hr/performance/deadline-enforcement',
             icon: FastForward,
           },
+        ],
+      },
+      {
+        // Ordered the way a hire happens rather than alphabetically: a gap in the establishment
+        // becomes a requisition, an approved requisition becomes a vacancy, and publishing the
+        // vacancy raises the adverts.
+        title: 'Recruitment',
+        href: '/hr/recruitment',
+        icon: UserPlus,
+        children: [
+          { title: 'Establishment', href: '/hr/recruitment/establishment', icon: Building2 },
+          { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList },
+          { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase },
+          { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone },
         ],
       },
       {

@@ -335,20 +335,9 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static JobVacancyAttachment ToEntity(this CreateJobVacancyAttachmentDto dto, Guid tenantId, Guid userId)
-    {
-        return new JobVacancyAttachment
-        {
-            TenantId = tenantId,
-            JobVacancyId = dto.JobVacancyId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
-            Description = dto.Description,
-            UploadDate = DateTime.UtcNow,
-            UploadedById = userId,
-            CreatedBy = userId.ToString(),
-        };
-    }
+    // The ToEntity mapper for vacancy attachments is gone with its DTO: the row is now built in
+    // JobVacancyService.AddAttachmentAsync from the scanned document the upload gate returns, so
+    // there is no caller payload left to map.
 
     #endregion
 

@@ -34,6 +34,14 @@ public static class ControlledFileUploadCategories
     public const string HrAppraisalAttachments = "hr-appraisal-attachments";
 
     /// <summary>
+    /// Recruitment paperwork attached to a requisition, vacancy or advert — org charts, budget
+    /// approvals, signed job descriptions, agency terms. Kept apart from
+    /// <see cref="HrCandidateDocuments"/>: that is a named person's file, this is a role's, and the
+    /// two have different audiences.
+    /// </summary>
+    public const string HrRecruitmentAttachments = "hr-recruitment-attachments";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -59,7 +67,8 @@ public static class ControlledFileUploadCategories
                 HrStaffMovementAttachments,
                 HrOfferLetters,
                 HrMedicalExamDocuments,
-                HrAppraisalAttachments
+                HrAppraisalAttachments,
+                HrRecruitmentAttachments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

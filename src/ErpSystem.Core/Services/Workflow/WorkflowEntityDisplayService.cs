@@ -273,6 +273,18 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("StaffRequisition") || key == Normalize("STAFF_REQUISITION") || key == Normalize("Staff Requisition"))
+            {
+                var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Requisition.StaffRequisition>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Position);
+                info.EntityType = "StaffRequisition";
+                info.EntityName = requisition == null
+                    ? null
+                    : $"{requisition.RequisitionNumber} — {requisition.RequisitionTitle}";
+                info.ActionUrl = $"/hr/recruitment/requisitions/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
             {
                 info.EntityType = "TrainingNomination";

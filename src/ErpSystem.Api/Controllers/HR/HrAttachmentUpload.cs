@@ -5,15 +5,17 @@ using Microsoft.AspNetCore.Mvc;
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// The controlled-upload dance shared by every performance-domain attachment endpoint: resolve the
-/// uploading employee from the token, push the file through the scanning + DMS-registration gate,
-/// write the attachment row, and roll the stored document back if that write fails.
+/// The controlled-upload dance shared by HR attachment endpoints: resolve the uploading employee
+/// from the token, push the file through the scanning + DMS-registration gate, write the attachment
+/// row, and roll the stored document back if that write fails.
 ///
-/// <para>Extracted because it is identical at four call sites (check-ins, calibration sessions,
-/// unit goals, appraisals) and the parts that are easy to get wrong — the rollback, and taking the
-/// uploader from the token rather than the payload — are exactly the parts a copy would drift on.
-/// <c>AppraisalAttachment.UploadedById</c> is a required Employee FK, and every one of those four
-/// paths used to leave it unset, so each died on a foreign-key violation the first time it ran.</para>
+/// <para>Extracted because it is identical at four performance call sites (check-ins, calibration
+/// sessions, unit goals, appraisals) and the parts that are easy to get wrong — the rollback, and
+/// taking the uploader from the token rather than the payload — are exactly the parts a copy would
+/// drift on. <c>AppraisalAttachment.UploadedById</c> is a required Employee FK, and every one of
+/// those four paths used to leave it unset, so each died on a foreign-key violation the first time
+/// it ran. Recruitment's requisition attachments had the same shape and now use this too, which is
+/// why the storage category is a parameter rather than a constant.</para>
 ///
 /// <para>The counterpart for reading a file back is <see cref="HrDocumentDownload"/>. Neither this
 /// nor the DMS performs an entitlement check — that belongs to the calling controller, which is the
@@ -38,7 +40,8 @@ internal static class HrAttachmentUpload
         string documentType,
         string? description,
         Func<Guid, HrControlledDocument, Task<T>> persist,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string category = ControlledFileUploadCategories.HrAppraisalAttachments)
     {
         if (file is null || file.Length == 0)
             return controller.BadRequest(new { message = "No file provided" });
@@ -58,7 +61,7 @@ internal static class HrAttachmentUpload
                 TenantId    = tenantId,
                 ActorUserId = actorUserId,
                 ActorName   = currentUser.UserName,
-                Category    = ControlledFileUploadCategories.HrAppraisalAttachments,
+                Category    = category,
                 File        = file,
                 Registration = new HrDocumentDmsRegistration
                 {

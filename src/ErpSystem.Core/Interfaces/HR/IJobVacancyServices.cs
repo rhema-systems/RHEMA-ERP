@@ -39,7 +39,21 @@ public interface IJobVacancyService
     Task<bool> CloseForApplicationsAsync(CloseForApplicationsDto dto, Guid closedByUserId, CancellationToken cancellationToken = default);
 
     // Attachment operations
-    Task<JobVacancyAttachmentDto> AddAttachmentAsync(CreateJobVacancyAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records an attachment against a vacancy, from a file the controlled-upload gate has already
+    /// scanned and registered. The old <c>CreateJobVacancyAttachmentDto</c> overload took a
+    /// caller-supplied <c>filePath</c> and stored no file; it is deleted, not deprecated.
+    /// </summary>
+    Task<JobVacancyAttachmentDto> AddAttachmentAsync(
+        Guid jobVacancyId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null);
     Task<IEnumerable<JobVacancyAttachmentDto>> GetAttachmentsAsync(Guid vacancyId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 

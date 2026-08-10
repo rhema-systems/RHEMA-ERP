@@ -105,11 +105,33 @@ public class JobPostingService : IJobPostingService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// Loads the vacancy a posting is being written against, refusing one that belongs to another
+    /// tenant or does not exist.
+    ///
+    /// <para>Create had no such check — the only create in this area that did not. An id from
+    /// another tenant advertised their role under this tenant's postings, and an unknown one
+    /// reached the database and came back as a foreign-key violation rather than a 404.</para>
+    /// </summary>
+    private async Task<JobVacancy> GetOwnedVacancyAsync(Guid vacancyId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var vacancy = await _unitOfWork.Repository<JobVacancy>().GetQueryable()
+            .FirstOrDefaultAsync(v => v.Id == vacancyId && v.TenantId == tenantId && !v.IsDeleted, cancellationToken);
+
+        if (vacancy == null)
+            throw new ArgumentException($"Job vacancy with ID '{vacancyId}' not found.");
+
+        return vacancy;
+    }
+
     public async Task<JobPostingDto> CreateAsync(CreateJobPostingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         var current = GetTenantId();
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedVacancyAsync(createDto.JobVacancyId, cancellationToken);
 
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.Status = JobPostingStatus.Draft;
@@ -118,7 +140,7 @@ public class JobPostingService : IJobPostingService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job posting created for vacancy {VacancyId} on channel {Channel}", createDto.JobVacancyId, createDto.Channel);
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id);
     }
 
     public async Task<JobPostingDto> UpdateAsync(UpdateJobPostingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -130,7 +152,26 @@ public class JobPostingService : IJobPostingService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job posting updated: {PostingId}", entity.Id);
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id);
+    }
+
+    /// <summary>
+    /// Re-reads a posting through the vacancy-bearing query so a write response carries the vacancy
+    /// number and poster name a subsequent GET would. The repository does not override
+    /// <c>GetByIdAsync</c>, so the tracked entity has neither.
+    /// </summary>
+    private async Task<JobPostingDto> ReloadDtoAsync(Guid id)
+    {
+        var reloaded = await _postingRepository.GetQueryable()
+            .Include(p => p.JobVacancy)
+            .Include(p => p.PostedBy)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+
+        if (reloaded == null)
+            throw new ArgumentException($"Job posting with ID '{id}' not found.");
+
+        return reloaded.ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -164,9 +205,32 @@ public class JobPostingService : IJobPostingService
         return entity == null || entity.TenantId != tenantId ? null : entity.ToDto();
     }
 
+    /// <summary>
+    /// Publishes an advert for a vacancy that is actually open for applications.
+    ///
+    /// <para>This used to guard nothing: neither the posting's own state nor the vacancy's. So an
+    /// advert could be published for a vacancy still in Draft — never approved by anyone — or for
+    /// one that had been cancelled, and an Expired posting could be quietly brought back to life.
+    /// Refusing to advertise an unapproved role is the entire reason a vacancy has an approval step
+    /// in front of publication, and this was the way round it.</para>
+    /// </summary>
     public async Task<JobPostingDto> PublishAsync(Guid postingId, DateTime? actualPublishDate, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(postingId);
+
+        if (entity.Status == JobPostingStatus.Published)
+            throw new InvalidOperationException("This job posting is already published.");
+
+        if (entity.Status == JobPostingStatus.Expired)
+            throw new InvalidOperationException(
+                "An expired job posting cannot be republished. Create a new posting for the channel instead.");
+
+        var vacancy = await GetOwnedVacancyAsync(entity.JobVacancyId, cancellationToken);
+
+        if (vacancy.VacancyStatus != JobVacancyStatus.Published)
+            throw new InvalidOperationException(
+                $"Vacancy {vacancy.VacancyNumber} is {vacancy.VacancyStatus}, so its advert cannot be published. " +
+                "Publish the vacancy first.");
 
         entity.Status = JobPostingStatus.Published;
         entity.IsActive = true;
@@ -179,36 +243,57 @@ public class JobPostingService : IJobPostingService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job posting {PostingId} published (actual {Date:d}).", entity.Id, entity.ActualPublishDate);
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id);
     }
 
     // ── Attachments ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Records an attachment against a posting, from a file the controlled-upload gate has already
+    /// scanned and registered.
+    ///
+    /// <para>This used to take a <c>CreateJobPostingAttachmentDto</c> carrying a caller-supplied
+    /// <c>filePath</c>, so the endpoint stored no file and recorded whatever path was posted to it.
+    /// The DTO is gone rather than ignored, so it cannot drift back.</para>
+    /// </summary>
     public async Task<JobPostingAttachmentDto> AddAttachmentAsync(
-        CreateJobPostingAttachmentDto createDto, Guid tenantId, Guid uploadedByUserId, CancellationToken cancellationToken = default)
+        Guid jobPostingId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
-        var current = GetTenantId();
-        if (tenantId != Guid.Empty && tenantId != current)
-            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
-
-        await GetOwnedAsync(createDto.JobPostingId);
+        var posting = await GetOwnedAsync(jobPostingId);
 
         var entity = new JobPostingAttachment
         {
-            TenantId = current,
-            JobPostingId = createDto.JobPostingId,
-            FileName = createDto.FileName,
-            FilePath = createDto.FilePath,
-            Description = createDto.Description,
-            UploadDate = DateTime.UtcNow,
-            UploadedById = uploadedByUserId,
-            CreatedById = uploadedByUserId,
-            CreatedBy = uploadedByUserId.ToString(),
+            TenantId           = posting.TenantId,
+            JobPostingId       = jobPostingId,
+            FileName           = fileName,
+            // The stored file is addressed by its upload/DMS ids, not by a path the client chose.
+            FilePath           = string.Empty,
+            FileSizeBytes      = fileSize,
+            Description        = description,
+            UploadDate         = DateTime.UtcNow,
+            UploadedById       = uploadedById,
+            CreatedById        = uploadedById,
+            CreatedBy          = uploadedById.ToString(),
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
         };
 
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read so the response carries the uploader's name rather than a null navigation.
+        var reloaded = (await _attachmentRepository.FindAsync(
+                a => a.Id == entity.Id && !a.IsDeleted, a => a.UploadedBy)).FirstOrDefault();
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<JobPostingAttachmentDto>> GetAttachmentsAsync(Guid postingId, CancellationToken cancellationToken = default)

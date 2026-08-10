@@ -1,25 +1,82 @@
+using ErpSystem.Api.Filters;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Staff (headcount) requisitions.
+///
+/// <para><b>Approval authority comes from the published <c>StaffRequisition</c> workflow
+/// definition, not from a role attribute.</b> <c>Approve</c> and <c>Reject</c> therefore carry no
+/// <c>[Authorize(Roles = …)]</c> — the service asks the engine whether the caller is an approver
+/// for the current step. Until a definition is published and
+/// <c>POST api/Workflow/entity-types/seed</c> has been re-run, submit and approve are inoperable
+/// <i>by design</i>.</para>
+///
+/// <para>Everything that is not an approval decision is gated here: retiring, parking, fulfilling
+/// and costing a requisition are HR's, while raising, editing, submitting and recalling one belong
+/// to the manager who wants the head — so those check the requester rather than a role.</para>
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[RecruitmentBusinessRules]
 public class StaffRequisitionsController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IStaffRequisitionService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<StaffRequisitionsController> _logger;
 
-    public StaffRequisitionsController(IStaffRequisitionService service, ICurrentUserService currentUser)
+    public StaffRequisitionsController(
+        IStaffRequisitionService service,
+        ICurrentUserService currentUser,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorageService,
+        ApplicationDbContext db,
+        ILogger<StaffRequisitionsController> logger)
     {
         _service = service;
         _currentUser = currentUser;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorageService = fileStorageService;
+        _db = db;
+        _logger = logger;
+    }
+
+    private bool IsHr =>
+        User.IsInRole(Constants.Roles.SuperAdmin) || User.IsInRole(Constants.Roles.Hr);
+
+    /// <summary>
+    /// HR, or the employee who raised the requisition. Used on the endpoints that belong to the
+    /// requester rather than to a role — editing a draft, sending it for approval, taking it back.
+    /// </summary>
+    private async Task<bool> CanActAsRequesterAsync(Guid requisitionId, CancellationToken ct)
+    {
+        if (IsHr) return true;
+        if (_currentUser.EmployeeId is not Guid me) return false;
+
+        var requisition = await _service.GetByIdAsync(requisitionId, ct);
+        return requisition.RequestedById == me;
     }
 
     // =========================================================================
@@ -155,10 +212,14 @@ public class StaffRequisitionsController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        if (!await CanActAsRequesterAsync(id, ct))
+            return Forbid();
+
         return Ok(await _service.UpdateAsync(dto, employeeId.Value, ct));
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -182,10 +243,35 @@ public class StaffRequisitionsController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        if (!await CanActAsRequesterAsync(id, ct))
+            return Forbid();
+
         await _service.SubmitAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Requisition submitted for review." });
+
+        // Return the requisition rather than a fixed message: with a multi-step definition the
+        // engine decides where submission lands, and the caller needs the status it actually
+        // reached, not this endpoint's guess at it.
+        return Ok(await _service.GetByIdAsync(id, ct));
     }
 
+    /// <summary>
+    /// Withdraws a requisition awaiting approval back to Draft. The service refuses unless the
+    /// caller is the person who raised it.
+    /// </summary>
+    [HttpPost("{id:guid}/recall")]
+    public async Task<IActionResult> Recall(Guid id, [FromBody] RecallStaffRequisitionDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _service.RecallAsync(id, dto?.Reason, employeeId.Value, ct);
+        return Ok(await _service.GetByIdAsync(id, ct));
+    }
+
+    /// <summary>
+    /// No role gate: authority for this step comes from the published workflow definition, and the
+    /// service refuses anyone the engine does not name as an approver.
+    /// </summary>
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveStaffRequisitionDto dto, CancellationToken ct)
     {
@@ -196,9 +282,15 @@ public class StaffRequisitionsController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         await _service.ApproveAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Requisition approved." });
+
+        // An approval step is not necessarily the last one — a two-approver definition leaves the
+        // requisition Submitted after the first sign-off. Return what it became.
+        return Ok(await _service.GetByIdAsync(id, ct));
     }
 
+    /// <summary>
+    /// No role gate, for the same reason as <see cref="Approve"/>.
+    /// </summary>
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectStaffRequisitionDto dto, CancellationToken ct)
     {
@@ -209,10 +301,11 @@ public class StaffRequisitionsController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         await _service.RejectAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Requisition rejected." });
+        return Ok(await _service.GetByIdAsync(id, ct));
     }
 
     [HttpPost("{id:guid}/hold")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> PutOnHold(Guid id, [FromBody] HoldStaffRequisitionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -226,6 +319,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/cancel")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelStaffRequisitionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -239,6 +333,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/fulfill")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> Fulfill(Guid id, [FromBody] FulfillStaffRequisitionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -252,6 +347,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/link-vacancy")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> LinkToVacancy(Guid id, [FromBody] LinkStaffRequisitionToVacancyDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -273,6 +369,7 @@ public class StaffRequisitionsController : ControllerBase
     #region Costs
 
     [HttpPost("{id:guid}/costs")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<StaffRequisitionCostDto>> AddCost(Guid id, [FromBody] CreateStaffRequisitionCostDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -301,6 +398,7 @@ public class StaffRequisitionsController : ControllerBase
         => Ok(await _service.GetCostsByCategoryAsync(id, category, ct));
 
     [HttpPut("costs/{costId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<StaffRequisitionCostDto>> UpdateCost(Guid costId, [FromBody] UpdateStaffRequisitionCostDto dto, CancellationToken ct)
     {
         if (costId != dto.Id) return BadRequest("ID mismatch.");
@@ -313,6 +411,7 @@ public class StaffRequisitionsController : ControllerBase
     }
 
     [HttpDelete("costs/{costId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> DeleteCost(Guid costId, CancellationToken ct)
     {
         await _service.DeleteCostAsync(costId, ct);
@@ -327,31 +426,79 @@ public class StaffRequisitionsController : ControllerBase
 
     #region Attachments
 
+    /// <summary>
+    /// Attaches a document to a requisition through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a JSON endpoint that accepted a caller-supplied <c>filePath</c>: it stored no file,
+    /// scanned nothing, and recorded whatever path was posted. Same shape as the five
+    /// appraisal-domain attachment paths fixed before it.
+    ///
+    /// <para>⚠ Requires a working ClamAV — <c>hr-recruitment-attachments</c> is in
+    /// <c>SystemCleanScanRequired</c> and tenant policy cannot turn that off, so with no scanner the
+    /// gate refuses with 422 before the row is ever written.</para>
+    /// </remarks>
     [HttpPost("{id:guid}/attachments")]
-    public async Task<ActionResult<StaffRequisitionAttachmentDto>> AddAttachment(Guid id, [FromBody] CreateStaffRequisitionAttachmentDto dto, CancellationToken ct)
+    [ProducesResponseType(typeof(StaffRequisitionAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddAttachment(
+        Guid id, IFormFile file, [FromForm] string? description, CancellationToken ct)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (!await CanActAsRequesterAsync(id, ct))
+            return Forbid();
 
-        var tenantId = _currentUser.TenantId;
-        var employeeId = _currentUser.EmployeeId;
-
-        if (tenantId == null) return BadRequest("Tenant context could not be resolved.");
-        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        dto.RequisitionId = id;
-        var created = await _service.AddAttachmentAsync(dto, tenantId.Value, employeeId.Value, ct);
-        return CreatedAtAction(nameof(GetById), new { id }, created);
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "StaffRequisition",
+            sourceRecordId: id,
+            sourceLabel: "Staff requisition attachment",
+            documentType: "StaffRequisitionAttachment",
+            description: description,
+            persist: (uploadedById, document) => _service.AddAttachmentAsync(
+                id, uploadedById, document.OriginalFileName, document.FileSize, description, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrRecruitmentAttachments);
     }
 
     [HttpGet("{id:guid}/attachments")]
     public async Task<ActionResult<IEnumerable<StaffRequisitionAttachmentDto>>> GetAttachments(Guid id, CancellationToken ct)
         => Ok(await _service.GetAttachmentsAsync(id, ct));
 
+    /// <summary>Streams a requisition attachment — the file lives outside the web root.</summary>
+    [HttpGet("{id:guid}/attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid id, Guid attachmentId, CancellationToken ct)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<StaffRequisitionAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.RequisitionId == id && a.TenantId == tenantId && !a.IsDeleted,
+                ct);
+
+        if (attachment is null)
+            return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken: ct);
+    }
+
     [HttpGet("attachments/uploader/{uploadedByUserId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffRequisitionAttachmentDto>>> GetAttachmentsByUploader(Guid uploadedByUserId, CancellationToken ct)
         => Ok(await _service.GetAttachmentsByUploaderAsync(uploadedByUserId, ct));
 
     [HttpDelete("attachments/{attachmentId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId, CancellationToken ct)
     {
         await _service.DeleteAttachmentAsync(attachmentId, ct);

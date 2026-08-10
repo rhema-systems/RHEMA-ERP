@@ -2,6 +2,7 @@ using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -27,8 +28,17 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IStaffRequisitionHistoryRepository _historyRepository;
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffRequisitionService> _logger;
+
+    /// <summary>
+    /// The workflow entity type this service drives. Approval authority comes from the published
+    /// definition for this type, not from a role attribute on the controller — see
+    /// <c>StaffRequisitionWorkflowStatusAdapter</c>.
+    /// </summary>
+    private const string EntityType = "StaffRequisition";
 
     public StaffRequisitionService(
         IStaffRequisitionRepository requisitionRepository,
@@ -38,6 +48,8 @@ public class StaffRequisitionService : IStaffRequisitionService
         IStaffRequisitionHistoryRepository historyRepository,
         ICompanyHrPolicyProvider policyProvider,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<StaffRequisitionService> logger)
     {
@@ -48,6 +60,8 @@ public class StaffRequisitionService : IStaffRequisitionService
         _historyRepository = historyRepository;
         _policyProvider = policyProvider;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -277,7 +291,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         _logger.LogInformation("Staff requisition created: {RequisitionNumber}", entity.RequisitionNumber);
 
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id, cancellationToken);
     }
 
     public async Task<StaffRequisitionDto> UpdateAsync(UpdateStaffRequisitionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -297,7 +311,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         _logger.LogInformation("Staff requisition updated: {RequisitionNumber}", entity.RequisitionNumber);
 
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -324,18 +338,29 @@ public class StaffRequisitionService : IStaffRequisitionService
         if (entity.Status != StaffRequisitionStatus.Draft && entity.Status != StaffRequisitionStatus.Rejected)
             throw new InvalidOperationException("Only Draft or Rejected requisitions can be submitted.");
 
+        // Budget enforcement stays here rather than in the workflow definition: whether a request
+        // exceeds approved manpower budget is a fact about the requisition, not a routing choice,
+        // and Block mode must refuse before an approver is ever troubled with it.
         await EnforceBudgetAsync(entity, "submitted", cancellationToken);
 
         var fromStatus = entity.Status;
-        entity.Status = StaffRequisitionStatus.Submitted;
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the requisition approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = submittedByUserId.ToString();
 
         await _requisitionRepository.UpdateAsync(entity);
-        await RecordHistoryAsync(entity, fromStatus, StaffRequisitionStatus.Submitted, submittedByUserId, submitDto.Notes, cancellationToken);
+        await RecordHistoryAsync(entity, fromStatus, entity.Status, submittedByUserId, submitDto.Notes, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Staff requisition submitted: {RequisitionNumber}", entity.RequisitionNumber);
+        _logger.LogInformation("Staff requisition submitted: {RequisitionNumber} (now {Status})",
+            entity.RequisitionNumber, entity.Status);
 
         return true;
     }
@@ -347,7 +372,11 @@ public class StaffRequisitionService : IStaffRequisitionService
         if (entity.Status != StaffRequisitionStatus.Submitted && entity.Status != StaffRequisitionStatus.UnderReview)
             throw new InvalidOperationException("Only Submitted or UnderReview requisitions can be approved.");
 
-        // Segregation of duties: a requester must not approve their own headcount request.
+        // Segregation of duties: a requester must not approve their own headcount request. The
+        // definition's preventInitiatorApproval covers the same ground by ApplicationUser, but this
+        // one compares Employee ids — so it still catches a requester approving through a second
+        // login — and it gives the requester a message about their own requisition rather than a
+        // generic "not an approver".
         // NOTE: despite its name, approvedByUserId carries the caller's EMPLOYEE id (the controller
         // passes _currentUser.EmployeeId), which is what RequestedById holds — so this compares like
         // with like.
@@ -356,16 +385,32 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         await EnforceBudgetAsync(entity, "approved", cancellationToken);
 
+        // The engine resolves approvers by ApplicationUser, so it gets UserId; everything the
+        // entity stores (RequestedById, the history row's ChangedById) is an Employee FK and gets
+        // the id the controller passed. See hr-attendance-actor-conventions.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
         var fromStatus = entity.Status;
-        entity.Status = StaffRequisitionStatus.Approved;
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Approve", approveDto.Comments);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = approvedByUserId.ToString();
 
         await _requisitionRepository.UpdateAsync(entity);
-        await RecordHistoryAsync(entity, fromStatus, StaffRequisitionStatus.Approved, approvedByUserId, approveDto.Comments, cancellationToken);
+        await RecordHistoryAsync(entity, fromStatus, entity.Status, approvedByUserId, approveDto.Comments, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Staff requisition approved: {RequisitionNumber}", entity.RequisitionNumber);
+        _logger.LogInformation("Staff requisition approval step processed: {RequisitionNumber} (now {Status})",
+            entity.RequisitionNumber, entity.Status);
 
         return true;
     }
@@ -377,16 +422,65 @@ public class StaffRequisitionService : IStaffRequisitionService
         if (entity.Status != StaffRequisitionStatus.Submitted && entity.Status != StaffRequisitionStatus.UnderReview)
             throw new InvalidOperationException("Only Submitted or UnderReview requisitions can be rejected.");
 
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
         var fromStatus = entity.Status;
-        entity.Status = StaffRequisitionStatus.Rejected;
+        var rejectionText = string.IsNullOrWhiteSpace(rejectDto.Comments) ? "Rejected" : rejectDto.Comments.Trim();
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Reject", rejectionText);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, rejectionText);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = rejectedByUserId.ToString();
 
         await _requisitionRepository.UpdateAsync(entity);
-        await RecordHistoryAsync(entity, fromStatus, StaffRequisitionStatus.Rejected, rejectedByUserId, rejectDto.Comments, cancellationToken);
+        await RecordHistoryAsync(entity, fromStatus, entity.Status, rejectedByUserId, rejectDto.Comments, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff requisition rejected: {RequisitionNumber}", entity.RequisitionNumber);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Withdraws a requisition the requester has sent but nobody has ruled on yet, returning it to
+    /// Draft. Distinct from Cancel, which retires the request for good and is available from any
+    /// live state.
+    /// </summary>
+    public async Task<bool> RecallAsync(Guid requisitionId, string? reason, Guid recalledByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(requisitionId);
+
+        if (entity.Status != StaffRequisitionStatus.Submitted && entity.Status != StaffRequisitionStatus.UnderReview)
+            throw new InvalidOperationException("Only a requisition still awaiting approval can be recalled.");
+
+        if (entity.RequestedById != recalledByUserId)
+            throw new InvalidOperationException("Only the person who raised a requisition can recall it.");
+
+        var fromStatus = entity.Status;
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, entity.Id, _currentUserProvider.UserId);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to recall the requisition.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = recalledByUserId.ToString();
+
+        await _requisitionRepository.UpdateAsync(entity);
+        await RecordHistoryAsync(entity, fromStatus, entity.Status, recalledByUserId, reason, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Staff requisition recalled: {RequisitionNumber}", entity.RequisitionNumber);
 
         return true;
     }
@@ -477,6 +571,17 @@ public class StaffRequisitionService : IStaffRequisitionService
     {
         var entity = await GetOwnedAsync(linkDto.RequisitionId);
 
+        // The vacancy id arrived from the payload and was written straight onto the FK. An id from
+        // another tenant linked silently; an unknown one reached the database and came back as a
+        // foreign-key violation. Check it belongs here before writing it.
+        var vacancyExists = await _unitOfWork.Repository<JobVacancy>().GetQueryable()
+            .AnyAsync(v => v.Id == linkDto.JobVacancyId
+                        && v.TenantId == entity.TenantId
+                        && !v.IsDeleted, cancellationToken);
+
+        if (!vacancyExists)
+            throw new ArgumentException($"Job vacancy with ID '{linkDto.JobVacancyId}' not found.");
+
         entity.JobVacancyId = linkDto.JobVacancyId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -554,18 +659,48 @@ public class StaffRequisitionService : IStaffRequisitionService
 
     // ── Attachment operations ─────────────────────────────────────────────────
 
-    public async Task<StaffRequisitionAttachmentDto> AddAttachmentAsync(CreateStaffRequisitionAttachmentDto createDto, Guid tenantId, Guid uploadedByUserId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Records an attachment against a requisition. The file itself has already been scanned and
+    /// registered by the controlled-upload gate in the controller — this only writes the row, from
+    /// the stored document's own metadata rather than anything the caller typed.
+    /// </summary>
+    public async Task<StaffRequisitionAttachmentDto> AddAttachmentAsync(
+        Guid requisitionId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
-        var current = GetTenantId();
-        if (tenantId != Guid.Empty && tenantId != current)
-            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        var requisition = await GetOwnedAsync(requisitionId);
 
-        await GetOwnedAsync(createDto.RequisitionId);
+        var entity = new StaffRequisitionAttachment
+        {
+            TenantId           = requisition.TenantId,
+            RequisitionId      = requisitionId,
+            FileName           = fileName,
+            // The stored file is addressed by its upload/DMS ids, not by a path the client chose.
+            FilePath           = string.Empty,
+            FileSizeBytes      = fileSize,
+            Description        = description,
+            UploadDate         = DateTime.UtcNow,
+            UploadedById       = uploadedById,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
+            CreatedBy          = uploadedById.ToString(),
+        };
 
-        var entity = createDto.ToEntity(current, uploadedByUserId);
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read so the response carries the uploader's name rather than a null navigation.
+        var reloaded = (await _attachmentRepository.GetByRequisitionIdAsync(requisitionId))
+            .FirstOrDefault(a => a.Id == entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<StaffRequisitionAttachmentDto>> GetAttachmentsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
@@ -780,6 +915,23 @@ public class StaffRequisitionService : IStaffRequisitionService
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Re-reads a requisition through the summary-nav query so a write response carries the same
+    /// position title, org unit, location and requester name a subsequent GET would.
+    ///
+    /// <para>Mapping the tracked entity directly is what create and update used to do, and every
+    /// one of those names came back blank: a freshly built entity has no navigations at all, and an
+    /// edited one has whatever was loaded before its FKs changed — EF does not re-query them. The
+    /// screen then showed an empty Position column until it happened to refetch.</para>
+    /// </summary>
+    private async Task<StaffRequisitionDto> ReloadDtoAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var reloaded = await _requisitionRepository.GetWithSummaryNavAsync(id);
+        if (reloaded == null)
+            throw new ArgumentException($"Staff requisition with ID '{id}' not found.");
+        return reloaded.ToDto();
+    }
 
     private async Task<string> GenerateRequisitionNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {

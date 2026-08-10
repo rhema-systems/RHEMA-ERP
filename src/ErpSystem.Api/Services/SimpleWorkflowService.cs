@@ -1484,6 +1484,28 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = plan.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "STAFF_REQUISITION", "StaffRequisition", "Staff Requisition"))
+        {
+            var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Requisition.StaffRequisition>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Staff requisition not found");
+
+            // How many heads are being asked for, and whether any budget covers them, is the
+            // routing threshold here — one budgeted replacement and a five-head unbudgeted
+            // expansion are not the same decision.
+            context["requisitionNumber"] = requisition.RequisitionNumber;
+            context["positionId"] = requisition.PositionId;
+            context["organizationUnitId"] = requisition.OrganizationUnitId;
+            context["locationId"] = requisition.LocationId;
+            context["requisitionType"] = requisition.Type.ToString();
+            context["priority"] = requisition.Priority.ToString();
+            context["numberOfPositions"] = requisition.NumberOfPositions;
+            context["isBudgeted"] = requisition.IsBudgeted;
+            context["requestedById"] = requisition.RequestedById;
+            context["desiredStartDate"] = requisition.DesiredStartDate;
+            context["status"] = requisition.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "TRAINING_NOMINATION", "TrainingNomination", "Training Nomination"))
         {
             var nomination = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingNomination>()
