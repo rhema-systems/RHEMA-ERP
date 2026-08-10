@@ -45,7 +45,7 @@ Unsupported and rejected or deferred:
 - Partial/component disposal.
 - Foreign-currency disposal proceeds.
 - Sale proceeds through AR invoice, cash/bank receipt, or tax document creation.
-- Automatic final/partial-period depreciation at disposal.
+- Final/partial-period depreciation at disposal is now implemented under `FIN-LIM-0039`; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - Revaluation surplus transfer within equity on disposal.
 
 ## Validation Rules
@@ -102,7 +102,7 @@ The original Batch 21C did not recycle revaluation surplus through profit or los
 
 ## Depreciation Interaction
 
-The disposal service requires depreciation posted through the prior fiscal period when the asset was placed in service before the disposal period. It does not calculate final or partial-period depreciation through the disposal date. That gap is tracked as `FIN-LIM-0039`.
+The disposal service requires depreciation posted through the prior fiscal period and now calculates final depreciation through the disposal date under `FIN-LIM-0039`. Time-based methods use actual inclusive days; units-of-production requires verified usage evidence. The charge and derecognition post atomically.
 
 After a successful disposal, the default book value clears accumulated depreciation and NBV to zero without mutating acquisition cost or prior depreciation schedules.
 
@@ -332,7 +332,7 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 ## Limitations Register
 
 - `FIN-LIM-0026`: resolved for whole-asset sale/write-off disposal foundation.
-- `FIN-LIM-0039`: opened for final/partial-period depreciation on disposal.
+- `FIN-LIM-0039`: resolved by controlled disposal-date depreciation; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
 - `FIN-LIM-0041`: resolved for full remaining asset-specific surplus transfer directly to retained earnings on whole-asset disposal.
 - `FIN-LIM-0042`: opened for partial/component disposal.

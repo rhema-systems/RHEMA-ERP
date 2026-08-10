@@ -106,7 +106,7 @@ Focused regression coverage proves:
 
 This slice resolves only `FIN-LIM-0041`. The following remain separately controlled:
 
-- `FIN-LIM-0039`: automatic final/partial-period depreciation through disposal date;
+- `FIN-LIM-0039`: resolved by automatic final/partial-period depreciation through disposal date;
 - `FIN-LIM-0040`: VAT, AR and cash/bank integration for sale proceeds;
 - `FIN-LIM-0042`: component or partial disposal; and
 - `FIN-LIM-0043`: foreign-currency disposal proceeds.

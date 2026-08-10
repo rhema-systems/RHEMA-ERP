@@ -497,7 +497,8 @@ public partial class FixedAssetDepreciationService
             // value movement without guessing how that later activity should itself be reversed.
             if (RoundMoney(bookValue.AccumulatedDepreciation) != RoundMoney(line.AccumulatedDepreciation) ||
                 RoundMoney(bookValue.NetBookValue) != RoundMoney(line.NetBookValue) ||
-                RoundUnits(bookValue.AccumulatedProductionUnits) != RoundUnits(line.CumulativeProductionUnitsAfter))
+                FixedAssetDepreciationCalculator.RoundUnits(bookValue.AccumulatedProductionUnits) !=
+                FixedAssetDepreciationCalculator.RoundUnits(line.CumulativeProductionUnitsAfter))
             {
                 throw new InvalidOperationException(
                     "The asset book value has later accounting activity and no longer matches this depreciation run. Reverse later activity first.");

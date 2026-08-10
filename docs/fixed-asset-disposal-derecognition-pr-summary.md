@@ -115,7 +115,7 @@ Supported:
 
 Unsupported and tracked:
 
-- Final/partial-period depreciation on disposal: `FIN-LIM-0039`.
+- Final/partial-period depreciation on disposal was subsequently resolved under `FIN-LIM-0039`; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - Disposal sale VAT/AR/cash integration: `FIN-LIM-0040`.
 - Revaluation surplus equity transfer policy: resolved by the follow-up documented in `docs/fixed-asset-disposal-revaluation-surplus-policy-foundation.md`.
 - Partial/component disposal: `FIN-LIM-0042`.
@@ -123,7 +123,7 @@ Unsupported and tracked:
 
 ## Depreciation Interaction
 
-Disposal requires depreciation posted through the prior fiscal period for assets placed in service before the disposal period. It does not calculate final/partial-period depreciation through the disposal date. Prior posted depreciation schedules are immutable.
+Disposal still requires depreciation posted through the prior fiscal period. The subsequent `FIN-LIM-0039` slice calculates final depreciation through the disposal date and retains prior posted schedules as immutable history.
 
 ## Revaluation And Impairment Interaction
 
@@ -173,7 +173,7 @@ Implemented/emitted where applicable:
 ## Limitations Register
 
 - `FIN-LIM-0026`: resolved for whole-asset disposal/write-off foundation.
-- `FIN-LIM-0039`: opened for final/partial-period depreciation on disposal.
+- `FIN-LIM-0039`: subsequently resolved for whole-asset disposal.
 - `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
 - `FIN-LIM-0041`: resolved by the dedicated whole-asset disposal equity-transfer policy slice.
 - `FIN-LIM-0042`: opened for partial/component disposal.

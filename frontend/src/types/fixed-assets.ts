@@ -459,6 +459,21 @@ export interface AssetDisposal {
   saleProceeds: number;
   disposalCost: number;
   netBookValueAtDisposal: number;
+  finalDepreciationAmount: number;
+  finalDepreciationFromDate?: string;
+  finalDepreciationToDate?: string;
+  finalDepreciationPeriodDays: number;
+  finalDepreciationEligibleDays: number;
+  finalDepreciationProrationBasis?: string;
+  finalDepreciationMethodSnapshot?: DepreciationMethod;
+  finalDepreciationScheduleId?: string;
+  finalDepreciationProductionUnits: number;
+  finalDepreciationDiminishingRatePercent: number;
+  finalDepreciationLifetimeProductionCapacity: number;
+  finalDepreciationCumulativeProductionUnitsBefore: number;
+  finalDepreciationCumulativeProductionUnitsAfter: number;
+  finalDepreciationEvidenceReference?: string;
+  finalDepreciationEvidenceNotes?: string;
   gainOrLoss: number;
   revaluationSurplusAtDisposal: number;
   revaluationSurplusAccountId?: string;
@@ -483,6 +498,9 @@ export interface RequestAssetDisposalDto {
   saleProceeds: number;
   disposalCost: number;
   buyerName?: string;
+  finalDepreciationProductionUnits?: number;
+  finalDepreciationEvidenceReference?: string;
+  finalDepreciationEvidenceNotes?: string;
 }
 
 export interface ApproveAssetDisposalDto {

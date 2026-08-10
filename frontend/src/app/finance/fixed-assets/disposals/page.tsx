@@ -70,6 +70,16 @@ export default function AssetDisposalsPage() {
             });
             return;
         }
+        const selectedAssetForRequest = assets.find(asset => asset.id === formData.fixedAssetId);
+        if (selectedAssetForRequest?.depreciationMethod === 'UnitsOfProduction' &&
+            (!formData.finalDepreciationProductionUnits || !formData.finalDepreciationEvidenceReference?.trim())) {
+            toast({
+                title: "Usage evidence required",
+                description: "Enter disposal-period production units and a meter reading or production-report reference.",
+                variant: "destructive",
+            });
+            return;
+        }
 
         try {
             setIsSubmitting(true);
@@ -90,7 +100,7 @@ export default function AssetDisposalsPage() {
             console.error('Failed to submit disposal request:', error);
             toast({
                 title: "Error",
-                description: "Failed to submit disposal request.",
+                description: error instanceof Error ? error.message : "Failed to submit disposal request.",
                 variant: "destructive",
             });
         } finally {
@@ -110,7 +120,7 @@ export default function AssetDisposalsPage() {
             console.error('Failed to approve disposal:', error);
             toast({
                 title: "Error",
-                description: "Failed to approve disposal.",
+                description: error instanceof Error ? error.message : "Failed to approve disposal.",
                 variant: "destructive",
             });
         }
@@ -128,7 +138,7 @@ export default function AssetDisposalsPage() {
             console.error('Failed to reject disposal:', error);
             toast({
                 title: "Error",
-                description: "Failed to reject disposal.",
+                description: error instanceof Error ? error.message : "Failed to reject disposal.",
                 variant: "destructive",
             });
         }
@@ -146,7 +156,7 @@ export default function AssetDisposalsPage() {
             console.error('Failed to complete disposal:', error);
             toast({
                 title: "Error",
-                description: "Failed to complete disposal.",
+                description: error instanceof Error ? error.message : "Failed to complete disposal.",
                 variant: "destructive",
             });
         }
@@ -182,6 +192,11 @@ export default function AssetDisposalsPage() {
         return asset?.netBookValue || 0;
     }, [formData.fixedAssetId, assets]);
 
+    const selectedAsset = useMemo(
+        () => assets.find(asset => asset.id === formData.fixedAssetId),
+        [formData.fixedAssetId, assets]
+    );
+
     const estimatedGainLoss = useMemo(() => {
         const proceeds = formData.saleProceeds || 0;
         const cost = formData.disposalCost || 0;
@@ -201,7 +216,7 @@ export default function AssetDisposalsPage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Asset Disposals</h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Control derecognition, gain/loss, proceeds, and direct revaluation-reserve transfer within equity.</p>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">Control depreciation through the disposal date, derecognition, gain/loss, proceeds, and direct revaluation-reserve transfer within equity.</p>
                 </div>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
@@ -214,7 +229,7 @@ export default function AssetDisposalsPage() {
                         <DialogHeader>
                             <DialogTitle className="text-xl">Request Asset Disposal</DialogTitle>
                             <DialogDescription>
-                                Initiate the retirement or sale of a fixed asset. Any remaining asset-specific revaluation surplus is transferred directly to retained earnings after approval, never through profit or loss.
+                                Initiate the retirement or sale of a fixed asset. Finance calculates final depreciation through the disposal date and includes it in the same approved posting as derecognition.
                             </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleRequestDisposal} className="space-y-4 py-4">
@@ -320,6 +335,40 @@ export default function AssetDisposalsPage() {
                                 </div>
                             </div>
 
+                            {selectedAsset?.depreciationMethod === 'UnitsOfProduction' ? (
+                                <Card className="border-blue-200 bg-blue-50/70">
+                                    <CardContent className="pt-4 space-y-3">
+                                        <p className="text-sm text-blue-900">
+                                            This asset uses units of production. The checker approves the verified usage and final charge together with the disposal.
+                                        </p>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div className="space-y-2">
+                                                <Label htmlFor="finalProductionUnits">Disposal-period units <span className="text-red-500">*</span></Label>
+                                                <Input id="finalProductionUnits" type="number" min="0" step="0.0001"
+                                                    value={formData.finalDepreciationProductionUnits ?? ''}
+                                                    onChange={(e) => setFormData({ ...formData, finalDepreciationProductionUnits: Number(e.target.value) })} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="finalEvidenceReference">Evidence reference <span className="text-red-500">*</span></Label>
+                                                <Input id="finalEvidenceReference" placeholder="Meter reading / production report"
+                                                    value={formData.finalDepreciationEvidenceReference ?? ''}
+                                                    onChange={(e) => setFormData({ ...formData, finalDepreciationEvidenceReference: e.target.value })} />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="finalEvidenceNotes">Evidence notes</Label>
+                                            <Textarea id="finalEvidenceNotes" rows={2}
+                                                value={formData.finalDepreciationEvidenceNotes ?? ''}
+                                                onChange={(e) => setFormData({ ...formData, finalDepreciationEvidenceNotes: e.target.value })} />
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ) : (
+                                <p className="text-xs text-slate-500">
+                                    Finance prorates the current period&apos;s depreciation by actual inclusive days through the selected disposal date. The approved amount appears in Disposal History.
+                                </p>
+                            )}
+
                             <Card className={estimatedGainLoss >= 0 ? "bg-emerald-50 border-emerald-100" : "bg-red-50 border-red-100"}>
                                 <CardContent className="py-3 flex justify-between items-center">
                                     <div className="text-sm font-medium text-slate-700">Estimated {estimatedGainLoss >= 0 ? 'Gain' : 'Loss'}:</div>
@@ -410,6 +459,7 @@ export default function AssetDisposalsPage() {
                                 <TableHead className="font-semibold">Asset</TableHead>
                                 <TableHead className="font-semibold">Method</TableHead>
                                 <TableHead className="font-semibold text-right">NBV</TableHead>
+                                <TableHead className="font-semibold text-right">Final Depreciation</TableHead>
                                 <TableHead className="font-semibold text-right">Proceeds</TableHead>
                                 <TableHead className="font-semibold text-right">Gain/Loss</TableHead>
                                 <TableHead className="font-semibold text-right">Equity Transfer</TableHead>
@@ -420,7 +470,7 @@ export default function AssetDisposalsPage() {
                         <TableBody>
                             {filteredDisposals.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={10} className="h-48 text-center text-slate-400">
+                                    <TableCell colSpan={11} className="h-48 text-center text-slate-400">
                                         <div className="flex flex-col items-center justify-center">
                                             <Trash2 className="h-10 w-10 mb-2 opacity-20" />
                                             <p>No asset disposals found matching your search.</p>
@@ -442,6 +492,14 @@ export default function AssetDisposalsPage() {
                                             <Badge variant="secondary" className="font-normal capitalize">{disposal.disposalType.toLowerCase()}</Badge>
                                         </TableCell>
                                         <TableCell className="text-right text-sm">₵ {disposal.netBookValueAtDisposal.toLocaleString()}</TableCell>
+                                        <TableCell className="text-right text-sm">
+                                            {disposal.finalDepreciationAmount > 0 ? (
+                                                <div className="flex flex-col">
+                                                    <span className="font-semibold text-blue-700">₵ {disposal.finalDepreciationAmount.toLocaleString()}</span>
+                                                    <span className="text-[11px] text-slate-500">{disposal.finalDepreciationProrationBasis}</span>
+                                                </div>
+                                            ) : '—'}
+                                        </TableCell>
                                         <TableCell className="text-right text-sm">₵ {disposal.saleProceeds.toLocaleString()}</TableCell>
                                         <TableCell className={`text-right text-sm font-semibold ${disposal.gainOrLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                             ₵ {Math.abs(disposal.gainOrLoss).toLocaleString()}
