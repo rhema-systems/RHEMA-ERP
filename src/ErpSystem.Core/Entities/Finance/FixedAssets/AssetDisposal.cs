@@ -58,6 +58,45 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal AccumulatedDepreciationAtDisposal { get; set; }
 
+        // FIN-LIM-0039 evidence: disposal can occur between normal month-end runs, so the maker
+        // approves the final charge and its proration basis together with the derecognition.
+        // Persisting these values prevents a later policy or book change from silently altering the
+        // accounting decision seen by the checker.
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal FinalDepreciationAmount { get; set; }
+
+        public DateTime? FinalDepreciationFromDate { get; set; }
+        public DateTime? FinalDepreciationToDate { get; set; }
+        public int FinalDepreciationPeriodDays { get; set; }
+        public int FinalDepreciationEligibleDays { get; set; }
+
+        [MaxLength(30)]
+        public string? FinalDepreciationProrationBasis { get; set; }
+
+        public DepreciationMethod? FinalDepreciationMethodSnapshot { get; set; }
+        public Guid? FinalDepreciationScheduleId { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal FinalDepreciationProductionUnits { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal FinalDepreciationDiminishingRatePercent { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal FinalDepreciationLifetimeProductionCapacity { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal FinalDepreciationCumulativeProductionUnitsBefore { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal FinalDepreciationCumulativeProductionUnitsAfter { get; set; }
+
+        [MaxLength(200)]
+        public string? FinalDepreciationEvidenceReference { get; set; }
+
+        [MaxLength(1000)]
+        public string? FinalDepreciationEvidenceNotes { get; set; }
+
         [Column(TypeName = "decimal(18,2)")]
         public decimal AccumulatedImpairmentAtDisposal { get; set; }
 

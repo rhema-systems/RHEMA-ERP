@@ -336,7 +336,7 @@ All open limitations remain centralized in `docs/finance-go-live-limitations-reg
 
 - `FIN-LIM-0027`: resolved for backend fixed asset reporting and GL reconciliation foundation.
 - `FIN-LIM-0038`: resolved by the controlled fixed-asset GL reclassification transfer foundation.
-- `FIN-LIM-0039` through `FIN-LIM-0043`: disposal-related limitations remain open.
+- `FIN-LIM-0039` is resolved: disposal-date depreciation schedules now reconcile through the same reports. `FIN-LIM-0040`, `FIN-LIM-0042`, and `FIN-LIM-0043` remain open.
 - `FIN-LIM-0044`: broader financial statement classification for disposal gains remains open.
 
 ## PR Definition Of Done

@@ -299,6 +299,7 @@ public class AssetDepreciationScheduleDto
     public Guid Id { get; set; }
     public Guid FixedAssetId { get; set; }
     public Guid? FixedAssetDepreciationRunId { get; set; }
+    public Guid? AssetDisposalId { get; set; }
     public Guid? AccountingBookId { get; set; }
     public string BookClassification { get; set; } = "IFRS";
     public Guid FiscalPeriodId { get; set; }
@@ -525,6 +526,21 @@ public class AssetDisposalDto
     public Guid? ProceedsAccountId { get; set; }
     public decimal CostAtDisposal { get; set; }
     public decimal AccumulatedDepreciationAtDisposal { get; set; }
+    public decimal FinalDepreciationAmount { get; set; }
+    public DateTime? FinalDepreciationFromDate { get; set; }
+    public DateTime? FinalDepreciationToDate { get; set; }
+    public int FinalDepreciationPeriodDays { get; set; }
+    public int FinalDepreciationEligibleDays { get; set; }
+    public string? FinalDepreciationProrationBasis { get; set; }
+    public DepreciationMethod? FinalDepreciationMethodSnapshot { get; set; }
+    public Guid? FinalDepreciationScheduleId { get; set; }
+    public decimal FinalDepreciationProductionUnits { get; set; }
+    public decimal FinalDepreciationDiminishingRatePercent { get; set; }
+    public decimal FinalDepreciationLifetimeProductionCapacity { get; set; }
+    public decimal FinalDepreciationCumulativeProductionUnitsBefore { get; set; }
+    public decimal FinalDepreciationCumulativeProductionUnitsAfter { get; set; }
+    public string? FinalDepreciationEvidenceReference { get; set; }
+    public string? FinalDepreciationEvidenceNotes { get; set; }
     public decimal AccumulatedImpairmentAtDisposal { get; set; }
     public decimal RevaluationSurplusAtDisposal { get; set; }
     public Guid? RevaluationSurplusAccountId { get; set; }
@@ -563,6 +579,14 @@ public class RequestAssetDisposalDto
     public Guid? ProceedsAccountId { get; set; }
     public string? BuyerName { get; set; }
     public string? IdempotencyKey { get; set; }
+
+    /// <summary>
+    /// Verified usage is mandatory only when the selected asset book uses units of production.
+    /// The disposal approval governs this evidence and the resulting final charge together.
+    /// </summary>
+    public decimal? FinalDepreciationProductionUnits { get; set; }
+    public string? FinalDepreciationEvidenceReference { get; set; }
+    public string? FinalDepreciationEvidenceNotes { get; set; }
 }
 
 public class ApproveAssetDisposalDto

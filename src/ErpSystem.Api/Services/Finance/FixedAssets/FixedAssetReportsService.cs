@@ -1027,8 +1027,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     }
 
     private static bool IsDepreciationLineRelated(AccountTransaction transaction, AssetDepreciationSchedule schedule)
-        => transaction.SourceDocumentType == SourceDocumentTypeDepreciationRun &&
+        => (transaction.SourceDocumentType == SourceDocumentTypeDepreciationRun ||
+            transaction.SourceDocumentType == SourceDocumentTypeDisposal) &&
            (transaction.SourceDocumentId == schedule.FixedAssetDepreciationRunId ||
+            transaction.SourceDocumentId == schedule.AssetDisposalId ||
             NotesContainId(transaction.Notes, "ScheduleId", schedule.Id) ||
             NotesContainId(transaction.Notes, "FixedAssetId", schedule.FixedAssetId));
 

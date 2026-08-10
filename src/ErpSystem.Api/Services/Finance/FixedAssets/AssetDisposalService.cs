@@ -83,8 +83,31 @@ public class AssetDisposalService : IAssetDisposalService
 
         await ValidateDisposalRequestAsync(asset, dto);
         var bookValue = ResolveDefaultBookValue(asset);
-        var fiscalPeriod = await ResolveFiscalPeriodAsync(dto.DisposalDate);
-        var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, dto);
+        var fiscalPeriod = await ResolveFiscalPeriodAsync(dto.DisposalDate)
+            ?? throw new InvalidOperationException("No fiscal period covers the disposal accounting date.");
+        FinalDepreciationPreparation finalDepreciation;
+        try
+        {
+            finalDepreciation = await CalculateFinalDepreciationAsync(
+                asset,
+                bookValue,
+                fiscalPeriod,
+                dto.DisposalDate,
+                dto.FinalDepreciationProductionUnits,
+                dto.FinalDepreciationEvidenceReference,
+                dto.FinalDepreciationEvidenceNotes);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("depreciation", StringComparison.OrdinalIgnoreCase))
+        {
+            // Request-time blockers do not yet have an AssetDisposal row, so record the asset ID as
+            // source evidence. Completion-time blockers continue to reference the disposal itself.
+            await RecordBlockedDisposalAuditAsync(
+                FinanceAuditEvents.FixedAssetDisposalBlockedMissingDepreciation,
+                asset.Id,
+                ex.Message);
+            throw;
+        }
+        var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, dto, finalDepreciation);
         var surplusTransfer = await ResolveRevaluationSurplusTransferAsync(asset, snapshot.RevaluationSurplusBalance);
 
         var existingActiveDisposal = await _context.AssetDisposals
@@ -119,6 +142,21 @@ public class AssetDisposalService : IAssetDisposalService
             ProceedsAccountId = snapshot.ProceedsAccountId,
             CostAtDisposal = snapshot.AssetCarryingAccountAmount,
             AccumulatedDepreciationAtDisposal = snapshot.AccumulatedDepreciation,
+            FinalDepreciationAmount = finalDepreciation.Amount,
+            FinalDepreciationFromDate = finalDepreciation.FromDate,
+            FinalDepreciationToDate = finalDepreciation.ToDate,
+            FinalDepreciationPeriodDays = finalDepreciation.PeriodDays,
+            FinalDepreciationEligibleDays = finalDepreciation.EligibleDays,
+            FinalDepreciationProrationBasis = finalDepreciation.ProrationBasis,
+            FinalDepreciationMethodSnapshot = bookValue.DepreciationMethod,
+            FinalDepreciationScheduleId = finalDepreciation.Amount > 0m ? Guid.NewGuid() : null,
+            FinalDepreciationProductionUnits = finalDepreciation.Calculation.PeriodProductionUnits,
+            FinalDepreciationDiminishingRatePercent = finalDepreciation.Calculation.EffectiveDiminishingBalanceRatePercent,
+            FinalDepreciationLifetimeProductionCapacity = finalDepreciation.Calculation.LifetimeProductionCapacity,
+            FinalDepreciationCumulativeProductionUnitsBefore = finalDepreciation.Calculation.CumulativeProductionUnitsBefore,
+            FinalDepreciationCumulativeProductionUnitsAfter = finalDepreciation.Calculation.CumulativeProductionUnitsAfter,
+            FinalDepreciationEvidenceReference = finalDepreciation.Calculation.ProductionEvidenceReference,
+            FinalDepreciationEvidenceNotes = finalDepreciation.Calculation.ProductionEvidenceNotes,
             AccumulatedImpairmentAtDisposal = snapshot.AccumulatedImpairment,
             RevaluationSurplusAtDisposal = snapshot.RevaluationSurplusBalance,
             RevaluationSurplusAccountId = surplusTransfer.RevaluationSurplusAccountId,
@@ -147,6 +185,25 @@ public class AssetDisposalService : IAssetDisposalService
             disposal,
             afterValues: BuildDisposalAuditSnapshot(disposal),
             comment: disposal.Reason);
+        if (disposal.FinalDepreciationAmount > 0m)
+        {
+            await RecordDisposalAuditAsync(
+                FinanceAuditEvents.FixedAssetDisposalFinalDepreciationCalculated,
+                disposal,
+                afterValues: new
+                {
+                    disposal.FinalDepreciationAmount,
+                    disposal.FinalDepreciationFromDate,
+                    disposal.FinalDepreciationToDate,
+                    disposal.FinalDepreciationEligibleDays,
+                    disposal.FinalDepreciationPeriodDays,
+                    disposal.FinalDepreciationProrationBasis,
+                    disposal.FinalDepreciationMethodSnapshot,
+                    disposal.FinalDepreciationProductionUnits,
+                    disposal.FinalDepreciationEvidenceReference
+                },
+                comment: "Final depreciation through the disposal date calculated for maker-checker approval.");
+        }
 
         var workflowResult = await _workflowService.StartApprovalWorkflowAsync("AssetDisposal", disposal.Id);
         if (!workflowResult.Success)
@@ -249,7 +306,6 @@ public class AssetDisposalService : IAssetDisposalService
         var asset = disposal.FixedAsset;
         ValidateAssetStillDisposable(asset, disposal);
         var bookValue = ResolveBookValue(asset, disposal.AccountingBookId, disposal.BookClassification);
-        await ValidateDepreciationCompletenessAsync(asset, bookValue, disposal);
         var fiscalPeriod = await ResolveFiscalPeriodAsync(disposal.AccountingDate ?? disposal.DisposalDate)
             ?? throw new InvalidOperationException("No fiscal period covers the disposal accounting date.");
         var functionalCurrency = await GetFunctionalCurrencyAsync();
@@ -264,7 +320,17 @@ public class AssetDisposalService : IAssetDisposalService
 
         try
         {
-            var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, disposal);
+            var finalDepreciation = await CalculateFinalDepreciationAsync(
+                asset,
+                bookValue,
+                fiscalPeriod,
+                disposal.DisposalDate,
+                disposal.FinalDepreciationProductionUnits == 0m ? null : disposal.FinalDepreciationProductionUnits,
+                disposal.FinalDepreciationEvidenceReference,
+                disposal.FinalDepreciationEvidenceNotes,
+                disposal.Id);
+            ValidateApprovedFinalDepreciation(disposal, finalDepreciation, bookValue.DepreciationMethod);
+            var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, disposal, finalDepreciation);
             await ValidateApprovedRevaluationSurplusTransferAsync(disposal, asset, snapshot);
             ApplySnapshot(disposal, snapshot);
             var postingRequest = await BuildDisposalPostingRequestAsync(disposal, asset, fiscalPeriod, functionalCurrency, snapshot);
@@ -285,7 +351,11 @@ public class AssetDisposalService : IAssetDisposalService
                     // checker decision. Completion separately verifies that policy has not drifted.
                     disposal.RevaluationSurplusAccountId,
                     disposal.RetainedEarningsAccountId,
-                    disposal.RevaluationSurplusTransferAmount
+                    disposal.RevaluationSurplusTransferAmount,
+                    disposal.FinalDepreciationAmount,
+                    disposal.FinalDepreciationProrationBasis,
+                    disposal.FinalDepreciationFromDate,
+                    disposal.FinalDepreciationToDate
                 },
                 comment: "Fixed asset disposal account mappings used for posting.");
             await RecordDisposalAuditAsync(
@@ -330,6 +400,22 @@ public class AssetDisposalService : IAssetDisposalService
                     disposal.PostingEventId
                 },
                 comment: "Fixed asset disposal posted through the central posting engine.");
+
+            if (disposal.FinalDepreciationAmount > 0m)
+            {
+                await RecordDisposalAuditAsync(
+                    FinanceAuditEvents.FixedAssetDisposalFinalDepreciationPosted,
+                    disposal,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: new
+                    {
+                        disposal.FinalDepreciationAmount,
+                        disposal.FinalDepreciationScheduleId,
+                        disposal.FinalDepreciationProrationBasis
+                    },
+                    comment: "Final depreciation posted atomically with fixed asset derecognition.");
+            }
 
             if (disposal.DisposalType == DisposalType.Sale && disposal.NetProceeds > 0m)
             {
@@ -602,40 +688,122 @@ public class AssetDisposalService : IAssetDisposalService
         }
     }
 
-    private async Task ValidateDepreciationCompletenessAsync(
+    private async Task<FinalDepreciationPreparation> CalculateFinalDepreciationAsync(
         FixedAsset asset,
         FixedAssetBookValue bookValue,
-        AssetDisposal disposal)
+        FiscalPeriod fiscalPeriod,
+        DateTime disposalDate,
+        decimal? productionUnits,
+        string? productionEvidenceReference,
+        string? productionEvidenceNotes,
+        Guid? completingDisposalId = null)
     {
-        var fiscalPeriod = await ResolveFiscalPeriodAsync(disposal.AccountingDate ?? disposal.DisposalDate);
-        if (fiscalPeriod == null)
+        // A normal full-period schedule and a prorated disposal charge cannot coexist: doing so
+        // would over-depreciate a mid-period disposal. A user must reverse the normal schedule and
+        // let the disposal create the single authoritative current-period schedule.
+        var currentPeriodScheduleExists = await _context.AssetDepreciationSchedules.AnyAsync(schedule =>
+            schedule.TenantId == TenantId &&
+            schedule.FixedAssetId == asset.Id &&
+            schedule.FiscalPeriodId == fiscalPeriod.Id &&
+            schedule.BookClassification == bookValue.BookClassification &&
+            !schedule.IsDeleted &&
+            !schedule.IsReversed &&
+            (!completingDisposalId.HasValue || schedule.AssetDisposalId != completingDisposalId.Value));
+        if (currentPeriodScheduleExists)
         {
-            return;
+            throw new InvalidOperationException(
+                "A current-period depreciation schedule already exists. Reverse it before disposing the asset so depreciation can be calculated through the disposal date.");
         }
 
         var placedInService = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate;
-        if (!placedInService.HasValue || placedInService.Value.Date >= fiscalPeriod.StartDate.Date)
+        if (!placedInService.HasValue)
         {
-            return;
+            throw new InvalidOperationException("Fixed asset book value must have a placed-in-service date before disposal depreciation can be calculated.");
         }
 
-        var previousPeriod = await _context.FiscalPeriods
-            .Where(p => p.TenantId == TenantId && !p.IsDeleted && p.EndDate < fiscalPeriod.StartDate)
-            .OrderByDescending(p => p.EndDate)
-            .FirstOrDefaultAsync();
-        if (previousPeriod == null)
+        if (placedInService.Value.Date < fiscalPeriod.StartDate.Date)
         {
-            return;
+            var previousPeriod = await _context.FiscalPeriods
+                .Where(p => p.TenantId == TenantId && !p.IsDeleted && p.EndDate < fiscalPeriod.StartDate)
+                .OrderByDescending(p => p.EndDate)
+                .FirstOrDefaultAsync();
+            if (previousPeriod != null &&
+                (!bookValue.LastDepreciationDate.HasValue ||
+                 bookValue.LastDepreciationDate.Value.Date < previousPeriod.EndDate.Date))
+            {
+                throw new InvalidOperationException("Fixed asset depreciation must be posted through the period before disposal.");
+            }
         }
 
-        if (!bookValue.LastDepreciationDate.HasValue ||
-            bookValue.LastDepreciationDate.Value.Date < previousPeriod.EndDate.Date)
+        var disposalDay = disposalDate.Date;
+        var startDate = new[] { fiscalPeriod.StartDate.Date, placedInService.Value.Date }
+            .Max();
+        if (bookValue.LastDepreciationDate.HasValue)
         {
-            await RecordBlockedDisposalAuditAsync(
-                FinanceAuditEvents.FixedAssetDisposalBlockedMissingDepreciation,
-                disposal,
-                "Fixed asset depreciation must be posted through the period before disposal.");
-            throw new InvalidOperationException("Fixed asset depreciation must be posted through the period before disposal.");
+            startDate = new[] { startDate, bookValue.LastDepreciationDate.Value.Date.AddDays(1) }.Max();
+        }
+
+        var usage = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
+            ? new FixedAssetProductionUsageDto
+            {
+                FixedAssetId = asset.Id,
+                BookClassification = bookValue.BookClassification,
+                UnitsConsumed = productionUnits ?? 0m,
+                EvidenceReference = productionEvidenceReference ?? string.Empty,
+                EvidenceNotes = productionEvidenceNotes
+            }
+            : null;
+        if (bookValue.DepreciationMethod != DepreciationMethod.UnitsOfProduction &&
+            (productionUnits.GetValueOrDefault() != 0m || !string.IsNullOrWhiteSpace(productionEvidenceReference)))
+        {
+            throw new InvalidOperationException("Final production usage may only be supplied for a units-of-production asset.");
+        }
+
+        var calculation = FixedAssetDepreciationCalculator.Calculate(bookValue, usage);
+        var periodDays = (fiscalPeriod.EndDate.Date - fiscalPeriod.StartDate.Date).Days + 1;
+        var eligibleDays = startDate > disposalDay ? 0 : (disposalDay - startDate).Days + 1;
+        var basis = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
+            ? "ProductionUsage"
+            : "ActualDaysInclusive";
+        var amount = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
+            ? calculation.DepreciationAmount
+            : RoundMoney(calculation.DepreciationAmount * eligibleDays / periodDays);
+        amount = Math.Min(amount, RoundMoney(bookValue.NetBookValue - bookValue.ResidualValue));
+
+        return new FinalDepreciationPreparation(
+            Math.Max(0m, amount),
+            eligibleDays == 0 ? null : startDate,
+            eligibleDays == 0 ? null : disposalDay,
+            periodDays,
+            eligibleDays,
+            basis,
+            calculation);
+    }
+
+    private static void ValidateApprovedFinalDepreciation(
+        AssetDisposal disposal,
+        FinalDepreciationPreparation current,
+        DepreciationMethod currentMethod)
+    {
+        if (disposal.FinalDepreciationAmount != current.Amount ||
+            disposal.FinalDepreciationFromDate?.Date != current.FromDate?.Date ||
+            disposal.FinalDepreciationToDate?.Date != current.ToDate?.Date ||
+            disposal.FinalDepreciationPeriodDays != current.PeriodDays ||
+            disposal.FinalDepreciationEligibleDays != current.EligibleDays ||
+            disposal.FinalDepreciationProrationBasis != current.ProrationBasis ||
+            disposal.FinalDepreciationMethodSnapshot != currentMethod ||
+            disposal.FinalDepreciationProductionUnits != current.Calculation.PeriodProductionUnits ||
+            disposal.FinalDepreciationDiminishingRatePercent != current.Calculation.EffectiveDiminishingBalanceRatePercent ||
+            disposal.FinalDepreciationLifetimeProductionCapacity != current.Calculation.LifetimeProductionCapacity ||
+            disposal.FinalDepreciationCumulativeProductionUnitsBefore != current.Calculation.CumulativeProductionUnitsBefore ||
+            disposal.FinalDepreciationCumulativeProductionUnitsAfter != current.Calculation.CumulativeProductionUnitsAfter ||
+            disposal.FinalDepreciationEvidenceReference != current.Calculation.ProductionEvidenceReference)
+        {
+            // The request snapshot is the accounting evidence approved by the checker. If a book,
+            // usage record, or date policy changed meanwhile, cancel instead of posting a different
+            // charge under the old approval.
+            throw new StaleDisposalApprovalException(
+                "The final disposal-date depreciation calculation changed after approval. Submit a new disposal request.");
         }
     }
 
@@ -648,6 +816,9 @@ public class AssetDisposalService : IAssetDisposalService
     {
         var category = asset.Category;
         var assetAccount = await ResolveDisposalAccountAsync(category.AssetAccountId, "fixed asset cost/carrying account", AccountType.Asset);
+        var depreciationExpenseAccount = snapshot.FinalDepreciation.Amount > 0m
+            ? await ResolveDisposalAccountAsync(category.DepreciationExpenseAccountId, "depreciation expense account", AccountType.Expense)
+            : null;
         var accumulatedDepreciationAccount = snapshot.AccumulatedDepreciation > 0m
             ? await ResolveDisposalAccountAsync(category.AccumulatedDepreciationAccountId, "accumulated depreciation account", AccountType.Asset)
             : null;
@@ -674,6 +845,11 @@ public class AssetDisposalService : IAssetDisposalService
         var lineNumber = 1;
         var lines = new List<FinancePostingLineDto>();
 
+        // The final charge and derecognition share one idempotent posting event. This preserves the
+        // existing disposal maker-checker decision and prevents an asset from becoming disposed
+        // while its final depreciation journal fails (or vice versa).
+        AddPostingLine(lines, depreciationExpenseAccount?.Id, snapshot.FinalDepreciation.Amount, 0m, "Final depreciation through disposal date", reference, lineNumber++, "FA-Depreciation", disposal, asset, functionalCurrency);
+        AddPostingLine(lines, accumulatedDepreciationAccount?.Id, 0m, snapshot.FinalDepreciation.Amount, "Final accumulated depreciation through disposal date", reference, lineNumber++, "FA-AccumulatedDepreciation", disposal, asset, functionalCurrency);
         AddPostingLine(lines, accumulatedDepreciationAccount?.Id, snapshot.AccumulatedDepreciation, 0m, "Clear accumulated depreciation", reference, lineNumber++, "FA-DisposalAccumulatedDepreciation", disposal, asset, functionalCurrency);
         AddPostingLine(lines, accumulatedImpairmentAccount?.Id, snapshot.AccumulatedImpairment, 0m, "Clear accumulated impairment", reference, lineNumber++, "FA-DisposalAccumulatedImpairment", disposal, asset, functionalCurrency);
         AddPostingLine(lines, proceedsAccount?.Id, snapshot.NetProceeds, 0m, "Record disposal proceeds clearing", reference, lineNumber++, "FA-DisposalProceeds", disposal, asset, functionalCurrency);
@@ -742,7 +918,9 @@ public class AssetDisposalService : IAssetDisposalService
             SourceReferenceNumber = reference,
             LineNumber = lineNumber,
             SegmentString = asset.CurrentSegmentString,
-            Notes = $"FixedAssetId={asset.Id:N};AssetDisposalId={disposal.Id:N};Book={disposal.BookClassification}",
+            Notes = $"FixedAssetId={asset.Id:N};AssetDisposalId={disposal.Id:N};" +
+                (disposal.FinalDepreciationScheduleId.HasValue ? $"ScheduleId={disposal.FinalDepreciationScheduleId.Value:N};" : string.Empty) +
+                $"Book={disposal.BookClassification}",
             TransactionTag = tag
         });
     }
@@ -754,6 +932,11 @@ public class AssetDisposalService : IAssetDisposalService
         FinancePostingResultDto postingResult,
         DisposalSnapshot snapshot)
     {
+        if (snapshot.FinalDepreciation.Amount > 0m)
+        {
+            AddPostedFinalDepreciationSchedule(disposal, asset, bookValue, postingResult, snapshot.FinalDepreciation);
+        }
+
         disposal.Status = AssetDisposalStatus.Completed;
         disposal.PostedAt = DateTime.UtcNow;
         disposal.CompletedAt = DateTime.UtcNow;
@@ -795,6 +978,84 @@ public class AssetDisposalService : IAssetDisposalService
         });
     }
 
+    private void AddPostedFinalDepreciationSchedule(
+        AssetDisposal disposal,
+        FixedAsset asset,
+        FixedAssetBookValue bookValue,
+        FinancePostingResultDto postingResult,
+        FinalDepreciationPreparation finalDepreciation)
+    {
+        if (!disposal.FinalDepreciationScheduleId.HasValue)
+        {
+            throw new InvalidOperationException("Final disposal depreciation is missing its immutable schedule identifier.");
+        }
+
+        var accumulatedBefore = RoundMoney(bookValue.AccumulatedDepreciation);
+        var netBookValueBefore = RoundMoney(bookValue.NetBookValue);
+        var schedule = new AssetDepreciationSchedule
+        {
+            Id = disposal.FinalDepreciationScheduleId.Value,
+            TenantId = disposal.TenantId,
+            FixedAssetId = asset.Id,
+            AssetDisposalId = disposal.Id,
+            AccountingBookId = bookValue.AccountingBookId,
+            BookClassification = bookValue.BookClassification,
+            FiscalPeriodId = disposal.FiscalPeriodId
+                ?? throw new InvalidOperationException("Final disposal depreciation is missing its fiscal period."),
+            DepreciationAmount = finalDepreciation.Amount,
+            AccumulatedDepreciationBefore = accumulatedBefore,
+            AccumulatedDepreciation = RoundMoney(accumulatedBefore + finalDepreciation.Amount),
+            NetBookValueBefore = netBookValueBefore,
+            NetBookValue = RoundMoney(netBookValueBefore - finalDepreciation.Amount),
+            DepreciableAmount = RoundMoney(netBookValueBefore - bookValue.ResidualValue),
+            ResidualValueSnapshot = bookValue.ResidualValue,
+            UsefulLifeMonthsSnapshot = bookValue.UsefulLifeMonths,
+            DepreciationMethodSnapshot = bookValue.DepreciationMethod,
+            DiminishingBalanceRatePercentSnapshot = finalDepreciation.Calculation.EffectiveDiminishingBalanceRatePercent,
+            LifetimeProductionCapacitySnapshot = finalDepreciation.Calculation.LifetimeProductionCapacity,
+            PeriodProductionUnits = finalDepreciation.Calculation.PeriodProductionUnits,
+            CumulativeProductionUnitsBefore = finalDepreciation.Calculation.CumulativeProductionUnitsBefore,
+            CumulativeProductionUnitsAfter = finalDepreciation.Calculation.CumulativeProductionUnitsAfter,
+            ProductionEvidenceReference = finalDepreciation.Calculation.ProductionEvidenceReference,
+            ProductionEvidenceNotes = finalDepreciation.Calculation.ProductionEvidenceNotes,
+            PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
+            ApprovalStatus = "ApprovedWithDisposal",
+            ApprovedAt = disposal.ApprovedAt,
+            ApprovedById = disposal.ApprovedById,
+            IsPosted = true,
+            PostedDate = DateTime.UtcNow,
+            PostingDate = disposal.AccountingDate ?? disposal.DisposalDate,
+            JournalEntryId = postingResult.JournalEntryId,
+            PostingEventId = postingResult.PostingEventId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = UserName
+        };
+
+        _context.AssetDepreciationSchedules.Add(schedule);
+
+        // Although derecognition immediately zeroes the book, these counters remain meaningful
+        // historical evidence and make the final schedule consistent with ordinary depreciation.
+        bookValue.AccumulatedProductionUnits = finalDepreciation.Calculation.CumulativeProductionUnitsAfter;
+        bookValue.LastDepreciationDate = disposal.DisposalDate.Date;
+
+        _context.AssetTransactions.Add(new AssetTransaction
+        {
+            TenantId = disposal.TenantId,
+            FixedAssetId = asset.Id,
+            AccountingBookId = bookValue.AccountingBookId,
+            BookClassification = bookValue.BookClassification,
+            TransactionDate = disposal.DisposalDate,
+            TransactionType = "Depreciation",
+            Description = $"Final depreciation through disposal date ({finalDepreciation.ProrationBasis})",
+            Amount = finalDepreciation.Amount,
+            ResultingBookValue = schedule.NetBookValue,
+            RelatedEntityId = disposal.Id,
+            PerformedByUserId = CurrentUserId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = UserName
+        });
+    }
+
     private static void ApplySnapshot(AssetDisposal disposal, DisposalSnapshot snapshot)
     {
         disposal.NetProceeds = snapshot.NetProceeds;
@@ -802,6 +1063,7 @@ public class AssetDisposalService : IAssetDisposalService
         disposal.ProceedsAccountId = snapshot.ProceedsAccountId;
         disposal.CostAtDisposal = snapshot.AssetCarryingAccountAmount;
         disposal.AccumulatedDepreciationAtDisposal = snapshot.AccumulatedDepreciation;
+        disposal.FinalDepreciationAmount = snapshot.FinalDepreciation.Amount;
         disposal.AccumulatedImpairmentAtDisposal = snapshot.AccumulatedImpairment;
         disposal.RevaluationSurplusAtDisposal = snapshot.RevaluationSurplusBalance;
         disposal.RevaluationSurplusTransferAmount = snapshot.RevaluationSurplusBalance;
@@ -812,7 +1074,8 @@ public class AssetDisposalService : IAssetDisposalService
     private async Task<DisposalSnapshot> BuildDisposalSnapshotAsync(
         FixedAsset asset,
         FixedAssetBookValue bookValue,
-        RequestAssetDisposalDto dto)
+        RequestAssetDisposalDto dto,
+        FinalDepreciationPreparation finalDepreciation)
     {
         var functionalCurrency = await GetFunctionalCurrencyAsync();
         var proceedsCurrency = NormalizeCurrency(dto.ProceedsCurrencyCode, functionalCurrency);
@@ -821,33 +1084,35 @@ public class AssetDisposalService : IAssetDisposalService
         var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
         var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
         var assetCarryingAccountAmount = RoundMoney(bookValue.AcquisitionCost + revaluationAssetAdjustment);
-        var netBookValue = RoundMoney(bookValue.NetBookValue);
+        var netBookValue = RoundMoney(bookValue.NetBookValue - finalDepreciation.Amount);
         var proceedsAccountId = netProceeds > 0m
             ? dto.ProceedsAccountId ?? asset.Category.DisposalProceedsClearingAccountId
             : null;
 
         return new DisposalSnapshot(
             assetCarryingAccountAmount,
-            RoundMoney(bookValue.AccumulatedDepreciation),
+            RoundMoney(bookValue.AccumulatedDepreciation + finalDepreciation.Amount),
             accumulatedImpairment,
             revaluationSurplusBalance,
             netBookValue,
             netProceeds,
             RoundMoney(netProceeds - netBookValue),
             proceedsCurrency,
-            proceedsAccountId);
+            proceedsAccountId,
+            finalDepreciation);
     }
 
     private async Task<DisposalSnapshot> BuildDisposalSnapshotAsync(
         FixedAsset asset,
         FixedAssetBookValue bookValue,
-        AssetDisposal disposal)
+        AssetDisposal disposal,
+        FinalDepreciationPreparation finalDepreciation)
     {
         var accumulatedImpairment = await CalculateAccumulatedImpairmentAsync(asset.Id, bookValue);
         var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
         var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
         var assetCarryingAccountAmount = RoundMoney(bookValue.AcquisitionCost + revaluationAssetAdjustment);
-        var netBookValue = RoundMoney(bookValue.NetBookValue);
+        var netBookValue = RoundMoney(bookValue.NetBookValue - finalDepreciation.Amount);
         var netProceeds = RoundMoney(disposal.SaleProceeds - disposal.DisposalCost);
         var proceedsAccountId = netProceeds > 0m
             ? disposal.ProceedsAccountId ?? asset.Category.DisposalProceedsClearingAccountId
@@ -855,14 +1120,15 @@ public class AssetDisposalService : IAssetDisposalService
 
         return new DisposalSnapshot(
             assetCarryingAccountAmount,
-            RoundMoney(bookValue.AccumulatedDepreciation),
+            RoundMoney(bookValue.AccumulatedDepreciation + finalDepreciation.Amount),
             accumulatedImpairment,
             revaluationSurplusBalance,
             netBookValue,
             netProceeds,
             RoundMoney(netProceeds - netBookValue),
             NormalizeCurrency(disposal.ProceedsCurrencyCode, await GetFunctionalCurrencyAsync()),
-            proceedsAccountId);
+            proceedsAccountId,
+            finalDepreciation);
     }
 
     private async Task<decimal> CalculateAccumulatedImpairmentAsync(Guid assetId, FixedAssetBookValue bookValue)
@@ -1126,6 +1392,20 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.ProceedsAccountId,
             disposal.CostAtDisposal,
             disposal.AccumulatedDepreciationAtDisposal,
+            disposal.FinalDepreciationAmount,
+            disposal.FinalDepreciationFromDate,
+            disposal.FinalDepreciationToDate,
+            disposal.FinalDepreciationPeriodDays,
+            disposal.FinalDepreciationEligibleDays,
+            disposal.FinalDepreciationProrationBasis,
+            disposal.FinalDepreciationMethodSnapshot,
+            disposal.FinalDepreciationScheduleId,
+            disposal.FinalDepreciationProductionUnits,
+            disposal.FinalDepreciationDiminishingRatePercent,
+            disposal.FinalDepreciationLifetimeProductionCapacity,
+            disposal.FinalDepreciationCumulativeProductionUnitsBefore,
+            disposal.FinalDepreciationCumulativeProductionUnitsAfter,
+            disposal.FinalDepreciationEvidenceReference,
             disposal.AccumulatedImpairmentAtDisposal,
             disposal.RevaluationSurplusAtDisposal,
             disposal.RevaluationSurplusAccountId,
@@ -1201,6 +1481,21 @@ public class AssetDisposalService : IAssetDisposalService
             ProceedsAccountId = d.ProceedsAccountId,
             CostAtDisposal = d.CostAtDisposal,
             AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
+            FinalDepreciationAmount = d.FinalDepreciationAmount,
+            FinalDepreciationFromDate = d.FinalDepreciationFromDate,
+            FinalDepreciationToDate = d.FinalDepreciationToDate,
+            FinalDepreciationPeriodDays = d.FinalDepreciationPeriodDays,
+            FinalDepreciationEligibleDays = d.FinalDepreciationEligibleDays,
+            FinalDepreciationProrationBasis = d.FinalDepreciationProrationBasis,
+            FinalDepreciationMethodSnapshot = d.FinalDepreciationMethodSnapshot,
+            FinalDepreciationScheduleId = d.FinalDepreciationScheduleId,
+            FinalDepreciationProductionUnits = d.FinalDepreciationProductionUnits,
+            FinalDepreciationDiminishingRatePercent = d.FinalDepreciationDiminishingRatePercent,
+            FinalDepreciationLifetimeProductionCapacity = d.FinalDepreciationLifetimeProductionCapacity,
+            FinalDepreciationCumulativeProductionUnitsBefore = d.FinalDepreciationCumulativeProductionUnitsBefore,
+            FinalDepreciationCumulativeProductionUnitsAfter = d.FinalDepreciationCumulativeProductionUnitsAfter,
+            FinalDepreciationEvidenceReference = d.FinalDepreciationEvidenceReference,
+            FinalDepreciationEvidenceNotes = d.FinalDepreciationEvidenceNotes,
             AccumulatedImpairmentAtDisposal = d.AccumulatedImpairmentAtDisposal,
             RevaluationSurplusAtDisposal = d.RevaluationSurplusAtDisposal,
             RevaluationSurplusAccountId = d.RevaluationSurplusAccountId,
@@ -1237,7 +1532,17 @@ public class AssetDisposalService : IAssetDisposalService
         decimal NetProceeds,
         decimal GainOrLoss,
         string ProceedsCurrencyCode,
-        Guid? ProceedsAccountId);
+        Guid? ProceedsAccountId,
+        FinalDepreciationPreparation FinalDepreciation);
+
+    private sealed record FinalDepreciationPreparation(
+        decimal Amount,
+        DateTime? FromDate,
+        DateTime? ToDate,
+        int PeriodDays,
+        int EligibleDays,
+        string ProrationBasis,
+        DepreciationCalculation Calculation);
 
     private sealed record RevaluationSurplusTransferPreparation(
         Guid? RevaluationSurplusAccountId,

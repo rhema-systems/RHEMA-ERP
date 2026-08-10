@@ -3281,6 +3281,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.FailureReason).HasMaxLength(1000);
             entity.Property(e => e.CostAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.AccumulatedDepreciationAtDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.FinalDepreciationAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.FinalDepreciationProrationBasis).HasMaxLength(30);
+            entity.Property(e => e.FinalDepreciationProductionUnits).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationDiminishingRatePercent).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationLifetimeProductionCapacity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationCumulativeProductionUnitsBefore).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationCumulativeProductionUnitsAfter).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationEvidenceReference).HasMaxLength(200);
+            entity.Property(e => e.FinalDepreciationEvidenceNotes).HasMaxLength(1000);
             entity.Property(e => e.AccumulatedImpairmentAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusTransferAmount).HasColumnType("decimal(18,2)");
@@ -3553,9 +3562,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
             entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.DepreciationReversalId });
+            entity.HasIndex(e => new { e.TenantId, e.AssetDisposalId })
+                .IsUnique()
+                .HasFilter("[AssetDisposalId] IS NOT NULL");
             entity.HasOne(e => e.DepreciationRun)
                 .WithMany(e => e.Lines)
                 .HasForeignKey(e => e.FixedAssetDepreciationRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AssetDisposal)
+                .WithMany()
+                .HasForeignKey(e => e.AssetDisposalId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.AccountingBook)
                 .WithMany()

@@ -19,6 +19,14 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public virtual FixedAssetDepreciationRun? DepreciationRun { get; set; }
 
         /// <summary>
+        /// Identifies a final partial-period charge posted atomically by a disposal. Normal
+        /// scheduled runs leave this null; the link lets depreciation reports and auditors trace
+        /// the charge without inventing a second depreciation-run approval.
+        /// </summary>
+        public Guid? AssetDisposalId { get; set; }
+        public virtual AssetDisposal? AssetDisposal { get; set; }
+
+        /// <summary>
         /// Matches the owning run revision. Including this value in the uniqueness key allows a
         /// corrected run for the same asset/book/period while retaining every earlier revision.
         /// </summary>
