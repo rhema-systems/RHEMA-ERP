@@ -2730,6 +2730,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.TransactionDebitAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.TransactionCreditAmount).HasColumnType("decimal(18,2)");
+            // Trial balance, ledger inquiry and reconciliation all begin with tenant/book/date
+            // scoping before narrowing to accounts. This composite index was added from the
+            // NFR-PER workload review so high-volume tenants do not scan the full shared ledger.
+            // AccountId is last because both all-account reports and single-account drill-downs
+            // can then use the same index prefix.
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.BookClassification,
+                e.TransactionDate,
+                e.AccountId
+            });
             entity.HasIndex(e => e.ExchangeRateId);
             entity.HasIndex(e => new { e.TenantId, e.TransactionCurrency, e.ExchangeRateId });
             entity.HasOne(e => e.Account)

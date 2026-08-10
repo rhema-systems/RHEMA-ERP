@@ -123,6 +123,7 @@
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
     <Compile Include="Services\Finance\JournalBatchServiceTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSqlServerReleaseGateTests.cs" />
+    <Compile Include="Services\Finance\FinancePerformanceReadinessTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSpreadsheetServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />

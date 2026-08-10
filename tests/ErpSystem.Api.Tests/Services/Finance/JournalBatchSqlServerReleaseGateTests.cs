@@ -23,6 +23,38 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class JournalBatchSqlServerReleaseGateTests
 {
     [SqlServerFact]
+    [Trait("Batch", "FinancePerformance")]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task CurrentSqlServerModel_ShouldExposeTheMeasuredLedgerAccessIndexInKeyOrder()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        await using var context = database.CreateContext();
+        await context.Database.OpenConnectionAsync();
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = """
+            SELECT STRING_AGG(column_definition.name, ',')
+                WITHIN GROUP (ORDER BY index_column.key_ordinal)
+            FROM sys.indexes AS index_definition
+            INNER JOIN sys.tables AS table_definition
+                ON table_definition.object_id = index_definition.object_id
+            INNER JOIN sys.index_columns AS index_column
+                ON index_column.object_id = index_definition.object_id
+                AND index_column.index_id = index_definition.index_id
+            INNER JOIN sys.columns AS column_definition
+                ON column_definition.object_id = index_column.object_id
+                AND column_definition.column_id = index_column.column_id
+            WHERE table_definition.name = N'AccountTransactions'
+                AND index_definition.name = N'IX_AccountTransactions_TenantId_BookClassification_TransactionDate_AccountId'
+                AND index_column.key_ordinal > 0;
+            """;
+
+        // Key order matters: changing it can leave the index present while making the tenant/book
+        // prefix unusable for the trial-balance and journal-inquiry query shapes it was designed for.
+        Convert.ToString(await command.ExecuteScalarAsync())
+            .Should().Be("TenantId,BookClassification,TransactionDate,AccountId");
+    }
+
+    [SqlServerFact]
     [Trait("Batch", "FinanceSchema")]
     [Trait("Category", "SqlServerIntegration")]
     public async Task CurrentSqlServerSchema_ShouldExposeEveryLineScopedDeductionEvidenceColumn()
