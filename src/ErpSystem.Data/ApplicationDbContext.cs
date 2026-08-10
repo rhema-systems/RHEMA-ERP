@@ -3194,6 +3194,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.ToSegmentLookupValueId });
+            entity.HasIndex(e => new { e.TenantId, e.ToFixedAssetCategoryId });
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId });
             entity.Property(e => e.FromLocation).HasMaxLength(500);
             entity.Property(e => e.ToLocation).HasMaxLength(500);
             entity.Property(e => e.FromSegmentString).HasMaxLength(500);
@@ -3203,6 +3205,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Reason).HasMaxLength(1000);
             entity.Property(e => e.Comments).HasMaxLength(2000);
             entity.Property(e => e.FailureReason).HasMaxLength(1000);
+            entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ReclassificationAssetCarryingAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ReclassificationAccumulatedDepreciation).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ReclassificationAccumulatedImpairment).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ReclassificationRevaluationSurplus).HasColumnType("decimal(18,2)");
             entity.HasOne(e => e.FixedAsset)
                 .WithMany()
                 .HasForeignKey(e => e.FixedAssetId)
@@ -3219,6 +3226,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.ToSegmentLookupValueId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FromFixedAssetCategory)
+                .WithMany()
+                .HasForeignKey(e => e.FromFixedAssetCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ToFixedAssetCategory)
+                .WithMany()
+                .HasForeignKey(e => e.ToFixedAssetCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => e.AccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Account mappings are retained as immutable evidence on the transfer. Explicit
+            // restricted foreign keys prevent deleting an account that explains a posted move.
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromAssetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToAssetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromAccumulatedDepreciationAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToAccumulatedDepreciationAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromAccumulatedImpairmentAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToAccumulatedImpairmentAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromRevaluationSurplusAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToRevaluationSurplusAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
                 .HasForeignKey(e => e.JournalEntryId)

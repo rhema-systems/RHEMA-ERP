@@ -112,6 +112,8 @@ public static class FinancePermissions
     public const string ApproveFixedAssetDepreciationReversal = "Finance.FixedAssets.Depreciation.Reversal.Approve";
     public const string ReverseFixedAssetValuation = "Finance.FixedAssets.Valuation.Reversal";
     public const string ApproveFixedAssetValuationReversal = "Finance.FixedAssets.Valuation.Reversal.Approve";
+    public const string ReclassifyFixedAssets = "Finance.FixedAssets.Reclassification.Request";
+    public const string ApproveFixedAssetReclassification = "Finance.FixedAssets.Reclassification.Approve";
 
     public const string RunFinanceReports = "Finance.Reports.Run";
     public const string ExportFinanceReports = "Finance.Reports.Export";
@@ -241,6 +243,8 @@ public static class FinancePermissions
         new(ApproveFixedAssetDepreciationReversal, "Approve Fixed Asset Depreciation Reversal", "Independently approve or reject fixed asset depreciation reversal requests.", CategoryFixedAssets),
         new(ReverseFixedAssetValuation, "Reverse Fixed Asset Valuation", "Request and post a linked correction for an incorrectly posted fixed asset valuation.", CategoryFixedAssets),
         new(ApproveFixedAssetValuationReversal, "Approve Fixed Asset Valuation Reversal", "Independently approve or reject fixed asset valuation correction requests.", CategoryFixedAssets),
+        new(ReclassifyFixedAssets, "Request Fixed Asset Reclassification", "Request a controlled category/account or reporting-dimension reclassification of current fixed asset balances.", CategoryFixedAssets),
+        new(ApproveFixedAssetReclassification, "Approve Fixed Asset Reclassification", "Independently approve or reject fixed asset GL reclassification requests before posting.", CategoryFixedAssets),
 
         new(RunFinanceReports, "Run Finance Reports", "Run finance statements, aging, cash, bank, tax, FX, and fixed asset reports.", CategoryReporting),
         new(ExportFinanceReports, "Export/Print Finance Reports", "Export or print finance reports and finance-controlled documents.", CategoryReporting),
