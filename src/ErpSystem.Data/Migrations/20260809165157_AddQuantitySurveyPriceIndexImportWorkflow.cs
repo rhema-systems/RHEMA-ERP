@@ -369,7 +369,7 @@ public partial class AddQuantitySurveyPriceIndexImportWorkflow : Migration
                             WHERE p.[Id] = i.[SupersedesValueId] AND p.[TenantId] = i.[TenantId]
                               AND p.[IndexFamilyId] = i.[IndexFamilyId] AND p.[IndexPeriod] = i.[IndexPeriod]
                               AND p.[ValueKey] = i.[ValueKey] AND p.[Version] + 1 = i.[Version]
-                              AND p.[Status] = 'Superseded' AND p.[IsCurrent] = 0 AND p.[IsDeleted] = 0)))
+                              AND p.[Status] = 'Superseded' AND p.[IsCurrent] = 0 AND p.[IsDeleted] = 0))))
                     THROW 51033, 'Approved index revisions must preserve the prior family, period, value key and version lineage.', 1;
             END
             """);

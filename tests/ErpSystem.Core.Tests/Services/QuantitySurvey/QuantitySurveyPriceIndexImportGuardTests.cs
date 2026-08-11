@@ -1,4 +1,8 @@
+using System.Reflection;
+using ErpSystem.Data.Migrations;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.QuantitySurvey;
@@ -106,6 +110,117 @@ public sealed class QuantitySurveyPriceIndexImportGuardTests
         source.Should().NotContain("EstateManagedAssets");
         source.Should().NotContain("FinanceSettings");
         preflight.Should().Contain($"GUARD_COVERAGE|{migrationId}");
+    }
+
+    [Fact]
+    public void Migration_SQL_operations_have_balanced_parentheses()
+    {
+        var migration = new AddQuantitySurveyPriceIndexImportWorkflow();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod(
+                "Up",
+                BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+
+        var sqlOperations = builder.Operations.OfType<SqlOperation>().ToList();
+        sqlOperations.Should().NotBeEmpty();
+
+        foreach (var operation in sqlOperations)
+        {
+            var (balance, minimumBalance) = ParenthesisBalance(operation.Sql);
+            minimumBalance.Should().BeGreaterThanOrEqualTo(
+                0,
+                "a SQL operation must not close a parenthesis before it is opened");
+            balance.Should().Be(
+                0,
+                "every SQL operation must be syntactically balanced before release");
+        }
+    }
+
+    private static (int Balance, int MinimumBalance) ParenthesisBalance(string sql)
+    {
+        var balance = 0;
+        var minimumBalance = 0;
+        var inString = false;
+        var inBracket = false;
+        var inLineComment = false;
+        var inBlockComment = false;
+
+        for (var index = 0; index < sql.Length; index++)
+        {
+            var current = sql[index];
+            var next = index + 1 < sql.Length ? sql[index + 1] : '\0';
+
+            if (inLineComment)
+            {
+                if (current == '\n') inLineComment = false;
+                continue;
+            }
+
+            if (inBlockComment)
+            {
+                if (current == '*' && next == '/')
+                {
+                    inBlockComment = false;
+                    index++;
+                }
+                continue;
+            }
+
+            if (inString)
+            {
+                if (current != '\'') continue;
+                if (next == '\'')
+                {
+                    index++;
+                    continue;
+                }
+                inString = false;
+                continue;
+            }
+
+            if (inBracket)
+            {
+                if (current != ']') continue;
+                if (next == ']')
+                {
+                    index++;
+                    continue;
+                }
+                inBracket = false;
+                continue;
+            }
+
+            if (current == '-' && next == '-')
+            {
+                inLineComment = true;
+                index++;
+            }
+            else if (current == '/' && next == '*')
+            {
+                inBlockComment = true;
+                index++;
+            }
+            else if (current == '\'')
+            {
+                inString = true;
+            }
+            else if (current == '[')
+            {
+                inBracket = true;
+            }
+            else if (current == '(')
+            {
+                balance++;
+            }
+            else if (current == ')')
+            {
+                balance--;
+                minimumBalance = Math.Min(minimumBalance, balance);
+            }
+        }
+
+        return (balance, minimumBalance);
     }
 
     private static string ServiceSource() => File.ReadAllText(Path.Combine(
