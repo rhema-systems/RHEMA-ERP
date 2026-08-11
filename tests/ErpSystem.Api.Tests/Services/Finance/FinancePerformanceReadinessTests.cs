@@ -57,26 +57,33 @@ public sealed class FinancePerformanceReadinessTests
     public void Assessment_ShouldPassOnlyWhenBothBudgetsAreMet()
     {
         var threshold = FinancePerformanceReadinessPolicy.Thresholds[FinancePerformanceWorkload.Posting];
-        var samples = new[]
-        {
-            new FinancePerformanceSample(threshold.MaximumQueryCount, threshold.MaximumP95Milliseconds - 1),
-            new FinancePerformanceSample(threshold.MaximumQueryCount - 1, threshold.MaximumP95Milliseconds)
-        };
+        var samples = Enumerable.Range(1, FinancePerformanceReadinessPolicy.MinimumMeasuredSampleCount)
+            .Select(index => new FinancePerformanceSample(
+                index == 1 ? threshold.MaximumQueryCount : threshold.MaximumQueryCount - 1,
+                index == 2 ? threshold.MaximumP95Milliseconds : threshold.MaximumP95Milliseconds - 1))
+            .ToArray();
 
         FinancePerformanceReadinessPolicy
             .Assess(FinancePerformanceWorkload.Posting, samples)
             .Passed.Should().BeTrue();
     }
 
-    [Fact]
-    public void Assessment_ShouldRejectAnEmptySampleSet()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(19)]
+    public void Assessment_ShouldRejectAnUnderSampledReleaseGate(int sampleCount)
     {
+        var samples = Enumerable.Range(0, sampleCount)
+            .Select(_ => new FinancePerformanceSample(1, 1))
+            .ToArray();
         var action = () => FinancePerformanceReadinessPolicy.Assess(
             FinancePerformanceWorkload.TrialBalance,
-            Array.Empty<FinancePerformanceSample>());
+            samples);
 
         action.Should().Throw<ArgumentException>()
-            .WithParameterName("samples");
+            .WithParameterName("samples")
+            .WithMessage("At least 20 measured performance samples*");
     }
 
     [Fact]

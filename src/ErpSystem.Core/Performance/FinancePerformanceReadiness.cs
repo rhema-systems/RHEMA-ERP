@@ -87,6 +87,13 @@ public sealed record FinancePerformanceAssessment(
 /// </summary>
 public static class FinancePerformanceReadinessPolicy
 {
+    /// <summary>
+    /// Minimum measured executions required before a p95 result may be used as release evidence.
+    /// Keeping this in the executable policy prevents callers from treating a single favourable
+    /// run as statistically meaningful merely because the runbook separately recommends 20.
+    /// </summary>
+    public const int MinimumMeasuredSampleCount = 20;
+
     public static IReadOnlyDictionary<FinancePerformanceWorkload, FinancePerformanceThreshold> Thresholds { get; }
         = new Dictionary<FinancePerformanceWorkload, FinancePerformanceThreshold>
         {
@@ -104,9 +111,11 @@ public static class FinancePerformanceReadinessPolicy
         IReadOnlyCollection<FinancePerformanceSample> samples)
     {
         ArgumentNullException.ThrowIfNull(samples);
-        if (samples.Count == 0)
+        if (samples.Count < MinimumMeasuredSampleCount)
         {
-            throw new ArgumentException("At least one performance sample is required.", nameof(samples));
+            throw new ArgumentException(
+                $"At least {MinimumMeasuredSampleCount} measured performance samples are required for release-gate assessment.",
+                nameof(samples));
         }
 
         if (!Thresholds.TryGetValue(workload, out var threshold))
@@ -120,7 +129,7 @@ public static class FinancePerformanceReadinessPolicy
             .OrderBy(value => value)
             .ToArray();
 
-        // Nearest-rank is intentionally used here: it is deterministic for small release-gate
+        // Nearest-rank is intentionally used here: it is deterministic for the bounded release-gate
         // sample sets and never interpolates a value that was not actually observed.
         var percentileIndex = Math.Max(0, (int)Math.Ceiling(orderedElapsedTimes.Length * 0.95) - 1);
         var p95 = orderedElapsedTimes[percentileIndex];
