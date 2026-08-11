@@ -37,6 +37,7 @@ import {
   Home,
   Code,
   HelpCircle,
+  LayoutList,
   Workflow,
   Wrench,
   Calendar,
@@ -509,6 +510,10 @@ export const navigationItems: NavItem[] = [
           { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone },
           { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users },
           { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText },
+          { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock },
+          // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The
+          // interview schedule above answers 403 for them, so without this they have no way in.
+          { title: 'My Panel', href: '/hr/recruitment/my-panel', icon: UserCheck },
         ],
       },
       {
@@ -1328,6 +1333,8 @@ export const navigationItems: NavItem[] = [
             icon: Workflow,
             children: [
               { title: 'Pipelines', href: '/administration/hr/recruitment/pipelines', icon: Workflow },
+              { title: 'Question Bank', href: '/administration/hr/recruitment/question-bank', icon: HelpCircle },
+              { title: 'Interview Presets', href: '/administration/hr/recruitment/question-presets', icon: LayoutList },
             ],
           },
           // Employee Categories has no backing controller at all, so it stays dropped.

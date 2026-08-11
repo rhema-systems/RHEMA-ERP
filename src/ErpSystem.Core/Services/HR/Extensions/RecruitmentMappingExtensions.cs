@@ -2091,10 +2091,12 @@ public static class RecruitmentMappingExtensions
             IntervieweeCount = entity.Interviewees?.Count ?? 0,
             PanelistCount = (entity.Panelists?.Count ?? 0) + (entity.ExternalPanelists?.Count ?? 0),
             QuestionPresetId = entity.QuestionPresetId,
-            Interviewees = entity.Interviewees?.Select(i => i.ToDto()).ToList() ?? new(),
+            Interviewees = entity.Interviewees?
+                .OrderBy(i => i.SlotStartTime ?? TimeSpan.MaxValue)
+                .Select(i => i.ToDto()).ToList() ?? new(),
             Panelists = entity.Panelists?.Select(p => p.ToDto()).ToList() ?? new(),
             ExternalPanelists = entity.ExternalPanelists?.Select(p => p.ToDto()).ToList() ?? new(),
-            Questions = entity.Questions.Select(q => q.ToDto()).ToList(),
+            Questions = entity.Questions.OrderBy(q => q.DisplayOrder).Select(q => q.ToDto()).ToList(),
         };
     }
 
@@ -2123,7 +2125,7 @@ public static class RecruitmentMappingExtensions
         entity.Round = dto.Round;
         entity.Type = dto.Type;
         entity.Mode = dto.Mode;
-        entity.Status = dto.Status;
+        // Status is owned by reschedule / cancel / complete — see UpdateJobInterviewDto.
         entity.ScheduledDate = dto.ScheduledDate;
         entity.StartTime = dto.StartTime;
         entity.EndTime = dto.EndTime;
@@ -2318,7 +2320,13 @@ public static class RecruitmentMappingExtensions
             RequiredQuestionCount = entity.RequiredQuestionCount,
             AllowedPoolSize = entity.AllowedPoolSize,
             DisplayOrder = entity.DisplayOrder,
-            SelectedQuestions = entity.SelectedQuestions.Select(q => q.ToDto()).ToList(),
+            // Sorted here as well as in the query: this mapper is the single choke point both the
+            // plan list and the interview detail read go through, and an unordered Include hands back
+            // whatever order the database chose. DisplayOrder is the sequence the panel committed.
+            SelectedQuestions = entity.SelectedQuestions
+                .OrderBy(q => q.DisplayOrder)
+                .Select(q => q.ToDto())
+                .ToList(),
         };
     }
 

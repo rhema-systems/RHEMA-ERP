@@ -1,14 +1,26 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The interview question bank — question types and the questions inside them, with the weight and
+/// score range each is marked against.
+///
+/// <para><b>HR-only, reads included.</b> The controller previously carried a bare <c>[Authorize]</c>, so
+/// any authenticated employee could read the exact questions they would be asked at their next internal
+/// interview, and edit the weights those answers are scored against. Panelists never need this
+/// controller: the questions they ask come back embedded in their own interview's question plans.</para>
+/// </summary>
 [ApiController]
 [Route("api/interview-question-bank")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[RecruitmentBusinessRules]
 public class InterviewQuestionBankController : ControllerBase
 {
     private readonly IJobInterviewQuestionBankService _service;

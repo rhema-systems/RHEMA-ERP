@@ -196,6 +196,49 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   passive: 'secondary',
   dormant: 'outline',
   converted: 'default',
+
+  // Interviews. "Rescheduled" is not a problem state — it is a session that moved and whose
+  // candidates have been re-invited — so it reads as work in hand rather than a warning. Only a
+  // cancellation and a no-show are destructive.
+  rescheduled: 'secondary',
+  noshow: 'destructive',
+
+  // Interview panel roles, shown against each member of the panel.
+  chair: 'default',
+  member: 'outline',
+  technicalassessor: 'secondary',
+  observer: 'outline',
+
+  // A panel's verdict on a candidate at one session (JobInterviewOutcome).
+  highlyrecommended: 'default',
+  recommended: 'default',
+  acceptable: 'secondary',
+  notrecommended: 'destructive',
+  proceedtonextround: 'default',
+  // ⚠ "onhold" is already mapped above (destructive) for the case where holding something is the
+  // problem. An interview outcome of "On Hold" is a neutral parking decision rather than a
+  // rejection, but one key cannot carry two meanings — the earlier mapping wins, and this is left
+  // here as a note rather than a duplicate.
+
+  // A single panelist's scorecard recommendation (JobInterviewRecommendation). Deliberately shares
+  // no key with the outcome above — they are different scales answering different questions.
+  stronghire: 'default',
+  hire: 'default',
+  neutral: 'secondary',
+  nohire: 'destructive',
+  strongnohire: 'destructive',
+
+  // Interview formats.
+  oneonone: 'outline',
+  panel: 'outline',
+  technical: 'outline',
+  competencybased: 'outline',
+  casestudy: 'outline',
+  presentation: 'outline',
+  inperson: 'outline',
+  phone: 'outline',
+  video: 'outline',
+  hybrid: 'outline',
 };
 
 interface StatusBadgeProps {

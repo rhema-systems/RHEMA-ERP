@@ -2074,6 +2074,16 @@ public sealed class ApplicationSlotEntry
     public TimeSpan? SlotEndTime   { get; set; }
 }
 
+/// <summary>
+/// Edits the schedule and setup of an interview.
+///
+/// <para><b>Status is deliberately absent.</b> It used to be copied straight onto the entity, so a plain
+/// PUT could cancel an interview without a cancellation reason, complete one that never happened, or
+/// mark one "Rescheduled" without moving the date, rotating the candidates' confirmation tokens or
+/// re-sending a single invitation. Status belongs to <c>reschedule</c>, <c>cancel</c> and
+/// <c>complete</c>, which carry those side effects — the same reasoning that took <c>Status</c> off
+/// <c>UpdateAppraisalCycleDto</c>.</para>
+/// </summary>
 public class UpdateJobInterviewDto : UpdateDtoBase
 {
     [Range(1, 20)]
@@ -2081,7 +2091,6 @@ public class UpdateJobInterviewDto : UpdateDtoBase
 
     public JobInterviewType Type { get; set; }
     public InterviewMode Mode { get; set; }
-    public JobInterviewStatus Status { get; set; }
 
     [Required]
     public DateOnly ScheduledDate { get; set; }
@@ -2685,6 +2694,17 @@ public class QuestionPlanPreviewDto
     public int    RequiredQuestionCount { get; set; }
     public int    AllowedPoolSize       { get; set; }
     public int    DisplayOrder          { get; set; }
+
+    /// <summary>
+    /// Active questions of this type in the bank. The draw is capped at <c>AllowedPoolSize</c>, but the
+    /// bank may hold fewer than the plan requires — nothing surfaced that, so the shortfall only showed
+    /// up when the panel ran out of questions in the room.
+    /// </summary>
+    public int    AvailableQuestionCount { get; set; }
+
+    /// <summary>False when the bank cannot supply <c>RequiredQuestionCount</c> questions of this type.</summary>
+    public bool   MeetsRequiredCount     { get; set; }
+
     public List<QuestionPreviewItemDto> Questions { get; set; } = new();
 }
 

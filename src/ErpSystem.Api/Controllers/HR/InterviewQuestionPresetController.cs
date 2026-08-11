@@ -1,14 +1,25 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Named interview templates: "which question types, how many of each". Applying one to an interview
+/// scaffolds its question plans and draws the questions.
+///
+/// <para>HR-only for the same reason as <see cref="InterviewQuestionBankController"/> — a preset names
+/// the shape of the interview, and it was previously readable and editable by any authenticated
+/// employee.</para>
+/// </summary>
 [ApiController]
 [Route("api/interview-question-presets")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[RecruitmentBusinessRules]
 public class InterviewQuestionPresetController : ControllerBase
 {
     private readonly IInterviewQuestionPresetService _service;
@@ -82,7 +93,7 @@ public class InterviewQuestionPresetController : ControllerBase
     public async Task<ActionResult<InterviewQuestionPresetItemDto>> AddItem(
         Guid presetId, [FromBody] CreateInterviewQuestionPresetItemDto dto)
     {
-        if (presetId != dto.PresetId) return BadRequest("Preset ID mismatch.");
+        dto.PresetId = presetId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;

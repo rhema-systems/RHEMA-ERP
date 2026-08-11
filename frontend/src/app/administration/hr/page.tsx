@@ -17,6 +17,8 @@ import {
   Coins,
   Target,
   Workflow,
+  HelpCircle,
+  LayoutList,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -166,6 +168,20 @@ export default function HrAdministrationPage() {
                 'The stages applications move through, and the rules governing those moves.',
               href: '/administration/hr/recruitment/pipelines',
               icon: Workflow,
+            },
+            {
+              title: 'Interview Question Bank',
+              description:
+                'The questions candidates are asked, with the weight and score band each is marked against.',
+              href: '/administration/hr/recruitment/question-bank',
+              icon: HelpCircle,
+            },
+            {
+              title: 'Interview Presets',
+              description:
+                'Reusable interview shapes — which question types a panel covers, and how many of each.',
+              href: '/administration/hr/recruitment/question-presets',
+              icon: LayoutList,
             },
           ]}
         />
