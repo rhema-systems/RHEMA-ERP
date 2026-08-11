@@ -447,6 +447,8 @@ export type AssetDisposalStatus =
   | 'Rejected'
   | 'Cancelled';
 
+export type AssetDisposalScope = 'WholeAsset' | 'PartialPortion' | 'Component';
+
 export interface AssetDisposal {
   id: string;
   fixedAssetId: string;
@@ -454,6 +456,12 @@ export interface AssetDisposal {
   assetCode?: string;
   disposalDate: string;
   disposalType: DisposalType;
+  disposalScope: AssetDisposalScope;
+  disposedPortionPercent: number;
+  componentReference?: string;
+  componentDescription?: string;
+  allocationEvidenceReference?: string;
+  allocationEvidenceNotes?: string;
   status: AssetDisposalStatus;
   reason?: string;
   saleProceeds: number;
@@ -475,6 +483,7 @@ export interface AssetDisposal {
   finalDepreciationEvidenceReference?: string;
   finalDepreciationEvidenceNotes?: string;
   gainOrLoss: number;
+  remainingNetBookValueAfterDisposal: number;
   revaluationSurplusAtDisposal: number;
   revaluationSurplusAccountId?: string;
   retainedEarningsAccountId?: string;
@@ -494,6 +503,12 @@ export interface RequestAssetDisposalDto {
   fixedAssetId: string;
   disposalDate: string;
   disposalType: DisposalType;
+  disposalScope: AssetDisposalScope;
+  disposedPortionPercent: number;
+  componentReference?: string;
+  componentDescription?: string;
+  allocationEvidenceReference?: string;
+  allocationEvidenceNotes?: string;
   reason?: string;
   saleProceeds: number;
   disposalCost: number;

@@ -118,7 +118,7 @@ Unsupported and tracked:
 - Final/partial-period depreciation on disposal was subsequently resolved under `FIN-LIM-0039`; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - Disposal sale VAT/AR/cash integration: `FIN-LIM-0040`.
 - Revaluation surplus equity transfer policy: resolved by the follow-up documented in `docs/fixed-asset-disposal-revaluation-surplus-policy-foundation.md`.
-- Partial/component disposal: `FIN-LIM-0042`.
+- Partial/component disposal was subsequently resolved under `FIN-LIM-0042`; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
 - Foreign-currency disposal proceeds: `FIN-LIM-0043`.
 
 ## Depreciation Interaction
@@ -176,7 +176,7 @@ Implemented/emitted where applicable:
 - `FIN-LIM-0039`: subsequently resolved for whole-asset disposal.
 - `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
 - `FIN-LIM-0041`: resolved by the dedicated whole-asset disposal equity-transfer policy slice.
-- `FIN-LIM-0042`: opened for partial/component disposal.
+- `FIN-LIM-0042`: resolved by controlled proportional partial/component derecognition.
 - `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open.
 

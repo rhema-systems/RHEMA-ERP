@@ -93,6 +93,8 @@ public class AssetDisposalService : IAssetDisposalService
                 bookValue,
                 fiscalPeriod,
                 dto.DisposalDate,
+                dto.DisposalScope,
+                dto.DisposedPortionPercent,
                 dto.FinalDepreciationProductionUnits,
                 dto.FinalDepreciationEvidenceReference,
                 dto.FinalDepreciationEvidenceNotes);
@@ -113,8 +115,11 @@ public class AssetDisposalService : IAssetDisposalService
         var existingActiveDisposal = await _context.AssetDisposals
             .Where(d => d.TenantId == TenantId
                 && d.FixedAssetId == asset.Id
-                && d.Status != AssetDisposalStatus.Rejected
-                && d.Status != AssetDisposalStatus.Cancelled
+                // Completed partial disposals are history, not an active lock on the remaining
+                // asset. Only an unfinished maker-checker request blocks another disposal.
+                && (d.Status == AssetDisposalStatus.Draft
+                    || d.Status == AssetDisposalStatus.PendingApproval
+                    || d.Status == AssetDisposalStatus.Approved)
                 && !d.IsDeleted)
             .OrderByDescending(d => d.CreatedAt)
             .FirstOrDefaultAsync();
@@ -134,6 +139,12 @@ public class AssetDisposalService : IAssetDisposalService
             BookClassification = NormalizeBookClassification(bookValue.BookClassification),
             DisposalType = dto.DisposalType,
             Status = AssetDisposalStatus.PendingApproval,
+            DisposalScope = dto.DisposalScope,
+            DisposedPortionPercent = snapshot.DisposedPortionPercent,
+            ComponentReference = NormalizeOptionalText(dto.ComponentReference),
+            ComponentDescription = NormalizeOptionalText(dto.ComponentDescription),
+            AllocationEvidenceReference = NormalizeOptionalText(dto.AllocationEvidenceReference),
+            AllocationEvidenceNotes = NormalizeOptionalText(dto.AllocationEvidenceNotes),
             Reason = dto.Reason?.Trim(),
             SaleProceeds = RoundMoney(dto.SaleProceeds),
             DisposalCost = RoundMoney(dto.DisposalCost),
@@ -141,6 +152,11 @@ public class AssetDisposalService : IAssetDisposalService
             ProceedsCurrencyCode = snapshot.ProceedsCurrencyCode,
             ProceedsAccountId = snapshot.ProceedsAccountId,
             CostAtDisposal = snapshot.AssetCarryingAccountAmount,
+            AcquisitionCostAllocated = snapshot.AcquisitionCostAllocated,
+            RevaluationAdjustmentAllocated = snapshot.RevaluationAdjustmentAllocated,
+            ResidualValueAllocated = snapshot.ResidualValueAllocated,
+            ProductionCapacityAllocated = snapshot.ProductionCapacityAllocated,
+            AccumulatedProductionUnitsAllocated = snapshot.AccumulatedProductionUnitsAllocated,
             AccumulatedDepreciationAtDisposal = snapshot.AccumulatedDepreciation,
             FinalDepreciationAmount = finalDepreciation.Amount,
             FinalDepreciationFromDate = finalDepreciation.FromDate,
@@ -164,6 +180,9 @@ public class AssetDisposalService : IAssetDisposalService
             RevaluationSurplusTransferAmount = snapshot.RevaluationSurplusBalance,
             NetBookValueAtDisposal = snapshot.NetBookValue,
             GainOrLoss = snapshot.GainOrLoss,
+            RemainingAcquisitionCostAfterDisposal = snapshot.RemainingAcquisitionCost,
+            RemainingAccumulatedDepreciationAfterDisposal = snapshot.RemainingAccumulatedDepreciation,
+            RemainingNetBookValueAfterDisposal = snapshot.RemainingNetBookValue,
             BuyerName = dto.BuyerName?.Trim(),
             RequestedById = requestedById == Guid.Empty ? null : requestedById,
             CreatedAt = DateTime.UtcNow,
@@ -185,6 +204,14 @@ public class AssetDisposalService : IAssetDisposalService
             disposal,
             afterValues: BuildDisposalAuditSnapshot(disposal),
             comment: disposal.Reason);
+        if (disposal.DisposalScope != AssetDisposalScope.WholeAsset)
+        {
+            await RecordDisposalAuditAsync(
+                FinanceAuditEvents.FixedAssetPartialDisposalAllocationCalculated,
+                disposal,
+                afterValues: BuildDisposalAuditSnapshot(disposal),
+                comment: "Partial/component carrying-value allocation calculated for maker-checker approval.");
+        }
         if (disposal.FinalDepreciationAmount > 0m)
         {
             await RecordDisposalAuditAsync(
@@ -325,6 +352,8 @@ public class AssetDisposalService : IAssetDisposalService
                 bookValue,
                 fiscalPeriod,
                 disposal.DisposalDate,
+                disposal.DisposalScope,
+                disposal.DisposedPortionPercent,
                 disposal.FinalDepreciationProductionUnits == 0m ? null : disposal.FinalDepreciationProductionUnits,
                 disposal.FinalDepreciationEvidenceReference,
                 disposal.FinalDepreciationEvidenceNotes,
@@ -332,6 +361,7 @@ public class AssetDisposalService : IAssetDisposalService
             ValidateApprovedFinalDepreciation(disposal, finalDepreciation, bookValue.DepreciationMethod);
             var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, disposal, finalDepreciation);
             await ValidateApprovedRevaluationSurplusTransferAsync(disposal, asset, snapshot);
+            ValidateApprovedAllocationSnapshot(disposal, snapshot);
             ApplySnapshot(disposal, snapshot);
             var postingRequest = await BuildDisposalPostingRequestAsync(disposal, asset, fiscalPeriod, functionalCurrency, snapshot);
 
@@ -415,6 +445,17 @@ public class AssetDisposalService : IAssetDisposalService
                         disposal.FinalDepreciationProrationBasis
                     },
                     comment: "Final depreciation posted atomically with fixed asset derecognition.");
+            }
+
+            if (disposal.DisposalScope != AssetDisposalScope.WholeAsset)
+            {
+                await RecordDisposalAuditAsync(
+                    FinanceAuditEvents.FixedAssetPartialDisposalAllocationPosted,
+                    disposal,
+                    postingEventId: postingResult.PostingEventId,
+                    journalEntryId: postingResult.JournalEntryId,
+                    afterValues: BuildDisposalAuditSnapshot(disposal),
+                    comment: "Partial/component derecognition posted; the retained carrying basis remains active.");
             }
 
             if (disposal.DisposalType == DisposalType.Sale && disposal.NetProceeds > 0m)
@@ -605,6 +646,8 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Fixed asset disposal reason is required.");
         }
 
+        ValidateDisposalScope(dto);
+
         if (dto.SaleProceeds < 0m || dto.DisposalCost < 0m)
         {
             throw new InvalidOperationException("Fixed asset disposal proceeds and disposal costs cannot be negative.");
@@ -629,6 +672,52 @@ public class AssetDisposalService : IAssetDisposalService
                 asset.Id,
                 "Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
             throw new InvalidOperationException("Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
+        }
+    }
+
+    private static void ValidateDisposalScope(RequestAssetDisposalDto dto)
+    {
+        if (!Enum.IsDefined(dto.DisposalScope))
+        {
+            throw new InvalidOperationException("A valid whole-asset, partial-portion, or component disposal scope is required.");
+        }
+
+        if (dto.DisposalScope == AssetDisposalScope.WholeAsset)
+        {
+            // The API owns the whole-asset value. Silently accepting a partial percentage while
+            // labelling the request whole would create misleading approval evidence.
+            if (dto.DisposedPortionPercent != 100m)
+            {
+                throw new InvalidOperationException("Whole-asset disposal must use 100 percent.");
+            }
+
+            return;
+        }
+
+        if (dto.DisposedPortionPercent <= 0m || dto.DisposedPortionPercent >= 100m)
+        {
+            throw new InvalidOperationException("Partial and component disposal percentage must be greater than zero and less than 100.");
+        }
+        if (string.IsNullOrWhiteSpace(dto.AllocationEvidenceReference))
+        {
+            throw new InvalidOperationException("Partial and component disposal requires an allocation evidence reference.");
+        }
+        if (dto.DisposalScope == AssetDisposalScope.Component && string.IsNullOrWhiteSpace(dto.ComponentReference))
+        {
+            throw new InvalidOperationException("Component disposal requires a component reference.");
+        }
+
+        ValidateTextLength(dto.ComponentReference, 100, "Component reference");
+        ValidateTextLength(dto.ComponentDescription, 500, "Component description");
+        ValidateTextLength(dto.AllocationEvidenceReference, 200, "Allocation evidence reference");
+        ValidateTextLength(dto.AllocationEvidenceNotes, 1000, "Allocation evidence notes");
+    }
+
+    private static void ValidateTextLength(string? value, int maximumLength, string fieldName)
+    {
+        if (value?.Trim().Length > maximumLength)
+        {
+            throw new InvalidOperationException($"{fieldName} cannot exceed {maximumLength} characters.");
         }
     }
 
@@ -693,6 +782,8 @@ public class AssetDisposalService : IAssetDisposalService
         FixedAssetBookValue bookValue,
         FiscalPeriod fiscalPeriod,
         DateTime disposalDate,
+        AssetDisposalScope disposalScope,
+        decimal disposedPortionPercent,
         decimal? productionUnits,
         string? productionEvidenceReference,
         string? productionEvidenceNotes,
@@ -708,6 +799,9 @@ public class AssetDisposalService : IAssetDisposalService
             schedule.BookClassification == bookValue.BookClassification &&
             !schedule.IsDeleted &&
             !schedule.IsReversed &&
+            // A prior partial-disposal schedule covers only the portion that left service. It must
+            // not block later depreciation of the retained asset in the same fiscal period.
+            (schedule.AssetDisposalId == null || schedule.AssetDisposal!.DisposalScope == AssetDisposalScope.WholeAsset) &&
             (!completingDisposalId.HasValue || schedule.AssetDisposalId != completingDisposalId.Value));
         if (currentPeriodScheduleExists)
         {
@@ -765,10 +859,20 @@ public class AssetDisposalService : IAssetDisposalService
         var basis = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
             ? "ProductionUsage"
             : "ActualDaysInclusive";
-        var amount = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
+        var wholeAssetAmount = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
             ? calculation.DepreciationAmount
             : RoundMoney(calculation.DepreciationAmount * eligibleDays / periodDays);
-        amount = Math.Min(amount, RoundMoney(bookValue.NetBookValue - bookValue.ResidualValue));
+        wholeAssetAmount = Math.Min(wholeAssetAmount, RoundMoney(bookValue.NetBookValue - bookValue.ResidualValue));
+
+        // For a partial/component disposal, only the portion leaving service receives final
+        // depreciation here. The retained portion remains eligible for its ordinary current-period
+        // run, preventing both a skipped charge and double-counting after the disposal date.
+        var allocationRate = disposalScope == AssetDisposalScope.WholeAsset
+            ? 1m
+            : RoundAllocation(disposedPortionPercent) / 100m;
+        var amount = disposalScope == AssetDisposalScope.WholeAsset
+            ? wholeAssetAmount
+            : AllocateMoney(wholeAssetAmount, allocationRate);
 
         return new FinalDepreciationPreparation(
             Math.Max(0m, amount),
@@ -947,16 +1051,42 @@ public class AssetDisposalService : IAssetDisposalService
         disposal.UpdatedAt = DateTime.UtcNow;
         disposal.UpdatedBy = UserName;
 
-        asset.Status = disposal.DisposalType == DisposalType.Sale
-            ? FixedAssetStatus.Disposed
-            : FixedAssetStatus.WrittenOff;
-        asset.DisposalDate = disposal.DisposalDate;
-        asset.NetBookValue = 0m;
+        if (disposal.DisposalScope == AssetDisposalScope.WholeAsset)
+        {
+            asset.Status = disposal.DisposalType == DisposalType.Sale
+                ? FixedAssetStatus.Disposed
+                : FixedAssetStatus.WrittenOff;
+            asset.DisposalDate = disposal.DisposalDate;
+            asset.NetBookValue = 0m;
+
+            // Preserve historical gross cost on a wholly derecognised asset, matching the existing
+            // register convention. Status and zero NBV remove it from the live asset population.
+            bookValue.AccumulatedDepreciation = 0m;
+            bookValue.NetBookValue = 0m;
+        }
+        else
+        {
+            // A partial/component disposal changes the current carrying basis but does not retire
+            // the parent asset. It therefore remains available for future depreciation, valuation,
+            // transfer, verification, and eventual additional or whole disposal.
+            asset.AcquisitionCost = snapshot.RemainingAcquisitionCost;
+            asset.NetBookValue = snapshot.RemainingNetBookValue;
+            asset.ResidualValue = RoundMoney(Math.Max(0m, bookValue.ResidualValue - snapshot.ResidualValueAllocated));
+            asset.LifetimeProductionCapacity = RoundUnits(Math.Max(0m,
+                bookValue.LifetimeProductionCapacity - snapshot.ProductionCapacityAllocated));
+            asset.AccumulatedProductionUnits = RoundUnits(Math.Max(0m,
+                bookValue.AccumulatedProductionUnits - snapshot.AccumulatedProductionUnitsAllocated));
+
+            bookValue.AcquisitionCost = snapshot.RemainingAcquisitionCost;
+            bookValue.AccumulatedDepreciation = snapshot.RemainingAccumulatedDepreciation;
+            bookValue.NetBookValue = snapshot.RemainingNetBookValue;
+            bookValue.ResidualValue = asset.ResidualValue;
+            bookValue.LifetimeProductionCapacity = asset.LifetimeProductionCapacity;
+            bookValue.AccumulatedProductionUnits = asset.AccumulatedProductionUnits;
+        }
+
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = UserName;
-
-        bookValue.AccumulatedDepreciation = 0m;
-        bookValue.NetBookValue = 0m;
         bookValue.UpdatedAt = DateTime.UtcNow;
         bookValue.UpdatedBy = UserName;
 
@@ -967,10 +1097,14 @@ public class AssetDisposalService : IAssetDisposalService
             AccountingBookId = bookValue.AccountingBookId,
             BookClassification = bookValue.BookClassification,
             TransactionDate = disposal.DisposalDate,
-            TransactionType = disposal.DisposalType == DisposalType.Sale ? "Disposal" : "WriteOff",
-            Description = $"Fixed asset {disposal.DisposalType} disposal. Proceeds: {snapshot.NetProceeds:N2}, Gain/Loss: {snapshot.GainOrLoss:N2}",
+            TransactionType = disposal.DisposalScope == AssetDisposalScope.WholeAsset
+                ? disposal.DisposalType == DisposalType.Sale ? "Disposal" : "WriteOff"
+                : "PartialDisposal",
+            Description = disposal.DisposalScope == AssetDisposalScope.WholeAsset
+                ? $"Fixed asset {disposal.DisposalType} disposal. Proceeds: {snapshot.NetProceeds:N2}, Gain/Loss: {snapshot.GainOrLoss:N2}"
+                : $"{disposal.DisposalScope} disposal ({snapshot.DisposedPortionPercent:N4}%). Proceeds: {snapshot.NetProceeds:N2}, Gain/Loss: {snapshot.GainOrLoss:N2}",
             Amount = snapshot.NetProceeds,
-            ResultingBookValue = 0m,
+            ResultingBookValue = snapshot.RemainingNetBookValue,
             RelatedEntityId = disposal.Id,
             PerformedByUserId = CurrentUserId,
             CreatedAt = DateTime.UtcNow,
@@ -1018,6 +1152,9 @@ public class AssetDisposalService : IAssetDisposalService
             CumulativeProductionUnitsAfter = finalDepreciation.Calculation.CumulativeProductionUnitsAfter,
             ProductionEvidenceReference = finalDepreciation.Calculation.ProductionEvidenceReference,
             ProductionEvidenceNotes = finalDepreciation.Calculation.ProductionEvidenceNotes,
+            // Negative sequences reserve a separate namespace from ordinary runs (0+) while still
+            // satisfying the existing unique asset/period/book/sequence constraint.
+            CorrectionSequence = ResolveDisposalScheduleSequence(asset, disposal),
             PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
             ApprovalStatus = "ApprovedWithDisposal",
             ApprovedAt = disposal.ApprovedAt,
@@ -1062,6 +1199,12 @@ public class AssetDisposalService : IAssetDisposalService
         disposal.ProceedsCurrencyCode = snapshot.ProceedsCurrencyCode;
         disposal.ProceedsAccountId = snapshot.ProceedsAccountId;
         disposal.CostAtDisposal = snapshot.AssetCarryingAccountAmount;
+        disposal.DisposedPortionPercent = snapshot.DisposedPortionPercent;
+        disposal.AcquisitionCostAllocated = snapshot.AcquisitionCostAllocated;
+        disposal.RevaluationAdjustmentAllocated = snapshot.RevaluationAdjustmentAllocated;
+        disposal.ResidualValueAllocated = snapshot.ResidualValueAllocated;
+        disposal.ProductionCapacityAllocated = snapshot.ProductionCapacityAllocated;
+        disposal.AccumulatedProductionUnitsAllocated = snapshot.AccumulatedProductionUnitsAllocated;
         disposal.AccumulatedDepreciationAtDisposal = snapshot.AccumulatedDepreciation;
         disposal.FinalDepreciationAmount = snapshot.FinalDepreciation.Amount;
         disposal.AccumulatedImpairmentAtDisposal = snapshot.AccumulatedImpairment;
@@ -1069,6 +1212,44 @@ public class AssetDisposalService : IAssetDisposalService
         disposal.RevaluationSurplusTransferAmount = snapshot.RevaluationSurplusBalance;
         disposal.NetBookValueAtDisposal = snapshot.NetBookValue;
         disposal.GainOrLoss = snapshot.GainOrLoss;
+        disposal.RemainingAcquisitionCostAfterDisposal = snapshot.RemainingAcquisitionCost;
+        disposal.RemainingAccumulatedDepreciationAfterDisposal = snapshot.RemainingAccumulatedDepreciation;
+        disposal.RemainingNetBookValueAfterDisposal = snapshot.RemainingNetBookValue;
+    }
+
+    private static int ResolveDisposalScheduleSequence(FixedAsset asset, AssetDisposal disposal)
+    {
+        var priorDisposalSequences = asset.DepreciationSchedules
+            .Where(schedule => schedule.FiscalPeriodId == disposal.FiscalPeriodId
+                && schedule.BookClassification == disposal.BookClassification
+                && schedule.AssetDisposalId.HasValue)
+            .Select(schedule => schedule.CorrectionSequence)
+            .ToList();
+
+        return priorDisposalSequences.Count == 0
+            ? -1
+            : Math.Min(-1, priorDisposalSequences.Min() - 1);
+    }
+
+    private static void ValidateApprovedAllocationSnapshot(AssetDisposal disposal, DisposalSnapshot current)
+    {
+        if (disposal.DisposedPortionPercent != current.DisposedPortionPercent ||
+            disposal.CostAtDisposal != current.AssetCarryingAccountAmount ||
+            disposal.AcquisitionCostAllocated != current.AcquisitionCostAllocated ||
+            disposal.RevaluationAdjustmentAllocated != current.RevaluationAdjustmentAllocated ||
+            disposal.ResidualValueAllocated != current.ResidualValueAllocated ||
+            disposal.ProductionCapacityAllocated != current.ProductionCapacityAllocated ||
+            disposal.AccumulatedProductionUnitsAllocated != current.AccumulatedProductionUnitsAllocated ||
+            disposal.AccumulatedDepreciationAtDisposal != current.AccumulatedDepreciation ||
+            disposal.AccumulatedImpairmentAtDisposal != current.AccumulatedImpairment ||
+            disposal.NetBookValueAtDisposal != current.NetBookValue ||
+            disposal.RemainingAcquisitionCostAfterDisposal != current.RemainingAcquisitionCost ||
+            disposal.RemainingAccumulatedDepreciationAfterDisposal != current.RemainingAccumulatedDepreciation ||
+            disposal.RemainingNetBookValueAfterDisposal != current.RemainingNetBookValue)
+        {
+            throw new StaleDisposalApprovalException(
+                "The approved partial/component allocation no longer matches the asset book. Submit a new disposal request.");
+        }
     }
 
     private async Task<DisposalSnapshot> BuildDisposalSnapshotAsync(
@@ -1083,20 +1264,18 @@ public class AssetDisposalService : IAssetDisposalService
         var accumulatedImpairment = await CalculateAccumulatedImpairmentAsync(asset.Id, bookValue);
         var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
         var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
-        var assetCarryingAccountAmount = RoundMoney(bookValue.AcquisitionCost + revaluationAssetAdjustment);
-        var netBookValue = RoundMoney(bookValue.NetBookValue - finalDepreciation.Amount);
         var proceedsAccountId = netProceeds > 0m
             ? dto.ProceedsAccountId ?? asset.Category.DisposalProceedsClearingAccountId
             : null;
 
-        return new DisposalSnapshot(
-            assetCarryingAccountAmount,
-            RoundMoney(bookValue.AccumulatedDepreciation + finalDepreciation.Amount),
+        return BuildAllocatedDisposalSnapshot(
+            bookValue,
+            dto.DisposalScope,
+            dto.DisposedPortionPercent,
+            revaluationAssetAdjustment,
             accumulatedImpairment,
             revaluationSurplusBalance,
-            netBookValue,
             netProceeds,
-            RoundMoney(netProceeds - netBookValue),
             proceedsCurrency,
             proceedsAccountId,
             finalDepreciation);
@@ -1111,24 +1290,91 @@ public class AssetDisposalService : IAssetDisposalService
         var accumulatedImpairment = await CalculateAccumulatedImpairmentAsync(asset.Id, bookValue);
         var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
         var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
-        var assetCarryingAccountAmount = RoundMoney(bookValue.AcquisitionCost + revaluationAssetAdjustment);
-        var netBookValue = RoundMoney(bookValue.NetBookValue - finalDepreciation.Amount);
         var netProceeds = RoundMoney(disposal.SaleProceeds - disposal.DisposalCost);
         var proceedsAccountId = netProceeds > 0m
             ? disposal.ProceedsAccountId ?? asset.Category.DisposalProceedsClearingAccountId
             : null;
 
-        return new DisposalSnapshot(
-            assetCarryingAccountAmount,
-            RoundMoney(bookValue.AccumulatedDepreciation + finalDepreciation.Amount),
+        return BuildAllocatedDisposalSnapshot(
+            bookValue,
+            disposal.DisposalScope,
+            disposal.DisposedPortionPercent,
+            revaluationAssetAdjustment,
             accumulatedImpairment,
             revaluationSurplusBalance,
-            netBookValue,
             netProceeds,
-            RoundMoney(netProceeds - netBookValue),
             NormalizeCurrency(disposal.ProceedsCurrencyCode, await GetFunctionalCurrencyAsync()),
             proceedsAccountId,
             finalDepreciation);
+    }
+
+    private static DisposalSnapshot BuildAllocatedDisposalSnapshot(
+        FixedAssetBookValue bookValue,
+        AssetDisposalScope scope,
+        decimal disposedPortionPercent,
+        decimal remainingRevaluationAdjustment,
+        decimal remainingAccumulatedImpairment,
+        decimal remainingRevaluationSurplus,
+        decimal netProceeds,
+        string proceedsCurrency,
+        Guid? proceedsAccountId,
+        FinalDepreciationPreparation finalDepreciation)
+    {
+        var normalizedPercent = scope == AssetDisposalScope.WholeAsset
+            ? 100m
+            : RoundAllocation(disposedPortionPercent);
+        var allocationRate = normalizedPercent / 100m;
+
+        // Final depreciation belongs to the entire asset still in service through the disposal
+        // date. Only after that charge is recognised do we allocate the disposed portion of each
+        // carrying-value layer. This keeps the retained portion's NBV and future depreciation sound.
+        var totalAccumulatedDepreciation = RoundMoney(bookValue.AccumulatedDepreciation + finalDepreciation.Amount);
+        var totalNetBookValue = RoundMoney(bookValue.NetBookValue - finalDepreciation.Amount);
+        var acquisitionCostAllocated = AllocateMoney(bookValue.AcquisitionCost, allocationRate);
+        var revaluationAdjustmentAllocated = AllocateMoney(remainingRevaluationAdjustment, allocationRate);
+        // Final depreciation already belongs only to the disposed portion. Allocate the opening
+        // reserve, then add that final charge once; multiplying the combined balance again would
+        // incorrectly apply the disposal percentage twice.
+        var accumulatedDepreciationAllocated = RoundMoney(
+            AllocateMoney(bookValue.AccumulatedDepreciation, allocationRate) + finalDepreciation.Amount);
+        var accumulatedImpairmentAllocated = AllocateMoney(remainingAccumulatedImpairment, allocationRate);
+        var revaluationSurplusAllocated = AllocateMoney(remainingRevaluationSurplus, allocationRate);
+        // Derive a partial portion's NBV from the rounded carrying layers that will actually post.
+        // This avoids a one-pesewa imbalance when independently rounded percentages differ. Whole
+        // disposal retains the authoritative book NBV used by the established workflow.
+        var netBookValueAllocated = scope == AssetDisposalScope.WholeAsset
+            ? totalNetBookValue
+            : RoundMoney(
+                acquisitionCostAllocated + revaluationAdjustmentAllocated -
+                accumulatedDepreciationAllocated - accumulatedImpairmentAllocated);
+        var residualValueAllocated = AllocateMoney(bookValue.ResidualValue, allocationRate);
+        var productionCapacityAllocated = AllocateUnits(bookValue.LifetimeProductionCapacity, allocationRate);
+        var accumulatedProductionUnitsAllocated = AllocateUnits(
+            finalDepreciation.Calculation.CumulativeProductionUnitsAfter > 0m
+                ? finalDepreciation.Calculation.CumulativeProductionUnitsAfter
+                : bookValue.AccumulatedProductionUnits,
+            allocationRate);
+
+        return new DisposalSnapshot(
+            RoundMoney(acquisitionCostAllocated + revaluationAdjustmentAllocated),
+            accumulatedDepreciationAllocated,
+            accumulatedImpairmentAllocated,
+            revaluationSurplusAllocated,
+            netBookValueAllocated,
+            netProceeds,
+            RoundMoney(netProceeds - netBookValueAllocated),
+            proceedsCurrency,
+            proceedsAccountId,
+            finalDepreciation,
+            normalizedPercent,
+            acquisitionCostAllocated,
+            revaluationAdjustmentAllocated,
+            residualValueAllocated,
+            productionCapacityAllocated,
+            accumulatedProductionUnitsAllocated,
+            RoundMoney(bookValue.AcquisitionCost - acquisitionCostAllocated),
+            RoundMoney(totalAccumulatedDepreciation - accumulatedDepreciationAllocated),
+            RoundMoney(totalNetBookValue - netBookValueAllocated));
     }
 
     private async Task<decimal> CalculateAccumulatedImpairmentAsync(Guid assetId, FixedAssetBookValue bookValue)
@@ -1141,7 +1387,13 @@ public class AssetDisposalService : IAssetDisposalService
                 && v.BookClassification == bookValue.BookClassification)
             .SumAsync(v => v.ImpairmentLoss - v.ImpairmentReversal);
 
-        return Math.Max(0m, RoundMoney(amount));
+        var alreadyDerecognised = await _context.AssetDisposals
+            .Where(d => d.TenantId == TenantId && d.FixedAssetId == assetId
+                && d.BookClassification == bookValue.BookClassification
+                && d.Status == AssetDisposalStatus.Completed && !d.IsDeleted)
+            .SumAsync(d => d.AccumulatedImpairmentAtDisposal);
+
+        return Math.Max(0m, RoundMoney(amount - alreadyDerecognised));
     }
 
     private async Task<decimal> CalculateRevaluationAssetAdjustmentAsync(Guid assetId, FixedAssetBookValue bookValue)
@@ -1155,7 +1407,13 @@ public class AssetDisposalService : IAssetDisposalService
                 && v.BookClassification == bookValue.BookClassification)
             .SumAsync(v => v.RevaluationSurplus - v.RevaluationDeficit);
 
-        return RoundMoney(amount);
+        var alreadyDerecognised = await _context.AssetDisposals
+            .Where(d => d.TenantId == TenantId && d.FixedAssetId == assetId
+                && d.BookClassification == bookValue.BookClassification
+                && d.Status == AssetDisposalStatus.Completed && !d.IsDeleted)
+            .SumAsync(d => d.RevaluationAdjustmentAllocated);
+
+        return RoundMoney(amount - alreadyDerecognised);
     }
 
     private async Task<decimal> CalculateRevaluationSurplusBalanceAsync(Guid assetId, FixedAssetBookValue bookValue)
@@ -1169,7 +1427,13 @@ public class AssetDisposalService : IAssetDisposalService
                 && v.BookClassification == bookValue.BookClassification)
             .SumAsync(v => v.RevaluationSurplus - v.RevaluationSurplusApplied);
 
-        return Math.Max(0m, RoundMoney(amount));
+        var alreadyTransferred = await _context.AssetDisposals
+            .Where(d => d.TenantId == TenantId && d.FixedAssetId == assetId
+                && d.BookClassification == bookValue.BookClassification
+                && d.Status == AssetDisposalStatus.Completed && !d.IsDeleted)
+            .SumAsync(d => d.RevaluationSurplusTransferAmount);
+
+        return Math.Max(0m, RoundMoney(amount - alreadyTransferred));
     }
 
     private FixedAssetBookValue ResolveDefaultBookValue(FixedAsset asset)
@@ -1368,9 +1632,12 @@ public class AssetDisposalService : IAssetDisposalService
             ResourceId = disposal.Id.ToString(),
             Context = new
             {
-                disposal.FixedAssetId,
-                disposal.DisposalType,
-                disposal.Status,
+            disposal.FixedAssetId,
+            disposal.DisposalType,
+            disposal.DisposalScope,
+            disposal.DisposedPortionPercent,
+            disposal.ComponentReference,
+            disposal.Status,
                 disposal.ReferenceNumber
             }
         });
@@ -1381,6 +1648,12 @@ public class AssetDisposalService : IAssetDisposalService
         {
             disposal.FixedAssetId,
             disposal.DisposalType,
+            disposal.DisposalScope,
+            disposal.DisposedPortionPercent,
+            disposal.ComponentReference,
+            disposal.ComponentDescription,
+            disposal.AllocationEvidenceReference,
+            disposal.AllocationEvidenceNotes,
             disposal.DisposalDate,
             disposal.AccountingDate,
             disposal.FiscalPeriodId,
@@ -1391,6 +1664,11 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.NetProceeds,
             disposal.ProceedsAccountId,
             disposal.CostAtDisposal,
+            disposal.AcquisitionCostAllocated,
+            disposal.RevaluationAdjustmentAllocated,
+            disposal.ResidualValueAllocated,
+            disposal.ProductionCapacityAllocated,
+            disposal.AccumulatedProductionUnitsAllocated,
             disposal.AccumulatedDepreciationAtDisposal,
             disposal.FinalDepreciationAmount,
             disposal.FinalDepreciationFromDate,
@@ -1413,6 +1691,9 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.RevaluationSurplusTransferAmount,
             disposal.NetBookValueAtDisposal,
             disposal.GainOrLoss,
+            disposal.RemainingAcquisitionCostAfterDisposal,
+            disposal.RemainingAccumulatedDepreciationAfterDisposal,
+            disposal.RemainingNetBookValueAfterDisposal,
             disposal.JournalEntryId,
             disposal.PostingEventId
         };
@@ -1423,6 +1704,12 @@ public class AssetDisposalService : IAssetDisposalService
            asset.Status is FixedAssetStatus.Active or FixedAssetStatus.Capitalized or FixedAssetStatus.FullyDepreciated;
 
     private static string NormalizeIdempotencyKey(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string? NormalizeOptionalText(string? value)
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
@@ -1458,6 +1745,18 @@ public class AssetDisposalService : IAssetDisposalService
     private static decimal RoundMoney(decimal amount)
         => Math.Round(amount, 2, MidpointRounding.AwayFromZero);
 
+    private static decimal RoundUnits(decimal amount)
+        => Math.Round(amount, 4, MidpointRounding.AwayFromZero);
+
+    private static decimal RoundAllocation(decimal amount)
+        => Math.Round(amount, 4, MidpointRounding.AwayFromZero);
+
+    private static decimal AllocateMoney(decimal amount, decimal allocationRate)
+        => RoundMoney(amount * allocationRate);
+
+    private static decimal AllocateUnits(decimal amount, decimal allocationRate)
+        => RoundUnits(amount * allocationRate);
+
     private static AssetDisposalDto MapToDto(AssetDisposal d)
     {
         return new AssetDisposalDto
@@ -1473,6 +1772,12 @@ public class AssetDisposalService : IAssetDisposalService
             BookClassification = d.BookClassification,
             DisposalType = d.DisposalType,
             Status = d.Status,
+            DisposalScope = d.DisposalScope,
+            DisposedPortionPercent = d.DisposedPortionPercent,
+            ComponentReference = d.ComponentReference,
+            ComponentDescription = d.ComponentDescription,
+            AllocationEvidenceReference = d.AllocationEvidenceReference,
+            AllocationEvidenceNotes = d.AllocationEvidenceNotes,
             Reason = d.Reason,
             SaleProceeds = d.SaleProceeds,
             DisposalCost = d.DisposalCost,
@@ -1480,6 +1785,11 @@ public class AssetDisposalService : IAssetDisposalService
             ProceedsCurrencyCode = d.ProceedsCurrencyCode,
             ProceedsAccountId = d.ProceedsAccountId,
             CostAtDisposal = d.CostAtDisposal,
+            AcquisitionCostAllocated = d.AcquisitionCostAllocated,
+            RevaluationAdjustmentAllocated = d.RevaluationAdjustmentAllocated,
+            ResidualValueAllocated = d.ResidualValueAllocated,
+            ProductionCapacityAllocated = d.ProductionCapacityAllocated,
+            AccumulatedProductionUnitsAllocated = d.AccumulatedProductionUnitsAllocated,
             AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
             FinalDepreciationAmount = d.FinalDepreciationAmount,
             FinalDepreciationFromDate = d.FinalDepreciationFromDate,
@@ -1503,6 +1813,9 @@ public class AssetDisposalService : IAssetDisposalService
             RevaluationSurplusTransferAmount = d.RevaluationSurplusTransferAmount,
             NetBookValueAtDisposal = d.NetBookValueAtDisposal,
             GainOrLoss = d.GainOrLoss,
+            RemainingAcquisitionCostAfterDisposal = d.RemainingAcquisitionCostAfterDisposal,
+            RemainingAccumulatedDepreciationAfterDisposal = d.RemainingAccumulatedDepreciationAfterDisposal,
+            RemainingNetBookValueAfterDisposal = d.RemainingNetBookValueAfterDisposal,
             BuyerName = d.BuyerName,
             ReferenceNumber = d.ReferenceNumber,
             RequestedById = d.RequestedById,
@@ -1533,7 +1846,16 @@ public class AssetDisposalService : IAssetDisposalService
         decimal GainOrLoss,
         string ProceedsCurrencyCode,
         Guid? ProceedsAccountId,
-        FinalDepreciationPreparation FinalDepreciation);
+        FinalDepreciationPreparation FinalDepreciation,
+        decimal DisposedPortionPercent,
+        decimal AcquisitionCostAllocated,
+        decimal RevaluationAdjustmentAllocated,
+        decimal ResidualValueAllocated,
+        decimal ProductionCapacityAllocated,
+        decimal AccumulatedProductionUnitsAllocated,
+        decimal RemainingAcquisitionCost,
+        decimal RemainingAccumulatedDepreciation,
+        decimal RemainingNetBookValue);
 
     private sealed record FinalDepreciationPreparation(
         decimal Amount,

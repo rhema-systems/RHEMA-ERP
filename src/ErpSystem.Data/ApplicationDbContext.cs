@@ -3279,7 +3279,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Reason).HasMaxLength(1000);
             entity.Property(e => e.Comments).HasMaxLength(1000);
             entity.Property(e => e.FailureReason).HasMaxLength(1000);
+            entity.Property(e => e.DisposedPortionPercent).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ComponentReference).HasMaxLength(100);
+            entity.Property(e => e.ComponentDescription).HasMaxLength(500);
+            entity.Property(e => e.AllocationEvidenceReference).HasMaxLength(200);
+            entity.Property(e => e.AllocationEvidenceNotes).HasMaxLength(1000);
             entity.Property(e => e.CostAtDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.AcquisitionCostAllocated).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RevaluationAdjustmentAllocated).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ResidualValueAllocated).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ProductionCapacityAllocated).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.AccumulatedProductionUnitsAllocated).HasColumnType("decimal(18,4)");
             entity.Property(e => e.AccumulatedDepreciationAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.FinalDepreciationAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.FinalDepreciationProrationBasis).HasMaxLength(30);
@@ -3293,6 +3303,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.AccumulatedImpairmentAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusTransferAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainingAcquisitionCostAfterDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainingAccumulatedDepreciationAfterDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainingNetBookValueAfterDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetProceeds).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetBookValueAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.GainOrLoss).HasColumnType("decimal(18,2)");

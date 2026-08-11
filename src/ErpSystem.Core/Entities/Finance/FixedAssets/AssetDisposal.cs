@@ -32,6 +32,25 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Required]
         public AssetDisposalStatus Status { get; set; } = AssetDisposalStatus.Draft;
 
+        // FIN-LIM-0042: the approved scope and allocation evidence must remain immutable because
+        // they determine both the amount derecognised and the carrying amount left in service.
+        public AssetDisposalScope DisposalScope { get; set; } = AssetDisposalScope.WholeAsset;
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DisposedPortionPercent { get; set; } = 100m;
+
+        [MaxLength(100)]
+        public string? ComponentReference { get; set; }
+
+        [MaxLength(500)]
+        public string? ComponentDescription { get; set; }
+
+        [MaxLength(200)]
+        public string? AllocationEvidenceReference { get; set; }
+
+        [MaxLength(1000)]
+        public string? AllocationEvidenceNotes { get; set; }
+
         [MaxLength(1000)]
         public string? Reason { get; set; }
 
@@ -54,6 +73,21 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal CostAtDisposal { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal AcquisitionCostAllocated { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RevaluationAdjustmentAllocated { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ResidualValueAllocated { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal ProductionCapacityAllocated { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal AccumulatedProductionUnitsAllocated { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal AccumulatedDepreciationAtDisposal { get; set; }
@@ -121,6 +155,15 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [Column(TypeName = "decimal(18,2)")]
         public decimal GainOrLoss { get; set; } 
         // Calculated: (SaleProceeds - DisposalCost) - NetBookValueAtDisposal
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RemainingAcquisitionCostAfterDisposal { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RemainingAccumulatedDepreciationAfterDisposal { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal RemainingNetBookValueAfterDisposal { get; set; }
 
         [MaxLength(100)]
         public string? BuyerName { get; set; }

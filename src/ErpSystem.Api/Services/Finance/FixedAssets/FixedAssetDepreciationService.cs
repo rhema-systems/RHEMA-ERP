@@ -153,7 +153,10 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         }
 
         var existingScheduleKeys = await _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed)
+            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed
+                // A disposal-linked partial charge belongs only to the portion that left service;
+                // the retained asset still needs its ordinary depreciation for this period.
+                && (s.AssetDisposalId == null || s.AssetDisposal!.DisposalScope == AssetDisposalScope.WholeAsset))
             .Select(s => new { s.FixedAssetId, s.BookClassification })
             .ToListAsync(cancellationToken);
 

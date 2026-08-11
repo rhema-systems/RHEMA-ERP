@@ -16,7 +16,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from "@/lib/utils";
 import { format } from 'date-fns';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
-import { AssetDisposal, AssetDisposalStatus, RequestAssetDisposalDto, FixedAsset } from '@/types/fixed-assets';
+import { AssetDisposal, AssetDisposalScope, AssetDisposalStatus, RequestAssetDisposalDto, FixedAsset } from '@/types/fixed-assets';
 import { useToast } from "@/components/ui/use-toast";
 
 export default function AssetDisposalsPage() {
@@ -32,6 +32,8 @@ export default function AssetDisposalsPage() {
     // Form state
     const [formData, setFormData] = useState<Partial<RequestAssetDisposalDto>>({
         disposalType: 'Sale',
+        disposalScope: 'WholeAsset',
+        disposedPortionPercent: 100,
         disposalDate: new Date().toISOString().split('T')[0],
         saleProceeds: 0,
         disposalCost: 0
@@ -71,6 +73,23 @@ export default function AssetDisposalsPage() {
             return;
         }
         const selectedAssetForRequest = assets.find(asset => asset.id === formData.fixedAssetId);
+        if (formData.disposalScope !== 'WholeAsset' &&
+            (!formData.disposedPortionPercent || formData.disposedPortionPercent >= 100 || !formData.allocationEvidenceReference?.trim())) {
+            toast({
+                title: "Allocation evidence required",
+                description: "Enter a percentage below 100 and the valuation, engineer, survey, or component-register evidence used for allocation.",
+                variant: "destructive",
+            });
+            return;
+        }
+        if (formData.disposalScope === 'Component' && !formData.componentReference?.trim()) {
+            toast({
+                title: "Component reference required",
+                description: "Identify the component being derecognised.",
+                variant: "destructive",
+            });
+            return;
+        }
         if (selectedAssetForRequest?.depreciationMethod === 'UnitsOfProduction' &&
             (!formData.finalDepreciationProductionUnits || !formData.finalDepreciationEvidenceReference?.trim())) {
             toast({
@@ -91,6 +110,8 @@ export default function AssetDisposalsPage() {
             setIsDialogOpen(false);
             setFormData({
                 disposalType: 'Sale',
+                disposalScope: 'WholeAsset',
+                disposedPortionPercent: 100,
                 disposalDate: new Date().toISOString().split('T')[0],
                 saleProceeds: 0,
                 disposalCost: 0
@@ -200,8 +221,11 @@ export default function AssetDisposalsPage() {
     const estimatedGainLoss = useMemo(() => {
         const proceeds = formData.saleProceeds || 0;
         const cost = formData.disposalCost || 0;
-        return (proceeds - cost) - selectedAssetNBV;
-    }, [formData.saleProceeds, formData.disposalCost, selectedAssetNBV]);
+        const disposalRate = formData.disposalScope === 'WholeAsset'
+            ? 1
+            : (formData.disposedPortionPercent || 0) / 100;
+        return (proceeds - cost) - (selectedAssetNBV * disposalRate);
+    }, [formData.saleProceeds, formData.disposalCost, formData.disposalScope, formData.disposedPortionPercent, selectedAssetNBV]);
 
     if (loading && disposals.length === 0) {
         return (
@@ -216,7 +240,7 @@ export default function AssetDisposalsPage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Asset Disposals</h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Control depreciation through the disposal date, derecognition, gain/loss, proceeds, and direct revaluation-reserve transfer within equity.</p>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">Control whole, partial, and component derecognition while preserving the carrying basis that remains in service.</p>
                 </div>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
@@ -234,6 +258,33 @@ export default function AssetDisposalsPage() {
                         </DialogHeader>
                         <form onSubmit={handleRequestDisposal} className="space-y-4 py-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="disposalScope">Disposal Scope</Label>
+                                    <Select
+                                        value={formData.disposalScope}
+                                        onValueChange={(value: AssetDisposalScope) => setFormData({
+                                            ...formData,
+                                            disposalScope: value,
+                                            disposedPortionPercent: value === 'WholeAsset' ? 100 : Math.min(formData.disposedPortionPercent || 0, 99.9999),
+                                            componentReference: value === 'Component' ? formData.componentReference : undefined,
+                                        })}
+                                    >
+                                        <SelectTrigger id="disposalScope"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="WholeAsset">Whole asset</SelectItem>
+                                            <SelectItem value="PartialPortion">Partial portion</SelectItem>
+                                            <SelectItem value="Component">Identified component</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                {formData.disposalScope !== 'WholeAsset' && (
+                                    <div className="space-y-2">
+                                        <Label htmlFor="disposedPortionPercent">Disposed Portion (%) <span className="text-red-500">*</span></Label>
+                                        <Input id="disposedPortionPercent" type="number" min="0.0001" max="99.9999" step="0.0001"
+                                            value={formData.disposedPortionPercent ?? ''}
+                                            onChange={(event) => setFormData({ ...formData, disposedPortionPercent: Number(event.target.value) })} />
+                                    </div>
+                                )}
                                 <div className="space-y-2">
                                     <Label htmlFor="asset">Asset to Dispose <span className="text-red-500">*</span></Label>
                                     <Popover open={assetComboOpen} onOpenChange={setAssetComboOpen}>
@@ -334,6 +385,44 @@ export default function AssetDisposalsPage() {
                                     />
                                 </div>
                             </div>
+
+                            {formData.disposalScope !== 'WholeAsset' && (
+                                <Card className="border-violet-200 bg-violet-50/70">
+                                    <CardContent className="pt-4 space-y-3">
+                                        <p className="text-sm text-violet-900">
+                                            Finance allocates cost, depreciation, impairment, revaluation reserve, residual value, and NBV by the approved percentage. The unallocated balance remains active.
+                                        </p>
+                                        {formData.disposalScope === 'Component' && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="componentReference">Component Reference <span className="text-red-500">*</span></Label>
+                                                    <Input id="componentReference" placeholder="e.g. HVAC-01 / East Wing Lift"
+                                                        value={formData.componentReference ?? ''}
+                                                        onChange={(event) => setFormData({ ...formData, componentReference: event.target.value })} />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="componentDescription">Component Description</Label>
+                                                    <Input id="componentDescription" placeholder="Physical portion leaving service"
+                                                        value={formData.componentDescription ?? ''}
+                                                        onChange={(event) => setFormData({ ...formData, componentDescription: event.target.value })} />
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div className="space-y-2">
+                                            <Label htmlFor="allocationEvidenceReference">Allocation Evidence <span className="text-red-500">*</span></Label>
+                                            <Input id="allocationEvidenceReference" placeholder="Valuation / engineer report / component register reference"
+                                                value={formData.allocationEvidenceReference ?? ''}
+                                                onChange={(event) => setFormData({ ...formData, allocationEvidenceReference: event.target.value })} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="allocationEvidenceNotes">Allocation Notes</Label>
+                                            <Textarea id="allocationEvidenceNotes" rows={2} placeholder="Explain how the percentage was established"
+                                                value={formData.allocationEvidenceNotes ?? ''}
+                                                onChange={(event) => setFormData({ ...formData, allocationEvidenceNotes: event.target.value })} />
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
 
                             {selectedAsset?.depreciationMethod === 'UnitsOfProduction' ? (
                                 <Card className="border-blue-200 bg-blue-50/70">
@@ -458,6 +547,7 @@ export default function AssetDisposalsPage() {
                                 <TableHead className="w-[120px] font-semibold">Date</TableHead>
                                 <TableHead className="font-semibold">Asset</TableHead>
                                 <TableHead className="font-semibold">Method</TableHead>
+                                <TableHead className="font-semibold">Scope</TableHead>
                                 <TableHead className="font-semibold text-right">NBV</TableHead>
                                 <TableHead className="font-semibold text-right">Final Depreciation</TableHead>
                                 <TableHead className="font-semibold text-right">Proceeds</TableHead>
@@ -470,7 +560,7 @@ export default function AssetDisposalsPage() {
                         <TableBody>
                             {filteredDisposals.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={11} className="h-48 text-center text-slate-400">
+                                    <TableCell colSpan={12} className="h-48 text-center text-slate-400">
                                         <div className="flex flex-col items-center justify-center">
                                             <Trash2 className="h-10 w-10 mb-2 opacity-20" />
                                             <p>No asset disposals found matching your search.</p>
@@ -490,6 +580,12 @@ export default function AssetDisposalsPage() {
                                         </TableCell>
                                         <TableCell>
                                             <Badge variant="secondary" className="font-normal capitalize">{disposal.disposalType.toLowerCase()}</Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-medium">{disposal.disposalScope === 'WholeAsset' ? 'Whole asset' : `${disposal.disposedPortionPercent}%`}</span>
+                                                {disposal.componentReference && <span className="text-xs text-violet-700">{disposal.componentReference}</span>}
+                                            </div>
                                         </TableCell>
                                         <TableCell className="text-right text-sm">₵ {disposal.netBookValueAtDisposal.toLocaleString()}</TableCell>
                                         <TableCell className="text-right text-sm">
