@@ -43,6 +43,18 @@ vi.mock('@tanstack/react-query', () => ({
         isFavorite: false,
         tags: ['opening-register'],
       },
+      {
+        id: '44444444-4444-4444-4444-444444444444',
+        name: 'BoQ Summary',
+        description: 'Published report',
+        type: 'quantity-survey',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-11T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['boq-summary'],
+      },
     ] : [],
     isLoading: false,
     isError: false,
@@ -87,7 +99,19 @@ vi.mock('@/services/finance/finance-data.service', () => ({
   financeDataService: { getFiscalPeriods: vi.fn().mockResolvedValue([]) },
 }));
 
-function renderCatalogue(reportCode?: string, mode: 'procurement' | 'inventory' | 'compliance' = 'procurement') {
+vi.mock('@/services/projectService', () => ({
+  projectService: {
+    getProjects: vi.fn().mockResolvedValue({
+      items: [{ id: '55555555-5555-5555-5555-555555555555', projectCode: 'PRJ-001', title: 'Works project' }],
+      totalCount: 1,
+      page: 1,
+      pageSize: 500,
+      totalPages: 1,
+    }),
+  },
+}));
+
+function renderCatalogue(reportCode?: string, mode: 'procurement' | 'inventory' | 'compliance' | 'quantity-survey' = 'procurement') {
   return render(<StatutoryReportCataloguePage mode={mode} reportCode={reportCode} />);
 }
 
@@ -150,6 +174,23 @@ describe('StatutoryReportCataloguePage navigation', () => {
     expect(screen.getByRole('link', { name: /Opening Register/ })).toHaveAttribute(
       'href',
       '/reports/audit-compliance/opening-register',
+    );
+  });
+
+  it('uses the shared report shell and a controlled project selector for Quantity Survey reports', async () => {
+    renderCatalogue('boq-summary', 'quantity-survey');
+
+    expect(await screen.findByRole('heading', { name: 'BoQ Summary' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run report' })).toBeDisabled();
+    expect(screen.getByLabelText('Start date')).toBeInTheDocument();
+    expect(screen.getByLabelText('End date')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Status / classification')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open quantity survey report navigator' }));
+    const navigator = await screen.findByRole('complementary', { name: 'Quantity Survey report navigator' });
+    expect(within(navigator).getByRole('link', { name: 'All quantity survey reports' })).toHaveAttribute(
+      'href',
+      '/reports/quantity-survey',
     );
   });
 });

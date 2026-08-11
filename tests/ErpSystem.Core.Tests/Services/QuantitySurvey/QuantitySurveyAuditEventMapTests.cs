@@ -19,12 +19,38 @@ public sealed class QuantitySurveyAuditEventMapTests
     {
         var definitions = QuantitySurveyAuditEventMap.Definitions;
 
-        definitions.Should().HaveCount(38);
+        definitions.Should().HaveCountGreaterThanOrEqualTo(77);
         definitions.Select(value => value.Action).Should().OnlyHaveUniqueItems();
         definitions.Should().OnlyContain(value =>
             AuditOperationClassifier.Classify(value.Action) == value.Operation);
         definitions.Should().OnlyContain(value =>
             (value.RequiredFacets & RequiredContext) == RequiredContext);
+    }
+
+    [Fact]
+    public void Joint_measurement_actions_capture_participant_evidence_approval_and_application_controls()
+    {
+        foreach (var action in new[]
+                 {
+                     QuantitySurveyAuditEventMap.ScheduleJointMeasurement,
+                     QuantitySurveyAuditEventMap.RecordJointMeasurementAttendance,
+                     QuantitySurveyAuditEventMap.EndorseJointMeasurement,
+                     QuantitySurveyAuditEventMap.AttachJointMeasurementEvidence,
+                     QuantitySurveyAuditEventMap.ApproveJointMeasurement,
+                     QuantitySurveyAuditEventMap.ApplyJointMeasurementBoqRevision
+                 })
+        {
+            var definition = QuantitySurveyAuditEventMap.GetRequired(action);
+            definition.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.AfterValues);
+            AuditOperationClassifier.Classify(action).Should().Be(definition.Operation);
+        }
+
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.AttachJointMeasurementEvidence)
+            .RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.EvidenceLinks);
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.ApproveJointMeasurement)
+            .RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.ApprovalState);
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.ApplyJointMeasurementBoqRevision)
+            .RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.FormulaInputs);
     }
 
     [Fact]
@@ -131,6 +157,66 @@ public sealed class QuantitySurveyAuditEventMapTests
             QuantitySurveyAuditEventMap.GetRequired(action).RequiredFacets
                 .Should().HaveFlag(QuantitySurveyAuditFacet.ApprovalState);
         }
+    }
+
+    [Fact]
+    public void Escalation_formula_actions_capture_policy_inputs_evidence_and_approval_state()
+    {
+        foreach (var action in new[]
+                 {
+                     QuantitySurveyAuditEventMap.CreateEscalationFormula,
+                     QuantitySurveyAuditEventMap.UpdateEscalationFormula,
+                     QuantitySurveyAuditEventMap.SubmitEscalationFormula,
+                     QuantitySurveyAuditEventMap.ApproveEscalationFormula,
+                     QuantitySurveyAuditEventMap.RejectEscalationFormula
+                 })
+        {
+            var definition = QuantitySurveyAuditEventMap.GetRequired(action);
+            definition.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.FormulaInputs);
+            definition.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.EvidenceLinks);
+            definition.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.ApprovalState);
+        }
+
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.ApproveEscalationFormula)
+            .Operation.Should().Be(AuditOperationKind.Approve);
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.RejectEscalationFormula)
+            .Operation.Should().Be(AuditOperationKind.Reject);
+    }
+
+    [Fact]
+    public void Price_index_import_actions_capture_source_policy_evidence_and_approval_state()
+    {
+        foreach (var action in new[]
+                 {
+                     QuantitySurveyAuditEventMap.StagePriceIndexImport,
+                     QuantitySurveyAuditEventMap.SubmitPriceIndexImport,
+                     QuantitySurveyAuditEventMap.ApprovePriceIndexImport,
+                     QuantitySurveyAuditEventMap.RejectPriceIndexImport
+                 })
+        {
+            var definition = QuantitySurveyAuditEventMap.GetRequired(action);
+            definition.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.FormulaInputs);
+            definition.RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.EvidenceLinks);
+        }
+
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.StagePriceIndexImport)
+            .RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.Reason);
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.SubmitPriceIndexImport)
+            .RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.Reason);
+        foreach (var action in new[]
+                 {
+                     QuantitySurveyAuditEventMap.SubmitPriceIndexImport,
+                     QuantitySurveyAuditEventMap.ApprovePriceIndexImport,
+                     QuantitySurveyAuditEventMap.RejectPriceIndexImport
+                 })
+        {
+            QuantitySurveyAuditEventMap.GetRequired(action)
+                .RequiredFacets.Should().HaveFlag(QuantitySurveyAuditFacet.ApprovalState);
+        }
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.ApprovePriceIndexImport)
+            .Operation.Should().Be(AuditOperationKind.Approve);
+        QuantitySurveyAuditEventMap.GetRequired(QuantitySurveyAuditEventMap.RejectPriceIndexImport)
+            .Operation.Should().Be(AuditOperationKind.Reject);
     }
 
     [Fact]

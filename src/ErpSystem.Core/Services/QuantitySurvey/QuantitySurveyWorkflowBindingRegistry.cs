@@ -26,6 +26,7 @@ public static class QuantitySurveyWorkflowBindingRegistry
     public const string MaterialDeduction = "QS_MATERIAL_DEDUCTION";
     public const string Variation = "QS_VARIATION";
     public const string Claim = "QS_CLAIM";
+    public const string Subcontract = "QS_SUBCONTRACT";
     public const string FinalAccount = "QS_FINAL_ACCOUNT";
 
     public static IReadOnlyList<QuantitySurveyWorkflowEntityTypeDefinition> EntityTypes { get; } =
@@ -40,6 +41,7 @@ public static class QuantitySurveyWorkflowBindingRegistry
         new(MaterialDeduction, "QS Material Deduction", "Quantity Survey material valuation and deduction approval lifecycle."),
         new(Variation, "QS Variation", "Quantity Survey variation and change-order approval lifecycle."),
         new(Claim, "QS Claim", "Quantity Survey contractor and subcontractor claim approval lifecycle."),
+        new(Subcontract, "QS Subcontract", "Quantity Survey subcontract approval lifecycle."),
         new(FinalAccount, "QS Final Account", "Quantity Survey final-account approval lifecycle.")
     ];
 
@@ -55,6 +57,7 @@ public static class QuantitySurveyWorkflowBindingRegistry
         new("QS-DEC-010", "approvalWorkflowDefinitionId", MaterialDeduction, "Material deduction"),
         new("QS-DEC-011", "variationWorkflowDefinitionId", Variation, "Variation"),
         new("QS-DEC-011", "claimWorkflowDefinitionId", Claim, "Claim"),
+        new("QS-DEC-012", "subcontractWorkflowDefinitionId", Subcontract, "Subcontract"),
         new("QS-DEC-012", "finalAccountWorkflowDefinitionId", FinalAccount, "Final account")
     ];
 

@@ -414,6 +414,12 @@ export default function SupplierApplicantPortalPage() {
           </Alert>
         )}
 
+        <div className="flex justify-end">
+          <Button disabled={busy || !portal?.canSubmit} onClick={submit}>
+            Submit for review
+          </Button>
+        </div>
+
         <Tabs defaultValue="payment">
           <TabsList className="grid w-full grid-cols-4 md:w-[620px]">
             <TabsTrigger value="payment">Payment</TabsTrigger>

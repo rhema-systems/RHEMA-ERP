@@ -15,6 +15,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
@@ -6991,6 +6992,10 @@ public partial class ProjectService : IProjectService
                 _ = await _unitOfWork.Repository<ProjectDocument>().FirstOrDefaultAsync(x => x.Id == dto.ArtifactId && x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId)
                     ?? throw new InvalidOperationException($"Project document with ID {dto.ArtifactId} not found");
                 return;
+            case "JointMeasurement":
+                _ = await _unitOfWork.Repository<QuantitySurveyJointMeasurementRequest>().FirstOrDefaultAsync(x => x.Id == dto.ArtifactId && x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId)
+                    ?? throw new InvalidOperationException($"Joint measurement request with ID {dto.ArtifactId} not found");
+                return;
             default:
                 throw new InvalidOperationException($"External access policy artifact type '{dto.ArtifactType}' is not supported.");
         }
@@ -7006,6 +7011,7 @@ public partial class ProjectService : IProjectService
                 "WorkItem" => "WorkItem",
                 "Deliverable" => "Deliverable",
                 "Document" => "Document",
+                "JointMeasurement" => "JointMeasurement",
                 _ => artifactType.Trim()
             };
 
@@ -8124,6 +8130,7 @@ public partial class ProjectService : IProjectService
             "WorkItem" => (await _unitOfWork.Repository<ProjectWorkItem>().FirstOrDefaultAsync(x => x.Id == artifactId.Value && x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId))?.Title,
             "Deliverable" => (await _unitOfWork.Repository<ProjectDeliverable>().FirstOrDefaultAsync(x => x.Id == artifactId.Value && x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId))?.Title,
             "Document" => (await _unitOfWork.Repository<ProjectDocument>().FirstOrDefaultAsync(x => x.Id == artifactId.Value && x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId))?.DocumentName,
+            "JointMeasurement" => (await _unitOfWork.Repository<QuantitySurveyJointMeasurementRequest>().FirstOrDefaultAsync(x => x.Id == artifactId.Value && x.ProjectId == project.Id && x.TenantId == _currentUserProvider.TenantId))?.Title,
             _ => artifactId.Value.ToString()
         };
     }

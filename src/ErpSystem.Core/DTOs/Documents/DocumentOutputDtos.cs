@@ -107,4 +107,11 @@ public static class DocumentTypes
     public const string FinanceClosePack = "Finance.ClosePack";
     public const string InventoryStoreIssueVoucher = "Inventory.StoreIssueVoucher";
     public const string InventoryStoreReturnVoucher = "Inventory.StoreReturnVoucher";
+    /// <summary>
+    /// Resolved QS escalation dispute pack containing the approved calculation inputs/version,
+    /// response, review notes, central-DMS evidence inventory, outcome, and immutable history.
+    /// </summary>
+    public const string QuantitySurveyEscalationDisputeAuditPack = "QuantitySurvey.EscalationDisputeAuditPack";
+    /// <summary>Governed payment certificate rendered from the Projects-owned certificate and frozen QS valuation lineage.</summary>
+    public const string QuantitySurveyPaymentCertificate = "QuantitySurvey.PaymentCertificate";
 }

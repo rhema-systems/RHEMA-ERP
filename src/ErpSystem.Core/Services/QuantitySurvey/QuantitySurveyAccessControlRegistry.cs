@@ -27,6 +27,7 @@ public static class QuantitySurveyAccessControlRegistry
     public const string FinalAccountsManage = "quantity-survey.final-accounts.manage";
     public const string TransactionsApprove = "quantity-survey.transactions.approve";
     public const string ReportsRead = "quantity-survey.reports.read";
+    public const string ReportsExport = "quantity-survey.reports.export";
     public const string ExternalAccessManage = "quantity-survey.external-access.manage";
 
     public static IReadOnlyList<QuantitySurveyPermissionDefinition> Permissions { get; } =
@@ -47,13 +48,14 @@ public static class QuantitySurveyAccessControlRegistry
         new(FinalAccountsManage, "Manage QS final accounts", "Prepare and reconcile project and subcontract final accounts."),
         new(TransactionsApprove, "Approve QS transactions", "Approve governed QS records within configured authority and assigned project scope."),
         new(ReportsRead, "Read QS reports", "View QS reports and drilldowns within assigned project, contract, section, and unit scope."),
+        new(ReportsExport, "Export QS reports", "Export QS reports only within assigned project, contract, section, and unit scope."),
         new(ExternalAccessManage, "Manage QS external access", "Manage contractor and consultant access through the shared project external-access controls.")
     ];
 
     public static IReadOnlyList<QuantitySurveyRoleDefinition> Roles { get; } =
     [
-        new("TDC_QUANTITY_SURVEYOR", "TDC Quantity Surveyor", "Prepares governed QS records within assigned projects and configured operational authority.", [Read, Manage, AuditRead, WorkspaceRead, BoqManage, RatesManage, EstimatesManage, MeasurementsManage, ValuationsManage, CertificatesManage, VariationsManage, ClaimsManage, FinalAccountsManage, ReportsRead]),
-        new("TDC_SUPERVISING_QUANTITY_SURVEYOR", "TDC Supervising Quantity Surveyor", "Reviews and approves governed QS records within assigned projects and configured delegated authority.", [Read, Manage, Approve, AuditRead, WorkspaceRead, BoqManage, RatesManage, EstimatesManage, MeasurementsManage, ValuationsManage, CertificatesManage, VariationsManage, ClaimsManage, FinalAccountsManage, TransactionsApprove, ReportsRead, ExternalAccessManage]),
+        new("TDC_QUANTITY_SURVEYOR", "TDC Quantity Surveyor", "Prepares governed QS records within assigned projects and configured operational authority.", [Read, Manage, AuditRead, WorkspaceRead, BoqManage, RatesManage, EstimatesManage, MeasurementsManage, ValuationsManage, CertificatesManage, VariationsManage, ClaimsManage, FinalAccountsManage, ReportsRead, ReportsExport]),
+        new("TDC_SUPERVISING_QUANTITY_SURVEYOR", "TDC Supervising Quantity Surveyor", "Reviews and approves governed QS records within assigned projects and configured delegated authority.", [Read, Manage, Approve, AuditRead, WorkspaceRead, BoqManage, RatesManage, EstimatesManage, MeasurementsManage, ValuationsManage, CertificatesManage, VariationsManage, ClaimsManage, FinalAccountsManage, TransactionsApprove, ReportsRead, ReportsExport, ExternalAccessManage]),
         new("TDC_ASSISTANT_QUANTITY_SURVEYOR", "TDC Assistant Quantity Surveyor", "Supports controlled QS preparation and evidence collection within assigned projects.", [Read, WorkspaceRead, BoqManage, RatesManage, EstimatesManage, MeasurementsManage, ValuationsManage, VariationsManage, ClaimsManage, ReportsRead])
     ];
 

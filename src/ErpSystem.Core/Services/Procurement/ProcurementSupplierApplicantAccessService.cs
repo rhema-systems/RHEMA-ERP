@@ -34,6 +34,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
     private readonly IUnitOfWork _unitOfWork;
     private readonly IProcurementSupplierOnboardingTokenService _tokenService;
     private readonly IBusinessPartnerRegistrationService _registrationService;
+    private readonly IProcurementSupplierApplicantContactCorrectionStore
+        _contactCorrectionStore;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementAccessControlService _accessControl;
     private readonly ICurrentUserProvider _currentUser;
@@ -48,6 +50,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         IUnitOfWork unitOfWork,
         IProcurementSupplierOnboardingTokenService tokenService,
         IBusinessPartnerRegistrationService registrationService,
+        IProcurementSupplierApplicantContactCorrectionStore contactCorrectionStore,
         IProcurementControlEventService controlEvents,
         IProcurementAccessControlService accessControl,
         ICurrentUserProvider currentUser,
@@ -61,6 +64,7 @@ public sealed class ProcurementSupplierApplicantAccessService :
         _unitOfWork = unitOfWork;
         _tokenService = tokenService;
         _registrationService = registrationService;
+        _contactCorrectionStore = contactCorrectionStore;
         _controlEvents = controlEvents;
         _accessControl = accessControl;
         _currentUser = currentUser;
@@ -1761,7 +1765,20 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     await BusinessPartners.UpdateAsync(businessPartner);
                 }
 
+                if (!_contactCorrectionStore.HasRequiredTransaction)
+                    throw new InvalidOperationException(
+                        "Verified supplier-contact correction requires an active database transaction.");
+
+                await _contactCorrectionStore
+                    .SetVerifiedContactCorrectionContextAsync(
+                        access.Id,
+                        actorUserId,
+                        access.VerifiedContactHashSha256,
+                        cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _contactCorrectionStore
+                    .ClearVerifiedContactCorrectionContextAsync(
+                        CancellationToken.None);
                 await RecordUserEventAsync(
                     access,
                     access.Token,
@@ -1783,7 +1800,39 @@ public sealed class ProcurementSupplierApplicantAccessService :
             catch
             {
                 if (_unitOfWork.HasActiveTransaction)
-                    await _unitOfWork.RollbackAsync(cancellationToken);
+                {
+                    try
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        // Preserve the original persistence exception for the
+                        // central ProblemDetails/error-log pipeline. A trigger
+                        // may already have aborted the SQL transaction.
+                        _logger.LogCritical(
+                            rollbackException,
+                            "Could not explicitly roll back supplier contact correction for registration {RegistrationId}",
+                            registrationId);
+                    }
+                }
+                try
+                {
+                    // SQL Server aborts a transaction when the protection
+                    // trigger rejects an update. Clear the connection-scoped
+                    // capability only after rollback so a failed save cannot
+                    // leave it on the scoped connection.
+                    await _contactCorrectionStore
+                        .ClearVerifiedContactCorrectionContextAsync(
+                            CancellationToken.None);
+                }
+                catch (Exception cleanupException)
+                {
+                    _logger.LogCritical(
+                        cleanupException,
+                        "Could not clear the supplier contact-correction database context for registration {RegistrationId}",
+                        registrationId);
+                }
                 _unitOfWork.ClearTrackedChanges();
                 throw;
             }

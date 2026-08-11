@@ -113,6 +113,43 @@ public sealed class ProcurementWorksCloseoutRulesTests
     }
 
     [Theory]
+    [InlineData(ProcurementRetentionReleaseStage.PracticalCompletion, 20, 100)]
+    [InlineData(ProcurementRetentionReleaseStage.SectionalTakeover, 10, 50)]
+    [InlineData(ProcurementRetentionReleaseStage.DefectsLiability, 30, 150)]
+    [InlineData(ProcurementRetentionReleaseStage.FinalRelease, 100, 400)]
+    public void RetentionStageLimitUsesPolicyCapAndOutstandingBalance(
+        ProcurementRetentionReleaseStage stage,
+        decimal stagePercent,
+        decimal expected)
+    {
+        var result = ProcurementWorksCloseoutRules.RetentionStageLimit(
+            retentionHeld: 500m,
+            retentionReleased: 100m,
+            releasedForStage: 0m,
+            stage,
+            practicalCompletionPercent: stage == ProcurementRetentionReleaseStage.PracticalCompletion ? stagePercent : 0m,
+            sectionalTakeoverPercent: stage == ProcurementRetentionReleaseStage.SectionalTakeover ? stagePercent : 0m,
+            defectsReleasePercent: stage == ProcurementRetentionReleaseStage.DefectsLiability ? stagePercent : 0m);
+
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void RetentionStageLimitDeductsPriorStageReleaseAndNeverExceedsOutstanding()
+    {
+        ProcurementWorksCloseoutRules.RetentionStageLimit(
+                1_000m, 850m, 80m,
+                ProcurementRetentionReleaseStage.PracticalCompletion,
+                25m, 0m, 0m)
+            .Should().Be(150m);
+        ProcurementWorksCloseoutRules.RetentionStageLimit(
+                1_000m, 0m, 300m,
+                ProcurementRetentionReleaseStage.PracticalCompletion,
+                25m, 0m, 0m)
+            .Should().Be(0m);
+    }
+
+    [Theory]
     [InlineData(ProcurementWorksCloseoutActionStatus.PendingApproval, true)]
     [InlineData(ProcurementWorksCloseoutActionStatus.RevalidationFailed, true)]
     [InlineData(ProcurementWorksCloseoutActionStatus.Approved, false)]

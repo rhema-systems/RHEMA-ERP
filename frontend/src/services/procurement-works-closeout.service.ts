@@ -12,18 +12,17 @@ export type WorksCloseoutActionType =
   | 'Closeout';
 
 export type WorksCloseoutActionStatus =
-  | 'PendingApproval'
-  | 'Approved'
-  | 'Rejected'
-  | 'RevalidationFailed'
+  'PendingApproval' | 'Approved' | 'Rejected' | 'RevalidationFailed' | number;
+
+export type RetentionReleaseStage =
+  | 'PracticalCompletion'
+  | 'SectionalTakeover'
+  | 'DefectsLiability'
+  | 'FinalRelease'
   | number;
 
 export type WorksCloseoutCheckStatus =
-  | 'Passed'
-  | 'Failed'
-  | 'NotRequired'
-  | 'Pending'
-  | number;
+  'Passed' | 'Failed' | 'NotRequired' | 'Pending' | number;
 
 export interface WorksCloseoutCheck {
   key: string;
@@ -67,6 +66,16 @@ export interface WorksCloseoutAction {
   projectFinalAccountId?: string;
   projectPaymentCertificateId?: string;
   performanceBondRequestId?: string;
+  retentionReleaseStage?: RetentionReleaseStage;
+  quantitySurveyConfigurationProfileId?: string;
+  quantitySurveyConfigurationProfileVersion?: number;
+  quantitySurveyRetentionDecisionId?: string;
+  quantitySurveyRetentionPolicyHash?: string;
+  retentionHeldSnapshot?: number;
+  retentionReleasedBefore?: number;
+  retentionStageLimitAmount?: number;
+  retentionReleasedAfter?: number;
+  usesRetentionBond: boolean;
   effectiveAtUtc?: string;
   defectsLiabilityEndsAtUtc?: string;
   amount?: number;
@@ -106,6 +115,7 @@ export interface WorksCloseoutProjectSummary {
 
 export interface WorksHandoverSource {
   id: string;
+  projectUnitId?: string;
   handoverType: string;
   title: string;
   status: string;
@@ -148,8 +158,39 @@ export interface WorksCloseoutOverview {
   defects: WorksDefectSource[];
   paymentCertificates: WorksCertificateSource[];
   performanceSecurity?: { id: string; status: string };
+  retentionPolicy?: RetentionPolicy;
+  retentionLedger: RetentionLedgerEntry[];
   checks: WorksCloseoutCheck[];
   history: WorksCloseoutAction[];
+}
+
+export interface RetentionPolicy {
+  profileId: string;
+  profileVersion: number;
+  decisionId: string;
+  maximumRetentionPercent: number;
+  practicalCompletionReleasePercent: number;
+  sectionalTakeoverReleasePercent: number;
+  defectsReleasePercent: number;
+  defectsLiabilityDays: number;
+  approvalWorkflowDefinitionId: string;
+  allowRetentionBond: boolean;
+  policyHash: string;
+}
+
+export interface RetentionLedgerEntry {
+  sourceType: string;
+  sourceId: string;
+  sourceReference: string;
+  effectiveAtUtc: string;
+  releaseStage?: RetentionReleaseStage;
+  heldAmount: number;
+  releasedAmount: number;
+  runningHeldAmount: number;
+  runningReleasedAmount: number;
+  outstandingAmount: number;
+  currency: string;
+  status: string;
 }
 
 export interface SubmitWorksCloseoutAction {
@@ -159,6 +200,8 @@ export interface SubmitWorksCloseoutAction {
   projectFinalAccountId?: string;
   projectPaymentCertificateId?: string;
   performanceBondRequestId?: string;
+  retentionReleaseStage?: RetentionReleaseStage;
+  usesRetentionBond?: boolean;
   effectiveAtUtc?: string;
   amount?: number;
   currency?: string;
@@ -176,21 +219,27 @@ export interface SubmitWorksCloseoutAction {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 function headers(): Record<string, string> {
-  const token = typeof window !== 'undefined'
-    ? (localStorage.getItem('token') || localStorage.getItem('authToken'))
-    : null;
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('token') || localStorage.getItem('authToken')
+      : null;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 
-async function responseError(response: Response, fallback: string): Promise<Error> {
+async function responseError(
+  response: Response,
+  fallback: string
+): Promise<Error> {
   const text = await response.text();
   if (!text) return new Error(fallback);
   try {
     const payload = JSON.parse(text);
-    return new Error(payload?.detail || payload?.message || payload?.title || fallback);
+    return new Error(
+      payload?.detail || payload?.message || payload?.title || fallback
+    );
   } catch {
     return new Error(text || fallback);
   }
@@ -202,7 +251,11 @@ export const procurementWorksCloseoutService = {
       `${API_BASE_URL}/procurement/works-closeout/contracts/${contractId}`,
       { headers: headers(), cache: 'no-store' }
     );
-    if (!response.ok) throw await responseError(response, 'Failed to load Works closeout controls');
+    if (!response.ok)
+      throw await responseError(
+        response,
+        'Failed to load Works closeout controls'
+      );
     return response.json();
   },
 
@@ -218,7 +271,11 @@ export const procurementWorksCloseoutService = {
         body: JSON.stringify(request),
       }
     );
-    if (!response.ok) throw await responseError(response, 'Failed to submit Works closeout action');
+    if (!response.ok)
+      throw await responseError(
+        response,
+        'Failed to submit Works closeout action'
+      );
     return response.json();
   },
 
@@ -236,7 +293,11 @@ export const procurementWorksCloseoutService = {
         body: JSON.stringify({ approved, comment, rowVersion }),
       }
     );
-    if (!response.ok) throw await responseError(response, 'Failed to decide Works closeout action');
+    if (!response.ok)
+      throw await responseError(
+        response,
+        'Failed to decide Works closeout action'
+      );
     return response.json();
   },
 };

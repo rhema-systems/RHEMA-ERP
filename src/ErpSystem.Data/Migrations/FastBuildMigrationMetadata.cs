@@ -174,3 +174,15 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806091039_TDC0808ProcurementCentralDmsAdoption")] partial class TDC0808ProcurementCentralDmsAdoption { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260808143557_AddQuantitySurveyTenderBoqSubmissions")] partial class AddQuantitySurveyTenderBoqSubmissions { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260808155330_AddQuantitySurveyRateLibrary")] partial class AddQuantitySurveyRateLibrary { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260809152905_AddQuantitySurveyEscalationFormulaRegister")] partial class AddQuantitySurveyEscalationFormulaRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810103259_AddQuantitySurveyDesignRevisionImpacts")] partial class AddQuantitySurveyDesignRevisionImpacts { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810121810_AddQuantitySurveyValuationWorksheets")] partial class AddQuantitySurveyValuationWorksheets { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810134646_AddQuantitySurveyInterimValuationWorkflow")] partial class AddQuantitySurveyInterimValuationWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810154236_AddQuantitySurveyPaymentCertificateLifecycle")] partial class AddQuantitySurveyPaymentCertificateLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810165005_AddQuantitySurveyRetentionReleaseLifecycle")] partial class AddQuantitySurveyRetentionReleaseLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle")] partial class AddQuantitySurveyAdvanceRecoveryLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810202208_AddQuantitySurveyFinalAccountLifecycle")] partial class AddQuantitySurveyFinalAccountLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle")] partial class AddQuantitySurveyMaterialReconciliationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810234912_AddQuantitySurveyVariationLifecycle")] partial class AddQuantitySurveyVariationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260811010013_AddQuantitySurveyContractClaimLifecycle")] partial class AddQuantitySurveyContractClaimLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260811013838_AddQuantitySurveyDayworkLifecycle")] partial class AddQuantitySurveyDayworkLifecycle { }

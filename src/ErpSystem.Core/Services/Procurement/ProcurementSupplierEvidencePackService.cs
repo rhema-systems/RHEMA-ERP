@@ -626,7 +626,7 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
             {
                 await Bindings.AddAsync(binding);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
+                var controlEvent = new ProcurementControlEventWriteRequest
                 {
                     EventKey = ProcurementControlEventKey.Create(
                         "supplier-registration-pack", registration.TenantId, registration.Id,
@@ -652,7 +652,19 @@ public sealed class ProcurementSupplierEvidencePackService : IProcurementSupplie
                     CorrelationId = correlation,
                     CausationId = correlation,
                     OccurredAtUtc = now
-                }, cancellationToken);
+                };
+                if (_currentUser.IsExternalUser)
+                {
+                    await _controlEvents.RecordSystemAsync(
+                        registration.TenantId,
+                        ActorName,
+                        controlEvent,
+                        cancellationToken);
+                }
+                else
+                {
+                    await _controlEvents.RecordAsync(controlEvent, cancellationToken);
+                }
             }
         }, cancellationToken);
         return await GetRegistrationReadinessAsync(registrationId, cancellationToken);

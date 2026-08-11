@@ -293,6 +293,47 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
+        public async Task<List<PostedSupplierAdvanceDto>> GetPostedSupplierAdvancesAsync(
+            Guid supplierOrBusinessPartnerId,
+            CancellationToken cancellationToken = default)
+        {
+            if (supplierOrBusinessPartnerId == Guid.Empty)
+                return new List<PostedSupplierAdvanceDto>();
+
+            var supplierId = await ResolveSupplierIdForQueryAsync(supplierOrBusinessPartnerId, cancellationToken);
+            if (!supplierId.HasValue)
+                return new List<PostedSupplierAdvanceDto>();
+
+            return await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(payment =>
+                    payment.TenantId == TenantId &&
+                    !payment.IsDeleted &&
+                    payment.SupplierId == supplierId.Value &&
+                    payment.IsSupplierAdvance &&
+                    payment.JournalEntryId.HasValue &&
+                    payment.TotalAmount > payment.AllocatedAmount &&
+                    payment.Status != VendorPaymentStatus.Voided &&
+                    payment.Status != VendorPaymentStatus.Failed &&
+                    payment.Status != VendorPaymentStatus.Reversed)
+                .AsNoTracking()
+                .OrderByDescending(payment => payment.PaymentDate)
+                .Select(payment => new PostedSupplierAdvanceDto
+                {
+                    Id = payment.Id,
+                    PaymentNumber = payment.PaymentNumber,
+                    SupplierId = payment.SupplierId,
+                    SupplierName = payment.Supplier.Name,
+                    PaymentDate = payment.PaymentDate,
+                    TotalAmount = payment.TotalAmount,
+                    AllocatedAmount = payment.AllocatedAmount,
+                    AvailableAmount = payment.TotalAmount - payment.AllocatedAmount,
+                    CurrencyCode = payment.CurrencyCode,
+                    Status = payment.Status,
+                    JournalEntryId = payment.JournalEntryId!.Value
+                })
+                .ToListAsync(cancellationToken);
+        }
+
         // ═════════════════════════════════════════════════════════════════
         //  CREATE PAYMENT
         // ═════════════════════════════════════════════════════════════════

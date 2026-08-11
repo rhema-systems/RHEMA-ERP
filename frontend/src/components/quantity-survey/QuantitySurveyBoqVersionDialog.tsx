@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   CheckCircle2,
   Eye,
@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Plus,
   RotateCcw,
+  Ruler,
   Send,
   XCircle,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +56,7 @@ import {
   type ProjectBoqVersionDetailDto,
   type ProjectBoqVersionSummaryDto,
   type ProjectBoqVersionWorkspaceDto,
+  type ProjectBoqRemeasurementWorkspaceDto,
   type QuantitySurveyBoqVersionType,
 } from '@/services/projectService';
 
@@ -129,6 +132,16 @@ export function QuantitySurveyBoqVersionActions({
     useState<ProjectBoqVersionSummaryDto | null>(null);
   const [workflowText, setWorkflowText] = useState('');
   const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [remeasurementOpen, setRemeasurementOpen] = useState(false);
+  const [remeasurementLoading, setRemeasurementLoading] = useState(false);
+  const [remeasurementSaving, setRemeasurementSaving] = useState(false);
+  const [remeasurementWorkspace, setRemeasurementWorkspace] =
+    useState<ProjectBoqRemeasurementWorkspaceDto | null>(null);
+  const [remeasurementSelection, setRemeasurementSelection] = useState<
+    string[]
+  >([]);
+  const [remeasurementSummary, setRemeasurementSummary] = useState('');
+  const remeasurementRequestIds = useRef(new Map<string, string>());
 
   const loadWorkspace = async () => {
     setLoading(true);
@@ -170,6 +183,69 @@ export function QuantitySurveyBoqVersionActions({
     setSourceVersionId(workspace.currentPublishedVersionId || 'none');
     setChangeSummary('');
     setCreateOpen(true);
+  };
+
+  const openRemeasurement = async () => {
+    setRemeasurementOpen(true);
+    setRemeasurementLoading(true);
+    setRemeasurementSelection([]);
+    setRemeasurementSummary('');
+    try {
+      setRemeasurementWorkspace(
+        await projectService.getProjectBoqRemeasurementWorkspace(projectId)
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to load the remeasurement workspace.'
+      );
+      setRemeasurementWorkspace(null);
+    } finally {
+      setRemeasurementLoading(false);
+    }
+  };
+
+  const toggleRemeasurementSheet = (id: string, checked: boolean) =>
+    setRemeasurementSelection((current) =>
+      checked
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : current.filter((value) => value !== id)
+    );
+
+  const createRemeasurement = async () => {
+    if (!remeasurementWorkspace) return;
+    const summary = remeasurementSummary.trim();
+    if (remeasurementSelection.length === 0 || summary.length < 5) return;
+    const selected = [...remeasurementSelection].sort();
+    const fingerprint = JSON.stringify({ selected, summary });
+    const clientRequestId =
+      remeasurementRequestIds.current.get(fingerprint) || crypto.randomUUID();
+    remeasurementRequestIds.current.set(fingerprint, clientRequestId);
+    setRemeasurementSaving(true);
+    try {
+      await projectService.createProjectBoqRemeasurement(projectId, {
+        clientRequestId,
+        measurementSheetIds: selected,
+        changeSummary: summary,
+      });
+      remeasurementRequestIds.current.delete(fingerprint);
+      setRemeasurementOpen(false);
+      await loadWorkspace();
+      toast.success(
+        'Remeasurement revision created. Submit it through the existing BoQ approval workflow.'
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to create the governed remeasurement revision.'
+      );
+    } finally {
+      setRemeasurementSaving(false);
+    }
   };
 
   const createSnapshot = async () => {
@@ -377,18 +453,31 @@ export function QuantitySurveyBoqVersionActions({
                     {workspace.versions.length} saved version(s)
                   </span>
                 </div>
-                <Button
-                  className="gap-2"
-                  onClick={handleCreateOpen}
-                  disabled={
-                    !canManage ||
-                    workspace.workingLineCount === 0 ||
-                    workspace.allowedVersionTypes.length === 0
-                  }
-                >
-                  <Plus className="h-4 w-4" />
-                  Create snapshot
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() => void openRemeasurement()}
+                    disabled={
+                      !canManage || !workspace.currentPublishedVersionId
+                    }
+                  >
+                    <Ruler className="h-4 w-4" />
+                    Prepare remeasurement
+                  </Button>
+                  <Button
+                    className="gap-2"
+                    onClick={handleCreateOpen}
+                    disabled={
+                      !canManage ||
+                      workspace.workingLineCount === 0 ||
+                      workspace.allowedVersionTypes.length === 0
+                    }
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create snapshot
+                  </Button>
+                </div>
               </div>
 
               <div className="overflow-x-auto rounded-lg border">
@@ -785,6 +874,143 @@ export function QuantitySurveyBoqVersionActions({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               Create snapshot
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={remeasurementOpen} onOpenChange={setRemeasurementOpen}>
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Prepare measurement-derived remeasurement</DialogTitle>
+            <DialogDescription>
+              Select Recorded sheets from the current approved BoQ. Their
+              quantities are grouped by line and routed through the existing BoQ
+              approval and publication workflow.
+            </DialogDescription>
+          </DialogHeader>
+          {remeasurementLoading ? (
+            <div className="flex min-h-40 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : remeasurementWorkspace ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                Source: approved BoQ v
+                {remeasurementWorkspace.sourceApprovedBoqVersionNumber}
+              </div>
+              {remeasurementWorkspace.openCandidateVersionId ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Complete or resubmit the existing open BoQ candidate before
+                  creating another revision.
+                </div>
+              ) : remeasurementWorkspace.eligibleMeasurements.length === 0 ? (
+                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                  No unused Recorded measurement sheets exist for the current
+                  approved BoQ.
+                </div>
+              ) : (
+                <div className="max-h-[44vh] overflow-auto rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12" />
+                        <TableHead>BoQ line</TableHead>
+                        <TableHead>Sheet</TableHead>
+                        <TableHead className="text-right">
+                          Approved qty
+                        </TableHead>
+                        <TableHead className="text-right">
+                          Measured qty
+                        </TableHead>
+                        <TableHead>Recorded</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {remeasurementWorkspace.eligibleMeasurements.map(
+                        (measurement) => (
+                          <TableRow key={measurement.measurementSheetId}>
+                            <TableCell>
+                              <Checkbox
+                                aria-label={`Select ${measurement.sheetReference}`}
+                                checked={remeasurementSelection.includes(
+                                  measurement.measurementSheetId
+                                )}
+                                onCheckedChange={(checked) =>
+                                  toggleRemeasurementSheet(
+                                    measurement.measurementSheetId,
+                                    checked === true
+                                  )
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="min-w-72">
+                              <div className="font-medium">
+                                {measurement.boqLineLabel}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {measurement.unitOfMeasure || 'No unit'}
+                              </div>
+                            </TableCell>
+                            <TableCell>{measurement.sheetReference}</TableCell>
+                            <TableCell className="text-right">
+                              {formatNumber(measurement.previousQuantity)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {formatNumber(measurement.measuredQuantity)}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs">
+                              {formatDateTime(measurement.recordedAt)}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="remeasurement-summary">Change summary</Label>
+                <Textarea
+                  id="remeasurement-summary"
+                  value={remeasurementSummary}
+                  onChange={(event) =>
+                    setRemeasurementSummary(event.target.value)
+                  }
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Explain the measured quantity revision."
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {remeasurementSelection.length} sheet(s) selected. Quantities
+                are calculated on the server; approval updates the working BoQ
+                only after the shared workflow succeeds.
+              </p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRemeasurementOpen(false)}
+              disabled={remeasurementSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void createRemeasurement()}
+              disabled={
+                remeasurementSaving ||
+                !remeasurementWorkspace ||
+                Boolean(remeasurementWorkspace.openCandidateVersionId) ||
+                remeasurementSelection.length === 0 ||
+                remeasurementSummary.trim().length < 5
+              }
+            >
+              {remeasurementSaving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Create remeasurement revision
             </Button>
           </DialogFooter>
         </DialogContent>

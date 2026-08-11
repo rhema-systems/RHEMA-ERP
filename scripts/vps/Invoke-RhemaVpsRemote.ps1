@@ -177,6 +177,34 @@ IF COL_LENGTH('EvaluatorEvaluations','EvaluationDate') IS NOT NULL INSERT @R EXE
 IF OBJECT_ID(N'CriterionScores',N'U') IS NOT NULL INSERT @R EXEC(N'SELECT ''CriterionScores'',COUNT_BIG(*) FROM CriterionScores');
 IF OBJECT_ID(N'AppraisalEmployeeResponses',N'U') IS NOT NULL INSERT @R EXEC(N'SELECT ''AppraisalEmployeeResponses'',COUNT_BIG(*) FROM AppraisalEmployeeResponses');
 IF OBJECT_ID(N'AppraisalAttachments',N'U') IS NOT NULL INSERT @R EXEC(N'SELECT ''AppraisalAttachments'',COUNT_BIG(*) FROM AppraisalAttachments');
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'dbo.SystemExceptionLogs')
+      AND [name] = N'IX_SystemExceptionLogs_TenantId_Fingerprint')
+    INSERT @R VALUES(N'SystemExceptionLogs fingerprint index prerequisite', 1);
+IF OBJECT_ID(N'dbo.BusinessPartnerRegistrations',N'U') IS NULL
+   OR OBJECT_ID(N'dbo.ProcurementSupplierEvidencePackVersions',N'U') IS NULL
+   OR OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS NULL
+    INSERT @R VALUES(N'Supplier evidence binding trigger prerequisites', 1);
+IF OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.BusinessPartnerRegistrations',N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.ProcurementSupplierEvidencePackVersions',N'U') IS NOT NULL
+    INSERT @R EXEC(N'
+        SELECT ''Supplier evidence binding stored lineage'', COUNT_BIG(*)
+        FROM dbo.ProcurementSupplierRegistrationEvidencePackBindings i
+        JOIN dbo.BusinessPartnerRegistrations r ON r.Id = i.RegistrationId
+        JOIN dbo.ProcurementSupplierEvidencePackVersions p ON p.Id = i.PackVersionId
+        WHERE r.TenantId <> i.TenantId
+           OR p.TenantId <> i.TenantId
+           OR r.RegistrationCategory <> i.RegistrationCategory
+           OR p.Category <> i.RegistrationCategory
+           OR p.PackCode <> i.PackCode
+           OR p.Version <> i.PackVersion
+           OR TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.PackSnapshotJson, ''$.id'')) <> p.Id
+           OR TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.PackSnapshotJson, ''$.tenantId'')) <> i.TenantId
+           OR JSON_VALUE(i.PackSnapshotJson, ''$.packCode'') <> p.PackCode
+           OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.category'')) <> i.RegistrationCategory
+           OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.version'')) <> p.Version');
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -248,7 +276,41 @@ function Invoke-Preflight {
     # These migrations only define immutable-row trigger bodies. Their THROW statements
     # are not executed while applying the migrations and have no legacy-data precondition.
     Write-Output 'GUARD_COVERAGE|20260807202000_AddQuantitySurveyConfigurationRegister'
+    Write-Output 'GUARD_COVERAGE|20260807233500_FixSupplierEvidencePackBindingLineageTrigger'
+    Write-Output 'GUARD_COVERAGE|20260807234500_RecordEverySystemExceptionOccurrence'
     Write-Output 'GUARD_COVERAGE|20260808124500_AddProjectBoqApprovalPublication'
+    # These QS migrations either create empty governed registers, replace a
+    # trigger, or add nullable/defaulted lineage columns whose unique indexes
+    # are filtered to newly-governed rows. Their THROW statements live only in
+    # trigger bodies and cannot execute against legacy rows during migration.
+    Write-Output 'GUARD_COVERAGE|20260808231322_AddQuantitySurveyRateBuildUps'
+    Write-Output 'GUARD_COVERAGE|20260809002001_AddQuantitySurveyEstimateVersions'
+    Write-Output 'GUARD_COVERAGE|20260809152905_AddQuantitySurveyEscalationFormulaRegister'
+    Write-Output 'GUARD_COVERAGE|20260809165157_AddQuantitySurveyPriceIndexImportWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260809221500_AddQuantitySurveyEscalationCalculationRuns'
+    Write-Output 'GUARD_COVERAGE|20260810005756_AddQuantitySurveyEscalationDisputes'
+    Write-Output 'GUARD_COVERAGE|20260810023000_AddQuantitySurveyMeasurementSheets'
+    Write-Output 'GUARD_COVERAGE|20260810040000_AddProjectBoqRemeasurementWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260810041753_AddQuantitySurveyJointMeasurements'
+    Write-Output 'GUARD_COVERAGE|20260810103259_AddQuantitySurveyDesignRevisionImpacts'
+    Write-Output 'GUARD_COVERAGE|20260810121810_AddQuantitySurveyValuationWorksheets'
+    Write-Output 'GUARD_COVERAGE|20260810134646_AddQuantitySurveyInterimValuationWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260810154236_AddQuantitySurveyPaymentCertificateLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260810165005_AddQuantitySurveyRetentionReleaseLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260810202208_AddQuantitySurveyFinalAccountLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260810234912_AddQuantitySurveyVariationLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260811010013_AddQuantitySurveyContractClaimLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260811013838_AddQuantitySurveyDayworkLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260811022852_AddQuantitySurveyVariationApplications'
+    Write-Output 'GUARD_COVERAGE|20260811043000_ExtendWorksContractCommercialTerms'
+    Write-Output 'GUARD_COVERAGE|20260811050412_AddQuantitySurveySubcontractLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260811061000_HardenQuantitySurveySubcontractCertificates'
+    Write-Output 'GUARD_COVERAGE|20260811063100_AddQuantitySurveySubcontractChargeLifecycle'
+    # Trigger replacement only; all existing rows remain untouched.
+    Write-Output 'GUARD_COVERAGE|20260809173500_AllowControlledSupplierApplicantContactCorrection'
+    Write-Output 'GUARD_COVERAGE|20260809204500_AllowPreProvisioningSupplierContactCorrection'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"

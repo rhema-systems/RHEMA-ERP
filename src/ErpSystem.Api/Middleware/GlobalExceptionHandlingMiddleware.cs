@@ -226,35 +226,6 @@ public class GlobalExceptionHandlingMiddleware
                 requestPath: requestPath);
 
             var repo = unitOfWork.Repository<SystemExceptionLog>();
-            var existing = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Fingerprint == fingerprint);
-
-            if (existing != null && !existing.IsDeleted)
-            {
-                existing.OccurrenceCount += 1;
-                existing.LastOccurredAt = now;
-                existing.Level = level;
-                existing.Logger = loggerName;
-                existing.ShortMessage = Truncate(redactedShort, 1000);
-                existing.FullMessage = redactedFull;
-                existing.ExceptionType = exception.GetType().FullName;
-                existing.StackTrace = redactedStack;
-                existing.TraceId = response.TraceId;
-                existing.RequestMethod = context.Request.Method;
-                existing.RequestPath = requestPath;
-                existing.QueryString = redactedQuery;
-                existing.ReferrerUrl = redactedReferrer;
-                existing.RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
-                existing.UserAgent = redactedUserAgent;
-                existing.UserId = userId;
-                existing.Username = context.User?.FindFirst(ClaimTypes.Name)?.Value;
-                existing.UpdatedAt = now;
-                existing.LastModifiedById = userId;
-
-                await repo.UpdateAsync(existing);
-                await unitOfWork.SaveChangesAsync();
-                return;
-            }
-
             var log = new SystemExceptionLog
             {
                 Id = Guid.NewGuid(),
@@ -283,45 +254,7 @@ public class GlobalExceptionHandlingMiddleware
             };
 
             await repo.AddAsync(log);
-
-            try
-            {
-                await unitOfWork.SaveChangesAsync();
-            }
-            catch (Exception saveEx)
-            {
-                // If we hit the unique fingerprint constraint due to a race, retry by updating the existing row.
-                _logger.LogDebug(saveEx, "Exception log insert failed; attempting fingerprint dedup update");
-
-                var again = await repo.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Fingerprint == fingerprint);
-                if (again == null)
-                {
-                    throw;
-                }
-
-                again.OccurrenceCount += 1;
-                again.LastOccurredAt = now;
-                again.Level = level;
-                again.Logger = loggerName;
-                again.ShortMessage = Truncate(redactedShort, 1000);
-                again.FullMessage = redactedFull;
-                again.ExceptionType = exception.GetType().FullName;
-                again.StackTrace = redactedStack;
-                again.TraceId = response.TraceId;
-                again.RequestMethod = context.Request.Method;
-                again.RequestPath = requestPath;
-                again.QueryString = redactedQuery;
-                again.ReferrerUrl = redactedReferrer;
-                again.RemoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
-                again.UserAgent = redactedUserAgent;
-                again.UserId = userId;
-                again.Username = context.User?.FindFirst(ClaimTypes.Name)?.Value;
-                again.UpdatedAt = now;
-                again.LastModifiedById = userId;
-
-                await repo.UpdateAsync(again);
-                await unitOfWork.SaveChangesAsync();
-            }
+            await unitOfWork.SaveChangesAsync();
         }
         catch (Exception ex)
         {

@@ -327,7 +327,17 @@ public sealed class QsValuationCertificateValue : QuantitySurveyEffectiveDecisio
     public Guid CertificateWorkflowDefinitionId { get; set; }
     public Guid ValuationTemplateId { get; set; }
     public Guid CertificateTemplateId { get; set; }
+    public Guid ValuationEvidenceMetadataTemplateId { get; set; }
+    public Guid CertificateMetadataTemplateId { get; set; }
+    public Guid CertificateExpenseAccountId { get; set; }
+    public Guid CertificateAccountsPayableAccountId { get; set; }
+    public Guid CertificatePaymentTermId { get; set; }
+    public Guid CertificateTaxGroupId { get; set; }
+    public Guid? CertificateWithholdingTaxId { get; set; }
     public QuantitySurveyTaxHandling TaxHandling { get; set; }
+    public bool RequireContractorSubmission { get; set; } = true;
+    public bool RequireConsultantEndorsement { get; set; } = true;
+    public bool RequireSupportingEvidence { get; set; } = true;
     public bool RequirePreviousCertificate { get; set; } = true;
     public bool ApplyAdvanceRecovery { get; set; } = true;
     public bool ApplyRetention { get; set; } = true;
@@ -358,6 +368,7 @@ public sealed class QsVariationClaimsValue : QuantitySurveyEffectiveDecisionValu
 {
     public Guid VariationWorkflowDefinitionId { get; set; }
     public Guid ClaimWorkflowDefinitionId { get; set; }
+    public Guid VariationEvidenceMetadataTemplateId { get; set; }
     [MinLength(1)] public List<string> AllowedTypes { get; set; } = new();
     public bool UpdateContractSum { get; set; } = true;
     public bool UpdateBudget { get; set; } = true;
@@ -370,9 +381,13 @@ public sealed class QsContractControlsValue : QuantitySurveyEffectiveDecisionVal
     public bool ControlProvisionalSums { get; set; } = true;
     public bool ControlContingencies { get; set; } = true;
     public bool ControlDefectsLiability { get; set; } = true;
+    public bool ControlSectionalTakeover { get; set; } = true;
     public bool ControlSubcontracts { get; set; } = true;
+    public bool ControlClaimClauses { get; set; } = true;
     public bool ControlBackCharges { get; set; } = true;
     public bool ControlContraCharges { get; set; } = true;
+    public bool RequireCommercialTermsDocument { get; set; } = true;
+    public Guid SubcontractWorkflowDefinitionId { get; set; }
     public Guid FinalAccountWorkflowDefinitionId { get; set; }
 }
 

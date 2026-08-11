@@ -72,4 +72,28 @@ public static class ProcurementWorksCloseoutRules
         initialTakeoverAt.HasValue && warrantyDays.GetValueOrDefault() > 0
             ? initialTakeoverAt.Value.AddDays(warrantyDays!.Value)
             : initialTakeoverAt;
+
+    public static decimal RetentionStageLimit(
+        decimal retentionHeld,
+        decimal retentionReleased,
+        decimal releasedForStage,
+        ProcurementRetentionReleaseStage stage,
+        decimal practicalCompletionPercent,
+        decimal sectionalTakeoverPercent,
+        decimal defectsReleasePercent)
+    {
+        var available = Math.Max(decimal.Round(retentionHeld - retentionReleased, 2), 0m);
+        if (stage == ProcurementRetentionReleaseStage.FinalRelease)
+            return available;
+
+        var percent = stage switch
+        {
+            ProcurementRetentionReleaseStage.PracticalCompletion => practicalCompletionPercent,
+            ProcurementRetentionReleaseStage.SectionalTakeover => sectionalTakeoverPercent,
+            ProcurementRetentionReleaseStage.DefectsLiability => defectsReleasePercent,
+            _ => 0m
+        };
+        var stageCap = decimal.Round(retentionHeld * percent / 100m, 2);
+        return Math.Min(available, Math.Max(decimal.Round(stageCap - releasedForStage, 2), 0m));
+    }
 }

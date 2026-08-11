@@ -32,6 +32,15 @@ public interface IVendorPaymentService
     Task<PagedResult<VendorPaymentDto>> GetAllAsync(VendorPaymentQueryDto query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns only posted, non-reversed supplier advances with an unapplied balance for the
+    /// supplied legacy Supplier or canonical BusinessPartner identifier. Supplier identity
+    /// reconciliation remains owned by Finance rather than being reimplemented by consumers.
+    /// </summary>
+    Task<List<PostedSupplierAdvanceDto>> GetPostedSupplierAdvancesAsync(
+        Guid supplierOrBusinessPartnerId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Creates a new vendor payment.
     /// - Auto-generates payment number (VP-YYYY-NNNNN)
     /// - Optionally creates allocations in the same transaction

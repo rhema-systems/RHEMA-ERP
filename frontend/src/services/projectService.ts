@@ -910,6 +910,8 @@ export interface ProjectDrawingDto {
   projectId: string;
   projectPhaseId?: string;
   projectPhaseName?: string;
+  supersedesDrawingId?: string;
+  supersedesDrawingLabel?: string;
   drawingNumber: string;
   title: string;
   discipline: string;
@@ -925,6 +927,7 @@ export interface ProjectDrawingDto {
 
 export interface CreateProjectDrawingDto {
   projectPhaseId?: string;
+  supersedesDrawingId?: string;
   drawingNumber: string;
   title: string;
   discipline?: string;
@@ -2226,6 +2229,34 @@ export interface ProjectBoqVersionComparisonDto {
   lines: ProjectBoqVersionLineComparisonDto[];
 }
 
+export interface ProjectBoqRemeasurementMeasurementDto {
+  measurementSheetId: string;
+  sheetReference: string;
+  projectBoqVersionLineId: string;
+  boqLineKey: string;
+  boqLineLabel: string;
+  unitOfMeasure?: string;
+  previousQuantity: number;
+  measuredQuantity: number;
+  measurementDate: string;
+  recordedAt: string;
+  recordedByName?: string;
+}
+
+export interface ProjectBoqRemeasurementWorkspaceDto {
+  projectId: string;
+  sourceApprovedBoqVersionId: string;
+  sourceApprovedBoqVersionNumber: number;
+  openCandidateVersionId?: string;
+  eligibleMeasurements: ProjectBoqRemeasurementMeasurementDto[];
+}
+
+export interface CreateProjectBoqRemeasurementDto {
+  clientRequestId: string;
+  measurementSheetIds: string[];
+  changeSummary: string;
+}
+
 export type QuantitySurveyEstimateType =
   'CostPlan' | 'TenderEstimate' | 'BudgetEstimate';
 
@@ -2325,6 +2356,98 @@ export interface QuantitySurveyEstimateWorkspaceDto {
   versions: QuantitySurveyEstimateVersionDto[];
   approvedBoqVersionIds: string[];
   allowedTypes: QuantitySurveyEstimateType[];
+}
+
+export interface QuantitySurveyCostReconciliationLineDto {
+  sequence: number;
+  estimateLineId?: string;
+  projectBoqVersionLineId?: string;
+  sourceBoqItemId?: string;
+  projectPackageId?: string;
+  packageCode?: string;
+  packageName?: string;
+  lineNumber: string;
+  itemCode?: string;
+  description: string;
+  mappingStatus: 'Direct' | 'SnapshotOnly' | 'Unallocated';
+  estimateAmount: number;
+  approvedBudgetAmount: number;
+  committedAmount: number;
+  certifiedAmount: number;
+  actualAmount: number;
+  forecastAmount: number;
+  budgetVarianceAmount: number;
+  forecastVarianceAmount: number;
+}
+
+export interface QuantitySurveyCostReconciliationDto {
+  projectId: string;
+  estimateVersionId: string;
+  estimateName: string;
+  estimateType: QuantitySurveyEstimateType;
+  estimateVersionNumber: number;
+  approvedBudgetRevisionId?: string;
+  approvedBudgetRevisionName?: string;
+  activeForecastVersionId?: string;
+  activeForecastVersionName?: string;
+  currencyCode: string;
+  generatedAtUtc: string;
+  estimateAmount: number;
+  approvedBudgetAmount: number;
+  committedAmount: number;
+  certifiedAmount: number;
+  actualAmount: number;
+  forecastAmount: number;
+  budgetVarianceAmount: number;
+  forecastVarianceAmount: number;
+  hasUnallocatedAmounts: boolean;
+  warnings: string[];
+  lines: QuantitySurveyCostReconciliationLineDto[];
+}
+
+export interface QuantitySurveyCostDashboardLineDto {
+  boqItemId: string;
+  projectPackageId: string;
+  packageCode?: string;
+  packageName?: string;
+  sectionCode?: string;
+  sectionName?: string;
+  costCode?: string;
+  costCodeName?: string;
+  lineNumber?: string;
+  itemCode?: string;
+  description: string;
+  quantity: number;
+  unitOfMeasure?: string;
+  budgetAmount: number;
+  committedAmount: number;
+  actualAmount: number;
+  forecastAmount: number;
+  forecastVarianceAmount: number;
+}
+
+export interface QuantitySurveyCostDashboardDto {
+  projectId: string;
+  projectCode: string;
+  projectTitle: string;
+  projectStatus: string;
+  contractId?: string;
+  currencyCode: string;
+  generatedAtUtc: string;
+  approvedBudget: number;
+  committedValue: number;
+  certifiedValue: number;
+  actualCost: number;
+  approvedVariationValue: number;
+  forecastCost: number;
+  finalProjectedCost: number;
+  costToComplete: number;
+  budgetVariance: number;
+  forecastBasis: string;
+  hasConversionGaps: boolean;
+  missingExchangeRateCount: number;
+  warnings: string[];
+  lines: QuantitySurveyCostDashboardLineDto[];
 }
 
 export interface QuantitySurveyBoqImportIssueDto {
@@ -5283,6 +5406,45 @@ class ProjectService {
     return response.json();
   }
 
+  async getProjectBoqRemeasurementWorkspace(
+    projectId: string
+  ): Promise<ProjectBoqRemeasurementWorkspaceDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-remeasurements/workspace`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to load the remeasurement workspace'
+        )
+      );
+    return response.json();
+  }
+
+  async createProjectBoqRemeasurement(
+    projectId: string,
+    dto: CreateProjectBoqRemeasurementDto
+  ): Promise<ProjectBoqVersionDetailDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/boq-remeasurements`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(dto),
+      }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to create the governed remeasurement revision'
+        )
+      );
+    return response.json();
+  }
+
   async getQuantitySurveyEstimateWorkspace(
     projectId: string
   ): Promise<QuantitySurveyEstimateWorkspaceDto> {
@@ -5308,6 +5470,42 @@ class ProjectService {
     if (!response.ok)
       throw new Error(
         await this.readProblemMessage(response, 'Failed to create QS estimate')
+      );
+    return response.json();
+  }
+
+  async getQuantitySurveyCostReconciliation(
+    projectId: string,
+    estimateVersionId: string
+  ): Promise<QuantitySurveyCostReconciliationDto> {
+    const params = new URLSearchParams({ estimateVersionId });
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/quantity-survey-cost-reconciliation?${params.toString()}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to reconcile the approved estimate'
+        )
+      );
+    return response.json();
+  }
+
+  async getQuantitySurveyCostDashboard(
+    projectId: string
+  ): Promise<QuantitySurveyCostDashboardDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/quantity-survey-cost-dashboard`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw new Error(
+        await this.readProblemMessage(
+          response,
+          'Failed to load the Quantity Survey cost dashboard'
+        )
       );
     return response.json();
   }

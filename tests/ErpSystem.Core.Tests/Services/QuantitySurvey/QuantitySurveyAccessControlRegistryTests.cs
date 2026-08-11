@@ -92,4 +92,35 @@ public sealed class QuantitySurveyAccessControlRegistryTests
             granted.Should().BeEquivalentTo(definition.Permissions);
         }
     }
+
+    [Fact]
+    public async Task Report_catalogue_is_complete_project_scoped_and_seeded_idempotently()
+    {
+        QuantitySurveyStatutoryReportCatalogue.Definitions.Should().HaveCount(6);
+        QuantitySurveyStatutoryReportCatalogue.Definitions.Select(value => value.Code).Should().OnlyHaveUniqueItems();
+        QuantitySurveyStatutoryReportCatalogue.Definitions.Should().OnlyContain(value =>
+            value.Query.StartsWith(QuantitySurveyStatutoryReportCatalogue.QueryPrefix, StringComparison.Ordinal) &&
+            value.Columns.Count > 0 && value.Tags.Contains("quantity-survey"));
+        var parameters = QuantitySurveyStatutoryReportCatalogue.BuildParameters();
+        parameters.Should().ContainKeys("projectId", "startDate", "endDate");
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using var context = new ApplicationDbContext(options);
+        var tenantId = Guid.NewGuid();
+        context.Tenants.Add(new Tenant { Id = tenantId, Code = "TDC", Name = "TDC" });
+        context.TenantModules.Add(new TenantModule { TenantId = tenantId, ModuleName = "Project Management" });
+        await context.SaveChangesAsync();
+        var seeder = new QuantitySurveyStatutoryReportSeeder(
+            context, NullLogger<QuantitySurveyStatutoryReportSeeder>.Instance);
+
+        await seeder.SeedTenantAsync(tenantId);
+        await seeder.SeedTenantAsync(tenantId);
+
+        var reports = await context.Reports.IgnoreQueryFilters().Where(value => value.TenantId == tenantId).ToListAsync();
+        reports.Should().HaveCount(6);
+        reports.Should().OnlyContain(value => value.Type == QuantitySurveyStatutoryReportCatalogue.ReportType &&
+            value.Status == "published" && value.ModuleId != null && !value.IsDeleted);
+    }
 }

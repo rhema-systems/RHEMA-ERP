@@ -941,6 +941,36 @@ public class SimpleWorkflowService : IWorkflowService
             context["createdById"] = version.CreatedById ?? Guid.Empty;
         }
 
+        if (IsEntityType(entityTypeRecord,
+                QuantitySurveyWorkflowBindingRegistry.RetentionRelease,
+                "QS Retention Release"))
+        {
+            var action = await _unitOfWork.Repository<ProcurementWorksCloseoutAction>()
+                .FirstOrDefaultAsync(
+                    item => item.TenantId == tenantId &&
+                            item.Id == entityId && !item.IsDeleted,
+                    item => item.Contract,
+                    item => item.Project)
+                ?? throw new InvalidOperationException("QS retention-release action not found");
+            context["module"] = "QuantitySurvey";
+            context["category"] = "RetentionRelease";
+            context["contractId"] = action.ContractId;
+            context["contractNumber"] = action.Contract?.ContractNumber ?? string.Empty;
+            context["projectId"] = action.ProjectId;
+            context["projectCode"] = action.Project?.ProjectCode ?? string.Empty;
+            context["projectName"] = action.Project?.Title ?? string.Empty;
+            context["releaseStage"] = action.RetentionReleaseStage?.ToString() ?? string.Empty;
+            context["amount"] = action.Amount ?? 0m;
+            context["totalAmount"] = context["amount"];
+            context["currencyCode"] = action.Currency ?? action.Contract?.Currency ?? string.Empty;
+            context["retentionHeld"] = action.RetentionHeldSnapshot ?? 0m;
+            context["retentionReleasedBefore"] = action.RetentionReleasedBefore ?? 0m;
+            context["retentionReleasedAfter"] = action.RetentionReleasedAfter ?? 0m;
+            context["usesRetentionBond"] = action.UsesRetentionBond;
+            context["submittedById"] = action.SubmittedById;
+            context["createdById"] = action.Contract?.CreatedById ?? Guid.Empty;
+        }
+
         if (IsEntityType(entityTypeRecord, "BankDepositBatch", "Bank Deposit"))
         {
             var deposit = await _unitOfWork.Repository<BankDepositBatch>()
@@ -1870,6 +1900,36 @@ public class SimpleWorkflowService : IWorkflowService
             catch
             {
                 // Ignore display enrichment failure and fall through to the entity identifier.
+            }
+        }
+
+        if (IsEntityType(entityTypeRecord,
+                QuantitySurveyWorkflowBindingRegistry.RetentionRelease,
+                "QS Retention Release"))
+        {
+            try
+            {
+                var action = await _unitOfWork.Repository<ProcurementWorksCloseoutAction>()
+                    .FirstOrDefaultAsync(
+                        value => value.TenantId ==
+                                 (_currentUserService.TenantId ?? Guid.Empty) &&
+                                 value.Id == entityId && !value.IsDeleted,
+                        value => value.Contract,
+                        value => value.Project);
+                if (action != null)
+                {
+                    var projectLabel = string.IsNullOrWhiteSpace(action.Project?.ProjectCode)
+                        ? action.Project?.Title ?? "Project"
+                        : action.Project.ProjectCode;
+                    item.EntityTitle = $"{projectLabel} - {action.RetentionReleaseStage} retention release";
+                    item.EntityDescription =
+                        $"{action.Currency} {action.Amount:N2} / {action.Contract?.ContractNumber}";
+                    return;
+                }
+            }
+            catch
+            {
+                // Ignore display enrichment failure and use the protected entity identifier.
             }
         }
 

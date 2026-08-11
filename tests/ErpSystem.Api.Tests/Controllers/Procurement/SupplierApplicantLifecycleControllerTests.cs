@@ -110,7 +110,8 @@ public sealed class SupplierApplicantLifecycleControllerTests
         var registrationId = Guid.NewGuid();
         const string contact = "supplier.owner@example.test";
         string? challengeTarget = null;
-        string? confirmTarget = null;
+        var confirmTargets = new List<string>();
+        var consumeFlags = new List<bool>();
         var access = new Mock<IProcurementSupplierApplicantAccessService>();
         access.Setup(item => item.PrepareVerifiedContactCorrectionAsync(
                 registrationId,
@@ -156,10 +157,14 @@ public sealed class SupplierApplicantLifecycleControllerTests
                 OtpChannel.Email,
                 It.IsAny<string>(),
                 "123456",
-                true,
+                It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
             .Callback<Guid, OtpPurpose, OtpChannel, string, string, bool, CancellationToken>(
-                (_, _, _, target, _, _, _) => confirmTarget = target)
+                (_, _, _, target, _, consume, _) =>
+                {
+                    confirmTargets.Add(target);
+                    consumeFlags.Add(consume);
+                })
             .ReturnsAsync(new OtpVerifyResult(true, null));
         var notifications = new Mock<INotificationService>();
         notifications.Setup(item => item.SendEmailAsync(
@@ -212,9 +217,142 @@ public sealed class SupplierApplicantLifecycleControllerTests
             .Should().BeOfType<OkObjectResult>();
 
         challengeTarget.Should().NotBeNull();
-        confirmTarget.Should().Be(challengeTarget);
+        confirmTargets.Should().Equal(challengeTarget!, challengeTarget!);
+        consumeFlags.Should().Equal(false, true);
         challengeTarget.Should().Contain(registrationId.ToString("N"));
         challengeTarget.Should().NotContain(contact);
+    }
+
+    [Theory]
+    [InlineData("Invalid code")]
+    [InlineData("Code expired or not found")]
+    public async Task InvalidOrExpiredContactCorrectionOtpDoesNotMutateOrConsume(
+        string failureReason)
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        const string contact = "supplier.owner@example.test";
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.PrepareVerifiedContactCorrectionAsync(
+                registrationId,
+                It.IsAny<PrepareSupplierApplicantContactCorrectionRequest>(),
+                actorId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SupplierApplicantContactCorrectionPreparationDto
+            {
+                TenantId = tenantId,
+                Channel = ProcurementSupplierApplicantVerificationChannel.Email,
+                NormalizedContact = contact,
+                MaskedContact = "su***@example.test"
+            });
+        var otp = new Mock<IOtpService>();
+        otp.Setup(item => item.VerifyOtpAsync(
+                tenantId,
+                OtpPurpose.SupplierApplicantContactCorrection,
+                OtpChannel.Email,
+                It.IsAny<string>(),
+                "654321",
+                false,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OtpVerifyResult(false, failureReason));
+        var controller = ContactCorrectionController(
+            access.Object, otp.Object, actorId);
+
+        var result = await controller.ConfirmContactCorrection(
+            registrationId,
+            new SupplierApplicantContactCorrectionConfirmRequest
+            {
+                Channel = "Email",
+                Contact = contact,
+                OtpCode = "654321",
+                Reason = "Correct the approved supplier contact."
+            },
+            CancellationToken.None);
+
+        var problem = result.Should().BeOfType<ObjectResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        var details = problem.Value.Should().BeOfType<ProblemDetails>().Subject;
+        details.Extensions["code"].Should().Be(
+            "SUPPLIER_APPLICANT_CONTACT_CORRECTION_OTP_INVALID");
+        details.Extensions.Should().ContainKey("correlationId");
+        access.Verify(item => item.CorrectVerifiedContactAndRetryAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CorrectSupplierApplicantVerifiedContactRequest>(),
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        otp.Verify(item => item.VerifyOtpAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<OtpPurpose>(),
+            It.IsAny<OtpChannel>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            true,
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UnexpectedContactCorrectionFailureBubblesToCentralExceptionMiddleware()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.PrepareVerifiedContactCorrectionAsync(
+                registrationId,
+                It.IsAny<PrepareSupplierApplicantContactCorrectionRequest>(),
+                actorId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+        var controller = ContactCorrectionController(
+            access.Object, Mock.Of<IOtpService>(), actorId);
+
+        var action = () => controller.ConfirmContactCorrection(
+            registrationId,
+            new SupplierApplicantContactCorrectionConfirmRequest
+            {
+                Channel = "Email",
+                Contact = "supplier.owner@example.test",
+                OtpCode = "123456",
+                Reason = "Correct the approved supplier contact."
+            },
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("database unavailable");
+    }
+
+    [Fact]
+    public async Task SubmitReturnsEvidenceValidationProblemInsteadOfUnexpectedFailure()
+    {
+        var sessionReference = Guid.NewGuid();
+        var access = new Mock<IProcurementSupplierApplicantAccessService>();
+        access.Setup(item => item.SubmitAsync(
+                sessionReference,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementSupplierEvidencePackValidationException(
+                "SUPPLIER_REGISTRATION_EVIDENCE_INCOMPLETE",
+                "Upload the mandatory supplier evidence before submission."));
+        var controller = Controller(
+            access.Object,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            Mock.Of<IControlledFileUploadService>(),
+            sessionReference);
+
+        var result = await controller.Submit(CancellationToken.None);
+
+        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        var problem = objectResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Detail.Should().Be(
+            "Upload the mandatory supplier evidence before submission.");
+        problem.Extensions["code"].Should().Be(
+            "SUPPLIER_REGISTRATION_EVIDENCE_INCOMPLETE");
+        problem.Extensions["correlationId"].Should().NotBeNull();
     }
 
     [Fact]
@@ -1134,6 +1272,32 @@ public sealed class SupplierApplicantLifecycleControllerTests
         unitOfWork.Verify(item => item.CommitAsync(
             It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    private static SupplierApplicantAccessController ContactCorrectionController(
+        IProcurementSupplierApplicantAccessService access,
+        IOtpService otp,
+        Guid actorId) =>
+        new(
+            access,
+            Mock.Of<IProcurementSupplierOnboardingTokenService>(),
+            Mock.Of<IBusinessPartnerRegistrationService>(),
+            Mock.Of<ITenantService>(),
+            otp,
+            Mock.Of<ITenantSmsSender>(),
+            Mock.Of<INotificationService>(),
+            Mock.Of<ICaptchaVerificationService>(),
+            Mock.Of<IProcurementSupplierApplicantJwtService>(),
+            Mock.Of<IControlledFileUploadService>(),
+            Mock.Of<ICentralDocumentRepositoryFileService>(),
+            Mock.Of<IFileStorageService>(),
+            TransactionalUnitOfWork().Object,
+            NullLogger<SupplierApplicantAccessController>.Instance)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = AuthenticatedContext(actorId)
+            }
+        };
 
     private static SupplierApplicantAccessController Controller(
         IProcurementSupplierApplicantAccessService access,

@@ -26,6 +26,8 @@ public sealed class ProjectBoqQuantitySurveySecurityTests
     [InlineData(nameof(ProjectsController.CompareProjectBoqVersions), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(ProjectsController.GetQuantitySurveyEstimates), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
     [InlineData(nameof(ProjectsController.GetQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    [InlineData(nameof(ProjectsController.GetQuantitySurveyCostReconciliation), QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    [InlineData(nameof(ProjectsController.GetQuantitySurveyCostDashboard), QuantitySurveyAccessControlRegistry.ReportsRead)]
     [InlineData(nameof(ProjectsController.CreateQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.EstimatesManage)]
     [InlineData(nameof(ProjectsController.SubmitQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.EstimatesManage)]
     [InlineData(nameof(ProjectsController.ApproveQuantitySurveyEstimate), QuantitySurveyAccessControlRegistry.TransactionsApprove)]

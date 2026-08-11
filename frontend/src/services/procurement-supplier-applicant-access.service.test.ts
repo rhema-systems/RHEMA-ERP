@@ -157,4 +157,37 @@ describe('supplier applicant access client', () => {
       expect.objectContaining({ otpCode: '123456' })
     );
   });
+
+  it('includes the safe ProblemDetails correlation reference in contact correction failures', async () => {
+    localStorage.setItem('authToken', 'internal-admin-token');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: 401,
+          detail: 'The verification code is invalid.',
+          code: 'SUPPLIER_APPLICANT_CONTACT_CORRECTION_OTP_INVALID',
+          correlationId: 'contact-correction-reference-123',
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/problem+json' },
+        }
+      )
+    );
+
+    const action = service.confirmContactCorrection('registration-1', {
+      channel: 'Email',
+      contact: 'supplier@test.example',
+      otpCode: '654321',
+      reason: 'Correct approved supplier contact.',
+    });
+
+    await expect(action).rejects.toMatchObject({
+      message:
+        'The verification code is invalid. Reference: contact-correction-reference-123',
+      status: 401,
+      code: 'SUPPLIER_APPLICANT_CONTACT_CORRECTION_OTP_INVALID',
+      correlationId: 'contact-correction-reference-123',
+    });
+  });
 });
