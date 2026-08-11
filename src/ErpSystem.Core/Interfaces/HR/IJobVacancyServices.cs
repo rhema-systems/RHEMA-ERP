@@ -68,9 +68,11 @@ public interface IJobVacancyService
     Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteCriteriaAsync(Guid criteriaId, CancellationToken cancellationToken = default);
 
-    // Shortlist approval workflow
-    Task<bool> SubmitShortlistForApprovalAsync(SubmitShortlistForApprovalDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ReviewShortlistApprovalAsync(ReviewShortlistApprovalDto dto, Guid reviewedByUserId, CancellationToken cancellationToken = default);
+    // Shortlist approval lives on IJobApplicationService, not here. This interface used to declare its
+    // own Submit/Review pair; JobApplicationController — the only caller — went to the application
+    // service's identical pair, so these two never executed. Removed rather than left as a second
+    // implementation of the same rules for someone to wire up by mistake: the surviving pair also
+    // refuses an empty shortlist and refuses to let the submitter approve their own.
 
     // ── Public career portal ──────────────────────────────────────────────────
 

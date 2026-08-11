@@ -1,7 +1,9 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,11 +15,23 @@ public record StageOrderItem(Guid StageId, int NewOrder);
 /// <summary>Request body for cloning a pipeline.</summary>
 public record ClonePipelineRequest(string NewName);
 
+/// <summary>
+/// Recruitment pipelines and their stages — the setup that defines how applications progress.
+///
+/// <para>Reads stay open to the tenant: a stage name is what every pipeline board, application card
+/// and stage-history row renders, so anyone who can see an application needs to resolve them.
+/// Everything that changes a pipeline is HR's — a stage's <c>Order</c>, <c>CanRepeat</c> and
+/// <c>MaxAttempts</c> are the transition rules <c>ApplicationPipelineService</c> enforces, so editing
+/// a stage rewrites the rules every in-flight application is being moved under.</para>
+/// </summary>
 [ApiController]
 [Route("api/recruitment-pipelines")]
 [Authorize]
+[RecruitmentBusinessRules]
 public class RecruitmentPipelineController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IRecruitmentPipelineService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -52,6 +66,7 @@ public class RecruitmentPipelineController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<RecruitmentPipelineDto>> Create([FromBody] CreateRecruitmentPipelineDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -70,6 +85,7 @@ public class RecruitmentPipelineController : ControllerBase
 
     /// <summary>Clones an existing pipeline (with its stages) into a new one for editing.</summary>
     [HttpPost("{id:guid}/clone")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<RecruitmentPipelineDto>> Clone(Guid id, [FromBody] ClonePipelineRequest request)
     {
         var tenantId = _currentUser.TenantId;
@@ -88,6 +104,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<RecruitmentPipelineDto>> Update(Guid id, [FromBody] UpdateRecruitmentPipelineDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -101,6 +118,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -133,6 +151,7 @@ public class RecruitmentPipelineController : ControllerBase
     // =========================================================================
 
     [HttpPost("{pipelineId:guid}/stages")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<RecruitmentPipelineStageDto>> AddStage(
         Guid pipelineId, [FromBody] CreateRecruitmentPipelineStageDto dto)
     {
@@ -146,10 +165,14 @@ public class RecruitmentPipelineController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        // The pipeline comes from the route; the DTO also declares it and the service read only that,
+        // so a POST to /{A}/stages carrying recruitmentPipelineId: B added the stage to pipeline B.
+        dto.RecruitmentPipelineId = pipelineId;
         return Ok(await _service.AddStageAsync(dto, tenantId.Value, employeeId.Value));
     }
 
     [HttpPut("stages/{stageId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<RecruitmentPipelineStageDto>> UpdateStage(
         Guid stageId, [FromBody] UpdateRecruitmentPipelineStageDto dto)
     {
@@ -164,6 +187,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpDelete("stages/{stageId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> DeleteStage(Guid stageId)
     {
         await _service.DeleteStageAsync(stageId);
@@ -171,6 +195,7 @@ public class RecruitmentPipelineController : ControllerBase
     }
 
     [HttpPost("{pipelineId:guid}/stages/reorder")]
+    [Authorize(Roles = HrRoles)]
     public async Task<IActionResult> ReorderStages(
         Guid pipelineId, [FromBody] List<StageOrderItem> stageOrders)
     {

@@ -408,6 +408,16 @@ export interface CreateJobVacancy {
   requiresWrittenTest: boolean;
   requiresPracticalTest: boolean;
   recruitmentPipelineId?: string | null;
+
+  /**
+   * ⚠ These three were missing from this type while the backend DTO carried them, and the mapper
+   * assigns all of them unconditionally. Two consequences: blind screening could never be switched
+   * on (so `GET .../blind-applications` answered 422 forever), and any future edit form that omitted
+   * them would silently clear them — the same shape as the cycle-status revert.
+   */
+  isBlindScreeningEnabled: boolean;
+  autoShortlistMinScore?: number | null;
+  autoShortlistRequireAllMandatory: boolean;
 }
 
 export type UpdateJobVacancy = Omit<CreateJobVacancy, 'staffRequisitionId'> & { id: string };

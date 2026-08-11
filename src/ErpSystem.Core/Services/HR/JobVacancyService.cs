@@ -848,46 +848,11 @@ public class JobVacancyService : IJobVacancyService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
-    public async Task<bool> SubmitShortlistForApprovalAsync(
-        SubmitShortlistForApprovalDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default)
-    {
-        var vacancy = await GetOwnedAsync(dto.VacancyId);
-
-        if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.PendingApproval)
-            throw new InvalidOperationException("Shortlist is already pending approval.");
-
-        if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.Approved)
-            throw new InvalidOperationException("Shortlist is already approved.");
-
-        vacancy.ShortlistApprovalStatus = ShortlistApprovalStatus.PendingApproval;
-        vacancy.ShortlistSubmittedAt = DateTime.UtcNow;
-        vacancy.ShortlistSubmittedById = submittedByUserId;
-        vacancy.ShortlistApprovalNotes = dto.Notes;
-
-        await _vacancyRepository.UpdateAsync(vacancy);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return true;
-    }
-
-    public async Task<bool> ReviewShortlistApprovalAsync(
-        ReviewShortlistApprovalDto dto, Guid reviewedByUserId, CancellationToken cancellationToken = default)
-    {
-        var vacancy = await GetOwnedAsync(dto.VacancyId);
-
-        if (vacancy.ShortlistApprovalStatus != ShortlistApprovalStatus.PendingApproval)
-            throw new InvalidOperationException("Shortlist is not currently pending approval.");
-
-        vacancy.ShortlistApprovalStatus = dto.Approved
-            ? ShortlistApprovalStatus.Approved
-            : ShortlistApprovalStatus.Rejected;
-        vacancy.ShortlistApprovedAt = DateTime.UtcNow;
-        vacancy.ShortlistApprovedById = reviewedByUserId;
-        vacancy.ShortlistApprovalNotes = dto.Notes;
-
-        await _vacancyRepository.UpdateAsync(vacancy);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return true;
-    }
+    // Shortlist submit/review used to be implemented here as well as on JobApplicationService.
+    // JobApplicationController calls the application service's pair, and nothing called these — a dead
+    // second implementation of the same rules, minus the two guards the live pair has (an empty
+    // shortlist cannot be submitted, and the submitter cannot approve their own). Deleted so it cannot
+    // be wired up in place of the real one.
 
     // ── Public career portal ──────────────────────────────────────────────────
 

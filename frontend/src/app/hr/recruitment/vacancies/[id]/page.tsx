@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, Loader2, Megaphone, Send, SlidersHorizontal } from 'lucide-react';
+import { Ban, ListFilter, Loader2, Megaphone, Send, SlidersHorizontal, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -169,6 +169,21 @@ export default function VacancyDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={v.vacancyStatus} />
+
+            {/*
+              The two per-vacancy workspaces. They live here rather than in the sidebar because
+              neither means anything without a vacancy to scope them to.
+            */}
+            <Button variant="outline" asChild>
+              <Link href={`/hr/recruitment/vacancies/${id}/pipeline`}>
+                <Workflow className="mr-2 h-4 w-4" /> Pipeline
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href={`/hr/recruitment/vacancies/${id}/screening`}>
+                <ListFilter className="mr-2 h-4 w-4" /> Screening
+              </Link>
+            </Button>
 
             {isHr && canApprove && (
               <Button

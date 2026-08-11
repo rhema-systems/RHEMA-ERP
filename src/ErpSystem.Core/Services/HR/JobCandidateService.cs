@@ -2,6 +2,7 @@ using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -761,14 +762,40 @@ public class JobCandidateService : IJobCandidateService
 
     // ── Documents ─────────────────────────────────────────────────────────────
 
-    public async Task<JobCandidateDocumentDto> AddDocumentAsync(CreateJobCandidateDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<JobCandidateDocumentDto> AddDocumentAsync(
+        Guid candidateId,
+        JobCandidateDocumentType documentType,
+        string fileName,
+        Guid tenantId,
+        Guid createdByUserId,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
         var current = GetTenantId();
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        await GetOwnedCandidateAsync(createDto.JobCandidateId);
-        var entity = createDto.ToEntity(current, createdByUserId);
+        await GetOwnedCandidateAsync(candidateId);
+
+        // FilePath is left empty: the bytes live behind the controlled-upload gate and are reached
+        // through FileUploadRecordId / the DMS ids. Only rows written before the gate carry a path.
+        var entity = new JobCandidateDocument
+        {
+            TenantId           = current,
+            JobCandidateId     = candidateId,
+            DocumentType       = documentType,
+            FileName           = fileName,
+            FilePath           = string.Empty,
+            UploadDate         = DateTime.UtcNow,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
+            CreatedAt          = DateTime.UtcNow,
+            CreatedBy          = createdByUserId.ToString(),
+        };
+
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();

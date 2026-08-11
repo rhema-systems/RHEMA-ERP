@@ -31,9 +31,12 @@ public interface IJobApplicationService
     Task<bool> WithdrawAsync(WithdrawApplicationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> MoveToStageAsync(MoveApplicationToStageDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
-    // Bulk shortlisting operations
-    Task<RecruitmentBulkOperationResultDto> BulkShortlistAsync(BulkShortlistDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<RecruitmentBulkOperationResultDto> BulkRejectAsync(BulkRejectDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    // Bulk shortlisting operations.
+    // Both take the vacancy explicitly and refuse ids that belong to a different one: the routes are
+    // vacancy-scoped (`vacancy/{vacancyId}/bulk-shortlist`) but the ids arrive in the body, so without the
+    // check a request nominally about one vacancy could shortlist or reject another vacancy's applicants.
+    Task<RecruitmentBulkOperationResultDto> BulkShortlistAsync(Guid vacancyId, BulkShortlistDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<RecruitmentBulkOperationResultDto> BulkRejectAsync(Guid vacancyId, BulkRejectDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<RecruitmentBulkOperationResultDto> AutoShortlistByScoreAsync(AutoShortlistByScoreDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<RecruitmentBulkOperationResultDto> SendShortlistNotificationsAsync(Guid vacancyId, CancellationToken cancellationToken = default);
     Task<RecruitmentBulkOperationResultDto> SendRejectionNotificationsAsync(Guid vacancyId, CancellationToken cancellationToken = default);

@@ -199,6 +199,7 @@ public static class RecruitmentMappingExtensions
             KeyBenefitsSummary = dto.KeyBenefitsSummary,
             RequiresWrittenTest = dto.RequiresWrittenTest,
             RequiresPracticalTest = dto.RequiresPracticalTest,
+            IsBlindScreeningEnabled = dto.IsBlindScreeningEnabled,
             RecruitmentPipelineId = dto.RecruitmentPipelineId,
             AutoShortlistMinScore            = dto.AutoShortlistMinScore,
             AutoShortlistRequireAllMandatory = dto.AutoShortlistRequireAllMandatory,
@@ -1241,19 +1242,9 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static JobCandidateDocument ToEntity(this CreateJobCandidateDocumentDto dto, Guid tenantId, Guid userId)
-    {
-        return new JobCandidateDocument
-        {
-            TenantId = tenantId,
-            JobCandidateId = dto.JobCandidateId,
-            DocumentType = dto.DocumentType,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
-            UploadDate = DateTime.UtcNow,
-            CreatedBy = userId.ToString(),
-        };
-    }
+    // No ToEntity for candidate documents: the row is written by JobCandidateService.AddDocumentAsync
+    // from what the controlled-upload gate returns, not from a payload. The Create DTO this mapped is
+    // deleted — it carried a caller-supplied FilePath.
 
     #endregion
 

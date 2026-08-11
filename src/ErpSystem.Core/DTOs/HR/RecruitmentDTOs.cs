@@ -157,6 +157,19 @@ public class CreateJobVacancyDto : CreateDtoBase
 
     public bool RequiresWrittenTest { get; set; }
     public bool RequiresPracticalTest { get; set; }
+
+    /// <summary>
+    /// Whether reviewers screen this vacancy's applications with the candidate's name, gender, age,
+    /// location and contact details withheld.
+    ///
+    /// <para>Present on <see cref="UpdateJobVacancyDto"/> and <see cref="TransitionJobVacancyDto"/>
+    /// but missing here, which made the whole blind-screening feature unreachable: it could not be
+    /// set when the vacancy was opened, and no edit form sent it either, so
+    /// <c>GET api/job-applications/vacancy/{id}/blind-applications</c> answered 422 for every
+    /// vacancy that had ever existed.</para>
+    /// </summary>
+    public bool IsBlindScreeningEnabled { get; set; }
+
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
     public bool AutoShortlistRequireAllMandatory { get; set; } = true;
@@ -1300,22 +1313,12 @@ public class JobCandidateDocumentDto : BaseDto
     public DateTime UploadDate { get; set; }
 }
 
-public class CreateJobCandidateDocumentDto : CreateDtoBase
-{
-    [Required]
-    public Guid JobCandidateId { get; set; }
-
-    [Required]
-    public JobCandidateDocumentType DocumentType { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-}
+// CreateJobCandidateDocumentDto is deliberately absent. It carried a caller-supplied FilePath, so the
+// endpoint that took it stored no file, scanned nothing, and wrote a row pointing at a path the server
+// had never received. Candidate documents are now posted as multipart to
+// POST api/job-candidates/{candidateId}/documents and go through the controlled-upload gate, exactly
+// like the requisition, vacancy and posting attachments. Deleted rather than left unused so the shape
+// cannot drift back.
 
 #endregion
 

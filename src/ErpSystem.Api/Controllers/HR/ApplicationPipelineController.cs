@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,9 +15,14 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/applications")]
-[Authorize]
+[Authorize(Roles = ApplicationPipelineController.HrRoles)]
 public class ApplicationPipelineController : ControllerBase
 {
+    // HR-only for the same reason as JobApplicationController: every board column, stage list and
+    // scoring run on this controller carries candidate names and scores. The endpoints already map
+    // their own exceptions, so this controller does not take [RecruitmentBusinessRules].
+    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IApplicationPipelineService _pipelineService;
     private readonly IPipelineQueryService _queryService;
     private readonly IAutoScoringService _scoringService;

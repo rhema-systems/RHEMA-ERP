@@ -159,6 +159,43 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   // Position vacancies (establishment gaps), before a requisition exists.
   anticipated: 'outline',
   requisitionraised: 'default',
+
+  // Applications. ApplicationStatus arrives humanised on the summary DTOs ("Under Review",
+  // "Pre-Employment Check"), so the keys here are the stripped forms. "Shortlisted" and "Hired" are
+  // the outcomes worth spotting; the mid-pipeline states read as work in hand. "Waitlisted" is not a
+  // rejection — it is a hold — so it stays neutral rather than destructive.
+  new: 'secondary',
+  shortlisted: 'default',
+  interviewscheduled: 'secondary',
+  interviewcompleted: 'secondary',
+  assessmentpending: 'secondary',
+  preemploymentcheck: 'secondary',
+  offerextended: 'secondary',
+  offeraccepted: 'default',
+  offerdeclined: 'destructive',
+  hired: 'default',
+  waitlisted: 'outline',
+
+  // Pipeline stage types, shown on board columns and stage-history rows.
+  applicationreview: 'outline',
+  screening: 'outline',
+  hiringmanagerreview: 'outline',
+  assessment: 'outline',
+  interview: 'outline',
+  offer: 'outline',
+  inbox: 'outline',
+
+  // Shortlist decisions and their audit log.
+  unshortlisted: 'secondary',
+  autoshortlisted: 'default',
+  notsubmitted: 'outline',
+  progressed: 'default',
+  merged: 'outline',
+
+  // Talent pool.
+  passive: 'secondary',
+  dormant: 'outline',
+  converted: 'default',
 };
 
 interface StatusBadgeProps {

@@ -1,39 +1,67 @@
+using ErpSystem.Api.Filters;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Job candidates — the person behind an application, and the talent pool they may be kept in.
+///
+/// <para><b>HR-only, in full.</b> Unlike <see cref="JobVacancyController"/>, nothing here is an advert:
+/// a candidate record holds a name, email, phone, date of birth, gender, CV, profile photo, referees
+/// and recruiters' private notes on them. The controller previously carried a bare <c>[Authorize]</c>,
+/// so any authenticated employee could read, edit or delete any of it — including
+/// <c>GET {id}/notes?includePrivate=true</c>, which has no entitlement test of its own and is what
+/// makes a note marked private actually private. There is no self-service surface on this controller,
+/// so the gate sits at class level rather than being repeated on 40 endpoints.</para>
+///
+/// <para>Sub-resource writes take the candidate from the <b>route</b>. Each Create DTO also declares
+/// <c>JobCandidateId</c>, and the service validated only that one — so a POST to
+/// <c>/{A}/work-history</c> carrying <c>jobCandidateId: B</c> wrote to B's record.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-candidates")]
-[Authorize]
+[Authorize(Roles = JobCandidateController.HrRoles)]
+[RecruitmentBusinessRules]
 public class JobCandidateController : ControllerBase
 {
+    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IJobCandidateService _service;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
+    private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly ILogger<JobCandidateController> _logger;
 
     public JobCandidateController(
         IJobCandidateService service,
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
+        IHrControlledDocumentService hrDocuments,
         ApplicationDbContext db,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ILogger<JobCandidateController> logger)
     {
         _service = service;
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
+        _hrDocuments = hrDocuments;
         _db = db;
         _currentUser = currentUser;
+        _logger = logger;
     }
 
     // =========================================================================
@@ -246,6 +274,7 @@ public class JobCandidateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobCandidateId = candidateId;
         return Ok(await _service.AddQualificationAsync(dto, tenantId.Value, employeeId.Value));
     }
 
@@ -292,6 +321,7 @@ public class JobCandidateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobCandidateId = candidateId;
         return Ok(await _service.AddWorkHistoryAsync(dto, tenantId.Value, employeeId.Value));
     }
 
@@ -338,6 +368,7 @@ public class JobCandidateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobCandidateId = candidateId;
         return Ok(await _service.AddRefereeAsync(dto, tenantId.Value, employeeId.Value));
     }
 
@@ -384,6 +415,7 @@ public class JobCandidateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobCandidateId = candidateId;
         return Ok(await _service.AddSkillAsync(dto, tenantId.Value, employeeId.Value));
     }
 
@@ -430,6 +462,7 @@ public class JobCandidateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobCandidateId = candidateId;
         return Ok(await _service.AddInterestAsync(dto, tenantId.Value, employeeId.Value));
     }
 
@@ -462,21 +495,50 @@ public class JobCandidateController : ControllerBase
     public async Task<ActionResult<IEnumerable<JobCandidateDocumentDto>>> GetDocuments(Guid candidateId)
         => Ok(await _service.GetDocumentsAsync(candidateId));
 
+    /// <summary>
+    /// Attaches a document to a candidate through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a JSON endpoint that accepted a caller-supplied <c>filePath</c>: it stored no file,
+    /// scanned nothing, and recorded a path to a file the server had never received — so the row it
+    /// wrote could never be downloaded. Seventh sibling of the same shape, after the five appraisal
+    /// paths and the requisition attachments.
+    ///
+    /// <para>The DMS columns already existed on <c>JobCandidateDocument</c> — the candidate portal has
+    /// written through the gate since the documents commit — so this needs no migration; only the
+    /// HR-side write path was still on the old shape.</para>
+    ///
+    /// <para>⚠ Requires a working ClamAV — <c>hr-recruitment-attachments</c> is in
+    /// <c>SystemCleanScanRequired</c> and tenant policy cannot turn that off, so with no scanner the
+    /// gate refuses with 422 before the row is ever written.</para>
+    /// </remarks>
     [HttpPost("{candidateId:guid}/documents")]
-    public async Task<ActionResult<JobCandidateDocumentDto>> AddDocument(
-        Guid candidateId, [FromBody] CreateJobCandidateDocumentDto dto)
+    [ProducesResponseType(typeof(JobCandidateDocumentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AddDocument(
+        Guid candidateId,
+        IFormFile file,
+        [FromForm] JobCandidateDocumentType documentType,
+        [FromForm] string? description,
+        CancellationToken ct)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-
-        var tenantId = _currentUser.TenantId;
-        var employeeId = _currentUser.EmployeeId;
-
-        if (tenantId == null)
+        if (_currentUser.TenantId is not Guid tenantId)
             return BadRequest("Tenant context could not be resolved.");
-        if (employeeId == null)
-            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        return Ok(await _service.AddDocumentAsync(dto, tenantId.Value, employeeId.Value));
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "JobCandidate",
+            sourceRecordId: candidateId,
+            sourceLabel: "Candidate document",
+            documentType: "JobCandidateDocument",
+            description: description,
+            persist: (uploadedById, document) => _service.AddDocumentAsync(
+                candidateId, documentType, document.OriginalFileName,
+                tenantId, uploadedById, ct,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrRecruitmentAttachments);
     }
 
     [HttpDelete("documents/{documentId:guid}")]
@@ -509,6 +571,7 @@ public class JobCandidateController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobCandidateId = candidateId;
         return Ok(await _service.AddNoteAsync(dto, tenantId.Value, employeeId.Value));
     }
 

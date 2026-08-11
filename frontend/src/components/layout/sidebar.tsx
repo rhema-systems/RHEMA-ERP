@@ -494,8 +494,11 @@ export const navigationItems: NavItem[] = [
       },
       {
         // Ordered the way a hire happens rather than alphabetically: a gap in the establishment
-        // becomes a requisition, an approved requisition becomes a vacancy, and publishing the
-        // vacancy raises the adverts.
+        // becomes a requisition, an approved requisition becomes a vacancy, publishing the vacancy
+        // raises the adverts, and the adverts bring in candidates and applications.
+        //
+        // The pipeline board and the screening workspace are not listed: both belong to a single
+        // vacancy and are reached from it, so a top-level link would have nowhere to go.
         title: 'Recruitment',
         href: '/hr/recruitment',
         icon: UserPlus,
@@ -504,6 +507,8 @@ export const navigationItems: NavItem[] = [
           { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList },
           { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase },
           { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone },
+          { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users },
+          { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText },
         ],
       },
       {
@@ -1315,6 +1320,14 @@ export const navigationItems: NavItem[] = [
               { title: 'Goal Library', href: '/administration/hr/performance/goal-library', icon: Library },
               { title: 'KPI Definitions', href: '/administration/hr/performance/kpi-definitions', icon: Gauge },
               { title: 'Goal Risk Thresholds', href: '/administration/hr/performance/goal-risk-settings', icon: AlertTriangle },
+            ],
+          },
+          {
+            title: 'Recruitment',
+            href: '/administration/hr/recruitment/pipelines',
+            icon: Workflow,
+            children: [
+              { title: 'Pipelines', href: '/administration/hr/recruitment/pipelines', icon: Workflow },
             ],
           },
           // Employee Categories has no backing controller at all, so it stays dropped.

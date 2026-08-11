@@ -46,6 +46,17 @@ public sealed class RecruitmentBusinessRulesAttribute : ExceptionFilterAttribute
 
         switch (context.Exception)
         {
+            // The RHEMA-native recruitment services (ApplicationPipelineService, PositionVacancyService)
+            // raise KeyNotFoundException where the ported ones raise ArgumentException. Both mean
+            // "not found", so both answer 404 — otherwise the same missing id reads as 404 on one route
+            // and 500 on the next depending on which service happens to be behind it.
+            case KeyNotFoundException ex:
+                logger?.LogInformation("Recruitment record not found on {Path}: {Message}",
+                    context.HttpContext.Request.Path, ex.Message);
+                context.Result = new NotFoundObjectResult(new { message = ex.Message });
+                context.ExceptionHandled = true;
+                break;
+
             // Order matters: ArgumentException is not an InvalidOperationException, but both are
             // caught before the generic middleware ever sees them.
             case ArgumentException ex:

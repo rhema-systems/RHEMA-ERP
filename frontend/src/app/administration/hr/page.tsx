@@ -16,6 +16,7 @@ import {
   CalendarDays,
   Coins,
   Target,
+  Workflow,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -150,6 +151,21 @@ export default function HrAdministrationPage() {
                 'Strategic goals, the goal library, KPI definitions and the goal risk thresholds.',
               href: '/administration/hr/performance',
               icon: Target,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Recruitment</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Recruitment Pipelines',
+              description:
+                'The stages applications move through, and the rules governing those moves.',
+              href: '/administration/hr/recruitment/pipelines',
+              icon: Workflow,
             },
           ]}
         />

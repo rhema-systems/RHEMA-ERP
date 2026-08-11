@@ -24,6 +24,7 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { useToast } from '@/hooks/use-toast';
 import { dateOffset, humanizeEnum } from '@/lib/hr/attendance-format';
 import { jobVacancyService, staffRequisitionService } from '@/services/hr/recruitment.service';
+import { recruitmentPipelineService } from '@/services/hr/recruitment-pipeline.service';
 import {
   EMPLOYMENT_TYPES,
   WORK_MODES,
@@ -43,6 +44,14 @@ export default function NewVacancyPage() {
   const searchParams = useSearchParams();
   const requisitionId = searchParams.get('requisitionId') ?? '';
   const { toast } = useToast();
+
+  // Only active pipelines are offered — an inactive one stays attached where it already is, but
+  // should not be picked for something new.
+  const pipelines = useQuery({
+    queryKey: ['hr', 'recruitment-pipelines'],
+    queryFn: () => recruitmentPipelineService.getAll(),
+    select: (all) => all.filter((p) => p.isActive),
+  });
 
   const requisition = useQuery({
     queryKey: ['hr', 'requisitions', requisitionId],
@@ -71,6 +80,10 @@ export default function NewVacancyPage() {
     keyBenefitsSummary: '',
     requiresWrittenTest: false,
     requiresPracticalTest: false,
+    recruitmentPipelineId: '' as string,
+    isBlindScreeningEnabled: false,
+    autoShortlistMinScore: '',
+    autoShortlistRequireAllMandatory: true,
   });
 
   const [seeded, setSeeded] = useState(false);
@@ -103,6 +116,12 @@ export default function NewVacancyPage() {
         keyBenefitsSummary: form.keyBenefitsSummary.trim() || null,
         requiresWrittenTest: form.requiresWrittenTest,
         requiresPracticalTest: form.requiresPracticalTest,
+        // Without a pipeline the vacancy has no board and its applications cannot be moved through
+        // stages at all, so this is asked for up front rather than left to be discovered later.
+        recruitmentPipelineId: form.recruitmentPipelineId || null,
+        isBlindScreeningEnabled: form.isBlindScreeningEnabled,
+        autoShortlistMinScore: form.autoShortlistMinScore ? Number(form.autoShortlistMinScore) : null,
+        autoShortlistRequireAllMandatory: form.autoShortlistRequireAllMandatory,
       }),
     onSuccess: (created) => {
       toast({
@@ -417,6 +436,77 @@ export default function NewVacancyPage() {
                 <Label htmlFor="requiresPracticalTest" className="font-normal">
                   Requires a practical test
                 </Label>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Screening</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="recruitmentPipelineId">Recruitment pipeline</Label>
+                <Select
+                  value={form.recruitmentPipelineId}
+                  onValueChange={(v) => setForm({ ...form, recruitmentPipelineId: v })}
+                >
+                  <SelectTrigger id="recruitmentPipelineId">
+                    <SelectValue placeholder="Select a pipeline" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(pipelines.data ?? []).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                        {p.isDefault ? ' (default)' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Without a pipeline this vacancy has no board, and its applications cannot be moved
+                  through stages.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="isBlindScreeningEnabled"
+                  checked={form.isBlindScreeningEnabled}
+                  onCheckedChange={(c) =>
+                    setForm({ ...form, isBlindScreeningEnabled: c === true })
+                  }
+                />
+                <Label htmlFor="isBlindScreeningEnabled" className="font-normal">
+                  Enable blind screening — reviewers see no name, gender, age or contact details
+                </Label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="autoShortlistMinScore">Auto-shortlist threshold</Label>
+                  <Input
+                    id="autoShortlistMinScore"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={form.autoShortlistMinScore}
+                    onChange={(e) => setForm({ ...form, autoShortlistMinScore: e.target.value })}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div className="flex items-end gap-2 pb-2">
+                  <Checkbox
+                    id="autoShortlistRequireAllMandatory"
+                    checked={form.autoShortlistRequireAllMandatory}
+                    onCheckedChange={(c) =>
+                      setForm({ ...form, autoShortlistRequireAllMandatory: c === true })
+                    }
+                  />
+                  <Label htmlFor="autoShortlistRequireAllMandatory" className="font-normal">
+                    Require every mandatory criterion to pass
+                  </Label>
+                </div>
               </div>
             </CardContent>
           </Card>
