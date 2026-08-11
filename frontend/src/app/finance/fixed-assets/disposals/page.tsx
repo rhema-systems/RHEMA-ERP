@@ -36,7 +36,8 @@ export default function AssetDisposalsPage() {
         disposedPortionPercent: 100,
         disposalDate: new Date().toISOString().split('T')[0],
         saleProceeds: 0,
-        disposalCost: 0
+        disposalCost: 0,
+        proceedsCurrencyCode: 'GHS'
     });
 
     useEffect(() => {
@@ -114,7 +115,8 @@ export default function AssetDisposalsPage() {
                 disposedPortionPercent: 100,
                 disposalDate: new Date().toISOString().split('T')[0],
                 saleProceeds: 0,
-                disposalCost: 0
+                disposalCost: 0,
+                proceedsCurrencyCode: 'GHS'
             });
             loadData();
         } catch (error) {
@@ -226,6 +228,7 @@ export default function AssetDisposalsPage() {
             : (formData.disposedPortionPercent || 0) / 100;
         return (proceeds - cost) - (selectedAssetNBV * disposalRate);
     }, [formData.saleProceeds, formData.disposalCost, formData.disposalScope, formData.disposedPortionPercent, selectedAssetNBV]);
+    const hasForeignProceeds = (formData.proceedsCurrencyCode || 'GHS') !== 'GHS';
 
     if (loading && disposals.length === 0) {
         return (
@@ -365,7 +368,7 @@ export default function AssetDisposalsPage() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="proceeds">Sale Proceeds (GHS)</Label>
+                                    <Label htmlFor="proceeds">Sale Proceeds ({formData.proceedsCurrencyCode || 'GHS'})</Label>
                                     <Input
                                         id="proceeds"
                                         type="number"
@@ -375,7 +378,7 @@ export default function AssetDisposalsPage() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="cost">Disposal Cost (GHS)</Label>
+                                    <Label htmlFor="cost">Disposal Cost ({formData.proceedsCurrencyCode || 'GHS'})</Label>
                                     <Input
                                         id="cost"
                                         type="number"
@@ -383,6 +386,22 @@ export default function AssetDisposalsPage() {
                                         value={formData.disposalCost}
                                         onChange={(e) => setFormData({ ...formData, disposalCost: parseFloat(e.target.value) || 0 })}
                                     />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="proceedsCurrency">Proceeds Currency</Label>
+                                    <Input
+                                        id="proceedsCurrency"
+                                        maxLength={3}
+                                        placeholder="GHS"
+                                        value={formData.proceedsCurrencyCode || 'GHS'}
+                                        onChange={(e) => setFormData({
+                                            ...formData,
+                                            proceedsCurrencyCode: e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3)
+                                        })}
+                                    />
+                                    <p className="text-xs text-slate-500">
+                                        Finance automatically freezes the latest approved daily rate for foreign proceeds on the disposal date.
+                                    </p>
                                 </div>
                             </div>
 
@@ -458,14 +477,22 @@ export default function AssetDisposalsPage() {
                                 </p>
                             )}
 
-                            <Card className={estimatedGainLoss >= 0 ? "bg-emerald-50 border-emerald-100" : "bg-red-50 border-red-100"}>
-                                <CardContent className="py-3 flex justify-between items-center">
-                                    <div className="text-sm font-medium text-slate-700">Estimated {estimatedGainLoss >= 0 ? 'Gain' : 'Loss'}:</div>
-                                    <div className={`text-lg font-bold ${estimatedGainLoss >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                                        ₵ {Math.abs(estimatedGainLoss).toLocaleString()}
-                                    </div>
-                                </CardContent>
-                            </Card>
+                            {hasForeignProceeds ? (
+                                <Card className="bg-blue-50 border-blue-100">
+                                    <CardContent className="py-3 text-sm text-blue-900">
+                                        The authoritative functional proceeds and gain/loss will be calculated from the approved disposal-date rate when this request is submitted.
+                                    </CardContent>
+                                </Card>
+                            ) : (
+                                <Card className={estimatedGainLoss >= 0 ? "bg-emerald-50 border-emerald-100" : "bg-red-50 border-red-100"}>
+                                    <CardContent className="py-3 flex justify-between items-center">
+                                        <div className="text-sm font-medium text-slate-700">Estimated {estimatedGainLoss >= 0 ? 'Gain' : 'Loss'}:</div>
+                                        <div className={`text-lg font-bold ${estimatedGainLoss >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                            ₵ {Math.abs(estimatedGainLoss).toLocaleString()}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
 
                             <div className="space-y-2">
                                 <Label htmlFor="reason">Reason for Disposal</Label>
@@ -506,7 +533,7 @@ export default function AssetDisposalsPage() {
                 <Card className="border-slate-200 shadow-sm">
                     <CardHeader className="pb-2">
                         <CardDescription className="text-xs uppercase font-semibold text-emerald-500">Total Proceeds</CardDescription>
-                        <CardTitle className="text-2xl text-emerald-600">₵ {disposals.reduce((acc, curr) => acc + (curr.saleProceeds || 0), 0).toLocaleString()}</CardTitle>
+                        <CardTitle className="text-2xl text-emerald-600">₵ {disposals.reduce((acc, curr) => acc + (curr.proceedsFunctionalAmount || 0), 0).toLocaleString()}</CardTitle>
                     </CardHeader>
                 </Card>
                 <Card className="border-slate-200 shadow-sm">
@@ -596,7 +623,16 @@ export default function AssetDisposalsPage() {
                                                 </div>
                                             ) : '—'}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm">₵ {disposal.saleProceeds.toLocaleString()}</TableCell>
+                                        <TableCell className="text-right text-sm">
+                                            <div className="flex flex-col">
+                                                <span>{disposal.proceedsCurrencyCode} {disposal.netProceeds.toLocaleString()}</span>
+                                                {disposal.proceedsCurrencyCode !== 'GHS' && (
+                                                    <span className="text-[11px] text-slate-500">
+                                                        ₵ {disposal.proceedsFunctionalAmount.toLocaleString()} @ {disposal.proceedsExchangeRateValue}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </TableCell>
                                         <TableCell className={`text-right text-sm font-semibold ${disposal.gainOrLoss >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                                             ₵ {Math.abs(disposal.gainOrLoss).toLocaleString()}
                                         </TableCell>

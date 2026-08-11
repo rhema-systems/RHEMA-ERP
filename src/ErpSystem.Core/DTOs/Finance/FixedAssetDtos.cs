@@ -1,4 +1,5 @@
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.Finance;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
@@ -529,6 +530,13 @@ public class AssetDisposalDto
     public decimal? DisposalCost { get; set; }
     public decimal NetProceeds { get; set; }
     public string ProceedsCurrencyCode { get; set; } = "GHS";
+    public decimal ProceedsFunctionalAmount { get; set; }
+    public Guid? ProceedsExchangeRateId { get; set; }
+    public decimal ProceedsExchangeRateValue { get; set; }
+    public string ProceedsExchangeRateSource { get; set; } = "Functional currency";
+    public DateTime ProceedsExchangeRateDate { get; set; }
+    public ExchangeRateType ProceedsExchangeRateType { get; set; }
+    public ExchangeRateQuoteSide ProceedsExchangeRateQuoteSide { get; set; }
     public Guid? ProceedsAccountId { get; set; }
     public decimal CostAtDisposal { get; set; }
     public decimal AcquisitionCostAllocated { get; set; }
@@ -596,6 +604,11 @@ public class RequestAssetDisposalDto
     public decimal SaleProceeds { get; set; }
     public decimal DisposalCost { get; set; }
     public string? ProceedsCurrencyCode { get; set; }
+    /// <summary>
+    /// Optional explicit daily rate. When omitted, Finance selects the latest approved rate that
+    /// satisfies the tenant's receipt-side quote policy on the disposal date.
+    /// </summary>
+    public Guid? ProceedsExchangeRateId { get; set; }
     public Guid? ProceedsAccountId { get; set; }
     public string? BuyerName { get; set; }
     public string? IdempotencyKey { get; set; }

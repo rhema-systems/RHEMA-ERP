@@ -70,6 +70,12 @@ public class AssetDisposalReportDto
     public decimal SaleProceeds { get; set; }
     public decimal DisposalCost { get; set; }
     public decimal NetProceeds { get; set; }
+    public string ProceedsCurrencyCode { get; set; } = "GHS";
+    public decimal ProceedsFunctionalAmount { get; set; }
+    public Guid? ProceedsExchangeRateId { get; set; }
+    public decimal ProceedsExchangeRateValue { get; set; }
+    public string ProceedsExchangeRateSource { get; set; } = "Functional currency";
+    public DateTime ProceedsExchangeRateDate { get; set; }
     public decimal CostAtDisposal { get; set; }
     public decimal AccumulatedDepreciationAtDisposal { get; set; }
     public decimal AccumulatedImpairmentAtDisposal { get; set; }
