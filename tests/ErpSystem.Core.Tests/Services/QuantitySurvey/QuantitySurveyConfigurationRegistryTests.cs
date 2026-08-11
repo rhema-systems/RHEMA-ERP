@@ -85,6 +85,26 @@ public sealed class QuantitySurveyConfigurationRegistryTests
     }
 
     [Fact]
+    public void RetentionPolicyRejectsStagePercentagesAboveOneHundredPercent()
+    {
+        var value = JsonSerializer.SerializeToElement(new
+        {
+            effectiveFrom = new DateTime(2026, 8, 1),
+            effectiveTo = (DateTime?)null,
+            maximumRetentionPercent = 10m,
+            practicalCompletionReleasePercent = 50m,
+            sectionalTakeoverReleasePercent = 30m,
+            defectsReleasePercent = 30m,
+            defectsLiabilityDays = 365,
+            approvalWorkflowDefinitionId = Guid.NewGuid(),
+            allowRetentionBond = false
+        });
+
+        QuantitySurveyConfigurationDecisionRegistry.Validate("QS-DEC-009", 1, value)
+            .Errors.Should().ContainSingle(message => message.Contains("cannot exceed 100%"));
+    }
+
+    [Fact]
     public void VersionSequenceIncludesSoftDeletedRevisionsSuppliedByCaller()
     {
         var versions = new[]

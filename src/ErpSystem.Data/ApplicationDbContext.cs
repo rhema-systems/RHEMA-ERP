@@ -1055,6 +1055,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ProjectPaymentCertificate> ProjectPaymentCertificates { get; set; }
     public DbSet<ProjectExtensionOfTime> ProjectExtensionOfTimeRequests { get; set; }
     public DbSet<ProjectFinalAccount> ProjectFinalAccounts { get; set; }
+    public DbSet<ProjectFinalAccountRevision> ProjectFinalAccountRevisions { get; set; }
     public DbSet<ProjectBuilding> ProjectBuildings { get; set; }
     public DbSet<ProjectFloor> ProjectFloors { get; set; }
     public DbSet<ProjectUnitReleaseBatch> ProjectUnitReleaseBatches { get; set; }
@@ -4222,6 +4223,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProjectPaymentCertificateConfiguration());
         builder.ApplyConfiguration(new ProjectExtensionOfTimeConfiguration());
         builder.ApplyConfiguration(new ProjectFinalAccountConfiguration());
+        builder.ApplyConfiguration(new ProjectFinalAccountRevisionConfiguration());
         builder.ApplyConfiguration(new ProjectBuildingConfiguration());
         builder.ApplyConfiguration(new ProjectFloorConfiguration());
         builder.ApplyConfiguration(new ProjectUnitReleaseBatchConfiguration());

@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Entities.QuantitySurvey;
+using ErpSystem.Core.Services.QuantitySurvey;
 
 namespace ErpSystem.Core.Entities.Projects;
 
@@ -143,6 +146,7 @@ public static class ProjectSubmittalStatuses
     public const string Draft = "Draft";
     public const string Submitted = "Submitted";
     public const string UnderReview = "UnderReview";
+    public const string PendingApproval = "PendingApproval";
     public const string Approved = "Approved";
     public const string ApprovedWithComments = "ApprovedWithComments";
     public const string Rejected = "Rejected";
@@ -204,6 +208,7 @@ public static class ProjectVariationOrderStatuses
 {
     public const string Draft = "Draft";
     public const string Submitted = "Submitted";
+    public const string PendingApproval = "PendingApproval";
     public const string UnderReview = "UnderReview";
     public const string Approved = "Approved";
     public const string Rejected = "Rejected";
@@ -218,7 +223,18 @@ public static class ProjectVariationOrderTypes
     public const string ProvisionalSum = "ProvisionalSum";
     public const string RateChange = "RateChange";
     public const string Omission = "Omission";
+    public const string Daywork = "Daywork";
+    public const string AdditionalWork = "AdditionalWork";
+    public const string SiteInstruction = "SiteInstruction";
+    public const string ChangeOrder = "ChangeOrder";
     public const string Other = "Other";
+}
+
+public static class ProjectVariationApplicationStatuses
+{
+    public const string NotApplied = "NotApplied";
+    public const string AppliedPendingBoqApproval = "AppliedPendingBoqApproval";
+    public const string Applied = "Applied";
 }
 
 public static class ProjectInterimValuationStatuses
@@ -276,9 +292,11 @@ public static class ProjectExtensionOfTimeStatuses
 public static class ProjectFinalAccountStatuses
 {
     public const string Draft = "Draft";
+    public const string PendingApproval = "PendingApproval";
     public const string UnderReview = "UnderReview";
     public const string Agreed = "Agreed";
     public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
     public const string Closed = "Closed";
 }
 
@@ -1106,6 +1124,14 @@ public class ProjectBoqItem : TenantEntity
     public virtual ProjectCatalogEntry? MeasurementCodeCatalogEntry { get; set; }
 }
 
+public static class ProjectPaymentCertificateApHandoffStatuses
+{
+    public const string NotReady = "NotReady";
+    public const string Ready = "Ready";
+    public const string Created = "Created";
+    public const string Failed = "Failed";
+}
+
 public class ProjectApprovalRegisterItem : TenantEntity
 {
     public Guid ProjectId { get; set; }
@@ -1152,6 +1178,7 @@ public class ProjectDrawing : TenantEntity
 {
     public Guid ProjectId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
+    public Guid? SupersedesDrawingId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1188,6 +1215,9 @@ public class ProjectDrawing : TenantEntity
 
     [ForeignKey(nameof(ProjectPhaseId))]
     public virtual ProjectPhase? ProjectPhase { get; set; }
+
+    [ForeignKey(nameof(SupersedesDrawingId))]
+    public virtual ProjectDrawing? SupersedesDrawing { get; set; }
 }
 
 public class ProjectSubmittal : TenantEntity
@@ -1346,12 +1376,22 @@ public class ProjectSiteInstruction : TenantEntity
     public virtual ProjectPackage? ProjectPackage { get; set; }
 }
 
-public class ProjectVariationOrder : TenantEntity
+public class ProjectVariationOrder : TenantEntity, IQuantitySurveyWorkflowRecord
 {
     public Guid ProjectId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public Guid? ProjectPackageId { get; set; }
     public Guid? ContractId { get; set; }
+    public Guid? SiteInstructionId { get; set; }
+    public Guid? ChangeRequestId { get; set; }
+    public Guid? ContractorBusinessPartnerId { get; set; }
+    public Guid? ApprovedBoqVersionId { get; set; }
+    public QuantitySurveyVariationSourceType VariationSourceType { get; set; }
+    public bool IsQuantitySurveyGoverned { get; set; }
+    public Guid? ClientRequestId { get; set; }
+    [MaxLength(64)] public string? RequestHash { get; set; }
+    public Guid? LastMutationClientRequestId { get; set; }
+    [MaxLength(64)] public string? LastMutationRequestHash { get; set; }
 
     [MaxLength(100)]
     public string? ReferenceNumber { get; set; }
@@ -1370,6 +1410,7 @@ public class ProjectVariationOrder : TenantEntity
     [Required]
     [MaxLength(30)]
     public string Status { get; set; } = ProjectVariationOrderStatuses.Draft;
+    [Required, MaxLength(30)] public string ApprovalStatus { get; set; } = ProjectVariationOrderStatuses.Draft;
 
     public DateTime RequestedDate { get; set; } = DateTime.UtcNow;
     public DateTime? ApprovedDate { get; set; }
@@ -1386,6 +1427,39 @@ public class ProjectVariationOrder : TenantEntity
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal? ApprovedAmount { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? OriginalContractSumSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? RevisedContractSumSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? BudgetImpactAmount { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? ForecastImpactAmount { get; set; }
+    public bool UpdateContractSumOnApplication { get; set; }
+    public bool UpdateBudgetOnApplication { get; set; }
+    public bool UpdateForecastOnApplication { get; set; }
+    public bool UpdateCertificateOnApplication { get; set; }
+    [Required, MaxLength(40)] public string DownstreamApplicationStatus { get; set; } = ProjectVariationApplicationStatuses.NotApplied;
+    public Guid? ApplicationClientRequestId { get; set; }
+    [MaxLength(64)] public string? ApplicationRequestHash { get; set; }
+    [MaxLength(64)] public string? ApplicationHash { get; set; }
+    public Guid? AppliedById { get; set; }
+    public DateTime? AppliedAt { get; set; }
+    public Guid? ContractAmendmentId { get; set; }
+    public Guid? RevisedBoqVersionId { get; set; }
+    public Guid? BudgetRevisionId { get; set; }
+    public Guid? ForecastVersionId { get; set; }
+
+    public Guid? ConfigurationProfileId { get; set; }
+    public Guid? VariationDecisionId { get; set; }
+    public Guid? ApprovalWorkflowDefinitionId { get; set; }
+    public Guid? EvidenceMetadataTemplateId { get; set; }
+    [MaxLength(64)] public string? PolicyHash { get; set; }
+    public Guid? PreparedById { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? ApprovedById { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    [MaxLength(2000)] public string? RejectionReason { get; set; }
+    [MaxLength(100)] public string? CorrelationId { get; set; }
+    [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     [MaxLength(10)]
     public string Currency { get; set; } = "USD";
@@ -1406,6 +1480,19 @@ public class ProjectVariationOrder : TenantEntity
 
     [ForeignKey(nameof(ContractId))]
     public virtual Contract? Contract { get; set; }
+    [ForeignKey(nameof(SiteInstructionId))] public virtual ProjectSiteInstruction? SiteInstruction { get; set; }
+    [ForeignKey(nameof(ChangeRequestId))] public virtual ProjectChangeRequest? ChangeRequest { get; set; }
+    [ForeignKey(nameof(ContractorBusinessPartnerId))] public virtual BusinessPartner? ContractorBusinessPartner { get; set; }
+    [ForeignKey(nameof(ApprovedBoqVersionId))] public virtual ProjectBoqVersion? ApprovedBoqVersion { get; set; }
+    [ForeignKey(nameof(ConfigurationProfileId))] public virtual QuantitySurveyConfigurationProfile? ConfigurationProfile { get; set; }
+    [ForeignKey(nameof(VariationDecisionId))] public virtual QuantitySurveyConfigurationDecision? VariationDecision { get; set; }
+    [ForeignKey(nameof(ContractAmendmentId))] public virtual ContractAmendment? ContractAmendment { get; set; }
+    [ForeignKey(nameof(RevisedBoqVersionId))] public virtual ProjectBoqVersion? RevisedBoqVersion { get; set; }
+    [ForeignKey(nameof(BudgetRevisionId))] public virtual ProjectBudgetRevision? BudgetRevision { get; set; }
+    [ForeignKey(nameof(ForecastVersionId))] public virtual ProjectForecastVersion? ForecastVersion { get; set; }
+    public virtual ICollection<QuantitySurveyVariationValuationLine> ValuationLines { get; set; } = new List<QuantitySurveyVariationValuationLine>();
+    public virtual ICollection<QuantitySurveyVariationEvidence> VariationEvidence { get; set; } = new List<QuantitySurveyVariationEvidence>();
+    public virtual ICollection<QuantitySurveyVariationRevision> VariationRevisions { get; set; } = new List<QuantitySurveyVariationRevision>();
 }
 
 public class ProjectInterimValuation : TenantEntity
@@ -1493,6 +1580,17 @@ public class ProjectPaymentCertificate : TenantEntity
     public Guid? ProjectPackageId { get; set; }
     public Guid? ContractId { get; set; }
     public Guid? ProjectInterimValuationId { get; set; }
+    public Guid? QuantitySurveyValuationWorksheetId { get; set; }
+    public Guid? QuantitySurveySubcontractValuationId { get; set; }
+    public Guid? SubcontractorBusinessPartnerId { get; set; }
+    public Guid? PreviousPaymentCertificateId { get; set; }
+    public Guid? QuantitySurveyAdvanceRecoveryAgreementId { get; set; }
+    public Guid? QuantitySurveyMaterialReconciliationId { get; set; }
+    public Guid? VendorInvoiceId { get; set; }
+    public Guid ClientRequestId { get; set; }
+    [MaxLength(64)] public string? RequestHash { get; set; }
+    public Guid? LastMutationClientRequestId { get; set; }
+    [MaxLength(64)] public string? LastMutationRequestHash { get; set; }
 
     [MaxLength(100)]
     public string? CertificateNumber { get; set; }
@@ -1509,6 +1607,12 @@ public class ProjectPaymentCertificate : TenantEntity
     public DateTime? PaymentDueDate { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
+    public decimal CertifiedToDateAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PreviouslyCertifiedAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
     public decimal GrossCertifiedAmount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
@@ -1521,6 +1625,21 @@ public class ProjectPaymentCertificate : TenantEntity
     public decimal OtherDeductionsAmount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
+    public decimal AdvanceRecoveryAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal MaterialDeductionAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal MaterialOnSiteAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal MaterialOffSiteAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal TaxAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
     public decimal NetCertifiedAmount { get; set; }
 
     [MaxLength(10)]
@@ -1528,6 +1647,43 @@ public class ProjectPaymentCertificate : TenantEntity
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    [MaxLength(30)] public string ApprovalStatus { get; set; } = "Draft";
+    public Guid? ConfigurationProfileId { get; set; }
+    public Guid? ValuationDecisionId { get; set; }
+    public Guid? ApprovalWorkflowDefinitionId { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? CertificateTemplateId { get; set; }
+    public int CertificateTemplateVersionSnapshot { get; set; }
+    public Guid? CertificateMetadataTemplateId { get; set; }
+    [MaxLength(80)] public string? CertificateMetadataTemplateCodeSnapshot { get; set; }
+    [MaxLength(64)] public string? PolicyHash { get; set; }
+    public Guid? ExpenseAccountId { get; set; }
+    public Guid? AccountsPayableAccountId { get; set; }
+    public Guid? PaymentTermId { get; set; }
+    public Guid? TaxGroupId { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    [MaxLength(30)] public string TaxHandling { get; set; } = "FinanceCalculated";
+    public bool PreviousCertificateRequired { get; set; }
+    public bool RetentionApplied { get; set; }
+    public bool AdvanceRecoveryApplied { get; set; }
+    public Guid? PreparedById { get; set; }
+    public DateTime PreparedAt { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? ApprovedById { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    [MaxLength(2000)] public string? RejectionReason { get; set; }
+    [MaxLength(30)] public string ApHandoffStatus { get; set; } = ProjectPaymentCertificateApHandoffStatuses.NotReady;
+    public DateTime? ApHandoffAt { get; set; }
+    [MaxLength(1000)] public string? ApHandoffFailure { get; set; }
+    [MaxLength(30)] public string PaymentStatusSnapshot { get; set; } = "NotInvoiced";
+    public DateTime? PaymentStatusUpdatedAt { get; set; }
+    public Guid? CentralDocumentRecordId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
+    [MaxLength(64)] public string? GeneratedDocumentHash { get; set; }
+    public DateTime? GeneratedAt { get; set; }
+    [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     [ForeignKey(nameof(ProjectId))]
     public virtual Project Project { get; set; } = null!;
@@ -1543,6 +1699,13 @@ public class ProjectPaymentCertificate : TenantEntity
 
     [ForeignKey(nameof(ProjectInterimValuationId))]
     public virtual ProjectInterimValuation? ProjectInterimValuation { get; set; }
+    public virtual QuantitySurveyValuationWorksheet? QuantitySurveyValuationWorksheet { get; set; }
+    public virtual QuantitySurveySubcontractValuation? QuantitySurveySubcontractValuation { get; set; }
+    public virtual BusinessPartner? SubcontractorBusinessPartner { get; set; }
+    public virtual ProjectPaymentCertificate? PreviousPaymentCertificate { get; set; }
+    public virtual QuantitySurveyAdvanceRecoveryAgreement? QuantitySurveyAdvanceRecoveryAgreement { get; set; }
+    public virtual QuantitySurveyMaterialReconciliation? QuantitySurveyMaterialReconciliation { get; set; }
+    public virtual VendorInvoice? VendorInvoice { get; set; }
 }
 
 public class ProjectExtensionOfTime : TenantEntity
@@ -1594,22 +1757,50 @@ public class ProjectExtensionOfTime : TenantEntity
     public virtual Contract? Contract { get; set; }
 }
 
-public class ProjectFinalAccount : TenantEntity
+public class ProjectFinalAccount : TenantEntity, IQuantitySurveyWorkflowRecord
 {
     public Guid ProjectId { get; set; }
     public Guid? ContractId { get; set; }
+
+    public Guid ClientRequestId { get; set; }
+
+    [MaxLength(64)]
+    public string? RequestHash { get; set; }
+
+    public Guid? LastMutationClientRequestId { get; set; }
+
+    [MaxLength(64)]
+    public string? LastMutationRequestHash { get; set; }
 
     [Required]
     [MaxLength(30)]
     public string Status { get; set; } = ProjectFinalAccountStatuses.Draft;
 
+    [Required]
+    [MaxLength(30)]
+    public string ApprovalStatus { get; set; } = "Draft";
+
     public DateTime? SettlementDate { get; set; }
+
+    public Guid? ApprovedBoqVersionId { get; set; }
+
+    [MaxLength(64)]
+    public string? ApprovedBoqSnapshotHash { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ApprovedBoqValue { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal OriginalContractValue { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal ApprovedVariationAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ApprovedClaimAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal ApprovedEscalationAmount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal CertifiedToDate { get; set; }
@@ -1621,6 +1812,18 @@ public class ProjectFinalAccount : TenantEntity
     public decimal RetentionReleasedAmount { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
+    public decimal AdvanceRecoveryAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal MaterialDeductionAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal OtherDeductionAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PaidToDateAmount { get; set; }
+
+    [Column(TypeName = "decimal(18,2)")]
     public decimal FinalAccountValue { get; set; }
 
     [MaxLength(10)]
@@ -1629,11 +1832,88 @@ public class ProjectFinalAccount : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    public Guid? ConfigurationProfileId { get; set; }
+    public Guid? ContractControlsDecisionId { get; set; }
+    public Guid? ApprovalWorkflowDefinitionId { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+
+    [MaxLength(64)]
+    public string? PolicyHash { get; set; }
+
+    [MaxLength(64)]
+    public string? ReconciliationHash { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? ReconciliationJson { get; set; }
+
+    public Guid? PreparedById { get; set; }
+    public DateTime? PreparedAt { get; set; }
+    public Guid? SubmittedById { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public Guid? ApprovedById { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    [MaxLength(2000)]
+    public string? RejectionReason { get; set; }
+
+    public Guid? ClosedById { get; set; }
+    public DateTime? ClosedAt { get; set; }
+
+    [MaxLength(2000)]
+    public string? ClosureReason { get; set; }
+
+    [MaxLength(100)]
+    public string? CorrelationId { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     [ForeignKey(nameof(ProjectId))]
     public virtual Project Project { get; set; } = null!;
 
     [ForeignKey(nameof(ContractId))]
     public virtual Contract? Contract { get; set; }
+
+    [ForeignKey(nameof(ApprovedBoqVersionId))]
+    public virtual ProjectBoqVersion? ApprovedBoqVersion { get; set; }
+
+    public virtual ICollection<ProjectFinalAccountRevision> Revisions { get; set; } = new List<ProjectFinalAccountRevision>();
+}
+
+public sealed class ProjectFinalAccountRevision : TenantEntity
+{
+    public Guid ProjectFinalAccountId { get; set; }
+
+    public Guid ClientRequestId { get; set; }
+
+    [Required, MaxLength(64)]
+    public string RequestHash { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string Action { get; set; } = string.Empty;
+
+    public Guid ActorUserId { get; set; }
+
+    [Required, MaxLength(300)]
+    public string ActorName { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? ActorRoles { get; set; }
+
+    [Required, MaxLength(100)]
+    public string CorrelationId { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Reason { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? BeforeJson { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string? AfterJson { get; set; }
+
+    [ForeignKey(nameof(ProjectFinalAccountId))]
+    public ProjectFinalAccount ProjectFinalAccount { get; set; } = null!;
 }
 
 public class ProjectBuilding : TenantEntity

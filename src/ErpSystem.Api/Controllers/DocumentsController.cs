@@ -1,5 +1,7 @@
 using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.Interfaces.Documents;
+using ErpSystem.Core.Interfaces.QuantitySurvey;
+using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -35,6 +37,11 @@ public sealed class DocumentsController : ControllerBase
         // pass through the generic renderer, so keep the Finance export policy explicit here.
         [DocumentTypes.FinanceClosePack] = FinancePermissions.ExportFinanceReports
     };
+    public static readonly IReadOnlyDictionary<string, string> QuantitySurveyDocumentPolicies =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [DocumentTypes.QuantitySurveyEscalationDisputeAuditPack] = QuantitySurveyAccessControlRegistry.AuditRead
+        };
 
     private readonly IDocumentOutputService _documentOutputService;
     private readonly IAuthorizationService _authorizationService;
@@ -91,6 +98,14 @@ public sealed class DocumentsController : ControllerBase
         catch (NotSupportedException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (QuantitySurveyEscalationDisputeNotFoundException ex)
+        {
+            return NotFound(SafeQuantitySurveyProblem(404, ex.Message));
+        }
+        catch (QuantitySurveyEscalationDisputeConflictException ex)
+        {
+            return Conflict(SafeQuantitySurveyProblem(409, ex.Message));
         }
         catch (Exception ex)
         {
@@ -217,7 +232,8 @@ public sealed class DocumentsController : ControllerBase
 
     private async Task<IActionResult?> AuthorizeDocumentRenderAsync(string documentType, string? copyType)
     {
-        if (!FinanceDocumentPolicies.TryGetValue(documentType ?? string.Empty, out var policy))
+        if (!FinanceDocumentPolicies.TryGetValue(documentType ?? string.Empty, out var policy) &&
+            !QuantitySurveyDocumentPolicies.TryGetValue(documentType ?? string.Empty, out policy))
         {
             return null;
         }
@@ -238,4 +254,18 @@ public sealed class DocumentsController : ControllerBase
         var authorization = await _authorizationService.AuthorizeAsync(User, policy);
         return authorization.Succeeded ? null : Forbid();
     }
+
+    private ProblemDetails SafeQuantitySurveyProblem(int status, string detail) => new()
+    {
+        Status = status,
+        Title = status == 404 ? "QS escalation dispute not found" : "QS escalation dispute export conflict",
+        Detail = detail,
+        Type = $"https://tdc.gov.gh/problems/quantity-survey-escalation-dispute-{status}",
+        Instance = HttpContext.Request.Path,
+        Extensions =
+        {
+            ["code"] = $"QS_ESCALATION_DISPUTE_{status}",
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
 }

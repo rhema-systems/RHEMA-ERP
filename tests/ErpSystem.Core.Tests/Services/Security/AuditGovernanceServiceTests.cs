@@ -26,6 +26,15 @@ public sealed class AuditGovernanceServiceTests
         yield return ["ReverseStockAdjustment", AuditOperationKind.Reverse];
         yield return ["Dispatch", AuditOperationKind.Dispatch];
         yield return ["Receive", AuditOperationKind.Receive];
+        yield return ["CalculateEscalationRun", AuditOperationKind.Create];
+        yield return ["ReviewEscalationRun", AuditOperationKind.Update];
+        yield return ["OpenEscalationDispute", AuditOperationKind.Create];
+        yield return ["RecordEscalationContractorResponse", AuditOperationKind.Update];
+        yield return ["AttachMeasurementEvidence", AuditOperationKind.Create];
+        yield return ["RecordMeasurementSheet", AuditOperationKind.Approve];
+        yield return ["ScheduleJointMeasurement", AuditOperationKind.Update];
+        yield return ["EndorseJointMeasurement", AuditOperationKind.Approve];
+        yield return ["ApplyJointMeasurementBoqRevision", AuditOperationKind.Approve];
     }
 
     [Theory]

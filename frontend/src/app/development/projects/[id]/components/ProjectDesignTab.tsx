@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { QuantitySurveyDesignRevisionImpactPanel } from '@/components/quantity-survey/QuantitySurveyDesignRevisionImpactPanel';
 import type {
   CreateProjectDrawingDto,
   CreateProjectSubmittalDto,
@@ -18,6 +19,7 @@ import type {
 } from '@/services/projectService';
 
 type ProjectDesignTabProps = {
+  projectId: string;
   drawings: ProjectDrawingDto[];
   submittals: ProjectSubmittalDto[];
   phases: ProjectPhaseDto[];
@@ -42,6 +44,7 @@ const flattenPhases = (phases: ProjectPhaseDto[], depth = 0): Array<ProjectPhase
   phases.flatMap((phase) => [{ ...phase, depth }, ...flattenPhases(phase.children ?? [], depth + 1)]);
 
 export function ProjectDesignTab({
+  projectId,
   drawings,
   submittals,
   phases,
@@ -136,6 +139,28 @@ export function ProjectDesignTab({
                 <Label>Revision</Label>
                 <Input value={drawingDraft.revision ?? ''} onChange={(event) => setDrawingDraft((current) => ({ ...current, revision: event.target.value }))} placeholder="Rev 02" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Supersedes drawing revision</Label>
+              <Select value={drawingDraft.supersedesDrawingId || 'none'} onValueChange={(value) => {
+                const prior = drawings.find((item) => item.id === value);
+                setDrawingDraft((current) => ({
+                  ...current,
+                  supersedesDrawingId: value === 'none' ? undefined : value,
+                  drawingNumber: prior?.drawingNumber ?? current.drawingNumber,
+                  discipline: prior?.discipline ?? current.discipline,
+                  projectPhaseId: prior?.projectPhaseId ?? current.projectPhaseId,
+                }));
+              }}>
+                <SelectTrigger><SelectValue placeholder="First revision / no predecessor" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">First revision / no predecessor</SelectItem>
+                  {drawings.filter((item) => item.revision).map((item) => (
+                    <SelectItem key={item.id} value={item.id}>{item.drawingNumber} · Rev {item.revision} · {formatCatalogLabel(item.status)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500">Selecting a predecessor locks the drawing number and establishes auditable revision lineage.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
@@ -318,6 +343,8 @@ export function ProjectDesignTab({
           </CardContent>
         </Card>
       </div>
+
+      <QuantitySurveyDesignRevisionImpactPanel projectId={projectId} />
     </div>
   );
 }

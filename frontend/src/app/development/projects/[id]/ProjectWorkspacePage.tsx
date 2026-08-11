@@ -206,7 +206,6 @@ import {
   ProjectWorkspaceDto,
   ProjectWorkItemDto,
   ProjectNonConformanceDto,
-  UpsertProjectFinalAccountDto,
   UpsertProjectClosureDto,
   UpdateProjectDto,
   projectService,
@@ -577,13 +576,6 @@ const DEFAULT_PROJECT_EXTENSION_OF_TIME_STATUSES = [
   'Approved',
   'Rejected',
   'Implemented',
-  'Closed',
-];
-const DEFAULT_PROJECT_FINAL_ACCOUNT_STATUSES = [
-  'Draft',
-  'UnderReview',
-  'Agreed',
-  'Approved',
   'Closed',
 ];
 const DEFAULT_PROJECT_UNIT_TYPES = [
@@ -1110,17 +1102,6 @@ const extensionOfTimeInit: CreateProjectExtensionOfTimeDto = {
   daysRequested: 0,
   daysApproved: 0,
 };
-const finalAccountInit: UpsertProjectFinalAccountDto = {
-  status: 'Draft',
-  settlementDate: today(),
-  originalContractValue: 0,
-  approvedVariationAmount: 0,
-  certifiedToDate: 0,
-  retentionHeldAmount: 0,
-  retentionReleasedAmount: 0,
-  finalAccountValue: 0,
-  currency: '',
-};
 const unitInit: CreateProjectUnitDto = {
   name: '',
   unitType: 'Unit',
@@ -1583,8 +1564,6 @@ export default function ProjectWorkspacePage({
     useState<CreateProjectPaymentCertificateDto>(paymentCertificateInit);
   const [extensionOfTimeDraft, setExtensionOfTimeDraft] =
     useState<CreateProjectExtensionOfTimeDto>(extensionOfTimeInit);
-  const [finalAccountDraft, setFinalAccountDraft] =
-    useState<UpsertProjectFinalAccountDto>(finalAccountInit);
   const [unitDraft, setUnitDraft] = useState<CreateProjectUnitDto>(unitInit);
   const [customerVariationDraft, setCustomerVariationDraft] =
     useState<CreateProjectCustomerVariationDto>(customerVariationInit);
@@ -2392,30 +2371,6 @@ export default function ProjectWorkspacePage({
           p.contractId ||
           p.packages.find((item) => !!item.contractId)?.contractId,
       });
-      setFinalAccountDraft({
-        ...finalAccountInit,
-        contractId:
-          p.finalAccount?.contractId ||
-          p.contractId ||
-          p.packages.find((item) => !!item.contractId)?.contractId,
-        status: p.finalAccount?.status || finalAccountInit.status,
-        settlementDate:
-          normalizeDateInputValue(p.finalAccount?.settlementDate) ||
-          finalAccountInit.settlementDate,
-        originalContractValue: p.finalAccount?.originalContractValue ?? 0,
-        approvedVariationAmount:
-          p.finalAccount?.approvedVariationAmount ??
-          p.variationOrders.reduce(
-            (sum, item) => sum + (item.approvedAmount ?? 0),
-            0
-          ),
-        certifiedToDate: p.finalAccount?.certifiedToDate ?? 0,
-        retentionHeldAmount: p.finalAccount?.retentionHeldAmount ?? 0,
-        retentionReleasedAmount: p.finalAccount?.retentionReleasedAmount ?? 0,
-        finalAccountValue: p.finalAccount?.finalAccountValue ?? 0,
-        currency: p.finalAccount?.currency || baseCurrency.code,
-        notes: p.finalAccount?.notes || undefined,
-      });
       setUnitDraft({ ...unitInit, currency: baseCurrency.code });
       setCustomerVariationDraft({
         ...customerVariationInit,
@@ -3098,9 +3053,6 @@ export default function ProjectWorkspacePage({
         current.currency ? current : { ...current, currency: baseCurrency.code }
       );
       setPaymentCertificateDraft((current) =>
-        current.currency ? current : { ...current, currency: baseCurrency.code }
-      );
-      setFinalAccountDraft((current) =>
         current.currency ? current : { ...current, currency: baseCurrency.code }
       );
       setDefectLiabilityDraft((current) =>
@@ -4396,17 +4348,11 @@ export default function ProjectWorkspacePage({
             baseCurrency,
             paymentCertificateDraft.currency
           ),
-          ...buildProjectCurrencyOptions(
-            currencies,
-            baseCurrency,
-            finalAccountDraft.currency
-          ),
         ])
       ),
     [
       baseCurrency,
       currencies,
-      finalAccountDraft.currency,
       interimValuationDraft.currency,
       paymentCertificateDraft.currency,
       projectCurrencyOptions,
@@ -5443,20 +5389,6 @@ export default function ProjectWorkspacePage({
         }
       }
     );
-  const saveFinalAccount = () =>
-    act(
-      () =>
-        projectService
-          .upsertProjectFinalAccount(getProjectId(), {
-            contractId: finalAccountDraft.contractId,
-            status: finalAccountDraft.status,
-            settlementDate: finalAccountDraft.settlementDate,
-            currency: finalAccountDraft.currency || baseCurrency.code,
-            notes: finalAccountDraft.notes,
-          })
-          .then(() => Promise.resolve()),
-      'Final account refreshed'
-    );
   const addProjectBuilding = (dto: CreateProjectBuildingDto) =>
     act(
       () =>
@@ -6078,6 +6010,7 @@ export default function ProjectWorkspacePage({
         </TabsContent>
         <TabsContent value="design" className="space-y-6">
           <ProjectDesignTab
+            projectId={project.id}
             drawings={project.drawings}
             submittals={project.submittals}
             phases={project.phases}
@@ -6228,8 +6161,6 @@ export default function ProjectWorkspacePage({
             extensionOfTimeDraft={extensionOfTimeDraft}
             setExtensionOfTimeDraft={setExtensionOfTimeDraft}
             editingExtensionOfTimeId={editingExtensionOfTimeId}
-            finalAccountDraft={finalAccountDraft}
-            setFinalAccountDraft={setFinalAccountDraft}
             variationOrderStatusOptions={
               DEFAULT_PROJECT_VARIATION_ORDER_STATUSES
             }
@@ -6243,7 +6174,6 @@ export default function ProjectWorkspacePage({
             extensionOfTimeStatusOptions={
               DEFAULT_PROJECT_EXTENSION_OF_TIME_STATUSES
             }
-            finalAccountStatusOptions={DEFAULT_PROJECT_FINAL_ACCOUNT_STATUSES}
             formatCatalogLabel={formatCatalogLabel}
             getCurrencyOptionLabel={getCurrencyOptionLabel}
             formatDateLabel={formatDateLabel}
@@ -6264,7 +6194,6 @@ export default function ProjectWorkspacePage({
             onEditExtensionOfTime={beginEditExtensionOfTime}
             onCancelExtensionOfTimeEdit={resetExtensionOfTimeEditor}
             onDeleteExtensionOfTime={deleteExtensionOfTime}
-            onSaveFinalAccount={saveFinalAccount}
           />
         </TabsContent>
         <TabsContent value="approvals" className="space-y-6">

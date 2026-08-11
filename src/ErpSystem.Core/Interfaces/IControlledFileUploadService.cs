@@ -24,6 +24,33 @@ public static class ControlledFileUploadCategories
     public const string QuantitySurveyTenderBoqSubmission =
         "quantity-survey-tender-boq-submission";
 
+    public const string QuantitySurveyPriceIndexImport =
+        "quantity-survey-price-index-import";
+
+    public const string QuantitySurveyEscalationDisputeEvidence =
+        "quantity-survey-escalation-dispute-evidence";
+
+    public const string QuantitySurveyMeasurementEvidence =
+        "quantity-survey-measurement-evidence";
+
+    public const string QuantitySurveyValuationEvidence =
+        "quantity-survey-valuation-evidence";
+
+    public const string QuantitySurveyPaymentCertificate =
+        "quantity-survey-payment-certificate";
+
+    public const string QuantitySurveyVariationEvidence =
+        "quantity-survey-variation-evidence";
+
+    public const string QuantitySurveyClaimEvidence =
+        "quantity-survey-claim-evidence";
+
+    public const string QuantitySurveyDayworkEvidence =
+        "quantity-survey-daywork-evidence";
+
+    public const string QuantitySurveySubcontractEvidence =
+        "quantity-survey-subcontract-evidence";
+
     // HR document families. Every one of these is personal data — CVs, identity
     // documents, sick-note certificates, disciplinary evidence, medical exam
     // results — so they are all private (see LocalFileStorageService's "hr-"
@@ -57,6 +84,15 @@ public static class ControlledFileUploadCategories
                 FinanceCloseEvidence,
                 QuantitySurveyBoqImport,
                 QuantitySurveyTenderBoqSubmission,
+                QuantitySurveyPriceIndexImport,
+                QuantitySurveyEscalationDisputeEvidence,
+                QuantitySurveyMeasurementEvidence,
+                QuantitySurveyValuationEvidence,
+                QuantitySurveyPaymentCertificate,
+                QuantitySurveyVariationEvidence,
+                QuantitySurveyClaimEvidence,
+                QuantitySurveyDayworkEvidence,
+                QuantitySurveySubcontractEvidence,
                 HrCandidateCv,
                 HrCandidateDocuments,
                 HrCandidatePhotos,

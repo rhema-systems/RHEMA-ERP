@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tdc.gov.gh/contracts/quantity-survey/tdc-qs-design-extraction-manifest-v1.schema.json",
+  "title": "TDC Quantity Survey Design Extraction Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "exchangeId",
+    "generatedAtUtc",
+    "adapterProfileCode",
+    "adapterVersion",
+    "projectReference",
+    "baseBoqVersionNumber",
+    "designComparison",
+    "sourceArtifacts",
+    "lines",
+    "controlTotals",
+    "normalizedPayloadSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "tdc.qs.design-extraction.v1"
+    },
+    "exchangeId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "generatedAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "adapterProfileCode": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9._-]{2,49}$"
+    },
+    "adapterVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$"
+    },
+    "projectReference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "baseBoqVersionNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "designComparison": {
+      "$ref": "#/$defs/designComparison"
+    },
+    "sourceArtifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/sourceArtifact"
+      }
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2000,
+      "items": {
+        "$ref": "#/$defs/extractionLine"
+      }
+    },
+    "controlTotals": {
+      "$ref": "#/$defs/controlTotals"
+    },
+    "normalizedPayloadSha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[A-F0-9]{64}$"
+    },
+    "drawingReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drawingNumber", "revision"],
+      "properties": {
+        "drawingNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30
+        }
+      }
+    },
+    "designComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previousDrawing", "revisedDrawing"],
+      "properties": {
+        "previousDrawing": {
+          "$ref": "#/$defs/drawingReference"
+        },
+        "revisedDrawing": {
+          "$ref": "#/$defs/drawingReference"
+        }
+      }
+    },
+    "sourceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactRole", "originalFileName", "mediaType", "sha256"],
+      "properties": {
+        "artifactRole": {
+          "enum": ["PreviousDesign", "RevisedDesign", "NormalizedManifest", "NormalizedLines", "AdapterReport"]
+        },
+        "originalFileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "extractionLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalLineId",
+        "boqLineKey",
+        "boqItemCode",
+        "description",
+        "unitCode",
+        "previousQuantity",
+        "revisedQuantity",
+        "changeType",
+        "measurementCode",
+        "sourceElementIds",
+        "extractionMethod",
+        "confidencePercent"
+      ],
+      "properties": {
+        "externalLineId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "boqLineKey": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        },
+        "boqItemCode": {
+          "type": ["string", "null"],
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "unitCode": {
+          "enum": ["m", "m2", "m3", "nr", "kg", "t", "l", "sum"]
+        },
+        "previousQuantity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 999999999999.999999,
+          "multipleOf": 0.000001
+        },
+        "revisedQuantity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 999999999999.999999,
+          "multipleOf": 0.000001
+        },
+        "changeType": {
+          "enum": ["Added", "Removed", "Modified", "Unchanged"]
+        },
+        "measurementCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "pattern": "^[A-Z0-9._-]+$"
+        },
+        "sourceElementIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "extractionMethod": {
+          "enum": ["ModelProperty", "GeometryCalculated", "VendorTakeoff", "ManualVerified"]
+        },
+        "confidencePercent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "comment": {
+          "type": ["string", "null"],
+          "maxLength": 1000
+        }
+      }
+    },
+    "controlTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lineCount", "previousQuantityTotal", "revisedQuantityTotal", "netQuantityChange"],
+      "properties": {
+        "lineCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "previousQuantityTotal": {
+          "type": "number",
+          "minimum": 0
+        },
+        "revisedQuantityTotal": {
+          "type": "number",
+          "minimum": 0
+        },
+        "netQuantityChange": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

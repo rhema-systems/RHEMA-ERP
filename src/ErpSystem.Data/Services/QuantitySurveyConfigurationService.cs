@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -54,10 +55,23 @@ public sealed class QuantitySurveyConfigurationService : IQuantitySurveyConfigur
             .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.Name + " v" + x.Version, Group = x.Category }).ToListAsync(cancellationToken);
         var dmsTemplates = await _db.CentralDocumentMetadataTemplates.AsNoTracking().Where(x => x.TenantId == _user.TenantId && !x.IsDeleted && x.IsActive && x.PublishedAt.HasValue).OrderBy(x => x.DocumentType)
             .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.TemplateCode + " - " + x.DocumentType, Group = x.Module }).ToListAsync(cancellationToken);
+        var postingExpenseAccounts = await _db.Accounts.AsNoTracking().Where(x => x.TenantId == _user.TenantId && !x.IsDeleted && x.Status == AccountStatus.Active && x.AllowDirectPosting && x.AccountType == AccountType.Expense).OrderBy(x => x.AccountNumber)
+            .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.AccountNumber + " - " + x.AccountName, Group = "Expense" }).ToListAsync(cancellationToken);
+        var accountsPayableAccounts = await _db.Accounts.AsNoTracking().Where(x => x.TenantId == _user.TenantId && !x.IsDeleted && x.Status == AccountStatus.Active && x.AccountType == AccountType.Liability && x.IsControlAccount).OrderBy(x => x.AccountNumber)
+            .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.AccountNumber + " - " + x.AccountName, Group = "Accounts Payable" }).ToListAsync(cancellationToken);
+        var supplierPaymentTerms = await _db.PaymentTerms.AsNoTracking().Where(x => x.TenantId == _user.TenantId && !x.IsDeleted && x.IsActive && (x.ApplicableTo == "All" || x.ApplicableTo == "Supplier" || x.ApplicableTo == "Contractor")).OrderBy(x => x.DisplayOrder).ThenBy(x => x.Code)
+            .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.Code + " - " + x.Name, Group = x.ApplicableTo }).ToListAsync(cancellationToken);
+        var supplierWithholdingTaxes = await _db.Taxes.AsNoTracking().Where(x => x.TenantId == _user.TenantId && !x.IsDeleted && x.IsActive && (x.Applicability == TaxApplicability.Purchases || x.Applicability == TaxApplicability.Both) && x.Category == TaxCategory.Withholding).OrderBy(x => x.Code)
+            .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.Code + " - " + x.Name, Group = "Withholding" }).ToListAsync(cancellationToken);
+        var supplierTaxGroups = await _db.TaxGroups.AsNoTracking().Where(x => x.TenantId == _user.TenantId && !x.IsDeleted && x.IsActive && (x.Applicability == TaxApplicability.Purchases || x.Applicability == TaxApplicability.Both)).OrderBy(x => x.Code)
+            .Select(x => new QuantitySurveyLookupOptionDto { Value = x.Id.ToString(), Label = x.Code + " - " + x.Name, Group = "Purchases" }).ToListAsync(cancellationToken);
         return new QuantitySurveyLookupsDto { Sources = new Dictionary<string, IReadOnlyList<QuantitySurveyLookupOptionDto>>(StringComparer.OrdinalIgnoreCase)
         {
             ["roles"] = roles, ["projectTypes"] = projectTypes, ["locations"] = locations, ["currencies"] = currencies,
-            ["workflows"] = workflows, ["reports"] = reports, ["reportTemplates"] = reportTemplates, ["dmsTemplates"] = dmsTemplates
+            ["workflows"] = workflows, ["reports"] = reports, ["reportTemplates"] = reportTemplates, ["dmsTemplates"] = dmsTemplates,
+            ["postingExpenseAccounts"] = postingExpenseAccounts, ["accountsPayableAccounts"] = accountsPayableAccounts,
+            ["supplierPaymentTerms"] = supplierPaymentTerms, ["supplierTaxGroups"] = supplierTaxGroups,
+            ["supplierWithholdingTaxes"] = supplierWithholdingTaxes
         }};
     }
 

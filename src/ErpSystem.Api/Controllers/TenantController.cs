@@ -27,6 +27,7 @@ public class TenantController : ControllerBase
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
     private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
     private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+    private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
 
     public TenantController(
         ITenantService tenantService,
@@ -42,7 +43,8 @@ public class TenantController : ControllerBase
         QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
         InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
-        AuditComplianceReportSeeder? auditComplianceReportSeeder = null)
+        AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
+        QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null)
     {
         _tenantService = tenantService;
         _logger = logger;
@@ -58,6 +60,7 @@ public class TenantController : ControllerBase
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
         _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
         _auditComplianceReportSeeder = auditComplianceReportSeeder;
+        _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
     }
 
     /// <summary>
@@ -247,6 +250,10 @@ public class TenantController : ControllerBase
             if (_auditComplianceReportSeeder is not null)
             {
                 await _auditComplianceReportSeeder.SeedTenantAsync(createdTenant.Id);
+            }
+            if (_quantitySurveyStatutoryReportSeeder is not null)
+            {
+                await _quantitySurveyStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
             }
 
             // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.

@@ -4,12 +4,16 @@ using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.QuantitySurvey;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -586,6 +590,8 @@ public sealed class ProcurementContractActivationService :
                 "CONTRACT_ACTIVATION_AWARD_MISMATCH",
                 "Contract supplier, bid, amount, currency, tender, or award status differs from the approved award."));
 
+        checks.Add(await EvaluateQuantitySurveyCommercialTermsAsync(contract, cancellationToken));
+
         var readiness = await ReadinessDecisions.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.SourceType == ProcurementAwardReadinessSourceType.Tender &&
@@ -716,6 +722,21 @@ public sealed class ProcurementContractActivationService :
             contract.TenderBidId,
             contract.ContractValue,
             Currency = contract.Currency.ToUpperInvariant(),
+            contract.PaymentTermId,
+            contract.ProvisionalSumAmount,
+            contract.ContingencyAmount,
+            contract.RetentionPercentage,
+            contract.DefectsLiabilityDays,
+            contract.RetentionClause,
+            contract.AllowSectionalTakeover,
+            contract.SectionalTakeoverClause,
+            contract.AllowSubcontracting,
+            contract.SubcontractPaymentTermId,
+            contract.SubcontractTerms,
+            contract.ClaimNoticePeriodDays,
+            contract.ClaimClause,
+            contract.CommercialTermsContractDocumentId,
+            contract.CommercialTermsPolicyHash,
             contract.StartDate,
             contract.EndDate,
             contract.ScopeOfWork,
@@ -727,6 +748,115 @@ public sealed class ProcurementContractActivationService :
         return new Evaluation(profile, award, readiness, authority, ghaneps,
             performanceRequired, performanceBond, stage, signature,
             requirements, checks, snapshot);
+    }
+
+    private async Task<ProcurementContractActivationCheckDto> EvaluateQuantitySurveyCommercialTermsAsync(
+        Contract contract, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(contract.ContractType, "Works", StringComparison.OrdinalIgnoreCase))
+            return NotRequired("qs-commercial-terms", "QS commercial terms",
+                "CONTRACT_ACTIVATION_QS_TERMS_NOT_REQUIRED",
+                "QS commercial-term controls apply only to Works contracts.");
+        try
+        {
+            var now = DateTime.UtcNow;
+            var profile = await _unitOfWork.Repository<QuantitySurveyConfigurationProfile>()
+                .GetQueryable(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
+                                       value.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Published &&
+                                       value.PublishedAt != null && value.EffectiveFrom <= now &&
+                                       (!value.EffectiveTo.HasValue || value.EffectiveTo >= now))
+                .AsNoTracking().OrderByDescending(value => value.IsDefault)
+                .ThenByDescending(value => value.Version).FirstOrDefaultAsync(cancellationToken);
+            if (profile is null)
+                return Failed("qs-commercial-terms", "QS commercial terms",
+                    "CONTRACT_ACTIVATION_QS_CONFIGURATION_MISSING",
+                    "No Published QS configuration is effective for this Works contract.");
+            var decisions = await _unitOfWork.Repository<QuantitySurveyConfigurationDecision>()
+                .GetQueryable(value => value.TenantId == _currentUser.TenantId && value.ProfileId == profile.Id &&
+                                       !value.IsDeleted && (value.DecisionKey == "QS-DEC-009" || value.DecisionKey == "QS-DEC-012") &&
+                                       value.Status == QuantitySurveyConfigurationDecisionStatus.Approved &&
+                                       value.ApprovalStatus == QuantitySurveyConfigurationApprovalStatus.Approved &&
+                                       value.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Verified &&
+                                       (!value.EffectiveFrom.HasValue || value.EffectiveFrom <= now) &&
+                                       (!value.EffectiveTo.HasValue || value.EffectiveTo >= now))
+                .AsNoTracking().ToListAsync(cancellationToken);
+            var retentionDecision = decisions.SingleOrDefault(value => value.DecisionKey == "QS-DEC-009");
+            var controlsDecision = decisions.SingleOrDefault(value => value.DecisionKey == "QS-DEC-012");
+            if (retentionDecision is null || controlsDecision is null)
+                return Failed("qs-commercial-terms", "QS commercial terms",
+                    "CONTRACT_ACTIVATION_QS_DECISIONS_MISSING",
+                    "Approved and evidence-verified QS-DEC-009 and QS-DEC-012 decisions are required.");
+            var retention = JsonSerializer.Deserialize<QsRetentionValue>(retentionDecision.ValueJson, JsonOptions);
+            var controls = JsonSerializer.Deserialize<QsContractControlsValue>(controlsDecision.ValueJson, JsonOptions);
+            if (retention is null || controls is null)
+                return Failed("qs-commercial-terms", "QS commercial terms",
+                    "CONTRACT_ACTIVATION_QS_POLICY_INVALID",
+                    "The effective QS commercial-terms decisions are invalid.");
+            var paymentTermReady = contract.PaymentTermId.HasValue &&
+                await _unitOfWork.Repository<PaymentTerm>().GetQueryable(value =>
+                        value.TenantId == _currentUser.TenantId && value.Id == contract.PaymentTermId.Value &&
+                        !value.IsDeleted && value.IsActive &&
+                        (value.ApplicableTo == "All" || value.ApplicableTo == "Supplier" || value.ApplicableTo == "Contractor"))
+                    .AsNoTracking().AnyAsync(cancellationToken);
+            var subcontractPaymentTermReady = contract.SubcontractPaymentTermId.HasValue &&
+                await _unitOfWork.Repository<PaymentTerm>().GetQueryable(value =>
+                        value.TenantId == _currentUser.TenantId && value.Id == contract.SubcontractPaymentTermId.Value &&
+                        !value.IsDeleted && value.IsActive &&
+                        (value.ApplicableTo == "All" || value.ApplicableTo == "Supplier" || value.ApplicableTo == "Contractor"))
+                    .AsNoTracking().AnyAsync(cancellationToken);
+            var documentReady = contract.CommercialTermsContractDocumentId.HasValue &&
+                await _unitOfWork.Repository<ContractDocument>().GetQueryable(value =>
+                        value.TenantId == _currentUser.TenantId && value.ContractId == contract.Id &&
+                        value.Id == contract.CommercialTermsContractDocumentId.Value && !value.IsDeleted &&
+                        value.FileUploadRecordId.HasValue && value.CentralDocumentRecordId.HasValue &&
+                        value.CentralDocumentVersionId.HasValue && value.FileUploadRecord != null &&
+                        value.FileUploadRecord.TenantId == _currentUser.TenantId && !value.FileUploadRecord.IsDeleted &&
+                        value.FileUploadRecord.VirusScanStatus == FileVirusScanStatus.Clean &&
+                        value.CentralDocumentRecord != null && value.CentralDocumentRecord.TenantId == _currentUser.TenantId &&
+                        !value.CentralDocumentRecord.IsDeleted && value.CentralDocumentRecord.LifecycleStatus == "Active" &&
+                        value.CentralDocumentVersion != null && value.CentralDocumentVersion.TenantId == _currentUser.TenantId &&
+                        !value.CentralDocumentVersion.IsDeleted && value.CentralDocumentVersion.DocumentRecordId == value.CentralDocumentRecordId &&
+                        value.CentralDocumentVersion.FileUploadRecordId == value.FileUploadRecordId &&
+                        value.CentralDocumentVersion.Status == "Published" &&
+                        value.CentralDocumentRecord.CurrentVersion == value.CentralDocumentVersion.VersionNumber)
+                    .AsNoTracking().AnyAsync(cancellationToken);
+            var issues = QuantitySurveyContractCommercialTermsRules.Validate(new(
+                contract.ContractValue, contract.ProvisionalSumAmount, contract.ContingencyAmount,
+                contract.RetentionPercentage, contract.DefectsLiabilityDays, contract.AllowSectionalTakeover,
+                contract.AllowSubcontracting, subcontractPaymentTermReady, contract.ClaimNoticePeriodDays,
+                paymentTermReady, documentReady, contract.RetentionClause, contract.SectionalTakeoverClause,
+                contract.SubcontractTerms, contract.ClaimClause, retention.MaximumRetentionPercent,
+                retention.DefectsLiabilityDays, retention.SectionalTakeoverReleasePercent,
+                controls.ControlProvisionalSums, controls.ControlContingencies, controls.ControlDefectsLiability,
+                controls.ControlSectionalTakeover, controls.ControlSubcontracts, controls.ControlClaimClauses,
+                controls.RequireCommercialTermsDocument)).ToList();
+            var policyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Serialize(new
+            {
+                profile.Id,
+                RetentionDecisionId = retentionDecision.Id,
+                RetentionValueJson = retentionDecision.ValueJson,
+                ControlsDecisionId = controlsDecision.Id,
+                ControlsValueJson = controlsDecision.ValueJson
+            }))));
+            if (contract.CommercialTermsConfigurationProfileId != profile.Id ||
+                contract.ContractControlsDecisionId != controlsDecision.Id ||
+                contract.RetentionDecisionId != retentionDecision.Id ||
+                !string.Equals(contract.CommercialTermsPolicyHash, policyHash, StringComparison.Ordinal))
+                issues.Add("The commercial terms were not configured under the current QS policy.");
+            return issues.Count == 0
+                ? Passed("qs-commercial-terms", "QS commercial terms",
+                    "CONTRACT_ACTIVATION_QS_TERMS_READY",
+                    "Canonical Works-contract commercial terms satisfy the effective QS retention, DMS and controlled-master policy.",
+                    profile.Id, $"{profile.ProfileCode}:v{profile.Version}")
+                : Failed("qs-commercial-terms", "QS commercial terms",
+                    "CONTRACT_ACTIVATION_QS_TERMS_BLOCKED", string.Join(" ", issues));
+        }
+        catch (JsonException exception)
+        {
+            return Failed("qs-commercial-terms", "QS commercial terms",
+                "CONTRACT_ACTIVATION_QS_POLICY_INVALID",
+                $"The effective QS commercial-terms policy is invalid: {exception.Message}");
+        }
     }
 
     private async Task<bool> IsEvidenceCurrentAsync(

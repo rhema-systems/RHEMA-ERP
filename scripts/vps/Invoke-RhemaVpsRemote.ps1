@@ -249,6 +249,21 @@ function Invoke-Preflight {
     # are not executed while applying the migrations and have no legacy-data precondition.
     Write-Output 'GUARD_COVERAGE|20260807202000_AddQuantitySurveyConfigurationRegister'
     Write-Output 'GUARD_COVERAGE|20260808124500_AddProjectBoqApprovalPublication'
+    # These QS migrations create new empty governed registers and only attach
+    # hard-stop triggers to those newly-created tables. No legacy row can trip
+    # a trigger while the migration is being applied.
+    Write-Output 'GUARD_COVERAGE|20260808231322_AddQuantitySurveyRateBuildUps'
+    Write-Output 'GUARD_COVERAGE|20260809002001_AddQuantitySurveyEstimateVersions'
+    Write-Output 'GUARD_COVERAGE|20260809152905_AddQuantitySurveyEscalationFormulaRegister'
+    Write-Output 'GUARD_COVERAGE|20260809165157_AddQuantitySurveyPriceIndexImportWorkflow'
+    Write-Output 'GUARD_COVERAGE|20260809221500_AddQuantitySurveyEscalationCalculationRuns'
+Write-Output 'GUARD_COVERAGE|20260810005756_AddQuantitySurveyEscalationDisputes'
+Write-Output 'GUARD_COVERAGE|20260810023000_AddQuantitySurveyMeasurementSheets'
+Write-Output 'GUARD_COVERAGE|20260810040000_AddProjectBoqRemeasurementWorkflow'
+Write-Output 'GUARD_COVERAGE|20260810041753_AddQuantitySurveyJointMeasurements'
+Write-Output 'GUARD_COVERAGE|20260810103259_AddQuantitySurveyDesignRevisionImpacts'
+Write-Output 'GUARD_COVERAGE|20260810121810_AddQuantitySurveyValuationWorksheets'
+Write-Output 'GUARD_COVERAGE|20260810134646_AddQuantitySurveyInterimValuationWorkflow'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"

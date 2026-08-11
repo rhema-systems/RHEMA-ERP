@@ -84,6 +84,7 @@
     <Compile Include="Controllers\Procurement\ProcurementFrameworkCallOffsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementContractActivationsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementContractOperationsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementWorksCloseoutControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrdersSodControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementReceiptDocumentsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrderReceiptIdempotencyTests.cs" />

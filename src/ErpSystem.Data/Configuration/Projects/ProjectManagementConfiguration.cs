@@ -269,9 +269,11 @@ public sealed class ProjectDrawingConfiguration : IEntityTypeConfiguration<Proje
 {
     public void Configure(EntityTypeBuilder<ProjectDrawing> builder)
     {
-        builder.HasIndex(x => new { x.ProjectId, x.DrawingNumber }).IsUnique();
+        builder.HasIndex(x => new { x.ProjectId, x.DrawingNumber, x.Revision }).IsUnique();
         builder.HasIndex(x => new { x.ProjectId, x.ProjectPhaseId, x.Discipline });
         builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.TenantId, x.SupersedesDrawingId }).IsUnique()
+            .HasFilter("[SupersedesDrawingId] IS NOT NULL AND [IsDeleted] = 0");
 
         builder.HasOne(x => x.Project)
             .WithMany(x => x.Drawings)
@@ -281,6 +283,11 @@ public sealed class ProjectDrawingConfiguration : IEntityTypeConfiguration<Proje
         builder.HasOne(x => x.ProjectPhase)
             .WithMany()
             .HasForeignKey(x => x.ProjectPhaseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.SupersedesDrawing)
+            .WithMany()
+            .HasForeignKey(x => x.SupersedesDrawingId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
@@ -457,6 +464,27 @@ public sealed class ProjectPaymentCertificateConfiguration : IEntityTypeConfigur
         builder.HasIndex(x => new { x.ProjectId, x.ContractId });
         builder.HasIndex(x => new { x.ProjectId, x.ProjectInterimValuationId });
         builder.HasIndex(x => new { x.ProjectId, x.IssueDate });
+        builder.HasIndex(x => new { x.TenantId, x.CertificateNumber }).IsUnique()
+            .HasFilter("[CertificateNumber] IS NOT NULL AND [IsDeleted] = 0");
+        builder.HasIndex(x => new { x.TenantId, x.QuantitySurveyValuationWorksheetId }).IsUnique()
+            .HasFilter("[QuantitySurveyValuationWorksheetId] IS NOT NULL AND [IsDeleted] = 0");
+        builder.HasIndex(x => new { x.TenantId, x.QuantitySurveySubcontractValuationId }).IsUnique()
+            .HasFilter("[QuantitySurveySubcontractValuationId] IS NOT NULL AND [IsDeleted] = 0");
+        builder.HasIndex(x => new { x.TenantId, x.ClientRequestId }).IsUnique()
+            .HasFilter("[ClientRequestId] <> '00000000-0000-0000-0000-000000000000'");
+        builder.HasIndex(x => new { x.TenantId, x.LastMutationClientRequestId }).IsUnique()
+            .HasFilter("[LastMutationClientRequestId] IS NOT NULL");
+        builder.HasIndex(x => new { x.TenantId, x.VendorInvoiceId }).IsUnique()
+            .HasFilter("[VendorInvoiceId] IS NOT NULL");
+        builder.Property(x => x.RequestHash).IsUnicode(false);
+        builder.Property(x => x.LastMutationRequestHash).IsUnicode(false);
+        builder.Property(x => x.PolicyHash).IsUnicode(false);
+        builder.Property(x => x.GeneratedDocumentHash).IsUnicode(false);
+        builder.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
+        builder.Property(x => x.ApprovalStatus).HasDefaultValue("Draft");
+        builder.Property(x => x.ApHandoffStatus).HasDefaultValue(ProjectPaymentCertificateApHandoffStatuses.NotReady);
+        builder.Property(x => x.PaymentStatusSnapshot).HasDefaultValue("NotInvoiced");
+        builder.Property(x => x.TaxHandling).HasDefaultValue("FinanceCalculated");
 
         builder.HasOne(x => x.Project)
             .WithMany(x => x.PaymentCertificates)
@@ -483,6 +511,58 @@ public sealed class ProjectPaymentCertificateConfiguration : IEntityTypeConfigur
             .HasForeignKey(x => x.ProjectInterimValuationId)
             // Avoid a SQL Server multiple-cascade-path conflict because the valuation already belongs to the same project.
             .OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.QuantitySurveyValuationWorksheet).WithMany()
+            .HasForeignKey(x => x.QuantitySurveyValuationWorksheetId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.QuantitySurveySubcontractValuation).WithMany()
+            .HasForeignKey(x => x.QuantitySurveySubcontractValuationId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.SubcontractorBusinessPartner).WithMany()
+            .HasForeignKey(x => x.SubcontractorBusinessPartnerId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.PreviousPaymentCertificate).WithMany()
+            .HasForeignKey(x => x.PreviousPaymentCertificateId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.VendorInvoice).WithMany()
+            .HasForeignKey(x => x.VendorInvoiceId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.Finance.Account>().WithMany()
+            .HasForeignKey(x => x.ExpenseAccountId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.Finance.Account>().WithMany()
+            .HasForeignKey(x => x.AccountsPayableAccountId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.Finance.PaymentTerm>().WithMany()
+            .HasForeignKey(x => x.PaymentTermId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.Finance.TaxGroup>().WithMany()
+            .HasForeignKey(x => x.TaxGroupId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.Finance.Tax>().WithMany()
+            .HasForeignKey(x => x.WithholdingTaxId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.QuantitySurvey.QuantitySurveyConfigurationProfile>().WithMany()
+            .HasForeignKey(x => x.ConfigurationProfileId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.QuantitySurvey.QuantitySurveyConfigurationDecision>().WithMany()
+            .HasForeignKey(x => x.ValuationDecisionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.Workflow.WorkflowDefinition>().WithMany()
+            .HasForeignKey(x => x.ApprovalWorkflowDefinitionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.ReportTemplate>().WithMany()
+            .HasForeignKey(x => x.CertificateTemplateId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate>().WithMany()
+            .HasForeignKey(x => x.CertificateMetadataTemplateId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.DocumentManagement.CentralDocumentRecord>().WithMany()
+            .HasForeignKey(x => x.CentralDocumentRecordId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.DocumentManagement.CentralDocumentVersion>().WithMany()
+            .HasForeignKey(x => x.CentralDocumentVersionId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.ApplicationUser>().WithMany()
+            .HasForeignKey(x => x.PreparedById).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.ApplicationUser>().WithMany()
+            .HasForeignKey(x => x.SubmittedById).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ErpSystem.Core.Entities.ApplicationUser>().WithMany()
+            .HasForeignKey(x => x.ApprovedById).OnDelete(DeleteBehavior.Restrict);
+        builder.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_Status", "[Status] IN ('Draft','Issued','Approved','Paid','Cancelled')");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_Approval", "[ApprovalStatus] IN ('Draft','Pending','Approved','Rejected')");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_ApHandoff", "[ApHandoffStatus] IN ('NotReady','Ready','Created','Failed')");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_Amounts", "[CertifiedToDateAmount] >= 0 AND [PreviouslyCertifiedAmount] >= 0 AND [GrossCertifiedAmount] >= 0 AND [RetentionHeldAmount] >= 0 AND [RetentionReleasedAmount] >= 0 AND [OtherDeductionsAmount] >= 0 AND [AdvanceRecoveryAmount] >= 0 AND [MaterialDeductionAmount] >= 0 AND [MaterialOnSiteAmount] >= 0 AND [MaterialOffSiteAmount] >= 0 AND [TaxAmount] >= 0 AND [NetCertifiedAmount] >= 0");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_QsMaterial", "[QuantitySurveyValuationWorksheetId] IS NULL OR (([QuantitySurveyMaterialReconciliationId] IS NULL AND [MaterialDeductionAmount] = 0 AND [MaterialOnSiteAmount] = 0 AND [MaterialOffSiteAmount] = 0) OR [QuantitySurveyMaterialReconciliationId] IS NOT NULL)");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_QsLineage", "[QuantitySurveyValuationWorksheetId] IS NULL OR ([ProjectInterimValuationId] IS NOT NULL AND [ConfigurationProfileId] IS NOT NULL AND [ValuationDecisionId] IS NOT NULL AND [ApprovalWorkflowDefinitionId] IS NOT NULL AND [CertificateTemplateId] IS NOT NULL AND [CertificateMetadataTemplateId] IS NOT NULL AND [CertificateMetadataTemplateCodeSnapshot] IS NOT NULL AND [ExpenseAccountId] IS NOT NULL AND [AccountsPayableAccountId] IS NOT NULL AND [PaymentTermId] IS NOT NULL AND [TaxGroupId] IS NOT NULL AND [PreparedById] IS NOT NULL AND [PreparedAt] > '2000-01-01' AND [ClientRequestId] <> '00000000-0000-0000-0000-000000000000' AND [CertificateNumber] IS NOT NULL AND LEN([PolicyHash]) = 64 AND LEN([RequestHash]) = 64)");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_QsSubcontractLineage", "[QuantitySurveySubcontractValuationId] IS NULL OR ([QuantitySurveyValuationWorksheetId] IS NULL AND [SubcontractorBusinessPartnerId] IS NOT NULL AND [ContractId] IS NOT NULL AND [ConfigurationProfileId] IS NOT NULL AND [ValuationDecisionId] IS NOT NULL AND [ApprovalWorkflowDefinitionId] IS NOT NULL AND [ExpenseAccountId] IS NOT NULL AND [AccountsPayableAccountId] IS NOT NULL AND [PaymentTermId] IS NOT NULL AND [TaxGroupId] IS NOT NULL AND [CertificateNumber] IS NOT NULL AND LEN([PolicyHash]) = 64 AND LEN([RequestHash]) = 64)");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_GovernedState", "[QuantitySurveyValuationWorksheetId] IS NULL OR (([Status] = 'Draft' AND [ApprovalStatus] = 'Draft' AND [WorkflowInstanceId] IS NULL AND [ApprovedAt] IS NULL) OR ([Status] = 'Issued' AND [ApprovalStatus] = 'Pending' AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedAt] IS NULL) OR ([Status] IN ('Approved','Paid') AND [ApprovalStatus] = 'Approved' AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NOT NULL AND [ApprovedAt] IS NOT NULL) OR ([Status] = 'Cancelled' AND [ApprovalStatus] = 'Rejected' AND [WorkflowInstanceId] IS NOT NULL AND [RejectionReason] IS NOT NULL))");
+            table.HasCheckConstraint("CK_ProjectPaymentCertificates_ApLink", "([VendorInvoiceId] IS NULL AND [ApHandoffStatus] IN ('NotReady','Ready','Failed')) OR ([VendorInvoiceId] IS NOT NULL AND [ApHandoffStatus] = 'Created')");
+        });
     }
 }
 
@@ -524,6 +604,11 @@ public sealed class ProjectFinalAccountConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(x => x.ProjectId).IsUnique();
         builder.HasIndex(x => new { x.ProjectId, x.ContractId });
         builder.HasIndex(x => new { x.ProjectId, x.Status });
+        builder.HasIndex(x => new { x.TenantId, x.ClientRequestId })
+            .IsUnique()
+            .HasFilter("[ClientRequestId] <> '00000000-0000-0000-0000-000000000000' AND [IsDeleted] = 0");
+        builder.HasIndex(x => new { x.TenantId, x.ApprovalWorkflowDefinitionId });
+        builder.HasIndex(x => new { x.TenantId, x.ApprovedBoqVersionId });
 
         builder.HasOne(x => x.Project)
             .WithOne(x => x.FinalAccount)
@@ -534,6 +619,38 @@ public sealed class ProjectFinalAccountConfiguration : IEntityTypeConfiguration<
             .WithMany()
             .HasForeignKey(x => x.ContractId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(x => x.ApprovedBoqVersion)
+            .WithMany()
+            .HasForeignKey(x => x.ApprovedBoqVersionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Property(x => x.RowVersion).IsRowVersion();
+
+        builder.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_ProjectFinalAccounts_QS0506Amounts",
+                "[OriginalContractValue] >= 0 AND [ApprovedBoqValue] >= 0 AND [ApprovedVariationAmount] >= 0 AND [ApprovedClaimAmount] >= 0 AND [ApprovedEscalationAmount] >= 0 AND [CertifiedToDate] >= 0 AND [RetentionHeldAmount] >= 0 AND [RetentionReleasedAmount] >= 0 AND [RetentionReleasedAmount] <= [RetentionHeldAmount] AND [AdvanceRecoveryAmount] >= 0 AND [MaterialDeductionAmount] >= 0 AND [OtherDeductionAmount] >= 0 AND [PaidToDateAmount] >= 0 AND [FinalAccountValue] >= 0");
+        });
+    }
+}
+
+public sealed class ProjectFinalAccountRevisionConfiguration : IEntityTypeConfiguration<ProjectFinalAccountRevision>
+{
+    public void Configure(EntityTypeBuilder<ProjectFinalAccountRevision> builder)
+    {
+        builder.HasIndex(x => new { x.ProjectFinalAccountId, x.CreatedAt });
+        builder.HasIndex(x => new { x.TenantId, x.Action, x.CreatedAt });
+        builder.HasIndex(x => new { x.TenantId, x.ClientRequestId }).IsUnique();
+        builder.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_ProjectFinalAccountRevisions_QS0506Request",
+                "[ClientRequestId] <> '00000000-0000-0000-0000-000000000000' AND LEN([RequestHash]) = 64");
+        });
+        builder.HasOne(x => x.ProjectFinalAccount)
+            .WithMany(x => x.Revisions)
+            .HasForeignKey(x => x.ProjectFinalAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

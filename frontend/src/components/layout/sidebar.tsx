@@ -32,6 +32,7 @@ import {
   Mail,
   Building,
   BarChart3,
+  LineChart,
   Bell,
   Database,
   Home,
@@ -2245,6 +2246,7 @@ export const navigationItems: NavItem[] = [
         icon: ShoppingCart,
       },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
+      { title: 'Quantity Survey Reports', href: '/reports/quantity-survey', icon: Scale },
       {
         title: 'Audit & Compliance Reports',
         href: '/reports/audit-compliance',
@@ -2874,6 +2876,12 @@ export const navigationItems: NavItem[] = [
             title: 'Quantity Survey Rate Library',
             href: '/administration/project-management/quantity-survey-rate-library',
             icon: BarChart3,
+            permissions: ['quantity-survey.workspace.read'],
+          },
+          {
+            title: 'QS Escalation Formulas',
+            href: '/administration/project-management/quantity-survey-escalation',
+            icon: LineChart,
             permissions: ['quantity-survey.workspace.read'],
           },
         ],

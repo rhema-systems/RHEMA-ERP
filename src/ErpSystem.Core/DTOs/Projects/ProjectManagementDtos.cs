@@ -513,6 +513,8 @@ public class ProjectDrawingDto
     public Guid ProjectId { get; set; }
     public Guid? ProjectPhaseId { get; set; }
     public string? ProjectPhaseName { get; set; }
+    public Guid? SupersedesDrawingId { get; set; }
+    public string? SupersedesDrawingLabel { get; set; }
     public string DrawingNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Discipline { get; set; } = string.Empty;
@@ -529,6 +531,7 @@ public class ProjectDrawingDto
 public class CreateProjectDrawingDto
 {
     public Guid? ProjectPhaseId { get; set; }
+    public Guid? SupersedesDrawingId { get; set; }
 
     [Required]
     public string DrawingNumber { get; set; } = string.Empty;

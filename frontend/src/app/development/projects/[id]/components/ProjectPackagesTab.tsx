@@ -19,6 +19,9 @@ import { ProjectPackageDialogs } from '@/components/projects/ProjectPackageDialo
 import { QuantitySurveyBoqImportActions } from '@/components/quantity-survey/QuantitySurveyBoqImportDialog';
 import { QuantitySurveyBoqVersionActions } from '@/components/quantity-survey/QuantitySurveyBoqVersionDialog';
 import { QuantitySurveyEstimateVersionsDialog } from '@/components/quantity-survey/QuantitySurveyEstimateVersionsDialog';
+import { QuantitySurveyCostReconciliationDialog } from '@/components/quantity-survey/QuantitySurveyCostReconciliationDialog';
+import { QuantitySurveyMeasurementsDialog } from '@/components/quantity-survey/QuantitySurveyMeasurementsDialog';
+import { QuantitySurveyJointMeasurementsDialog } from '@/components/quantity-survey/QuantitySurveyJointMeasurementsDialog';
 import type { BusinessPartnerDto } from '@/services/businessPartnerService';
 import type { ContractDto } from '@/services/contractService';
 import type {
@@ -606,6 +609,9 @@ export function ProjectPackagesTab({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <QuantitySurveyMeasurementsDialog projectId={project.id} />
+              <QuantitySurveyJointMeasurementsDialog projectId={project.id} />
+              <QuantitySurveyCostReconciliationDialog projectId={project.id} />
               <QuantitySurveyEstimateVersionsDialog projectId={project.id} />
               <QuantitySurveyBoqVersionActions projectId={project.id} />
               <QuantitySurveyBoqImportActions

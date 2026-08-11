@@ -616,6 +616,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.Reporting.FinanceAdHocReportService>());
             services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.Reporting.FinanceAdHocReportService>());
+            services.AddScoped<ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyStatutoryReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyStatutoryReportService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyStatutoryReportService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyStatutoryReportService>());
             services.AddScoped<IReportsService, ErpSystem.Data.Services.DatabaseReportsService>();
             services.AddScoped<IReportTemplateLifecycleService, ErpSystem.Data.Services.ReportTemplateLifecycleService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentOutputService, ErpSystem.Api.Services.Documents.DocumentOutputService>();
@@ -636,6 +641,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Finance.FinanceClosePackDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Inventory.StoreIssueVoucherDocumentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.Inventory.StoreReturnVoucherDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.QuantitySurvey.QuantitySurveyEscalationDisputeAuditPackDocumentBuilder>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Documents.IDocumentBuilder, ErpSystem.Api.Services.Documents.QuantitySurvey.QuantitySurveyPaymentCertificateDocumentBuilder>();
 
             // Data source service
             services.AddScoped<IDataSourceService, EnterpriseDataSourceService>();
@@ -1041,6 +1048,24 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyBoqSpreadsheetService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyBoqSpreadsheetService>();
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyTenderBoqSubmissionService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyTenderBoqSubmissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyRateLibraryService, ErpSystem.Data.Services.QuantitySurveyRateLibraryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyEscalationFormulaService, ErpSystem.Data.Services.QuantitySurveyEscalationFormulaService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyPriceIndexImportService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyPriceIndexImportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyEscalationCalculationService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyEscalationCalculationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyEscalationDisputeService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyEscalationDisputeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyMeasurementService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyMeasurementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyJointMeasurementService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyJointMeasurementService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyDesignRevisionImpactService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyDesignRevisionImpactService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyValuationWorksheetService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyValuationWorksheetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyPaymentCertificateService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyPaymentCertificateService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyAdvanceRecoveryService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyAdvanceRecoveryService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyFinalAccountService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyFinalAccountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyMaterialReconciliationService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyMaterialReconciliationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyVariationService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyVariationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyContractClaimService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyContractClaimService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyDayworkService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyDayworkService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveyContractCommercialTermsService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveyContractCommercialTermsService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveySubcontractService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveySubcontractService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.QuantitySurvey.IQuantitySurveySubcontractChargeService, ErpSystem.Api.Services.QuantitySurvey.QuantitySurveySubcontractChargeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementPolicyService, ErpSystem.Core.Services.Procurement.ProcurementPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementComplianceDecisionService, ErpSystem.Core.Services.Procurement.ProcurementComplianceDecisionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementSodGuardService, ErpSystem.Core.Services.Procurement.ProcurementSodGuardService>();
@@ -1111,6 +1136,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Crm.ICrmService, ErpSystem.Core.Services.Crm.CrmService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAgreementService, ErpSystem.Api.Services.Sales.SalesAgreementService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();

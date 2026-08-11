@@ -96,3 +96,52 @@ public sealed class QuantitySurveyEstimateWorkspaceDto
     public IReadOnlyList<Guid> ApprovedBoqVersionIds { get; init; } = [];
     public IReadOnlyList<QuantitySurveyEstimateType> AllowedTypes { get; init; } = Enum.GetValues<QuantitySurveyEstimateType>();
 }
+
+public sealed class QuantitySurveyCostReconciliationLineDto
+{
+    public int Sequence { get; init; }
+    public Guid? EstimateLineId { get; init; }
+    public Guid? ProjectBoqVersionLineId { get; init; }
+    public Guid? SourceBoqItemId { get; init; }
+    public Guid? ProjectPackageId { get; init; }
+    public string? PackageCode { get; init; }
+    public string? PackageName { get; init; }
+    public string LineNumber { get; init; } = string.Empty;
+    public string? ItemCode { get; init; }
+    public string Description { get; init; } = string.Empty;
+    public string MappingStatus { get; init; } = string.Empty;
+    public decimal EstimateAmount { get; init; }
+    public decimal ApprovedBudgetAmount { get; init; }
+    public decimal CommittedAmount { get; init; }
+    public decimal CertifiedAmount { get; init; }
+    public decimal ActualAmount { get; init; }
+    public decimal ForecastAmount { get; init; }
+    public decimal BudgetVarianceAmount { get; init; }
+    public decimal ForecastVarianceAmount { get; init; }
+}
+
+public sealed class QuantitySurveyCostReconciliationDto
+{
+    public Guid ProjectId { get; init; }
+    public Guid EstimateVersionId { get; init; }
+    public string EstimateName { get; init; } = string.Empty;
+    public QuantitySurveyEstimateType EstimateType { get; init; }
+    public int EstimateVersionNumber { get; init; }
+    public Guid? ApprovedBudgetRevisionId { get; init; }
+    public string? ApprovedBudgetRevisionName { get; init; }
+    public Guid? ActiveForecastVersionId { get; init; }
+    public string? ActiveForecastVersionName { get; init; }
+    public string CurrencyCode { get; init; } = string.Empty;
+    public DateTime GeneratedAtUtc { get; init; }
+    public decimal EstimateAmount { get; init; }
+    public decimal ApprovedBudgetAmount { get; init; }
+    public decimal CommittedAmount { get; init; }
+    public decimal CertifiedAmount { get; init; }
+    public decimal ActualAmount { get; init; }
+    public decimal ForecastAmount { get; init; }
+    public decimal BudgetVarianceAmount { get; init; }
+    public decimal ForecastVarianceAmount { get; init; }
+    public bool HasUnallocatedAmounts { get; init; }
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+    public IReadOnlyList<QuantitySurveyCostReconciliationLineDto> Lines { get; init; } = [];
+}

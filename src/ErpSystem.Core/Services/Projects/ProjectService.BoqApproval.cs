@@ -318,6 +318,8 @@ public partial class ProjectService
         {
             throw new InvalidOperationException("The BoQ snapshot integrity hash is invalid. Approval and publication are blocked.");
         }
+
+        await ValidateRemeasurementVersionAsync(version);
     }
 
     private async Task EnsureApprovedBoqPublicationAsync(
@@ -359,6 +361,8 @@ public partial class ProjectService
                     candidate.AuditAction = QuantitySurveyAuditEventMap.ApproveBoqVersion;
                     SetBoqVersionAuditContext(candidate, correlationId);
                     await _unitOfWork.Repository<ProjectBoqVersion>().UpdateAsync(candidate);
+                    await _unitOfWork.SaveChangesAsync();
+                    await ApplyApprovedRemeasurementToWorkingBoqAsync(candidate, correlationId);
                     await _unitOfWork.SaveChangesAsync();
                     await _unitOfWork.CommitAsync();
                     transactionStarted = false;
@@ -431,6 +435,8 @@ public partial class ProjectService
                 publication.LastModifiedById = approverUserId;
                 await _unitOfWork.Repository<ProjectBoqVersion>().UpdateAsync(candidate);
                 await _unitOfWork.Repository<ProjectBoqVersion>().UpdateAsync(publication);
+                await _unitOfWork.SaveChangesAsync();
+                await ApplyApprovedRemeasurementToWorkingBoqAsync(candidate, correlationId);
                 await _unitOfWork.SaveChangesAsync();
                 await _unitOfWork.CommitAsync();
                 transactionStarted = false;

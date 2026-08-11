@@ -42,12 +42,16 @@ public interface IProjectService
     Task<ProjectBoqVersionDetailDto> RejectProjectBoqVersionAsync(Guid projectId, Guid versionId, Guid userId, string reason, string correlationId);
     Task<ProjectBoqVersionDetailDto> RecallProjectBoqVersionAsync(Guid projectId, Guid versionId, Guid userId, string reason, string correlationId);
     Task<ProjectBoqVersionComparisonDto> CompareProjectBoqVersionsAsync(Guid projectId, Guid baselineVersionId, Guid comparisonVersionId);
+    Task<ProjectBoqRemeasurementWorkspaceDto> GetProjectBoqRemeasurementWorkspaceAsync(Guid projectId);
+    Task<ProjectBoqVersionDetailDto> CreateProjectBoqRemeasurementAsync(Guid projectId, CreateProjectBoqRemeasurementDto dto, string correlationId);
     Task<QuantitySurveyEstimateWorkspaceDto> GetQuantitySurveyEstimateWorkspaceAsync(Guid projectId);
     Task<QuantitySurveyEstimateVersionDto> GetQuantitySurveyEstimateVersionAsync(Guid projectId, Guid estimateVersionId);
     Task<QuantitySurveyEstimateVersionDto> CreateQuantitySurveyEstimateVersionAsync(Guid projectId, CreateQuantitySurveyEstimateRequest dto, string correlationId);
     Task<QuantitySurveyEstimateVersionDto> SubmitQuantitySurveyEstimateVersionAsync(Guid projectId, Guid estimateVersionId, Guid userId, string correlationId);
     Task<QuantitySurveyEstimateVersionDto> ApproveQuantitySurveyEstimateVersionAsync(Guid projectId, Guid estimateVersionId, Guid userId, string? comments, string correlationId);
     Task<QuantitySurveyEstimateVersionDto> RejectQuantitySurveyEstimateVersionAsync(Guid projectId, Guid estimateVersionId, Guid userId, string reason, string correlationId);
+    Task<QuantitySurveyCostReconciliationDto> GetQuantitySurveyCostReconciliationAsync(Guid projectId, Guid estimateVersionId);
+    Task<QuantitySurveyCostDashboardDto> GetQuantitySurveyCostDashboardAsync(Guid projectId);
     Task<IEnumerable<ProjectApprovalRegisterItemDto>> GetApprovalRegisterAsync(Guid projectId);
     Task<ProjectApprovalRegisterItemDto> AddApprovalRegisterItemAsync(Guid projectId, CreateProjectApprovalRegisterItemDto dto);
     Task<ProjectApprovalRegisterItemDto> UpdateApprovalRegisterItemAsync(Guid approvalRegisterItemId, UpdateProjectApprovalRegisterItemDto dto);

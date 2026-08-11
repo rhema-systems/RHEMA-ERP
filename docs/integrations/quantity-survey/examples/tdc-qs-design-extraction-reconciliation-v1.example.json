@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "tdc.qs.design-extraction.reconciliation.v1",
+  "exchangeId": "36d72e90-7755-4f0c-aedb-94930d299a67",
+  "reconciledAtUtc": "2026-08-10T12:15:00Z",
+  "projectReference": "TDC-DEV-001",
+  "baseBoqVersionNumber": 3,
+  "manifestSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "status": "NeedsResolution",
+  "summary": {
+    "externalLineCount": 3,
+    "matchedLineCount": 2,
+    "blockingLineCount": 1,
+    "previousQuantityTotal": 165.500000,
+    "revisedQuantityTotal": 143.750000,
+    "netQuantityChange": -21.750000
+  },
+  "lines": [
+    {
+      "externalLineId": "IFC-WALL-001",
+      "matchedBoqLineKey": "65f36dfb-9dbf-4ef8-b9ad-6d940922726c",
+      "outcome": "QuantityVariance",
+      "previousQuantity": 120.500000,
+      "revisedQuantity": 128.750000,
+      "quantityVariance": 8.250000,
+      "proposedRoute": "Measurement",
+      "resolutionCode": null,
+      "reasonCode": "QUANTITY_CHANGE_REQUIRES_REVIEW"
+    },
+    {
+      "externalLineId": "IFC-DOOR-004",
+      "matchedBoqLineKey": "073f8278-ab3d-41b5-868e-ac3e92db350a",
+      "outcome": "ExactMatch",
+      "previousQuantity": 45.000000,
+      "revisedQuantity": 0.000000,
+      "quantityVariance": -45.000000,
+      "proposedRoute": "Variation",
+      "resolutionCode": "AcceptedExact",
+      "reasonCode": "SOURCE_LINE_MATCHED"
+    },
+    {
+      "externalLineId": "IFC-DOOR-008",
+      "matchedBoqLineKey": null,
+      "outcome": "NewExternalLine",
+      "previousQuantity": 0.000000,
+      "revisedQuantity": 15.000000,
+      "quantityVariance": 15.000000,
+      "proposedRoute": "Unresolved",
+      "resolutionCode": null,
+      "reasonCode": "BOQ_MAPPING_REQUIRED"
+    }
+  ],
+  "blockingIssues": [
+    {
+      "code": "BOQ_MAPPING_REQUIRED",
+      "severity": "Error",
+      "message": "The new external line must be mapped or excluded by an independent reviewer.",
+      "externalLineId": "IFC-DOOR-008"
+    }
+  ],
+  "reconciliationSha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+}

@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Projects;
+using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -24,6 +25,7 @@ public class ProjectsController : ControllerBase
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly INotificationService _notificationService;
     private readonly ApplicationDbContext _db;
+    private readonly IQuantitySurveyVariationService _quantitySurveyVariations;
     private readonly ILogger<ProjectsController> _logger;
 
     public ProjectsController(
@@ -32,6 +34,7 @@ public class ProjectsController : ControllerBase
         ICurrentUserProvider currentUserProvider,
         INotificationService notificationService,
         ApplicationDbContext db,
+        IQuantitySurveyVariationService quantitySurveyVariations,
         ILogger<ProjectsController> logger)
     {
         _projectService = projectService;
@@ -39,6 +42,7 @@ public class ProjectsController : ControllerBase
         _currentUserProvider = currentUserProvider;
         _notificationService = notificationService;
         _db = db;
+        _quantitySurveyVariations = quantitySurveyVariations;
         _logger = logger;
     }
 
@@ -536,6 +540,53 @@ public class ProjectsController : ControllerBase
         }
     }
 
+    [HttpGet("{id:guid}/boq-remeasurements/workspace")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<IActionResult> GetProjectBoqRemeasurementWorkspace(Guid id)
+        => ExecuteProjectRemeasurementAsync(async () =>
+            Ok(await _projectService.GetProjectBoqRemeasurementWorkspaceAsync(id)));
+
+    [HttpPost("{id:guid}/boq-remeasurements")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.BoqManage)]
+    public Task<IActionResult> CreateProjectBoqRemeasurement(
+        Guid id,
+        [FromBody] CreateProjectBoqRemeasurementDto request)
+        => ExecuteProjectRemeasurementAsync(async () =>
+        {
+            var result = await _projectService.CreateProjectBoqRemeasurementAsync(
+                id, request, HttpContext.TraceIdentifier);
+            return CreatedAtAction(nameof(GetProjectBoqVersion), new { id, versionId = result.Id }, result);
+        });
+
+    private async Task<IActionResult> ExecuteProjectRemeasurementAsync(Func<Task<IActionResult>> action)
+    {
+        try { return await action(); }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ProjectRemeasurementProblem(
+                403, "QS remeasurement access forbidden", exception.Message));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(ProjectRemeasurementProblem(
+                400, "QS remeasurement validation failed", exception.Message));
+        }
+    }
+
+    private ProblemDetails ProjectRemeasurementProblem(int status, string title, string detail) => new()
+    {
+        Status = status,
+        Title = title,
+        Detail = detail,
+        Type = $"https://tdc.gov.gh/problems/quantity-survey-remeasurement-{status}",
+        Instance = HttpContext.Request.Path,
+        Extensions =
+        {
+            ["code"] = $"QS_REMEASUREMENT_{status}",
+            ["correlationId"] = HttpContext.TraceIdentifier
+        }
+    };
+
     private async Task<ActionResult<ProjectBoqVersionDetailDto>> ExecuteProjectBoqWorkflowAsync(
         Func<Task<ProjectBoqVersionDetailDto>> action)
     {
@@ -583,11 +634,38 @@ public class ProjectsController : ControllerBase
     public Task<ActionResult<QuantitySurveyEstimateVersionDto>> RejectQuantitySurveyEstimate(Guid id, Guid estimateVersionId, [FromBody] RejectQuantitySurveyEstimateRequest request)
         => ExecuteProjectEstimateAsync(() => _projectService.RejectQuantitySurveyEstimateVersionAsync(id, estimateVersionId, _currentUserProvider.UserId, request.Reason, HttpContext.TraceIdentifier));
 
+    [HttpGet("{id:guid}/quantity-survey-cost-reconciliation")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.WorkspaceRead)]
+    public Task<ActionResult<QuantitySurveyCostReconciliationDto>> GetQuantitySurveyCostReconciliation(
+        Guid id,
+        [FromQuery] Guid estimateVersionId)
+        => ExecuteProjectEstimateAsync(() => _projectService.GetQuantitySurveyCostReconciliationAsync(id, estimateVersionId));
+
+    [HttpGet("{id:guid}/quantity-survey-cost-dashboard")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.ReportsRead)]
+    public Task<ActionResult<QuantitySurveyCostDashboardDto>> GetQuantitySurveyCostDashboard(Guid id)
+        => ExecuteProjectEstimateAsync(() => _projectService.GetQuantitySurveyCostDashboardAsync(id));
+
     private async Task<ActionResult<T>> ExecuteProjectEstimateAsync<T>(Func<Task<T>> action)
     {
         try { return Ok(await action()); }
         catch (UnauthorizedAccessException) { return Forbid(); }
-        catch (InvalidOperationException exception) { return BadRequest(exception.Message); }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Type = "https://tdc.gov.gh/problems/quantity-survey-estimate-400",
+                Title = "Quantity Survey request could not be completed",
+                Status = StatusCodes.Status400BadRequest,
+                Detail = exception.Message,
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "QS_ESTIMATE_400",
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
+        }
     }
 
     [HttpGet("{id:guid}/approval-register")]
@@ -879,6 +957,8 @@ public class ProjectsController : ControllerBase
     {
         try
         {
+            if (await _quantitySurveyVariations.IsGovernedAsync(null))
+                return Conflict("Use the governed Quantity Survey variation workspace while QS-DEC-011 is effective.");
             return Ok(await _projectService.AddProjectVariationOrderAsync(id, dto));
         }
         catch (UnauthorizedAccessException)
@@ -896,6 +976,8 @@ public class ProjectsController : ControllerBase
     {
         try
         {
+            if (await _quantitySurveyVariations.IsGovernedAsync(variationOrderId))
+                return Conflict("Use the governed Quantity Survey variation workspace while QS-DEC-011 is effective.");
             return Ok(await _projectService.UpdateProjectVariationOrderAsync(variationOrderId, dto));
         }
         catch (UnauthorizedAccessException)
@@ -913,6 +995,8 @@ public class ProjectsController : ControllerBase
     {
         try
         {
+            if (await _quantitySurveyVariations.IsGovernedAsync(variationOrderId))
+                return Conflict("Use the governed Quantity Survey variation workspace while QS-DEC-011 is effective.");
             await _projectService.DeleteProjectVariationOrderAsync(variationOrderId);
             return NoContent();
         }
@@ -1099,6 +1183,7 @@ public class ProjectsController : ControllerBase
         => await ExecuteProjectReadAsync(() => _projectService.GetProjectFinalAccountAsync(id), "Error loading project final account");
 
     [HttpPut("{id:guid}/final-account")]
+    [Authorize(Policy = QuantitySurveyAccessControlRegistry.FinalAccountsManage)]
     public async Task<ActionResult<ProjectFinalAccountDto>> UpsertProjectFinalAccount(Guid id, [FromBody] UpsertProjectFinalAccountDto dto)
     {
         try

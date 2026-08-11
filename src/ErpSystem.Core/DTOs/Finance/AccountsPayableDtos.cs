@@ -575,6 +575,26 @@ public class VendorPaymentDto
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
 }
 
+/// <summary>
+/// Restricted Finance-owned read model used by downstream contract controls. It deliberately
+/// excludes bank, cheque and authorization details while proving that the supplier advance is
+/// posted, active and still has an unapplied balance.
+/// </summary>
+public sealed class PostedSupplierAdvanceDto
+{
+    public Guid Id { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public Guid SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public DateTime PaymentDate { get; set; }
+    public decimal TotalAmount { get; set; }
+    public decimal AllocatedAmount { get; set; }
+    public decimal AvailableAmount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public VendorPaymentStatus Status { get; set; }
+    public Guid JournalEntryId { get; set; }
+}
+
 public class VendorPaymentCreateDto
 {
     [Required]
