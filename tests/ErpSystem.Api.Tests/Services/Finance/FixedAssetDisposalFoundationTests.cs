@@ -649,19 +649,106 @@ public sealed class FixedAssetDisposalFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
     [Trait("Category", "FixedAssets")]
-    public async Task ForeignCurrencyProceedsRejectedClearly()
+    public async Task ForeignCurrencyProceedsPreserveNativeEvidenceAndPostFunctionalValue()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        SeedAccountCurrencyLink(db, fixture.Accounts.ProceedsClearing, "USD");
+        var rate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId);
-        var dto = RequestSale(fixture.Asset.Id, 900m);
+        var dto = RequestSale(fixture.Asset.Id, 100m);
         dto.ProceedsCurrencyCode = "USD";
+        dto.ProceedsExchangeRateId = rate.Id;
 
-        var act = () => services.Disposals.RequestDisposalAsync(dto, fixture.RequestedBy.Id);
+        var completed = await RequestApproveAndCompleteAsync(services.Disposals, fixture, dto);
+        var proceedsLine = (await PostedLinesAsync(db)).Single(line => line.TransactionTag == "FA-DisposalProceeds");
+
+        completed.NetProceeds.Should().Be(100m);
+        completed.ProceedsCurrencyCode.Should().Be("USD");
+        completed.ProceedsFunctionalAmount.Should().Be(1500m);
+        completed.ProceedsExchangeRateId.Should().Be(rate.Id);
+        completed.GainOrLoss.Should().Be(532.26m);
+        proceedsLine.DebitAmount.Should().Be(1500m);
+        proceedsLine.TransactionCurrency.Should().Be("USD");
+        proceedsLine.TransactionDebitAmount.Should().Be(100m);
+        proceedsLine.ExchangeRateId.Should().Be(rate.Id);
+        proceedsLine.ExchangeRate.Should().Be(15m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyRateApprovalDriftCancelsDisposalBeforePosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        SeedAccountCurrencyLink(db, fixture.Accounts.ProceedsClearing, "USD");
+        var rate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture.Asset.Id, 100m);
+        request.ProceedsCurrencyCode = "USD";
+        request.ProceedsExchangeRateId = rate.Id;
+        var approved = await RequestAndApproveAsync(services.Disposals, fixture, request);
+
+        rate.ApprovalStatus = RateApprovalStatus.Rejected;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Disposals.CompleteDisposalAsync(approved.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*selected exchange rate*");
+        (await db.AssetDisposals.SingleAsync(item => item.Id == approved.Id)).Status.Should().Be(AssetDisposalStatus.Cancelled);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyProceedsRequireTenantApprovedEffectiveRate()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        SeedAccountCurrencyLink(db, fixture.Accounts.ProceedsClearing, "USD");
+        SeedTenant(db, otherTenantId, "OTH");
+        var otherTenantRate = SeedExchangeRate(db, otherTenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture.Asset.Id, 100m);
+        request.ProceedsCurrencyCode = "USD";
+        request.ProceedsExchangeRateId = otherTenantRate.Id;
+
+        var act = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Foreign-currency disposal proceeds*");
+            .WithMessage("*selected exchange rate*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ForeignCurrencyProceedsRequireAuthorizedClearingAccountCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedDisposalFoundationAsync(db, tenantId);
+        var rate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+        var request = RequestSale(fixture.Asset.Id, 100m);
+        request.ProceedsCurrencyCode = "USD";
+        request.ProceedsExchangeRateId = rate.Id;
+
+        var act = () => services.Disposals.RequestDisposalAsync(request, fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*clearing account is not authorized for USD*");
+        (await db.AssetDisposals.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -1076,6 +1163,54 @@ public sealed class FixedAssetDisposalFoundationTests
             Code = code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
+        });
+    }
+
+    private static ExchangeRate SeedExchangeRate(ApplicationDbContext db, Guid tenantId, string currency, decimal rate)
+    {
+        var exchangeRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = currency,
+            Rate = rate,
+            InverseRate = 1m / rate,
+            EffectiveDate = new DateTime(2026, 7, 10),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana test fixture",
+            ApprovalStatus = RateApprovalStatus.Approved,
+            IsActive = true,
+            CreatedByUserId = Guid.NewGuid(),
+            CreatedDate = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        db.ExchangeRates.Add(exchangeRate);
+        return exchangeRate;
+    }
+
+    private static void SeedAccountCurrencyLink(ApplicationDbContext db, Account account, string currency)
+    {
+        // Foreign proceeds are held in the existing disposal clearing account, so the fixture
+        // models the same explicit account/currency authorization required in production.
+        account.IsMultiCurrency = true;
+        db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+        {
+            Id = Guid.NewGuid(),
+            TenantId = account.TenantId,
+            AccountId = account.Id,
+            LinkedCurrencyCode = currency,
+            TransactionRateType = "Daily",
+            TransactionQuoteSide = ExchangeRateQuoteSide.Mid,
+            RevaluationRateType = "Month-End",
+            RevaluationQuoteSide = ExchangeRateQuoteSide.Mid,
+            RevaluationRequired = true,
+            IsActive = true,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
         });
     }
 

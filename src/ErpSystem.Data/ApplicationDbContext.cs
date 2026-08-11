@@ -3282,10 +3282,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FiscalPeriodId });
             entity.HasIndex(e => new { e.TenantId, e.AccountingBookId });
             entity.HasIndex(e => new { e.TenantId, e.ProceedsAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.ProceedsExchangeRateId });
             entity.HasIndex(e => new { e.TenantId, e.RevaluationSurplusAccountId });
             entity.HasIndex(e => new { e.TenantId, e.RetainedEarningsAccountId });
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.ProceedsCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ProceedsFunctionalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ProceedsExchangeRateValue).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.ProceedsExchangeRateSource).HasMaxLength(100).IsRequired();
             entity.Property(e => e.IdempotencyKey).HasMaxLength(150);
             entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
             entity.Property(e => e.Reason).HasMaxLength(1000);
@@ -3336,6 +3340,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.ProceedsAccount)
                 .WithMany()
                 .HasForeignKey(e => e.ProceedsAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // The referenced rate is durable accounting evidence. Restrict deletion so a posted
+            // disposal can always explain how native proceeds became functional-currency GL value.
+            entity.HasOne(e => e.ProceedsExchangeRate)
+                .WithMany()
+                .HasForeignKey(e => e.ProceedsExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
             // Disposal evidence retains both equity accounts even if configuration changes later.
             entity.HasOne(e => e.RevaluationSurplusAccount)

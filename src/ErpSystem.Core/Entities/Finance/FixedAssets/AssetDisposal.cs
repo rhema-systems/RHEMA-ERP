@@ -68,6 +68,26 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         [MaxLength(3)]
         public string ProceedsCurrencyCode { get; set; } = "GHS";
 
+        // FIN-LIM-0043: SaleProceeds, DisposalCost and NetProceeds retain the commercial
+        // transaction currency. These separate fields freeze the approved translation into the
+        // tenant's functional currency so the GL, gain/loss calculation and audit trail never
+        // reinterpret a foreign amount after the checker has approved it.
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal ProceedsFunctionalAmount { get; set; }
+
+        public Guid? ProceedsExchangeRateId { get; set; }
+        public virtual ExchangeRate? ProceedsExchangeRate { get; set; }
+
+        [Column(TypeName = "decimal(18,6)")]
+        public decimal ProceedsExchangeRateValue { get; set; } = 1m;
+
+        [MaxLength(100)]
+        public string ProceedsExchangeRateSource { get; set; } = "Functional currency";
+
+        public DateTime ProceedsExchangeRateDate { get; set; }
+        public ExchangeRateType ProceedsExchangeRateType { get; set; } = ExchangeRateType.Daily;
+        public ExchangeRateQuoteSide ProceedsExchangeRateQuoteSide { get; set; } = ExchangeRateQuoteSide.Mid;
+
         public Guid? ProceedsAccountId { get; set; }
         public virtual Account? ProceedsAccount { get; set; }
 
@@ -154,7 +174,7 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal GainOrLoss { get; set; } 
-        // Calculated: (SaleProceeds - DisposalCost) - NetBookValueAtDisposal
+        // Calculated in functional currency: ProceedsFunctionalAmount - NetBookValueAtDisposal
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal RemainingAcquisitionCostAfterDisposal { get; set; }

@@ -466,6 +466,15 @@ export interface AssetDisposal {
   reason?: string;
   saleProceeds: number;
   disposalCost: number;
+  netProceeds: number;
+  proceedsCurrencyCode: string;
+  proceedsFunctionalAmount: number;
+  proceedsExchangeRateId?: string;
+  proceedsExchangeRateValue: number;
+  proceedsExchangeRateSource: string;
+  proceedsExchangeRateDate: string;
+  proceedsExchangeRateType: string;
+  proceedsExchangeRateQuoteSide: string;
   netBookValueAtDisposal: number;
   finalDepreciationAmount: number;
   finalDepreciationFromDate?: string;
@@ -512,6 +521,8 @@ export interface RequestAssetDisposalDto {
   reason?: string;
   saleProceeds: number;
   disposalCost: number;
+  proceedsCurrencyCode?: string;
+  proceedsExchangeRateId?: string;
   buyerName?: string;
   finalDepreciationProductionUnits?: number;
   finalDepreciationEvidenceReference?: string;

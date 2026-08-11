@@ -82,6 +82,6 @@ Whole asset and 100 percent. A database check constraint prevents invalid scope/
 - This resolves FIN-LIM-0042 for controlled proportional partial/component derecognition.
 - Significant-component master records with independent useful lives and depreciation schedules
   remain a broader asset-componentisation enhancement, not a prerequisite for evidenced disposal.
-- Foreign-currency proceeds remain FIN-LIM-0043.
+- Foreign-currency proceeds are now resolved by the shared disposal FX snapshot under FIN-LIM-0043; proportional disposals use the same translated functional-proceeds basis.
 - Tax, AR and Cash/Bank settlement integration remains FIN-LIM-0040.
 - Migration application and representative TDC UAT remain release gates.

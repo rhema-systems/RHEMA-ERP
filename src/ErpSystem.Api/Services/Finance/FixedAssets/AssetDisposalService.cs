@@ -150,6 +150,13 @@ public class AssetDisposalService : IAssetDisposalService
             DisposalCost = RoundMoney(dto.DisposalCost),
             NetProceeds = snapshot.NetProceeds,
             ProceedsCurrencyCode = snapshot.ProceedsCurrencyCode,
+            ProceedsFunctionalAmount = snapshot.ProceedsFunctionalAmount,
+            ProceedsExchangeRateId = snapshot.ProceedsExchangeRate.ExchangeRateId,
+            ProceedsExchangeRateValue = snapshot.ProceedsExchangeRate.Rate,
+            ProceedsExchangeRateSource = snapshot.ProceedsExchangeRate.Source,
+            ProceedsExchangeRateDate = snapshot.ProceedsExchangeRate.EffectiveDate,
+            ProceedsExchangeRateType = snapshot.ProceedsExchangeRate.RateType,
+            ProceedsExchangeRateQuoteSide = snapshot.ProceedsExchangeRate.QuoteSide,
             ProceedsAccountId = snapshot.ProceedsAccountId,
             CostAtDisposal = snapshot.AssetCarryingAccountAmount,
             AcquisitionCostAllocated = snapshot.AcquisitionCostAllocated,
@@ -336,14 +343,6 @@ public class AssetDisposalService : IAssetDisposalService
         var fiscalPeriod = await ResolveFiscalPeriodAsync(disposal.AccountingDate ?? disposal.DisposalDate)
             ?? throw new InvalidOperationException("No fiscal period covers the disposal accounting date.");
         var functionalCurrency = await GetFunctionalCurrencyAsync();
-        if (!string.Equals(disposal.ProceedsCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase))
-        {
-            await RecordBlockedDisposalAuditAsync(
-                FinanceAuditEvents.FixedAssetDisposalBlockedInvalidTenantAccountProceeds,
-                disposal,
-                "Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
-            throw new InvalidOperationException("Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
-        }
 
         try
         {
@@ -360,6 +359,7 @@ public class AssetDisposalService : IAssetDisposalService
                 disposal.Id);
             ValidateApprovedFinalDepreciation(disposal, finalDepreciation, bookValue.DepreciationMethod);
             var snapshot = await BuildDisposalSnapshotAsync(asset, bookValue, disposal, finalDepreciation);
+            ValidateApprovedProceedsSnapshot(disposal, snapshot);
             await ValidateApprovedRevaluationSurplusTransferAsync(disposal, asset, snapshot);
             ValidateApprovedAllocationSnapshot(disposal, snapshot);
             ApplySnapshot(disposal, snapshot);
@@ -377,6 +377,14 @@ public class AssetDisposalService : IAssetDisposalService
                     asset.Category.GainOnDisposalAccountId,
                     asset.Category.LossOnDisposalAccountId,
                     disposal.ProceedsAccountId,
+                    disposal.ProceedsCurrencyCode,
+                    disposal.ProceedsFunctionalAmount,
+                    disposal.ProceedsExchangeRateId,
+                    disposal.ProceedsExchangeRateValue,
+                    disposal.ProceedsExchangeRateSource,
+                    disposal.ProceedsExchangeRateDate,
+                    disposal.ProceedsExchangeRateType,
+                    disposal.ProceedsExchangeRateQuoteSide,
                     // These are request-time snapshots, not mutable settings resolved after the
                     // checker decision. Completion separately verifies that policy has not drifted.
                     disposal.RevaluationSurplusAccountId,
@@ -465,8 +473,19 @@ public class AssetDisposalService : IAssetDisposalService
                     disposal,
                     postingEventId: postingResult.PostingEventId,
                     journalEntryId: postingResult.JournalEntryId,
-                    afterValues: new { disposal.NetProceeds, disposal.ProceedsAccountId, disposal.ProceedsCurrencyCode },
-                    comment: "Fixed asset sale proceeds recorded to the configured clearing account.");
+                    afterValues: new
+                    {
+                        disposal.NetProceeds,
+                        disposal.ProceedsCurrencyCode,
+                        disposal.ProceedsFunctionalAmount,
+                        disposal.ProceedsExchangeRateId,
+                        disposal.ProceedsExchangeRateValue,
+                        disposal.ProceedsExchangeRateSource,
+                        disposal.ProceedsExchangeRateDate,
+                        disposal.ProceedsExchangeRateQuoteSide,
+                        disposal.ProceedsAccountId
+                    },
+                    comment: "Fixed asset sale proceeds and their approved functional-currency translation were recorded to the configured clearing account.");
             }
 
             if (disposal.RevaluationSurplusTransferAmount > 0m)
@@ -665,13 +684,10 @@ public class AssetDisposalService : IAssetDisposalService
 
         var functionalCurrency = await GetFunctionalCurrencyAsync();
         var proceedsCurrency = NormalizeCurrency(dto.ProceedsCurrencyCode, functionalCurrency);
-        if (!string.Equals(proceedsCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(proceedsCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+            && dto.ProceedsExchangeRateId.HasValue)
         {
-            await RecordBlockedDisposalAuditAsync(
-                FinanceAuditEvents.FixedAssetDisposalBlockedInvalidTenantAccountProceeds,
-                asset.Id,
-                "Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
-            throw new InvalidOperationException("Foreign-currency disposal proceeds are not supported in the Batch 21C foundation.");
+            throw new InvalidOperationException("An exchange rate must not be supplied for functional-currency disposal proceeds.");
         }
     }
 
@@ -956,7 +972,7 @@ public class AssetDisposalService : IAssetDisposalService
         AddPostingLine(lines, accumulatedDepreciationAccount?.Id, 0m, snapshot.FinalDepreciation.Amount, "Final accumulated depreciation through disposal date", reference, lineNumber++, "FA-AccumulatedDepreciation", disposal, asset, functionalCurrency);
         AddPostingLine(lines, accumulatedDepreciationAccount?.Id, snapshot.AccumulatedDepreciation, 0m, "Clear accumulated depreciation", reference, lineNumber++, "FA-DisposalAccumulatedDepreciation", disposal, asset, functionalCurrency);
         AddPostingLine(lines, accumulatedImpairmentAccount?.Id, snapshot.AccumulatedImpairment, 0m, "Clear accumulated impairment", reference, lineNumber++, "FA-DisposalAccumulatedImpairment", disposal, asset, functionalCurrency);
-        AddPostingLine(lines, proceedsAccount?.Id, snapshot.NetProceeds, 0m, "Record disposal proceeds clearing", reference, lineNumber++, "FA-DisposalProceeds", disposal, asset, functionalCurrency);
+        AddProceedsPostingLine(lines, proceedsAccount?.Id, snapshot, "Record disposal proceeds clearing", reference, lineNumber++, disposal, asset, functionalCurrency);
         AddPostingLine(lines, lossAccount?.Id, Math.Abs(Math.Min(snapshot.GainOrLoss, 0m)), 0m, "Loss on disposal", reference, lineNumber++, "FA-DisposalLoss", disposal, asset, functionalCurrency);
         AddPostingLine(lines, assetAccount.Id, 0m, snapshot.AssetCarryingAccountAmount, "Derecognize fixed asset carrying account", reference, lineNumber++, "FA-DisposalAsset", disposal, asset, functionalCurrency);
         AddPostingLine(lines, gainAccount?.Id, 0m, Math.Max(snapshot.GainOrLoss, 0m), "Gain on disposal", reference, lineNumber++, "FA-DisposalGain", disposal, asset, functionalCurrency);
@@ -1026,6 +1042,50 @@ public class AssetDisposalService : IAssetDisposalService
                 (disposal.FinalDepreciationScheduleId.HasValue ? $"ScheduleId={disposal.FinalDepreciationScheduleId.Value:N};" : string.Empty) +
                 $"Book={disposal.BookClassification}",
             TransactionTag = tag
+        });
+    }
+
+    private static void AddProceedsPostingLine(
+        ICollection<FinancePostingLineDto> lines,
+        Guid? accountId,
+        DisposalSnapshot snapshot,
+        string description,
+        string reference,
+        int lineNumber,
+        AssetDisposal disposal,
+        FixedAsset asset,
+        string functionalCurrency)
+    {
+        if (accountId == null || snapshot.ProceedsFunctionalAmount == 0m)
+        {
+            return;
+        }
+
+        var isForeign = !string.Equals(snapshot.ProceedsCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase);
+        // The journal balances in functional currency, while transaction debit and FX evidence
+        // preserve what the buyer actually paid. The central posting engine independently checks
+        // this tenant-owned rate before persisting its own immutable line snapshot.
+        lines.Add(new FinancePostingLineDto
+        {
+            AccountId = accountId.Value,
+            DebitAmount = snapshot.ProceedsFunctionalAmount,
+            CreditAmount = 0m,
+            TransactionCurrency = snapshot.ProceedsCurrencyCode,
+            TransactionDebitAmount = snapshot.NetProceeds,
+            TransactionCreditAmount = 0m,
+            ForeignCurrencyAmount = isForeign ? snapshot.NetProceeds : null,
+            ExchangeRateId = isForeign ? snapshot.ProceedsExchangeRate.ExchangeRateId : null,
+            ExchangeRate = isForeign ? snapshot.ProceedsExchangeRate.Rate : null,
+            ExchangeRateSource = isForeign ? snapshot.ProceedsExchangeRate.Source : null,
+            ExchangeRateDate = isForeign ? snapshot.ProceedsExchangeRate.EffectiveDate : null,
+            Description = $"{description} - {asset.AssetCode}",
+            SourceReferenceNumber = reference,
+            LineNumber = lineNumber,
+            SegmentString = asset.CurrentSegmentString,
+            Notes = $"FixedAssetId={asset.Id:N};AssetDisposalId={disposal.Id:N};Book={disposal.BookClassification};" +
+                $"NativeProceeds={snapshot.NetProceeds:0.00} {snapshot.ProceedsCurrencyCode};" +
+                $"FunctionalProceeds={snapshot.ProceedsFunctionalAmount:0.00} {functionalCurrency}",
+            TransactionTag = "FA-DisposalProceeds"
         });
     }
 
@@ -1101,9 +1161,11 @@ public class AssetDisposalService : IAssetDisposalService
                 ? disposal.DisposalType == DisposalType.Sale ? "Disposal" : "WriteOff"
                 : "PartialDisposal",
             Description = disposal.DisposalScope == AssetDisposalScope.WholeAsset
-                ? $"Fixed asset {disposal.DisposalType} disposal. Proceeds: {snapshot.NetProceeds:N2}, Gain/Loss: {snapshot.GainOrLoss:N2}"
-                : $"{disposal.DisposalScope} disposal ({snapshot.DisposedPortionPercent:N4}%). Proceeds: {snapshot.NetProceeds:N2}, Gain/Loss: {snapshot.GainOrLoss:N2}",
-            Amount = snapshot.NetProceeds,
+                ? $"Fixed asset {disposal.DisposalType} disposal. Proceeds: {snapshot.NetProceeds:N2} {snapshot.ProceedsCurrencyCode}; functional value: {snapshot.ProceedsFunctionalAmount:N2}; gain/loss: {snapshot.GainOrLoss:N2}"
+                : $"{disposal.DisposalScope} disposal ({snapshot.DisposedPortionPercent:N4}%). Proceeds: {snapshot.NetProceeds:N2} {snapshot.ProceedsCurrencyCode}; functional value: {snapshot.ProceedsFunctionalAmount:N2}; gain/loss: {snapshot.GainOrLoss:N2}",
+            // FixedAssetTransaction is a functional-currency register. Native proceeds remain on
+            // AssetDisposal and the journal line, avoiding mixed-currency totals in asset reports.
+            Amount = snapshot.ProceedsFunctionalAmount,
             ResultingBookValue = snapshot.RemainingNetBookValue,
             RelatedEntityId = disposal.Id,
             PerformedByUserId = CurrentUserId,
@@ -1197,6 +1259,13 @@ public class AssetDisposalService : IAssetDisposalService
     {
         disposal.NetProceeds = snapshot.NetProceeds;
         disposal.ProceedsCurrencyCode = snapshot.ProceedsCurrencyCode;
+        disposal.ProceedsFunctionalAmount = snapshot.ProceedsFunctionalAmount;
+        disposal.ProceedsExchangeRateId = snapshot.ProceedsExchangeRate.ExchangeRateId;
+        disposal.ProceedsExchangeRateValue = snapshot.ProceedsExchangeRate.Rate;
+        disposal.ProceedsExchangeRateSource = snapshot.ProceedsExchangeRate.Source;
+        disposal.ProceedsExchangeRateDate = snapshot.ProceedsExchangeRate.EffectiveDate;
+        disposal.ProceedsExchangeRateType = snapshot.ProceedsExchangeRate.RateType;
+        disposal.ProceedsExchangeRateQuoteSide = snapshot.ProceedsExchangeRate.QuoteSide;
         disposal.ProceedsAccountId = snapshot.ProceedsAccountId;
         disposal.CostAtDisposal = snapshot.AssetCarryingAccountAmount;
         disposal.DisposedPortionPercent = snapshot.DisposedPortionPercent;
@@ -1252,6 +1321,158 @@ public class AssetDisposalService : IAssetDisposalService
         }
     }
 
+    private static void ValidateApprovedProceedsSnapshot(AssetDisposal disposal, DisposalSnapshot current)
+    {
+        if (disposal.NetProceeds != current.NetProceeds
+            || disposal.ProceedsFunctionalAmount != current.ProceedsFunctionalAmount
+            || disposal.ProceedsExchangeRateId != current.ProceedsExchangeRate.ExchangeRateId
+            || disposal.ProceedsExchangeRateValue != current.ProceedsExchangeRate.Rate
+            || disposal.ProceedsExchangeRateSource != current.ProceedsExchangeRate.Source
+            || disposal.ProceedsExchangeRateDate.Date != current.ProceedsExchangeRate.EffectiveDate.Date
+            || disposal.ProceedsExchangeRateType != current.ProceedsExchangeRate.RateType
+            || disposal.ProceedsExchangeRateQuoteSide != current.ProceedsExchangeRate.QuoteSide)
+        {
+            // A checker approves both the native proceeds and their functional equivalent. Never
+            // let a changed rate record or quote-side policy alter that accounting decision later.
+            throw new StaleDisposalApprovalException(
+                "The approved disposal-proceeds exchange-rate snapshot is no longer current. Submit a new disposal request.");
+        }
+    }
+
+    private async Task<ProceedsExchangeRateSnapshot> ResolveProceedsExchangeRateAsync(
+        string proceedsCurrency,
+        string functionalCurrency,
+        DateTime disposalDate,
+        Guid? requestedExchangeRateId,
+        Guid? proceedsAccountId)
+    {
+        if (string.Equals(proceedsCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (requestedExchangeRateId.HasValue)
+            {
+                throw new InvalidOperationException("An exchange rate must not be supplied for functional-currency disposal proceeds.");
+            }
+
+            return new ProceedsExchangeRateSnapshot(
+                null,
+                1m,
+                "Functional currency",
+                disposalDate.Date,
+                ExchangeRateType.Daily,
+                ExchangeRateQuoteSide.Mid);
+        }
+
+        var settings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == TenantId && !s.IsDeleted);
+        var date = disposalDate.Date;
+        if (!proceedsAccountId.HasValue)
+        {
+            throw new InvalidOperationException("A disposal proceeds clearing account is required for foreign-currency sale proceeds.");
+        }
+
+        var proceedsAccount = await _context.Accounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(account => account.TenantId == TenantId
+                && account.Id == proceedsAccountId.Value
+                && !account.IsDeleted
+                && account.Status == AccountStatus.Active
+                && account.AllowDirectPosting);
+        if (proceedsAccount == null)
+        {
+            throw new InvalidOperationException("The disposal proceeds clearing account must be an active same-tenant direct-posting account.");
+        }
+
+        var accountCurrency = NormalizeCurrency(proceedsAccount.CurrencyCode, functionalCurrency);
+        AccountCurrencyLink? currencyLink = null;
+        if (!string.Equals(accountCurrency, proceedsCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            currencyLink = proceedsAccount.IsMultiCurrency
+                ? await _context.AccountCurrencyLinks
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(link => link.TenantId == TenantId
+                        && link.AccountId == proceedsAccount.Id
+                        && !link.IsDeleted
+                        && link.IsActive
+                        && link.LinkedCurrencyCode == proceedsCurrency
+                        && link.EffectiveDate.Date <= date
+                        && (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value.Date >= date))
+                : null;
+            if (currencyLink == null)
+            {
+                // Reject this before workflow submission; otherwise a checker could approve a
+                // disposal that the central posting engine is guaranteed to reject later.
+                throw new InvalidOperationException(
+                    $"The disposal proceeds clearing account is not authorized for {proceedsCurrency} on {date:yyyy-MM-dd}.");
+            }
+        }
+
+        if (currencyLink != null
+            && !string.Equals(
+                currencyLink.TransactionRateType?.Replace("-", string.Empty).Replace("_", string.Empty).Replace(" ", string.Empty),
+                nameof(ExchangeRateType.Daily),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Foreign-currency disposal proceeds require a Daily transaction-rate policy on the clearing account currency link.");
+        }
+
+        // FixedAssets is a normal Finance source. When a currency link exists, its quote side is
+        // authoritative; otherwise the tenant default applies. This mirrors FinancePostingEngine
+        // so request-time selection and posting-time independent validation cannot disagree.
+        var quoteSide = settings?.DirectionalExchangeRatePolicyEnabled == true
+            ? currencyLink?.TransactionQuoteSide ?? settings.DefaultTransactionQuoteSide
+            : ExchangeRateQuoteSide.Mid;
+
+        IQueryable<ExchangeRate> query = _context.ExchangeRates
+            .AsNoTracking()
+            .Where(rate => rate.TenantId == TenantId
+                && !rate.IsDeleted
+                && rate.BaseCurrencyCode == functionalCurrency
+                && rate.TargetCurrencyCode == proceedsCurrency
+                && rate.RateType == ExchangeRateType.Daily
+                && rate.QuoteSide == quoteSide
+                && rate.IsActive
+                && rate.Rate > 0m
+                && (rate.ApprovalStatus == RateApprovalStatus.Approved
+                    || rate.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                && rate.EffectiveDate.Date <= date
+                && (!rate.EndDate.HasValue || rate.EndDate.Value.Date >= date));
+
+        ExchangeRate? rate;
+        if (requestedExchangeRateId.HasValue)
+        {
+            // Keep every policy predicate on an explicitly selected ID; accepting an ID first and
+            // validating only its value could leak another tenant's rate into the approval record.
+            rate = await query.FirstOrDefaultAsync(candidate => candidate.Id == requestedExchangeRateId.Value);
+            if (rate == null)
+            {
+                throw new InvalidOperationException(
+                    $"The selected exchange rate is not an active, approved {quoteSide} daily rate for {proceedsCurrency} to {functionalCurrency} on {date:yyyy-MM-dd}.");
+            }
+        }
+        else
+        {
+            rate = await query
+                .OrderByDescending(candidate => candidate.EffectiveDate)
+                .ThenByDescending(candidate => candidate.Priority)
+                .ThenByDescending(candidate => candidate.CreatedAt)
+                .FirstOrDefaultAsync();
+            if (rate == null)
+            {
+                throw new InvalidOperationException(
+                    $"No active, approved {quoteSide} daily exchange rate exists for {proceedsCurrency} to {functionalCurrency} on {date:yyyy-MM-dd}.");
+            }
+        }
+
+        return new ProceedsExchangeRateSnapshot(
+            rate.Id,
+            rate.Rate,
+            rate.RateSource,
+            rate.EffectiveDate.Date,
+            rate.RateType,
+            rate.QuoteSide);
+    }
+
     private async Task<DisposalSnapshot> BuildDisposalSnapshotAsync(
         FixedAsset asset,
         FixedAssetBookValue bookValue,
@@ -1261,13 +1482,19 @@ public class AssetDisposalService : IAssetDisposalService
         var functionalCurrency = await GetFunctionalCurrencyAsync();
         var proceedsCurrency = NormalizeCurrency(dto.ProceedsCurrencyCode, functionalCurrency);
         var netProceeds = RoundMoney(dto.SaleProceeds - dto.DisposalCost);
-        var accumulatedImpairment = await CalculateAccumulatedImpairmentAsync(asset.Id, bookValue);
-        var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
-        var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
         var proceedsAccountId = netProceeds > 0m
             ? dto.ProceedsAccountId ?? asset.Category.DisposalProceedsClearingAccountId
             : null;
-
+        var exchangeRate = await ResolveProceedsExchangeRateAsync(
+            proceedsCurrency,
+            functionalCurrency,
+            dto.DisposalDate,
+            dto.ProceedsExchangeRateId,
+            proceedsAccountId);
+        var functionalProceeds = RoundMoney(netProceeds * exchangeRate.Rate);
+        var accumulatedImpairment = await CalculateAccumulatedImpairmentAsync(asset.Id, bookValue);
+        var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
+        var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
         return BuildAllocatedDisposalSnapshot(
             bookValue,
             dto.DisposalScope,
@@ -1276,7 +1503,9 @@ public class AssetDisposalService : IAssetDisposalService
             accumulatedImpairment,
             revaluationSurplusBalance,
             netProceeds,
+            functionalProceeds,
             proceedsCurrency,
+            exchangeRate,
             proceedsAccountId,
             finalDepreciation);
     }
@@ -1291,10 +1520,31 @@ public class AssetDisposalService : IAssetDisposalService
         var revaluationAssetAdjustment = await CalculateRevaluationAssetAdjustmentAsync(asset.Id, bookValue);
         var revaluationSurplusBalance = await CalculateRevaluationSurplusBalanceAsync(asset.Id, bookValue);
         var netProceeds = RoundMoney(disposal.SaleProceeds - disposal.DisposalCost);
+        var functionalCurrency = await GetFunctionalCurrencyAsync();
+        var proceedsCurrency = NormalizeCurrency(disposal.ProceedsCurrencyCode, functionalCurrency);
         var proceedsAccountId = netProceeds > 0m
             ? disposal.ProceedsAccountId ?? asset.Category.DisposalProceedsClearingAccountId
             : null;
-
+        // Completion resolves the exact approved rate ID again. This detects deactivation,
+        // approval withdrawal, date changes or tenant policy drift before any journal is posted.
+        ProceedsExchangeRateSnapshot exchangeRate;
+        try
+        {
+            exchangeRate = await ResolveProceedsExchangeRateAsync(
+                proceedsCurrency,
+                functionalCurrency,
+                disposal.DisposalDate,
+                disposal.ProceedsExchangeRateId,
+                proceedsAccountId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // At completion, a missing/rejected rate is approval drift rather than a transient
+            // posting failure. Cancel the stale checker decision so it cannot later be retried.
+            throw new StaleDisposalApprovalException(
+                $"The approved disposal-proceeds exchange-rate snapshot is no longer usable: {ex.Message}");
+        }
+        var functionalProceeds = RoundMoney(netProceeds * exchangeRate.Rate);
         return BuildAllocatedDisposalSnapshot(
             bookValue,
             disposal.DisposalScope,
@@ -1303,7 +1553,9 @@ public class AssetDisposalService : IAssetDisposalService
             accumulatedImpairment,
             revaluationSurplusBalance,
             netProceeds,
-            NormalizeCurrency(disposal.ProceedsCurrencyCode, await GetFunctionalCurrencyAsync()),
+            functionalProceeds,
+            proceedsCurrency,
+            exchangeRate,
             proceedsAccountId,
             finalDepreciation);
     }
@@ -1316,7 +1568,9 @@ public class AssetDisposalService : IAssetDisposalService
         decimal remainingAccumulatedImpairment,
         decimal remainingRevaluationSurplus,
         decimal netProceeds,
+        decimal proceedsFunctionalAmount,
         string proceedsCurrency,
+        ProceedsExchangeRateSnapshot proceedsExchangeRate,
         Guid? proceedsAccountId,
         FinalDepreciationPreparation finalDepreciation)
     {
@@ -1362,8 +1616,10 @@ public class AssetDisposalService : IAssetDisposalService
             revaluationSurplusAllocated,
             netBookValueAllocated,
             netProceeds,
-            RoundMoney(netProceeds - netBookValueAllocated),
+            proceedsFunctionalAmount,
+            RoundMoney(proceedsFunctionalAmount - netBookValueAllocated),
             proceedsCurrency,
+            proceedsExchangeRate,
             proceedsAccountId,
             finalDepreciation,
             normalizedPercent,
@@ -1662,6 +1918,14 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.SaleProceeds,
             disposal.DisposalCost,
             disposal.NetProceeds,
+            disposal.ProceedsCurrencyCode,
+            disposal.ProceedsFunctionalAmount,
+            disposal.ProceedsExchangeRateId,
+            disposal.ProceedsExchangeRateValue,
+            disposal.ProceedsExchangeRateSource,
+            disposal.ProceedsExchangeRateDate,
+            disposal.ProceedsExchangeRateType,
+            disposal.ProceedsExchangeRateQuoteSide,
             disposal.ProceedsAccountId,
             disposal.CostAtDisposal,
             disposal.AcquisitionCostAllocated,
@@ -1783,6 +2047,13 @@ public class AssetDisposalService : IAssetDisposalService
             DisposalCost = d.DisposalCost,
             NetProceeds = d.NetProceeds,
             ProceedsCurrencyCode = d.ProceedsCurrencyCode,
+            ProceedsFunctionalAmount = d.ProceedsFunctionalAmount,
+            ProceedsExchangeRateId = d.ProceedsExchangeRateId,
+            ProceedsExchangeRateValue = d.ProceedsExchangeRateValue,
+            ProceedsExchangeRateSource = d.ProceedsExchangeRateSource,
+            ProceedsExchangeRateDate = d.ProceedsExchangeRateDate,
+            ProceedsExchangeRateType = d.ProceedsExchangeRateType,
+            ProceedsExchangeRateQuoteSide = d.ProceedsExchangeRateQuoteSide,
             ProceedsAccountId = d.ProceedsAccountId,
             CostAtDisposal = d.CostAtDisposal,
             AcquisitionCostAllocated = d.AcquisitionCostAllocated,
@@ -1843,8 +2114,10 @@ public class AssetDisposalService : IAssetDisposalService
         decimal RevaluationSurplusBalance,
         decimal NetBookValue,
         decimal NetProceeds,
+        decimal ProceedsFunctionalAmount,
         decimal GainOrLoss,
         string ProceedsCurrencyCode,
+        ProceedsExchangeRateSnapshot ProceedsExchangeRate,
         Guid? ProceedsAccountId,
         FinalDepreciationPreparation FinalDepreciation,
         decimal DisposedPortionPercent,
@@ -1856,6 +2129,14 @@ public class AssetDisposalService : IAssetDisposalService
         decimal RemainingAcquisitionCost,
         decimal RemainingAccumulatedDepreciation,
         decimal RemainingNetBookValue);
+
+    private sealed record ProceedsExchangeRateSnapshot(
+        Guid? ExchangeRateId,
+        decimal Rate,
+        string Source,
+        DateTime EffectiveDate,
+        ExchangeRateType RateType,
+        ExchangeRateQuoteSide QuoteSide);
 
     private sealed record FinalDepreciationPreparation(
         decimal Amount,

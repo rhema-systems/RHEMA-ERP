@@ -110,7 +110,7 @@ After a successful disposal, the default book value clears accumulated depreciat
 
 Sale proceeds are posted to a configured disposal proceeds clearing account. The batch does not create AR invoices, cash/bank receipts, VAT documents, or statutory sale tax outputs. That gap is tracked as `FIN-LIM-0040`.
 
-Disposal proceeds must be in the tenant functional currency. Foreign-currency proceeds are rejected and tracked as `FIN-LIM-0043`.
+Disposal proceeds may be denominated in the tenant functional currency or an approved foreign currency. The foreign-currency workflow freezes the tenant-owned Daily rate and native/functional values described in `docs/fixed-asset-foreign-currency-disposal-proceeds-foundation.md`; this resolves `FIN-LIM-0043` without implying AR/cash/tax settlement integration.
 
 ## Workflow And Permissions
 

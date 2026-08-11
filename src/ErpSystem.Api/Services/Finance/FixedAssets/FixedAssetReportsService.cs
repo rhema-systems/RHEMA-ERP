@@ -344,6 +344,12 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                 SaleProceeds = d.SaleProceeds,
                 DisposalCost = d.DisposalCost,
                 NetProceeds = d.NetProceeds,
+                ProceedsCurrencyCode = d.ProceedsCurrencyCode,
+                ProceedsFunctionalAmount = d.ProceedsFunctionalAmount,
+                ProceedsExchangeRateId = d.ProceedsExchangeRateId,
+                ProceedsExchangeRateValue = d.ProceedsExchangeRateValue,
+                ProceedsExchangeRateSource = d.ProceedsExchangeRateSource,
+                ProceedsExchangeRateDate = d.ProceedsExchangeRateDate,
                 CostAtDisposal = d.CostAtDisposal,
                 AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
                 AccumulatedImpairmentAtDisposal = d.AccumulatedImpairmentAtDisposal,
@@ -596,8 +602,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             if (category.DisposalProceedsClearingAccountId.HasValue)
             {
                 AddReconciliationRow(rows, diagnostics, "Disposal Proceeds Clearing", category.DisposalProceedsClearingAccountId.Value, accounts, glLines,
-                    RoundMoney(disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.NetProceeds)),
-                    disposals.Count(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id) && d.NetProceeds > 0m),
+                    // GL reconciliation must aggregate functional values; adding USD and GHS native
+                    // amounts would produce a plausible-looking but meaningless control total.
+                    RoundMoney(disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.ProceedsFunctionalAmount)),
+                    disposals.Count(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id) && d.ProceedsFunctionalAmount > 0m),
                     0,
                     0,
                     BalanceConvention.DebitMinusCredit);
