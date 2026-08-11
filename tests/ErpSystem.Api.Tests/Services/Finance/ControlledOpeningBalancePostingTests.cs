@@ -6,6 +6,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -23,6 +24,147 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ControlledOpeningBalancePostingTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task FixedAssetOpeningBatch_ShouldDerivePostingAndLinkImportedRegisterEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        var assetFixture = SeedFixedAssetOpeningFixture(db, tenantId, fixture.Cash, fixture.Equity);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId, withAudit: true);
+
+        var batch = await service.CreateFixedAssetBatchAsync(new CreateFixedAssetOpeningBalanceBatchDto
+        {
+            SourceReference = "TDC-FA-CUTOVER",
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            BookClassification = "IFRS",
+            FixedAssetIds = new[] { assetFixture.Asset.Id }
+        });
+
+        // Accounts and amounts are server-derived from the approved asset category and imported
+        // book values; the migration operator never supplies editable GL lines for this workflow.
+        batch.Lines.Should().ContainSingle(line =>
+            line.CounterpartyType == "FixedAssetOpeningCost" &&
+            line.AccountId == assetFixture.AssetAccount.Id &&
+            line.DebitAmount == 1_000m);
+        batch.Lines.Should().ContainSingle(line =>
+            line.CounterpartyType == "FixedAssetOpeningDep" &&
+            line.AccountId == assetFixture.AccumulatedDepreciationAccount.Id &&
+            line.CreditAmount == 200m);
+        batch.Lines.Should().ContainSingle(line =>
+            line.CounterpartyType == null &&
+            line.AccountId == fixture.Equity.Id &&
+            line.CreditAmount == 800m);
+
+        await service.SubmitForApprovalAsync(batch.Id);
+        var posted = await service.PostAsync(batch.Id);
+
+        posted.Status.Should().Be("Posted");
+        var bookValue = await db.FixedAssetBookValues.SingleAsync(value => value.Id == assetFixture.BookValue.Id);
+        bookValue.OpeningPostedToGl.Should().BeTrue();
+        bookValue.OpeningJournalEntryId.Should().Be(posted.JournalEntryId);
+        bookValue.SourceDocumentType.Should().Be("OpeningBalanceBatch");
+        bookValue.SourceDocumentId.Should().Be(batch.Id);
+        var asset = await db.FixedAssets.SingleAsync(item => item.Id == assetFixture.Asset.Id);
+        asset.JournalEntryId.Should().Be(posted.JournalEntryId);
+        asset.PostingEventId.Should().Be(posted.PostingEventId);
+        (await db.AssetTransactions
+            .Where(transaction => transaction.FixedAssetId == asset.Id && transaction.TransactionType.StartsWith("Opening"))
+            .AllAsync(transaction => transaction.RelatedEntityId == posted.JournalEntryId)).Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task FixedAssetOpeningBatch_ShouldRejectRegisterDriftAfterPreparation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        var assetFixture = SeedFixedAssetOpeningFixture(db, tenantId, fixture.Cash, fixture.Equity);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var batch = await service.CreateFixedAssetBatchAsync(new CreateFixedAssetOpeningBalanceBatchDto
+        {
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetIds = new[] { assetFixture.Asset.Id }
+        });
+
+        var value = await db.FixedAssetBookValues.SingleAsync(item => item.Id == assetFixture.BookValue.Id);
+        value.AcquisitionCost = 1_100m;
+        value.NetBookValue = 900m;
+        await db.SaveChangesAsync();
+
+        var validation = await service.ValidateBatchAsync(batch.Id);
+
+        validation.IsValid.Should().BeFalse();
+        validation.Errors.Should().Contain(error => error.Contains("changed after batch preparation", StringComparison.OrdinalIgnoreCase));
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerOpeningBalances")]
+    [Trait("Category", "TenantIsolation")]
+    public async Task FixedAssetOpeningBatch_ShouldRejectCrossTenantAssetSelection()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        var otherFixture = SeedOpeningBalanceFixture(db, otherTenantId);
+        var otherAsset = SeedFixedAssetOpeningFixture(db, otherTenantId, otherFixture.Cash, otherFixture.Equity);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var act = () => service.CreateFixedAssetBatchAsync(new CreateFixedAssetOpeningBalanceBatchDto
+        {
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            FixedAssetIds = new[] { otherAsset.Asset.Id }
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*current tenant*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task SubledgerReadiness_ShouldExposePostedAndUnpostedSourceEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        SeedFixedAssetOpeningFixture(db, tenantId, fixture.Cash, fixture.Equity);
+        db.VendorInvoices.Add(new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "AP-OPEN-1",
+            InvoiceDate = new DateTime(2026, 1, 1), DueDate = new DateTime(2026, 2, 1),
+            IsOpeningBalance = true, TotalAmount = 500m, BaseCurrencyAmount = 500m
+        });
+        db.Invoices.Add(new Invoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "AR-OPEN-1",
+            InvoiceDate = new DateTime(2026, 1, 1), DueDate = new DateTime(2026, 2, 1),
+            IsOpeningBalance = true, TotalAmount = 700m, BaseCurrencyAmount = 700m
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var readiness = await service.GetSubledgerReadinessAsync();
+
+        readiness.ApOpeningInvoiceCount.Should().Be(1);
+        readiness.ArOpeningInvoiceCount.Should().Be(1);
+        readiness.FixedAssetOpeningBookValueCount.Should().Be(1);
+        readiness.FixedAssetOpeningNetBookValue.Should().Be(800m);
+        readiness.Warnings.Should().HaveCount(3);
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "Migration")]
@@ -1094,10 +1236,69 @@ public sealed class ControlledOpeningBalancePostingTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             BaseCurrency = "GHS",
+            MigrationClearingAccountId = equity.Id,
             ReferenceNumber = "FIN-SETTINGS",
             Status = "Active"
         });
         return new OpeningBalanceFixture(period, cash, equity);
+    }
+
+    private static FixedAssetOpeningFixture SeedFixedAssetOpeningFixture(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Account assetAccount,
+        Account migrationClearingAccount)
+    {
+        var accumulatedDepreciationAccount = SeedAccount(db, tenantId, $"19{Guid.NewGuid():N}"[..4], AccountType.Asset);
+        var depreciationExpenseAccount = SeedAccount(db, tenantId, $"61{Guid.NewGuid():N}"[..4], AccountType.Expense);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS", IsDefault = true, AllowsPosting = true
+        };
+        var category = new FixedAssetCategory
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = $"FA-{Guid.NewGuid():N}"[..8], Name = "Opening assets",
+            AssetAccountId = assetAccount.Id,
+            AccumulatedDepreciationAccountId = accumulatedDepreciationAccount.Id,
+            DepreciationExpenseAccountId = depreciationExpenseAccount.Id
+        };
+        var asset = new FixedAsset
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AssetCode = $"FA-{Guid.NewGuid():N}"[..12], Name = "Imported opening asset",
+            FixedAssetCategoryId = category.Id, Category = category,
+            PurchaseDate = new DateTime(2024, 1, 1), PlacedInServiceDate = new DateTime(2024, 1, 1),
+            PurchasePrice = 1_000m, AcquisitionCost = 1_000m, NetBookValue = 800m,
+            UsefulLifeMonths = 120, Status = FixedAssetStatus.Active
+        };
+        var bookValue = new FixedAssetBookValue
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FixedAssetId = asset.Id, FixedAsset = asset,
+            AccountingBookId = book.Id, AccountingBook = book, BookClassification = "IFRS",
+            AcquisitionCost = 1_000m, AccumulatedDepreciation = 200m, NetBookValue = 800m,
+            UsefulLifeMonths = 120, RemainingUsefulLifeMonths = 96,
+            OpeningAsOfDate = new DateTime(2026, 1, 1), OpeningSource = "OpeningImport"
+        };
+        asset.BookValues.Add(bookValue);
+        db.AccountingBooks.Add(book);
+        db.FixedAssetCategories.Add(category);
+        db.FixedAssets.Add(asset);
+        var actorId = Guid.NewGuid();
+        db.AssetTransactions.AddRange(
+            new AssetTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FixedAssetId = asset.Id, AccountingBookId = book.Id,
+                BookClassification = "IFRS", TransactionDate = new DateTime(2026, 1, 1),
+                TransactionType = "Opening Acquisition", Amount = 1_000m, ResultingBookValue = 1_000m,
+                PerformedByUserId = actorId
+            },
+            new AssetTransaction
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FixedAssetId = asset.Id, AccountingBookId = book.Id,
+                BookClassification = "IFRS", TransactionDate = new DateTime(2026, 1, 1),
+                TransactionType = "Opening Accumulated Depreciation", Amount = 200m, ResultingBookValue = 800m,
+                PerformedByUserId = actorId
+            });
+        return new FixedAssetOpeningFixture(asset, bookValue, assetAccount, accumulatedDepreciationAccount, migrationClearingAccount);
     }
 
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
@@ -1285,4 +1486,10 @@ public sealed class ControlledOpeningBalancePostingTests
     }
 
     private sealed record OpeningBalanceFixture(FiscalPeriod Period, Account Cash, Account Equity);
+    private sealed record FixedAssetOpeningFixture(
+        FixedAsset Asset,
+        FixedAssetBookValue BookValue,
+        Account AssetAccount,
+        Account AccumulatedDepreciationAccount,
+        Account MigrationClearingAccount);
 }

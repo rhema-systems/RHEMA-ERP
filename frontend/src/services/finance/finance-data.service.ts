@@ -29,6 +29,7 @@ import type {
     CreateExchangeRateDto,
     CreateJournalEntryDto,
     CreateOpeningBalanceBatchDto,
+    CreateFixedAssetOpeningBalanceBatchDto,
     UpdateOpeningBalanceBatchDto,
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
@@ -38,6 +39,7 @@ import type {
     OpeningBalanceBatch,
     OpeningBalanceDiagnostic,
     OpeningBalanceValidationResult,
+    SubledgerOpeningBalanceReadiness,
     ReverseSubledgerAdjustmentJournalDto,
     CreateFiscalYearDto,
     BalanceSheetReportDto,
@@ -523,6 +525,14 @@ class FinanceDataService {
 
     async createOpeningBalanceBatch(dto: CreateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
         return apiService.post<OpeningBalanceBatch>('/finance/opening-balances', dto);
+    }
+
+    async createFixedAssetOpeningBalanceBatch(dto: CreateFixedAssetOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/fixed-assets', dto);
+    }
+
+    async getSubledgerOpeningBalanceReadiness(): Promise<SubledgerOpeningBalanceReadiness> {
+        return apiService.get<SubledgerOpeningBalanceReadiness>('/finance/opening-balances/subledger-readiness');
     }
 
     async getOpeningBalanceBatches(): Promise<OpeningBalanceBatch[]> {

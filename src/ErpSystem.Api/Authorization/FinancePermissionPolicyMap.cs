@@ -452,9 +452,12 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> OpeningBalancePolicy(string action)
         => action switch
         {
-            "Get" or "List" => One(FinancePermissions.ViewFinance),
+            "Get" or "List" or "GetSubledgerReadiness" => One(FinancePermissions.ViewFinance),
             "Diagnostics" => One(FinancePermissions.RunMigrationDiagnostics),
-            "Create" or "Update" or "Validate" => One(FinancePermissions.PrepareOpeningBalances),
+            // Fixed-asset batches are another preparation route into the same maker-checker
+            // opening-balance aggregate; they must not inherit the more powerful adjustment
+            // permission merely because the action name differs from the original Create action.
+            "Create" or "CreateFixedAssetBatch" or "Update" or "Validate" => One(FinancePermissions.PrepareOpeningBalances),
             "Submit" => new[] { FinancePermissions.PrepareOpeningBalances, FinancePermissions.WorkflowSubmit },
             _ => One(FinancePermissions.RunMigrationAdjustments)
         };

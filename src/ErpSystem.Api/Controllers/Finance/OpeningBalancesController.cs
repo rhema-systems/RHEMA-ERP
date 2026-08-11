@@ -23,6 +23,17 @@ public sealed class OpeningBalancesController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _openingBalanceService.CreateBatchAsync(dto, cancellationToken));
 
+    [HttpPost("fixed-assets")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateFixedAssetBatch(
+        [FromBody] CreateFixedAssetOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateFixedAssetBatchAsync(dto, cancellationToken));
+
+    [HttpGet("subledger-readiness")]
+    public async Task<ActionResult<SubledgerOpeningBalanceReadinessDto>> GetSubledgerReadiness(
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.GetSubledgerReadinessAsync(cancellationToken));
+
     [HttpGet("{batchId:guid}")]
     public async Task<ActionResult<OpeningBalanceBatchDto>> Get(
         Guid batchId,
