@@ -171,6 +171,8 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(BudgetController), "SubmitRevision", FinancePermissions.SubmitBudgetRevisions)]
     [InlineData(typeof(BudgetController), "ApplyRevision", FinancePermissions.ApplyBudgetRevisions)]
     [InlineData(typeof(OpeningBalancesController), "Create", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "CreateFixedAssetBatch", FinancePermissions.PrepareOpeningBalances)]
+    [InlineData(typeof(OpeningBalancesController), "GetSubledgerReadiness", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "List", FinancePermissions.ViewFinance)]
     [InlineData(typeof(OpeningBalancesController), "Update", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "Validate", FinancePermissions.PrepareOpeningBalances)]

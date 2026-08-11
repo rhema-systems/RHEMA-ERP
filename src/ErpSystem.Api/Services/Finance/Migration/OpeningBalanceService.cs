@@ -1,6 +1,7 @@
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -23,6 +24,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     private const string StatusPosted = "Posted";
     private const string StatusFailed = "Failed";
     private const string StatusPostingFailed = "PostingFailed";
+    private const string FixedAssetOpeningCost = "FixedAssetOpeningCost";
+    private const string FixedAssetOpeningDepreciation = "FixedAssetOpeningDep";
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
@@ -141,6 +144,162 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             ?? throw new InvalidOperationException("Opening balance batch was created but could not be reloaded.");
     }
 
+    public async Task<OpeningBalanceBatchDto> CreateFixedAssetBatchAsync(
+        CreateFixedAssetOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var requestedAssetIds = dto.FixedAssetIds.Distinct().ToArray();
+        if (requestedAssetIds.Length == 0)
+        {
+            // An explicit selection prevents a user from accidentally posting every imported asset
+            // when the screen is filtered or when another preparer imports more rows concurrently.
+            throw new InvalidOperationException("Select at least one fixed asset for the opening-balance batch.");
+        }
+
+        var book = NormalizeBook(dto.BookClassification);
+        var bookValues = await _db.FixedAssetBookValues
+            .Include(value => value.FixedAsset)
+                .ThenInclude(asset => asset.Category)
+            .Include(value => value.AccountingBook)
+            .Where(value =>
+                value.TenantId == tenantId &&
+                requestedAssetIds.Contains(value.FixedAssetId) &&
+                value.BookClassification == book &&
+                !value.IsDeleted &&
+                !value.FixedAsset.IsDeleted)
+            .OrderBy(value => value.FixedAsset.AssetCode)
+            .ToListAsync(cancellationToken);
+
+        var loadedAssetIds = bookValues.Select(value => value.FixedAssetId).Distinct().ToHashSet();
+        var missingAssetIds = requestedAssetIds.Where(id => !loadedAssetIds.Contains(id)).ToArray();
+        if (missingAssetIds.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"{missingAssetIds.Length} selected asset(s) have no {book} opening book value for the current tenant.");
+        }
+
+        var openingDate = dto.OpeningDate.Date;
+        foreach (var value in bookValues)
+        {
+            ValidateFixedAssetOpeningCandidate(value, openingDate);
+        }
+
+        var settings = await _db.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.TenantId == tenantId && !candidate.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Finance settings are required before fixed-asset opening balances can be prepared.");
+        var clearingAccountId = settings.MigrationClearingAccountId
+            ?? throw new InvalidOperationException("Migration Clearing Account is not configured in Finance Settings.");
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+
+        var lines = new List<CreateOpeningBalanceLineDto>();
+        foreach (var value in bookValues)
+        {
+            // Keep one evidenced cost line per asset/book rather than aggregating by category. The
+            // posting engine still creates one journal, while each register row retains an exact
+            // source-to-ledger path that migration sign-off can verify independently.
+            lines.Add(new CreateOpeningBalanceLineDto
+            {
+                AccountId = value.FixedAsset.Category.AssetAccountId,
+                DebitAmount = RoundMoney(value.AcquisitionCost),
+                TransactionCurrencyCode = functionalCurrency,
+                FunctionalCurrencyCode = functionalCurrency,
+                SegmentString = value.FixedAsset.CurrentSegmentString,
+                CounterpartyType = FixedAssetOpeningCost,
+                CounterpartyId = value.Id,
+                SourceReference = value.FixedAsset.AssetCode,
+                Notes = $"Opening acquisition cost for {value.FixedAsset.AssetCode} ({book})"
+            });
+
+            if (RoundMoney(value.AccumulatedDepreciation) > 0m)
+            {
+                lines.Add(new CreateOpeningBalanceLineDto
+                {
+                    AccountId = value.FixedAsset.Category.AccumulatedDepreciationAccountId,
+                    CreditAmount = RoundMoney(value.AccumulatedDepreciation),
+                    TransactionCurrencyCode = functionalCurrency,
+                    FunctionalCurrencyCode = functionalCurrency,
+                    SegmentString = value.FixedAsset.CurrentSegmentString,
+                    CounterpartyType = FixedAssetOpeningDepreciation,
+                    CounterpartyId = value.Id,
+                    SourceReference = value.FixedAsset.AssetCode,
+                    Notes = $"Opening accumulated depreciation for {value.FixedAsset.AssetCode} ({book})"
+                });
+            }
+        }
+
+        var totalNetBookValue = RoundMoney(bookValues.Sum(value => value.NetBookValue));
+        if (totalNetBookValue > 0m)
+        {
+            lines.Add(new CreateOpeningBalanceLineDto
+            {
+                AccountId = clearingAccountId,
+                CreditAmount = totalNetBookValue,
+                TransactionCurrencyCode = functionalCurrency,
+                FunctionalCurrencyCode = functionalCurrency,
+                SourceReference = dto.SourceReference,
+                Notes = "Migration clearing offset for fixed-asset opening net book value"
+            });
+        }
+
+        return await CreateBatchAsync(new CreateOpeningBalanceBatchDto
+        {
+            BatchNumber = dto.BatchNumber ?? string.Empty,
+            SourceReference = dto.SourceReference,
+            Description = string.IsNullOrWhiteSpace(dto.Description)
+                ? $"Fixed-asset {book} opening balances at {openingDate:yyyy-MM-dd}"
+                : dto.Description,
+            OpeningDate = openingDate,
+            FiscalPeriodId = dto.FiscalPeriodId,
+            BookClassification = book,
+            IdempotencyKey = dto.IdempotencyKey,
+            Lines = lines
+        }, cancellationToken);
+    }
+
+    public async Task<SubledgerOpeningBalanceReadinessDto> GetSubledgerReadinessAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var ap = await _db.VendorInvoices
+            .AsNoTracking()
+            .Where(invoice => invoice.TenantId == tenantId && invoice.IsOpeningBalance && !invoice.IsDeleted)
+            .Select(invoice => new { invoice.JournalEntryId, invoice.BaseCurrencyAmount })
+            .ToListAsync(cancellationToken);
+        var ar = await _db.Invoices
+            .AsNoTracking()
+            .Where(invoice => invoice.TenantId == tenantId && invoice.IsOpeningBalance && !invoice.IsDeleted)
+            .Select(invoice => new { invoice.JournalEntryId, invoice.BaseCurrencyAmount })
+            .ToListAsync(cancellationToken);
+        var candidates = await GetFixedAssetOpeningCandidatesAsync(tenantId, cancellationToken);
+
+        var warnings = new List<string>();
+        if (ap.Any(item => !item.JournalEntryId.HasValue))
+            warnings.Add("One or more AP opening invoices are not posted and therefore do not yet support supplier aging sign-off.");
+        if (ar.Any(item => !item.JournalEntryId.HasValue))
+            warnings.Add("One or more AR opening invoices are not posted and therefore do not yet support customer aging sign-off.");
+        if (candidates.Any(item => !item.OpeningPostedToGl))
+            warnings.Add("One or more imported fixed-asset opening book values are not linked to an approved opening GL journal.");
+
+        return new SubledgerOpeningBalanceReadinessDto
+        {
+            ApOpeningInvoiceCount = ap.Count,
+            PostedApOpeningInvoiceCount = ap.Count(item => item.JournalEntryId.HasValue),
+            ApOpeningInvoiceFunctionalAmount = RoundMoney(ap.Sum(item => item.BaseCurrencyAmount)),
+            ArOpeningInvoiceCount = ar.Count,
+            PostedArOpeningInvoiceCount = ar.Count(item => item.JournalEntryId.HasValue),
+            ArOpeningInvoiceFunctionalAmount = RoundMoney(ar.Sum(item => item.BaseCurrencyAmount)),
+            FixedAssetOpeningBookValueCount = candidates.Count,
+            PostedFixedAssetOpeningBookValueCount = candidates.Count(item => item.OpeningPostedToGl),
+            FixedAssetOpeningCost = RoundMoney(candidates.Sum(item => item.AcquisitionCost)),
+            FixedAssetOpeningAccumulatedDepreciation = RoundMoney(candidates.Sum(item => item.AccumulatedDepreciation)),
+            FixedAssetOpeningNetBookValue = RoundMoney(candidates.Sum(item => item.NetBookValue)),
+            FixedAssetCandidates = candidates,
+            Warnings = warnings
+        };
+    }
+
     public async Task<OpeningBalanceBatchDto?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
         => await MapBatchAsync(batchId, cancellationToken);
 
@@ -190,6 +349,14 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     {
         var tenantId = TenantId;
         var batch = await LoadBatchAsync(tenantId, batchId, cancellationToken);
+        if (HasFixedAssetOpeningEvidence(batch))
+        {
+            // Generated fixed-asset lines are derived from the imported register and category GL
+            // mappings. Letting a user replace them with arbitrary accounts would break the exact
+            // subledger-to-ledger evidence FIN-LIM-0048 is intended to provide.
+            throw new InvalidOperationException(
+                "Generated fixed-asset opening batches cannot be edited manually. Correct the imported register or category mapping and create a new batch.");
+        }
         if (!IsEditableStatus(batch.Status))
         {
             throw new InvalidOperationException($"Opening balance batch '{batch.BatchNumber}' cannot be edited while it is {batch.Status}.");
@@ -395,6 +562,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             }
         }
 
+        await ValidateFixedAssetOpeningEvidenceAsync(batch, errors, cancellationToken);
+
         RecalculateTotals(batch);
         if (batch.TotalDebit != batch.TotalCredit)
         {
@@ -558,6 +727,13 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         try
         {
             var result = await _postingEngine.PostAsync(request, cancellationToken);
+            // The posting engine may clear the tracker while recovering an idempotent/concurrent
+            // insert race. Rehydrate before saving batch/register back-links; otherwise GL could
+            // be correct while the migration workspace still appears unposted to another user.
+            if (_db.Entry(batch).State == EntityState.Detached)
+            {
+                batch = await LoadBatchAsync(tenantId, batchId, cancellationToken);
+            }
             batch.Status = StatusPosted;
             batch.JournalEntryId = result.JournalEntryId;
             batch.PostingEventId = result.PostingEventId;
@@ -566,6 +742,15 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             batch.UpdatedAt = DateTime.UtcNow;
             batch.UpdatedBy = _currentUser.UserName ?? "system";
             batch.LastModifiedById = CurrentUserId();
+
+            // The existing asset import establishes book-level source facts but deliberately does
+            // not claim they reached GL. Only after the approved central posting succeeds do we
+            // attach its immutable journal/event evidence to those imported book values.
+            await ApplyFixedAssetOpeningLinksAsync(
+                batch,
+                result.JournalEntryId,
+                result.PostingEventId,
+                cancellationToken);
             await _db.SaveChangesAsync(cancellationToken);
 
             await RecordAuditAsync(
@@ -744,6 +929,203 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 .ThenInclude(l => l.Account)
             .FirstOrDefaultAsync(b => b.TenantId == tenantId && b.Id == batchId && !b.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Opening balance batch was not found for the current tenant.");
+
+    private async Task<IReadOnlyList<FixedAssetOpeningBalanceCandidateDto>> GetFixedAssetOpeningCandidatesAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+        => await _db.FixedAssetBookValues
+            .AsNoTracking()
+            .Where(value =>
+                value.TenantId == tenantId &&
+                !value.IsDeleted &&
+                !value.FixedAsset.IsDeleted &&
+                (value.OpeningAsOfDate.HasValue || value.OpeningSource.Contains("Opening")))
+            .OrderBy(value => value.FixedAsset.AssetCode)
+            .ThenBy(value => value.BookClassification)
+            .Select(value => new FixedAssetOpeningBalanceCandidateDto
+            {
+                FixedAssetId = value.FixedAssetId,
+                FixedAssetBookValueId = value.Id,
+                AssetCode = value.FixedAsset.AssetCode,
+                AssetName = value.FixedAsset.Name,
+                CategoryCode = value.FixedAsset.Category.Code,
+                BookClassification = value.BookClassification,
+                OpeningAsOfDate = value.OpeningAsOfDate,
+                AcquisitionCost = value.AcquisitionCost,
+                AccumulatedDepreciation = value.AccumulatedDepreciation,
+                NetBookValue = value.NetBookValue,
+                OpeningPostedToGl = value.OpeningPostedToGl,
+                OpeningJournalEntryId = value.OpeningJournalEntryId
+            })
+            .ToListAsync(cancellationToken);
+
+    private async Task ValidateFixedAssetOpeningEvidenceAsync(
+        OpeningBalanceBatch batch,
+        ICollection<string> errors,
+        CancellationToken cancellationToken)
+    {
+        var evidenceLines = batch.Lines
+            .Where(IsFixedAssetOpeningLine)
+            .ToList();
+        if (evidenceLines.Count == 0)
+        {
+            return;
+        }
+
+        var valueIds = evidenceLines
+            .Where(line => line.CounterpartyId.HasValue)
+            .Select(line => line.CounterpartyId!.Value)
+            .Distinct()
+            .ToArray();
+        var values = await _db.FixedAssetBookValues
+            .AsNoTracking()
+            .Include(value => value.FixedAsset)
+                .ThenInclude(asset => asset.Category)
+            .Where(value =>
+                value.TenantId == batch.TenantId &&
+                valueIds.Contains(value.Id) &&
+                !value.IsDeleted &&
+                !value.FixedAsset.IsDeleted)
+            .ToDictionaryAsync(value => value.Id, cancellationToken);
+
+        foreach (var valueId in valueIds)
+        {
+            if (!values.TryGetValue(valueId, out var value))
+            {
+                errors.Add($"Fixed-asset opening evidence {valueId} is missing or belongs to another tenant.");
+                continue;
+            }
+
+            try
+            {
+                ValidateFixedAssetOpeningCandidate(value, batch.OpeningDate.Date);
+            }
+            catch (InvalidOperationException ex)
+            {
+                errors.Add(ex.Message);
+                continue;
+            }
+
+            var costLine = evidenceLines.SingleOrDefault(line =>
+                line.CounterpartyId == valueId &&
+                string.Equals(line.CounterpartyType, FixedAssetOpeningCost, StringComparison.Ordinal));
+            if (costLine == null ||
+                costLine.AccountId != value.FixedAsset.Category.AssetAccountId ||
+                costLine.DebitAmount != RoundMoney(value.AcquisitionCost) ||
+                costLine.CreditAmount != 0m)
+            {
+                errors.Add($"Fixed asset {value.FixedAsset.AssetCode}: opening cost or category account changed after batch preparation.");
+            }
+
+            var depreciationLine = evidenceLines.SingleOrDefault(line =>
+                line.CounterpartyId == valueId &&
+                string.Equals(line.CounterpartyType, FixedAssetOpeningDepreciation, StringComparison.Ordinal));
+            var expectedDepreciation = RoundMoney(value.AccumulatedDepreciation);
+            if ((expectedDepreciation == 0m && depreciationLine != null) ||
+                (expectedDepreciation > 0m &&
+                 (depreciationLine == null ||
+                  depreciationLine.AccountId != value.FixedAsset.Category.AccumulatedDepreciationAccountId ||
+                  depreciationLine.CreditAmount != expectedDepreciation ||
+                  depreciationLine.DebitAmount != 0m)))
+            {
+                errors.Add($"Fixed asset {value.FixedAsset.AssetCode}: opening depreciation or category account changed after batch preparation.");
+            }
+        }
+    }
+
+    private async Task ApplyFixedAssetOpeningLinksAsync(
+        OpeningBalanceBatch batch,
+        Guid journalEntryId,
+        Guid postingEventId,
+        CancellationToken cancellationToken)
+    {
+        var valueIds = batch.Lines
+            .Where(IsFixedAssetOpeningLine)
+            .Where(line => line.CounterpartyId.HasValue)
+            .Select(line => line.CounterpartyId!.Value)
+            .Distinct()
+            .ToArray();
+        if (valueIds.Length == 0)
+        {
+            return;
+        }
+
+        var values = await _db.FixedAssetBookValues
+            .Include(value => value.FixedAsset)
+            .Where(value => value.TenantId == batch.TenantId && valueIds.Contains(value.Id))
+            .ToListAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        foreach (var value in values)
+        {
+            value.OpeningJournalEntryId = journalEntryId;
+            value.OpeningPostedToGl = true;
+            value.OpeningPostedDate = now;
+            value.SourceDocumentType = EntityType;
+            value.SourceDocumentId = batch.Id;
+            value.UpdatedAt = now;
+            value.UpdatedBy = _currentUser.UserName ?? "system";
+            value.LastModifiedById = CurrentUserId();
+
+            // The fixed-asset summary carries the primary IFRS opening lineage used by register
+            // inquiries. Parallel books retain their own journal link on FixedAssetBookValue and
+            // therefore never overwrite the primary-book evidence.
+            if (string.Equals(value.BookClassification, "IFRS", StringComparison.OrdinalIgnoreCase))
+            {
+                value.FixedAsset.JournalEntryId = journalEntryId;
+                value.FixedAsset.PostingEventId = postingEventId;
+                value.FixedAsset.SourceDocumentType = EntityType;
+                value.FixedAsset.SourceDocumentId = batch.Id;
+                value.FixedAsset.CapitalizationDate ??= batch.OpeningDate.Date;
+                value.FixedAsset.CapitalizedAt ??= now;
+                value.FixedAsset.UpdatedAt = now;
+                value.FixedAsset.UpdatedBy = _currentUser.UserName ?? "system";
+                value.FixedAsset.LastModifiedById = CurrentUserId();
+            }
+        }
+
+        // The importer already created immutable opening acquisition/depreciation transactions.
+        // Add the journal link to those exact rows instead of creating duplicate register events.
+        var assetIds = values.Select(value => value.FixedAssetId).Distinct().ToArray();
+        var openingTransactions = await _db.AssetTransactions
+            .Where(transaction =>
+                transaction.TenantId == batch.TenantId &&
+                assetIds.Contains(transaction.FixedAssetId) &&
+                transaction.BookClassification == batch.BookClassification &&
+                (transaction.TransactionType == "Opening Acquisition" ||
+                 transaction.TransactionType == "Opening Accumulated Depreciation"))
+            .ToListAsync(cancellationToken);
+        foreach (var transaction in openingTransactions)
+        {
+            transaction.RelatedEntityId = journalEntryId;
+            transaction.UpdatedAt = now;
+            transaction.UpdatedBy = _currentUser.UserName ?? "system";
+            transaction.LastModifiedById = CurrentUserId();
+        }
+    }
+
+    private static void ValidateFixedAssetOpeningCandidate(FixedAssetBookValue value, DateTime openingDate)
+    {
+        if (value.OpeningPostedToGl || value.OpeningJournalEntryId.HasValue)
+            throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening balance is already posted to GL.");
+        if (!value.OpeningAsOfDate.HasValue || value.OpeningAsOfDate.Value.Date != openingDate)
+            throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening as-of date must equal {openingDate:yyyy-MM-dd}.");
+        if (RoundMoney(value.AcquisitionCost) <= 0m)
+            throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening acquisition cost must be positive.");
+        if (RoundMoney(value.AccumulatedDepreciation) < 0m || value.AccumulatedDepreciation > value.AcquisitionCost)
+            throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening accumulated depreciation is outside the valid cost range.");
+        if (RoundMoney(value.AcquisitionCost - value.AccumulatedDepreciation) != RoundMoney(value.NetBookValue))
+            throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: opening cost, accumulated depreciation, and NBV do not reconcile.");
+        if (value.FixedAsset.Category.AssetAccountId == Guid.Empty ||
+            value.FixedAsset.Category.AccumulatedDepreciationAccountId == Guid.Empty)
+            throw new InvalidOperationException($"Fixed asset {value.FixedAsset.AssetCode}: category opening-balance accounts are incomplete.");
+    }
+
+    private static bool HasFixedAssetOpeningEvidence(OpeningBalanceBatch batch)
+        => batch.Lines.Any(IsFixedAssetOpeningLine);
+
+    private static bool IsFixedAssetOpeningLine(OpeningBalanceLine line)
+        => string.Equals(line.CounterpartyType, FixedAssetOpeningCost, StringComparison.Ordinal)
+            || string.Equals(line.CounterpartyType, FixedAssetOpeningDepreciation, StringComparison.Ordinal);
 
     private async Task<OpeningBalanceBatchDto?> MapBatchAsync(Guid batchId, CancellationToken cancellationToken)
     {

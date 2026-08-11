@@ -49,6 +49,58 @@ public sealed class PostOpeningBalanceBatchDto
     public string? Comment { get; set; }
 }
 
+/// <summary>
+/// Creates a controlled GL opening-balance batch from fixed-asset book values already loaded by
+/// the existing asset import. The request deliberately identifies assets, not user-entered GL
+/// accounts: Finance derives the cost and accumulated-depreciation accounts from the approved
+/// category configuration so the register and ledger cannot be mapped differently at cutover.
+/// </summary>
+public sealed class CreateFixedAssetOpeningBalanceBatchDto
+{
+    public string? BatchNumber { get; set; }
+    public string? SourceReference { get; set; }
+    public string? Description { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public string? IdempotencyKey { get; set; }
+    public IReadOnlyList<Guid> FixedAssetIds { get; set; } = Array.Empty<Guid>();
+}
+
+public sealed class SubledgerOpeningBalanceReadinessDto
+{
+    public int ApOpeningInvoiceCount { get; set; }
+    public int PostedApOpeningInvoiceCount { get; set; }
+    public decimal ApOpeningInvoiceFunctionalAmount { get; set; }
+    public int ArOpeningInvoiceCount { get; set; }
+    public int PostedArOpeningInvoiceCount { get; set; }
+    public decimal ArOpeningInvoiceFunctionalAmount { get; set; }
+    public int FixedAssetOpeningBookValueCount { get; set; }
+    public int PostedFixedAssetOpeningBookValueCount { get; set; }
+    public decimal FixedAssetOpeningCost { get; set; }
+    public decimal FixedAssetOpeningAccumulatedDepreciation { get; set; }
+    public decimal FixedAssetOpeningNetBookValue { get; set; }
+    public IReadOnlyList<FixedAssetOpeningBalanceCandidateDto> FixedAssetCandidates { get; set; }
+        = Array.Empty<FixedAssetOpeningBalanceCandidateDto>();
+    public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
+}
+
+public sealed class FixedAssetOpeningBalanceCandidateDto
+{
+    public Guid FixedAssetId { get; set; }
+    public Guid FixedAssetBookValueId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string CategoryCode { get; set; } = string.Empty;
+    public string BookClassification { get; set; } = string.Empty;
+    public DateTime? OpeningAsOfDate { get; set; }
+    public decimal AcquisitionCost { get; set; }
+    public decimal AccumulatedDepreciation { get; set; }
+    public decimal NetBookValue { get; set; }
+    public bool OpeningPostedToGl { get; set; }
+    public Guid? OpeningJournalEntryId { get; set; }
+}
+
 public sealed class OpeningBalanceBatchDto
 {
     public Guid Id { get; set; }

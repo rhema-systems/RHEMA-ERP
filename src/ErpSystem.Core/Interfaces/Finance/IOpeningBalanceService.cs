@@ -8,6 +8,13 @@ public interface IOpeningBalanceService
         CreateOpeningBalanceBatchDto dto,
         CancellationToken cancellationToken = default);
 
+    Task<OpeningBalanceBatchDto> CreateFixedAssetBatchAsync(
+        CreateFixedAssetOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken = default);
+
+    Task<SubledgerOpeningBalanceReadinessDto> GetSubledgerReadinessAsync(
+        CancellationToken cancellationToken = default);
+
     Task<OpeningBalanceBatchDto?> GetBatchAsync(
         Guid batchId,
         CancellationToken cancellationToken = default);

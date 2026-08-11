@@ -1094,6 +1094,48 @@ export interface CreateOpeningBalanceLineDto {
     notes?: string;
 }
 
+export interface CreateFixedAssetOpeningBalanceBatchDto {
+    batchNumber?: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    fixedAssetIds: string[];
+}
+
+export interface FixedAssetOpeningBalanceCandidate {
+    fixedAssetId: string;
+    fixedAssetBookValueId: string;
+    assetCode: string;
+    assetName: string;
+    categoryCode: string;
+    bookClassification: string;
+    openingAsOfDate?: string;
+    acquisitionCost: number;
+    accumulatedDepreciation: number;
+    netBookValue: number;
+    openingPostedToGl: boolean;
+    openingJournalEntryId?: string;
+}
+
+export interface SubledgerOpeningBalanceReadiness {
+    apOpeningInvoiceCount: number;
+    postedApOpeningInvoiceCount: number;
+    apOpeningInvoiceFunctionalAmount: number;
+    arOpeningInvoiceCount: number;
+    postedArOpeningInvoiceCount: number;
+    arOpeningInvoiceFunctionalAmount: number;
+    fixedAssetOpeningBookValueCount: number;
+    postedFixedAssetOpeningBookValueCount: number;
+    fixedAssetOpeningCost: number;
+    fixedAssetOpeningAccumulatedDepreciation: number;
+    fixedAssetOpeningNetBookValue: number;
+    fixedAssetCandidates: FixedAssetOpeningBalanceCandidate[];
+    warnings: string[];
+}
+
 export interface UpdateCurrencyLinkRatePolicyDto {
     revaluationRequired: boolean;
     revaluationFrequency: string;

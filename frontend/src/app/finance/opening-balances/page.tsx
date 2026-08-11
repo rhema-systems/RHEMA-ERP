@@ -47,7 +47,7 @@ type OpeningLine = {
     notes: string;
 };
 
-type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | null;
+type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | null;
 
 const BASE_CURRENCY = 'GHS';
 
@@ -136,6 +136,7 @@ export default function OpeningBalancesPage() {
     const [currentBatch, setCurrentBatch] = useState<OpeningBalanceBatch | null>(null);
     const [isDirty, setIsDirty] = useState(false);
     const [validation, setValidation] = useState<OpeningBalanceValidationResult | null>(null);
+    const [selectedFixedAssetIds, setSelectedFixedAssetIds] = useState<string[]>([]);
     const [comment, setComment] = useState('');
     const [header, setHeader] = useState({
         batchNumber: '',
@@ -175,6 +176,11 @@ export default function OpeningBalancesPage() {
     const batchesQuery = useQuery({
         queryKey: ['opening-balance-batches'],
         queryFn: () => financeDataService.getOpeningBalanceBatches(),
+    });
+
+    const subledgerReadinessQuery = useQuery({
+        queryKey: ['opening-balance-subledger-readiness'],
+        queryFn: () => financeDataService.getSubledgerOpeningBalanceReadiness(),
     });
 
     const accountingBooks = useMemo<AccountingBook[]>(() => {
@@ -358,6 +364,42 @@ export default function OpeningBalancesPage() {
         }
     };
 
+    const handleCreateFixedAssetBatch = async () => {
+        if (!header.openingDate || !header.fiscalPeriodId) {
+            toast({ title: 'Opening period required', description: 'Select the opening date and fiscal period on the GL Batch tab first.', variant: 'destructive' });
+            return;
+        }
+        if (selectedFixedAssetIds.length === 0) {
+            toast({ title: 'Select assets', description: 'Select at least one unposted fixed-asset opening row.', variant: 'destructive' });
+            return;
+        }
+
+        try {
+            setBusyAction('fixed-assets');
+            // The backend derives every GL account and amount from the imported register. The UI
+            // sends only the explicit asset selection and cutover header so operators cannot make
+            // the asset register and opening journal disagree by editing generated lines.
+            const created = await financeDataService.createFixedAssetOpeningBalanceBatch({
+                sourceReference: header.sourceReference.trim() || undefined,
+                description: `Fixed-asset ${header.bookClassification} opening balances`,
+                openingDate: header.openingDate,
+                fiscalPeriodId: header.fiscalPeriodId,
+                bookClassification: header.bookClassification,
+                fixedAssetIds: selectedFixedAssetIds,
+            });
+            applyBatchToForm(created);
+            setSelectedFixedAssetIds([]);
+            setActiveTab('gl');
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            toast({ title: 'Fixed-asset opening batch prepared', description: 'Validate and submit the generated batch for approval.' });
+        } catch (error: any) {
+            toast({ title: 'Preparation failed', description: error?.message || 'Unable to prepare the fixed-asset opening batch.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
     const handleUpdateBatch = async () => {
         if (!currentBatch || clientErrors.length > 0) {
             if (clientErrors.length > 0) {
@@ -422,7 +464,7 @@ export default function OpeningBalancesPage() {
             setBusyAction('post');
             const posted = await financeDataService.postOpeningBalanceBatch(currentBatch.id, comment || undefined);
             applyBatchToForm(posted);
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch(), subledgerReadinessQuery.refetch()]);
             toast({ title: 'Opening batch posted', description: posted.batchNumber });
         } catch (error: any) {
             toast({ title: 'Post failed', description: error?.message || 'Unable to post opening balance batch.', variant: 'destructive' });
@@ -1026,8 +1068,11 @@ export default function OpeningBalancesPage() {
                 <TabsContent value="subledger" className="space-y-6">
                     <div className="grid gap-6 md:grid-cols-2">
                         <Card>
-                            <CardHeader>
+                            <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>AR Opening Invoices</CardTitle>
+                                <Badge variant="outline">
+                                    {subledgerReadinessQuery.data?.postedArOpeningInvoiceCount ?? 0}/{subledgerReadinessQuery.data?.arOpeningInvoiceCount ?? 0} posted
+                                </Badge>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="text-sm text-muted-foreground">
@@ -1051,8 +1096,11 @@ export default function OpeningBalancesPage() {
                         </Card>
 
                         <Card>
-                            <CardHeader>
+                            <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>AP Opening Bills</CardTitle>
+                                <Badge variant="outline">
+                                    {subledgerReadinessQuery.data?.postedApOpeningInvoiceCount ?? 0}/{subledgerReadinessQuery.data?.apOpeningInvoiceCount ?? 0} posted
+                                </Badge>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="text-sm text-muted-foreground">
@@ -1075,6 +1123,111 @@ export default function OpeningBalancesPage() {
                             </CardContent>
                         </Card>
                     </div>
+
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between gap-4">
+                            <div>
+                                <CardTitle>Fixed-Asset Opening Register</CardTitle>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Prepare an approved GL batch from imported cost and accumulated-depreciation evidence. Accounts and amounts are derived by Finance and cannot be edited manually.
+                                </p>
+                            </div>
+                            <Badge variant="outline">
+                                {subledgerReadinessQuery.data?.postedFixedAssetOpeningBookValueCount ?? 0}/{subledgerReadinessQuery.data?.fixedAssetOpeningBookValueCount ?? 0} posted
+                            </Badge>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {(subledgerReadinessQuery.data?.warnings ?? []).map(warning => (
+                                <Alert key={warning}>
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertDescription>{warning}</AlertDescription>
+                                </Alert>
+                            ))}
+
+                            <div className="grid gap-3 sm:grid-cols-3">
+                                <div className="rounded-md border p-3">
+                                    <div className="text-xs text-muted-foreground">Opening cost</div>
+                                    <div className="font-semibold">{formatAmount(subledgerReadinessQuery.data?.fixedAssetOpeningCost ?? 0)}</div>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <div className="text-xs text-muted-foreground">Accumulated depreciation</div>
+                                    <div className="font-semibold">{formatAmount(subledgerReadinessQuery.data?.fixedAssetOpeningAccumulatedDepreciation ?? 0)}</div>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <div className="text-xs text-muted-foreground">Net book value</div>
+                                    <div className="font-semibold">{formatAmount(subledgerReadinessQuery.data?.fixedAssetOpeningNetBookValue ?? 0)}</div>
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-md border">
+                                <table className="w-full min-w-[900px]">
+                                    <thead>
+                                        <tr className="border-b bg-muted/50">
+                                            <th className="w-12 p-3"></th>
+                                            <th className="p-3 text-left font-medium">Asset</th>
+                                            <th className="p-3 text-left font-medium">Book / As Of</th>
+                                            <th className="p-3 text-right font-medium">Cost</th>
+                                            <th className="p-3 text-right font-medium">Accum. Dep.</th>
+                                            <th className="p-3 text-right font-medium">NBV</th>
+                                            <th className="p-3 text-left font-medium">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {(subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
+                                            .filter(candidate => candidate.bookClassification === header.bookClassification)
+                                            .map(candidate => {
+                                                const selectable = !candidate.openingPostedToGl;
+                                                return (
+                                                    <tr key={candidate.fixedAssetBookValueId} className="border-b last:border-0">
+                                                        <td className="p-3 text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                aria-label={`Select ${candidate.assetCode}`}
+                                                                checked={selectedFixedAssetIds.includes(candidate.fixedAssetId)}
+                                                                disabled={!selectable || busyAction !== null}
+                                                                onChange={(event) => setSelectedFixedAssetIds(current => event.target.checked
+                                                                    ? [...new Set([...current, candidate.fixedAssetId])]
+                                                                    : current.filter(id => id !== candidate.fixedAssetId))}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="font-medium">{candidate.assetCode} - {candidate.assetName}</div>
+                                                            <div className="text-xs text-muted-foreground">{candidate.categoryCode}</div>
+                                                        </td>
+                                                        <td className="p-3">{candidate.bookClassification} / {normalizeDate(candidate.openingAsOfDate)}</td>
+                                                        <td className="p-3 text-right">{formatAmount(candidate.acquisitionCost)}</td>
+                                                        <td className="p-3 text-right">{formatAmount(candidate.accumulatedDepreciation)}</td>
+                                                        <td className="p-3 text-right font-medium">{formatAmount(candidate.netBookValue)}</td>
+                                                        <td className="p-3"><Badge variant={candidate.openingPostedToGl ? 'default' : 'secondary'}>{candidate.openingPostedToGl ? 'Posted' : 'Ready'}</Badge></td>
+                                                    </tr>
+                                                );
+                                            })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-sm text-muted-foreground">
+                                    Uses {header.bookClassification}, opening date {header.openingDate || '-'}, and the selected fiscal period from the GL Batch tab.
+                                </p>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => setSelectedFixedAssetIds((subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
+                                            .filter(candidate => candidate.bookClassification === header.bookClassification && !candidate.openingPostedToGl)
+                                            .map(candidate => candidate.fixedAssetId))}
+                                        disabled={busyAction !== null}
+                                    >
+                                        Select Ready
+                                    </Button>
+                                    <Button onClick={handleCreateFixedAssetBatch} disabled={busyAction !== null || selectedFixedAssetIds.length === 0}>
+                                        {busyAction === 'fixed-assets' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+                                        Prepare GL Batch
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
                 </TabsContent>
 
                 <TabsContent value="diagnostics" className="space-y-6">
