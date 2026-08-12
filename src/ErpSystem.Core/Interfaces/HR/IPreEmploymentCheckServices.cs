@@ -35,7 +35,29 @@ public interface IPreEmploymentCheckService
 
     // Template application
     Task<PreEmploymentCheckDetailDto> ApplyTemplateAsync(Guid checkId, Guid templateId, Guid appliedByUserId, bool overwriteExisting = false, CancellationToken ct = default);
+
+    // ── Evidence documents ────────────────────────────────────────────────────
+    //
+    // ⚠ These take the ids the controlled-upload gate produced, never a caller-supplied path. The
+    // `DocumentPath` fields that used to be set straight from the request payload are legacy and
+    // read-only now.
+
+    Task<PreEmploymentCheckItemDto> RecordItemDocumentAsync(
+        Guid itemId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, CancellationToken cancellationToken = default);
+
+    Task<ReferenceCheckResponseDto> RecordReferenceDocumentAsync(
+        Guid responseId, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        string? fileName, CancellationToken cancellationToken = default);
+
+    Task<PreEmploymentDocumentHandleDto?> GetItemDocumentHandleAsync(
+        Guid itemId, CancellationToken cancellationToken = default);
+
+    Task<PreEmploymentDocumentHandleDto?> GetReferenceDocumentHandleAsync(
+        Guid responseId, CancellationToken cancellationToken = default);
 }
+
+
 
 // ============================================================================
 // PRE-EMPLOYMENT CHECK TEMPLATE SERVICE
@@ -50,5 +72,10 @@ public interface IPreEmploymentCheckTemplateService
     Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
     Task<PreEmploymentCheckTemplateItemDto> AddItemAsync(CreatePreEmploymentCheckTemplateItemDto dto, Guid tenantId, Guid createdByUserId, CancellationToken ct = default);
     Task<PreEmploymentCheckTemplateItemDto> UpdateItemAsync(UpdatePreEmploymentCheckTemplateItemDto dto, Guid updatedByUserId, CancellationToken ct = default);
-    Task<bool> DeleteItemAsync(Guid itemId, CancellationToken ct = default);
+
+    /// <summary>
+    /// ⚠ Takes the owning template id as well as the item id. The previous signature took the item
+    /// id alone, and the implementation found it by scanning every tenant's templates.
+    /// </summary>
+    Task<bool> DeleteItemAsync(Guid templateId, Guid itemId, CancellationToken ct = default);
 }

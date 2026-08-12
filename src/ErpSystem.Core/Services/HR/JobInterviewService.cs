@@ -455,8 +455,13 @@ public class JobInterviewService : IJobInterviewService
     private async Task<string> GenerateInterviewNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var last = await _interviewRepository.GetQueryable()
-            .Where(i => i.TenantId == tenantId && !i.IsDeleted)
+        // ⚠ Counts SOFT-DELETED rows too, via the including-deleted overload — plain GetQueryable()
+        // filters them out. Excluding them makes the sequence reuse a number the moment anything is
+        // deleted, and JobInterviews carries a UNIQUE index on (TenantId, InterviewNumber) that a soft delete does
+        // not release: deleting one draft made the very next create die on a duplicate-key violation,
+        // surfaced as a 500 with raw SQL in it. A reference number is an identifier, not a slot —
+        // once issued it is spent.
+        var last = await _interviewRepository.GetQueryableIncludingDeleted(i => i.TenantId == tenantId)
             .OrderByDescending(i => i.InterviewNumber)
             .Select(i => i.InterviewNumber)
             .FirstOrDefaultAsync(cancellationToken);

@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -6,15 +7,33 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Employment offers — terms, approval, issue, and the candidate's response.
+///
+/// <para><b>HR-only, reads included.</b> The controller previously carried a bare
+/// <c>[Authorize]</c>, so any authenticated employee could read every offer in the tenant — which
+/// is every new hire's salary, bonus and benefits — and create, approve, issue or revoke them.</para>
+///
+/// <para><b>Approval runs on the generic workflow engine</b>, like the two appraisal outcome
+/// proposals: an offer is a single-writer approval lifecycle that commits money, and who signs off
+/// an offer above the band midpoint is a routing policy rather than something to hard-code.
+/// ⚠ Submit/approve/reject are therefore inoperable until a <c>JobOffer</c> definition is published
+/// and <c>POST api/Workflow/entity-types/seed</c> has been re-run — authority comes from the
+/// definition, not from the role gate here. Everything from <c>Sent</c> onwards stays a direct
+/// action: issuing, the candidate responding, negotiating, revising and revoking have several
+/// writers, including the candidate through the anonymous token flow.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-offers")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[RecruitmentBusinessRules]
 public class JobOfferController : ControllerBase
 {
     private readonly IJobOfferService _service;
@@ -72,8 +91,14 @@ public class JobOfferController : ControllerBase
     /// letter is rendered from the HR-editable "OfferLetter" template enriched with the offer terms,
     /// job-description summary + duties, itemised salary breakdown, benefits and pre-employment
     /// conditions.
+    ///
+    /// <para>⚠ Route renamed from <c>{id}/letter</c> to <c>{id}/letter-preview</c>. It collided
+    /// exactly with <see cref="DownloadLetter"/> below, which streams the stored PDF on the same
+    /// verb and template — so ASP.NET raised <c>AmbiguousMatchException</c> on every request and
+    /// <b>both</b> endpoints were dead. The rendered preview and the stored file are genuinely
+    /// different resources, so they get different routes rather than one being dropped.</para>
     /// </summary>
-    [HttpGet("{id:guid}/letter")]
+    [HttpGet("{id:guid}/letter-preview")]
     public async Task<ActionResult<OfferLetterDto>> GetOfferLetter(Guid id, CancellationToken ct)
     {
         try
@@ -155,9 +180,19 @@ public class JobOfferController : ControllerBase
         return Ok(new { message = "Offer submitted for approval." });
     }
 
+    /// <summary>Withdraws an offer that is out for approval, returning it to Draft.</summary>
+    [HttpPost("{id:guid}/recall")]
+    public async Task<IActionResult> Recall(Guid id)
+    {
+        await _service.RecallApprovalAsync(id);
+        return Ok(new { message = "Offer recalled." });
+    }
+
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveJobOfferDto dto)
     {
+        // The service keys off the body's id, so a mismatch used to act on a different offer.
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -185,6 +220,7 @@ public class JobOfferController : ControllerBase
     [HttpPost("{id:guid}/issue")]
     public async Task<IActionResult> Issue(Guid id, [FromBody] IssueJobOfferDto dto)
     {
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -198,6 +234,7 @@ public class JobOfferController : ControllerBase
     [HttpPost("{id:guid}/record-response")]
     public async Task<IActionResult> RecordResponse(Guid id, [FromBody] RecordOfferResponseDto dto)
     {
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -211,6 +248,7 @@ public class JobOfferController : ControllerBase
     [HttpPost("{id:guid}/revoke")]
     public async Task<IActionResult> Revoke(Guid id, [FromBody] RevokeJobOfferDto dto)
     {
+        dto.OfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
@@ -277,8 +315,8 @@ public class JobOfferController : ControllerBase
     [HttpPost("{id:guid}/notes")]
     public async Task<ActionResult<JobOfferNoteDto>> AddNote(Guid id, [FromBody] CreateJobOfferNoteDto dto)
     {
+        dto.JobOfferId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (id != dto.JobOfferId) return BadRequest("ID mismatch.");
 
         var tenantId   = _currentUser.TenantId;
         var employeeId = _currentUser.EmployeeId;

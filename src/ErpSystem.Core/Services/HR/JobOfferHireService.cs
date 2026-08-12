@@ -25,6 +25,8 @@ public class JobOfferService : IJobOfferService
     private readonly IJobOfferNoteRepository _noteRepository;
     private readonly IApplicationPipelineService _pipelineService;
     private readonly IJobApplicationRepository _applicationRepository;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobOfferService> _logger;
@@ -38,6 +40,8 @@ public class JobOfferService : IJobOfferService
         IJobOfferNoteRepository noteRepository,
         IApplicationPipelineService pipelineService,
         IJobApplicationRepository applicationRepository,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobOfferService> logger,
@@ -50,6 +54,8 @@ public class JobOfferService : IJobOfferService
         _noteRepository          = noteRepository;
         _pipelineService         = pipelineService;
         _applicationRepository   = applicationRepository;
+        _workflowIntegrationService    = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider     = currentUserProvider;
         _unitOfWork              = unitOfWork;
         _logger                  = logger;
@@ -92,11 +98,50 @@ public class JobOfferService : IJobOfferService
         return entity;
     }
 
+    /// <summary>
+    /// The proposed base salary must sit inside the position's grade band.
+    ///
+    /// <para>Factored out because the rule was written three times over and enforced in only one of
+    /// them: create checked it, update checked the <i>pre-update</i> value, and revise — the path
+    /// whose entire purpose is to change the salary after a counter-offer — never checked at all.
+    /// A band is only a band if every write path respects it.</para>
+    ///
+    /// <para>Silent when the position carries no grade: an unbanded position constrains nothing.</para>
+    ///
+    /// <para>⚠ <b>Also silent when the grade exists but its band is unset (max ≤ 0), or is inverted.</b>
+    /// That is not a technicality. Salary grades are owned by payroll and mirrored into HR, and in
+    /// this deployment every one of them currently carries <c>0 – 0</c>. Treating an unconfigured
+    /// band as a constraint rather than as an absence made the rule read "no salary is permissible",
+    /// which refused <i>every offer in the tenant</i> — the whole feature was unusable, and the
+    /// message blamed the salary rather than the missing configuration. An absent band means the
+    /// grade has nothing to say about the number, not that the number is wrong.</para>
+    /// </summary>
+    private static void EnsureSalaryWithinBand(JobOffer offer)
+    {
+        if (!offer.BaseSalary.HasValue) return;
+
+        var min = offer.SalaryGradeMin ?? 0m;
+        var max = offer.SalaryGradeMax ?? 0m;
+
+        // No usable band: unset, or configured back-to-front. Either way it constrains nothing.
+        if (max <= 0m || max < min) return;
+
+        if (offer.BaseSalary < min || offer.BaseSalary > max)
+            throw new InvalidOperationException(
+                $"Proposed base salary {offer.BaseSalary:N2} is outside the salary band " +
+                $"({min:N2} – {max:N2}) for this position.");
+    }
+
     private async Task<string> GenerateOfferNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var last = await _offerRepository.GetQueryable()
-            .Where(o => o.TenantId == tenantId && !o.IsDeleted)
+        // ⚠ Counts SOFT-DELETED rows too, via the including-deleted overload — plain GetQueryable()
+        // filters them out. Excluding them makes the sequence reuse a number the moment anything is
+        // deleted, and JobOffers carries a UNIQUE index on (TenantId, OfferNumber) that a soft delete does
+        // not release: deleting one draft made the very next create die on a duplicate-key violation,
+        // surfaced as a 500 with raw SQL in it. A reference number is an identifier, not a slot —
+        // once issued it is spent.
+        var last = await _offerRepository.GetQueryableIncludingDeleted(o => o.TenantId == tenantId)
             .OrderByDescending(o => o.OfferNumber)
             .Select(o => o.OfferNumber)
             .FirstOrDefaultAsync(cancellationToken);
@@ -171,41 +216,44 @@ public class JobOfferService : IJobOfferService
         var vacancy  = application.JobVacancy;
         var position = vacancy?.Position;
 
+        // ⚠ These were `if (x != null)` guards that silently skipped the snapshot. That was survivable
+        // only because the client also sent PositionId/PositionTitle/ReportsToTitle/GradeTitle/
+        // EmploymentType and the entity kept those. Those fields are off the payload now — they were
+        // required of the caller and then always discarded — so an unresolved vacancy or position
+        // would write PositionId = Guid.Empty and die on a foreign-key violation with nothing to
+        // explain it. A vacancy's PositionId is non-nullable and the seeding query includes the
+        // chain, so this cannot happen in practice; if it ever does, it means the query changed and
+        // that deserves to be said out loud rather than half-written.
+        if (vacancy is null)
+            throw new InvalidOperationException(
+                "This application is not linked to a vacancy, so an offer cannot be raised from it.");
+        if (position is null)
+            throw new InvalidOperationException(
+                "The vacancy behind this application has no position, so the offer has no role to describe.");
+
         // Build entity from the client-supplied negotiated fields
         var entity = createDto.ToEntity(current, createdByUserId);
 
-        // --- Auto-populate position snapshot fields (always server-authoritative) ---
-        if (position != null)
-        {
-            entity.PositionId            = position.Id;
-            entity.PositionTitle         = position.Title;
-            entity.ReportsToTitle        = position.ReportsToPosition?.Title ?? string.Empty;
-            entity.GradeTitle            = position.SalaryGrade?.Name ?? string.Empty;
-            entity.DepartmentName        = position.OrganizationUnit?.Name ?? string.Empty;
-            entity.SalaryGradeMin        = position.SalaryGrade?.MinSalary;
-            entity.SalaryGradeMax        = position.SalaryGrade?.MaxSalary;
-            // HR override from DTO wins; fall back to position default
-            entity.ProbationPeriodMonths = createDto.ProbationPeriodMonths ?? position.ProbationPeriodMonths;
-            entity.NoticePeriodMonths    = createDto.NoticePeriodMonths    ?? position.NoticePeriodMonths;
-        }
+        // --- Position snapshot: always server-authoritative, never client-supplied ---
+        entity.PositionId            = position.Id;
+        entity.PositionTitle         = position.Title;
+        entity.ReportsToTitle        = position.ReportsToPosition?.Title ?? string.Empty;
+        entity.GradeTitle            = position.SalaryGrade?.Name ?? string.Empty;
+        entity.DepartmentName        = position.OrganizationUnit?.Name ?? string.Empty;
+        entity.SalaryGradeMin        = position.SalaryGrade?.MinSalary;
+        entity.SalaryGradeMax        = position.SalaryGrade?.MaxSalary;
+        // HR override from the payload wins; fall back to the position's default
+        entity.ProbationPeriodMonths = createDto.ProbationPeriodMonths ?? position.ProbationPeriodMonths;
+        entity.NoticePeriodMonths    = createDto.NoticePeriodMonths    ?? position.NoticePeriodMonths;
 
-        if (vacancy != null)
-        {
-            entity.WorkMode       = vacancy.WorkMode;
-            entity.EmploymentType = vacancy.EmploymentType;
-        }
+        entity.WorkMode       = vacancy.WorkMode;
+        entity.EmploymentType = vacancy.EmploymentType;
 
         // Default weekly hours: 20 for part-time, 40 for all other employment types
         entity.WeeklyHours ??= entity.EmploymentType == EmploymentType.PartTime ? 20m : 40m;
 
         // --- Salary within-band validation ---
-        if (entity.BaseSalary.HasValue && entity.SalaryGradeMin.HasValue && entity.SalaryGradeMax.HasValue)
-        {
-            if (entity.BaseSalary < entity.SalaryGradeMin || entity.BaseSalary > entity.SalaryGradeMax)
-                throw new InvalidOperationException(
-                    $"Proposed base salary {entity.BaseSalary:N2} is outside the salary band " +
-                    $"({entity.SalaryGradeMin:N2} \u2013 {entity.SalaryGradeMax:N2}) for this position.");
-        }
+        EnsureSalaryWithinBand(entity);
 
         entity.OfferNumber = await GenerateOfferNumberAsync(cancellationToken);
         entity.OfferStatus = JobOfferStatus.Draft;
@@ -239,7 +287,13 @@ public class JobOfferService : IJobOfferService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job offer created: {OfferNumber}", entity.OfferNumber);
-        return entity.ToDto();
+
+        // Re-read so the response carries the candidate's name. A freshly constructed entity has no
+        // navigations loaded, and EF will not populate them just because the FK is set — so the
+        // create response used to come back with an empty candidateName even though the very next
+        // GET showed it.
+        var saved = await _offerRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<JobOfferDto> UpdateAsync(UpdateJobOfferDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -249,16 +303,13 @@ public class JobOfferService : IJobOfferService
         if (entity.OfferStatus != JobOfferStatus.Draft && entity.OfferStatus != JobOfferStatus.PendingApproval)
             throw new InvalidOperationException("Only draft or pending-approval offers can be edited.");
 
-        // Validate salary against the grade band when present on the entity being updated
-        if (entity.BaseSalary.HasValue && entity.SalaryGradeMin.HasValue && entity.SalaryGradeMax.HasValue)
-        {
-            if (entity.BaseSalary < entity.SalaryGradeMin || entity.BaseSalary > entity.SalaryGradeMax)
-                throw new InvalidOperationException(
-                    $"Proposed base salary {entity.BaseSalary:N2} is outside the salary band " +
-                    $"({entity.SalaryGradeMin:N2} \u2013 {entity.SalaryGradeMax:N2}) for this position.");
-        }
-
         entity.UpdateEntity(updateDto, updatedByUserId);
+
+        // \u26a0 Validated AFTER the update is applied. This check used to run first, so it tested the
+        // salary already on the record and never the one being saved \u2014 the band guard that create
+        // enforces was a no-op on every edit.
+        EnsureSalaryWithinBand(entity);
+
         await _offerRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -278,6 +329,19 @@ public class JobOfferService : IJobOfferService
         return true;
     }
 
+    // ── Workflow ──────────────────────────────────────────────────────────────
+    //
+    // Offer approval runs on the generic workflow engine (see JobOfferWorkflowStatusAdapter). The
+    // service never sets an approval status itself: it asks the engine, then lets the adapter apply
+    // whatever the engine decided. That is what makes routing — who approves an offer above the
+    // band midpoint, say — a published policy rather than a hard-coded branch.
+    //
+    // ⚠ Until a JobOffer workflow definition is published and `POST api/Workflow/entity-types/seed`
+    // has been re-run, submit/approve/reject are inoperable BY DESIGN — authority comes from the
+    // definition, not from a role attribute.
+
+    private const string EntityType = "JobOffer";
+
     public async Task<bool> SubmitForApprovalAsync(Guid offerId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedOfferAsync(offerId);
@@ -287,10 +351,25 @@ public class JobOfferService : IJobOfferService
             throw new InvalidOperationException(
                 $"Only Draft or Rejected offers can be submitted for approval (current: {entity.OfferStatus}).");
 
-        entity.OfferStatus = JobOfferStatus.PendingApproval;
+        // The band is a fact about the offer, not a routing choice, so it is enforced here before
+        // an approver is ever troubled with it — the same reasoning that keeps requisition budget
+        // enforcement in its service rather than in a definition.
+        EnsureSalaryWithinBand(entity);
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the offer approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+        entity.UpdatedAt = DateTime.UtcNow;
 
         await _offerRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Offer {OfferNumber} submitted for approval (now {Status}).",
+            entity.OfferNumber, entity.OfferStatus);
         return true;
     }
 
@@ -302,12 +381,33 @@ public class JobOfferService : IJobOfferService
             throw new InvalidOperationException(
                 $"Only offers in PendingApproval can be approved (current: {entity.OfferStatus}).");
 
-        entity.OfferStatus = JobOfferStatus.Approved;
+        // The engine resolves approvers by ApplicationUser, so it gets UserId; everything the entity
+        // stores (PreparedById, ApprovedById) is an Employee FK and gets the id the controller
+        // passed. See hr-attendance-actor-conventions.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Approve", dto.Comments);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+
+        // ⚠ ApprovedDate is the server's clock, not `dto.ApprovedDate`. It used to be taken from the
+        // request body, so an approver could date their own approval to whenever suited them.
         entity.ApprovedById = approvedByUserId;
-        entity.ApprovedDate = dto.ApprovedDate;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = approvedByUserId.ToString();
 
         await _offerRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Offer approval step processed: {OfferNumber} (now {Status})",
+            entity.OfferNumber, entity.OfferStatus);
         return true;
     }
 
@@ -319,16 +419,55 @@ public class JobOfferService : IJobOfferService
             throw new InvalidOperationException(
                 $"Only offers in PendingApproval can be rejected (current: {entity.OfferStatus}).");
 
-        entity.OfferStatus = JobOfferStatus.Rejected;
-        entity.ApprovalRejectionReason = dto.RejectionReason;
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Reject", dto.RejectionReason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, dto.RejectionReason);
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = rejectedByUserId.ToString();
 
         await _offerRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Offer {OfferId} approval rejected by {RejectedBy}. Reason: {Reason}",
-            dto.OfferId, rejectedByUserId, dto.RejectionReason);
+            "Offer {OfferNumber} approval rejected by {RejectedBy}. Reason: {Reason}",
+            entity.OfferNumber, rejectedByUserId, dto.RejectionReason);
 
+        return true;
+    }
+
+    /// <summary>
+    /// The preparer withdrawing an offer before anyone has ruled on it. Returns it to Draft so it
+    /// can be reworked and resubmitted.
+    /// </summary>
+    public async Task<bool> RecallApprovalAsync(Guid offerId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedOfferAsync(offerId);
+
+        if (entity.OfferStatus != JobOfferStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only an offer awaiting approval can be recalled (current: {entity.OfferStatus}).");
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(
+            EntityType, entity.Id, _currentUserProvider.UserId);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to recall the offer.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyRecallOutcome(entity, _currentUserProvider.UserId);
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        await _offerRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -343,8 +482,8 @@ public class JobOfferService : IJobOfferService
         entity.OfferDate = dto.OfferDate;
         if (dto.ExpiryDate.HasValue)
             entity.ExpiryDate = dto.ExpiryDate;
-        if (dto.OfferLetterPath != null)
-            entity.OfferLetterPath = dto.OfferLetterPath;
+        // ⚠ The letter is no longer settable from the payload — see IssueJobOfferDto. It arrives
+        // through the controlled-upload gate, which is what records it in the DMS.
 
         // Generate a secure candidate response token
         var expiresAt = entity.ExpiryDate ?? dto.ExpiryDate ?? DateTime.UtcNow.AddDays(14);
@@ -384,6 +523,19 @@ public class JobOfferService : IJobOfferService
 
         if (entity.OfferStatus != JobOfferStatus.Sent)
             throw new InvalidOperationException("Can only record a response for a sent offer.");
+
+        // ⚠ `dto.Response` is a full JobOfferStatus, and this assigned it unchecked — so "record the
+        // candidate's response" could set an offer to Approved, Draft or anything else in the enum,
+        // straight past every gate that owns those states. The token-based candidate flow already
+        // constrains itself to these three; the internal one did not.
+        var allowedResponses = new[]
+        {
+            JobOfferStatus.Accepted, JobOfferStatus.Negotiating, JobOfferStatus.Declined,
+        };
+        if (!allowedResponses.Contains(dto.Response))
+            throw new InvalidOperationException(
+                "A candidate response must be Accepted, Negotiating or Declined. " +
+                "Use conditionally-accept, revoke or revise for the other outcomes.");
 
         entity.OfferStatus = dto.Response;
         if (dto.Response == JobOfferStatus.Accepted) entity.AcceptedDate = DateTime.UtcNow;
@@ -715,7 +867,15 @@ public class JobOfferService : IJobOfferService
             IsLatestVersion = true,
             PreviousOfferId = original.Id,
             CreatedBy = revisedByUserId.ToString(),
+            // Carried forward deliberately: a revision inherits the original's conditionality and
+            // working pattern. Only the negotiated terms below are open to change.
+            IsConditional = original.IsConditional,
+            WeeklyHours = original.WeeklyHours,
         };
+
+        // A revision exists to change the money after a counter-offer, so this is precisely the path
+        // that must respect the band — and it was the one path that never checked.
+        EnsureSalaryWithinBand(revised);
 
         await _offerRepository.AddAsync(revised);
 
@@ -814,7 +974,12 @@ public class JobOfferService : IJobOfferService
             ExpiryDate      = offer.ExpiryDate?.ToString("dddd, d MMMM yyyy"),
             AdditionalTerms = offer.AdditionalTerms,
             IsConditional   = offer.IsConditional,
-            OfferLetterUrl  = offer.OfferLetterPath,
+            // ⚠ Deliberately NOT `offer.OfferLetterPath`. That is a server filesystem path, and this
+            // payload goes to an unauthenticated caller holding only an emailed token — it told them
+            // where the file lives on disk and was useless to them as a link anyway. The letter
+            // reaches the candidate as an email attachment; a download route for them would need its
+            // own token check, which is candidate-portal work rather than something to bolt on here.
+            OfferLetterUrl  = null,
         };
     }
 
@@ -1054,8 +1219,13 @@ public class JobHireService : IJobHireService
     private async Task<string> GenerateHireNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var last = await _hireRepository.GetQueryable()
-            .Where(h => h.TenantId == tenantId && !h.IsDeleted)
+        // ⚠ Counts SOFT-DELETED rows too, via the including-deleted overload — plain GetQueryable()
+        // filters them out. Excluding them makes the sequence reuse a number the moment anything is
+        // deleted, and JobHireRecords carries a UNIQUE index on (TenantId, HireNumber) that a soft delete does
+        // not release: deleting one draft made the very next create die on a duplicate-key violation,
+        // surfaced as a 500 with raw SQL in it. A reference number is an identifier, not a slot —
+        // once issued it is spent.
+        var last = await _hireRepository.GetQueryableIncludingDeleted(h => h.TenantId == tenantId)
             .OrderByDescending(h => h.HireNumber)
             .Select(h => h.HireNumber)
             .FirstOrDefaultAsync(cancellationToken);
@@ -1119,13 +1289,31 @@ public class JobHireService : IJobHireService
         if (offer == null || offer.TenantId != current)
             throw new ArgumentException($"Job offer '{createDto.OfferId}' not found.");
 
-        if (offer.IsConditional
-            && offer.OfferStatus != JobOfferStatus.ChecksCleared
-            && offer.OfferStatus != JobOfferStatus.Accepted)
+        // ⚠ This gate previously accepted `Accepted` as well as `ChecksCleared`, so a conditional
+        // offer could be hired the moment the candidate said yes — while its message told the reader
+        // the opposite. Conditional now means what it says: the checks have to clear.
+        if (offer.IsConditional && offer.OfferStatus != JobOfferStatus.ChecksCleared)
         {
             throw new InvalidOperationException(
-                "This offer is conditional. Pre-employment checks must be completed and cleared before a hire record can be created.");
+                "This offer is conditional. Pre-employment checks must be completed and cleared " +
+                $"before a hire record can be created (offer is currently {offer.OfferStatus}).");
         }
+
+        // A non-conditional offer still has to have been accepted — hiring against a draft, a
+        // withdrawn or a declined offer was never intended and nothing prevented it.
+        if (!offer.IsConditional
+            && offer.OfferStatus is not (JobOfferStatus.Accepted or JobOfferStatus.ChecksCleared))
+        {
+            throw new InvalidOperationException(
+                $"Only an accepted offer can be hired against (offer is currently {offer.OfferStatus}).");
+        }
+
+        // One hire per offer. Nothing enforced this, so a repeated create left two hire records
+        // racing to become the same person's employment.
+        var existingForApplication = await _hireRepository.GetByApplicationIdAsync(createDto.ApplicationId);
+        if (existingForApplication is not null && existingForApplication.TenantId == current)
+            throw new InvalidOperationException(
+                $"This application already has hire record {existingForApplication.HireNumber}.");
 
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.HireNumber = await GenerateHireNumberAsync(cancellationToken);
@@ -1140,19 +1328,61 @@ public class JobHireService : IJobHireService
         await _pipelineService.AutoAdvanceToStageTypeAsync(
             entity.ApplicationId, RecruitmentPipelineStageType.Hired, createdByUserId, cancellationToken);
 
-        return entity.ToDto();
+        var saved = await _hireRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
+
+    /// <summary>
+    /// Moves a hire through onboarding.
+    ///
+    /// <para>⚠ <b>This had no state machine at all</b> — any status to any other, and that included
+    /// <c>Active</c>, which is what <see cref="ConfirmStartAsync"/> sets <i>after</i> it has created
+    /// the employee record, the contract, the probation period and the rest. Worse, setting it here
+    /// was a one-way door: <c>ConfirmStartAsync</c>'s idempotency guard refuses when the status is
+    /// already <c>Active</c>, so a stray status update permanently prevented the employee from ever
+    /// being created and there was no way back. <c>Active</c> is therefore reachable only through
+    /// confirm-start, and terminal states cannot be edited.</para>
+    /// </summary>
+    private static readonly IReadOnlyDictionary<JobHireStatus, JobHireStatus[]> HireTransitions =
+        new Dictionary<JobHireStatus, JobHireStatus[]>
+        {
+            [JobHireStatus.PendingOnboarding]    = new[] { JobHireStatus.OnboardingInProgress, JobHireStatus.Cancelled },
+            [JobHireStatus.OnboardingInProgress] = new[] { JobHireStatus.OnboardingCompleted, JobHireStatus.Cancelled },
+            [JobHireStatus.OnboardingCompleted]  = new[] { JobHireStatus.Cancelled },
+            [JobHireStatus.Active]               = Array.Empty<JobHireStatus>(),
+            [JobHireStatus.Cancelled]            = Array.Empty<JobHireStatus>(),
+        };
 
     public async Task<JobHireRecordDto> UpdateStatusAsync(UpdateJobHireRecordStatusDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedHireAsync(updateDto.HireRecordId);
 
+        if (updateDto.NewStatus == JobHireStatus.Active)
+            throw new InvalidOperationException(
+                "A hire becomes Active by confirming its start date, which creates the employee record. " +
+                "Use confirm-start rather than setting the status directly.");
+
+        if (entity.Status == updateDto.NewStatus)
+            throw new InvalidOperationException($"This hire is already {entity.Status}.");
+
+        var allowed = HireTransitions.TryGetValue(entity.Status, out var next) ? next : Array.Empty<JobHireStatus>();
+        if (!allowed.Contains(updateDto.NewStatus))
+            throw new InvalidOperationException(
+                $"A hire in '{entity.Status}' cannot move to '{updateDto.NewStatus}'.");
+
         entity.Status = updateDto.NewStatus;
-        entity.Notes = updateDto.Notes;
+        // Only replace the notes when the caller actually sent some — this used to blank them on
+        // every status change that omitted the field.
+        if (updateDto.Notes != null)
+            entity.Notes = updateDto.Notes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = updatedByUserId.ToString();
 
         await _hireRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var saved = await _hireRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> ConfirmStartAsync(Guid hireRecordId, DateTime actualStartDate, Guid? linkedEmployeeId, Guid confirmedByUserId, CancellationToken cancellationToken = default)

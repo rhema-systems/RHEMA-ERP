@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -2824,31 +2825,28 @@ public class JobOfferSummaryDto
     public DateTime CreatedAt { get; set; }
 }
 
+/// <summary>
+/// Raising an offer against an application. Carries the <b>negotiated terms only</b>.
+///
+/// <para>⚠ <c>PositionId</c>, <c>PositionTitle</c>, <c>ReportsToTitle</c>, <c>GradeTitle</c> and
+/// <c>EmploymentType</c> have been REMOVED. All five were <c>[Required]</c>, and
+/// <c>CreateAsync</c> overwrote every one of them from the application's vacancy and position as
+/// "always server-authoritative" — so a caller was forced to supply values that were guaranteed to
+/// be discarded. A vacancy's <c>PositionId</c> is non-nullable and the seeding query includes it,
+/// so the fallback branch that would have used these never runs.</para>
+///
+/// <para>That is the same failure as naming the approver in <c>ApproveJobOfferDto</c>: a field the
+/// caller believes is doing something and which is silently ignored. Removed rather than merely
+/// un-required, and with unmapped members disallowed, so anyone still sending them is told.</para>
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class CreateJobOfferDto : CreateDtoBase
 {
     [Required]
     public Guid JobApplicationId { get; set; }
 
-    [Required]
-    public Guid PositionId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string PositionTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string ReportsToTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string GradeTitle { get; set; } = string.Empty;
-
     public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
-
-    [Required]
-    public EmploymentType EmploymentType { get; set; }
 
     public int? ContractDurationMonths { get; set; }
     public int? ProbationPeriodMonths { get; set; }
@@ -2883,27 +2881,24 @@ public class CreateJobOfferDto : CreateDtoBase
     public string? AdditionalTerms { get; set; }
 }
 
+/// <summary>
+/// Editing a draft or pending-approval offer. Like <see cref="CreateJobOfferDto"/>, the
+/// <b>negotiated terms only</b>.
+///
+/// <para>⚠ <c>PositionTitle</c>, <c>ReportsToTitle</c>, <c>GradeTitle</c>, <c>EmploymentType</c> and
+/// <c>WorkMode</c> have been REMOVED — and here they were worse than on create. Create discarded
+/// them and took the role snapshot from the position; <b>update wrote them straight onto the
+/// entity</b>, so an editor could rewrite the position title, the reporting line, the grade and the
+/// employment type of an offer to anything at all, and the record would no longer describe the role
+/// it was raised against. The two paths contradicted each other about who owns these values; the
+/// position owns them.</para>
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class UpdateJobOfferDto : UpdateDtoBase
 {
-    [Required]
-    [MaxLength(200)]
-    public string PositionTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string ReportsToTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string GradeTitle { get; set; } = string.Empty;
-
     public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
 
-    [Required]
-    public EmploymentType EmploymentType { get; set; }
-
-    public WorkMode WorkMode { get; set; }
     public int? ContractDurationMonths { get; set; }
     public int? ProbationPeriodMonths { get; set; }
     public int? NoticePeriodMonths { get; set; }
@@ -2937,6 +2932,23 @@ public class UpdateJobOfferDto : UpdateDtoBase
     public string? AdditionalTerms { get; set; }
 }
 
+/// <summary>
+/// Issuing an approved offer to the candidate: sets the dates, mints their single-use response
+/// token and emails them the link.
+///
+/// <para>⚠ <c>OfferLetterPath</c> is gone. It let the caller write an arbitrary server path onto the
+/// offer, which is the same shape the seven recruitment attachment paths were fixed out of — the
+/// letter is uploaded through <c>upload-letter</c>, which runs the controlled-upload gate and
+/// registers the file in the DMS.</para>
+/// </summary>
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class IssueJobOfferDto
 {
     [Required]
@@ -2944,9 +2956,6 @@ public class IssueJobOfferDto
 
     public DateTime OfferDate { get; set; } = DateTime.UtcNow;
     public DateTime? ExpiryDate { get; set; }
-
-    [MaxLength(500)]
-    public string? OfferLetterPath { get; set; }
 }
 
 public class RecordOfferResponseDto
@@ -2971,15 +2980,30 @@ public class RevokeJobOfferDto
     public string RevocationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Approving an offer that is out for approval.
+///
+/// <para>⚠ <c>ApprovedById</c> and <c>ApprovedDate</c> are gone. The approver used to be named in
+/// the body — so a caller could record someone else as having approved — and the date came with it,
+/// letting an approval be dated to whenever suited. Both now come from the token and the server
+/// clock. What remains is the approver's own comment, which the workflow engine records on the
+/// history row.</para>
+/// </summary>
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class ApproveJobOfferDto
 {
     [Required]
     public Guid OfferId { get; set; }
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovedDate { get; set; } = DateTime.UtcNow;
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 public class SubmitForApprovalDto
@@ -3225,7 +3249,13 @@ public class PreEmploymentCheckItemDto : BaseDto
     public bool? Passed { get; set; }
     public string? Instructions { get; set; }
     public string? Remarks { get; set; }
-    public string? DocumentPath { get; set; }
+    // ⚠ The raw storage path is deliberately not exposed. It is a server filesystem location, of no
+    // use to a client and of some use to an attacker; the file is fetched from the download route.
+    /// <summary>True once evidence has been uploaded through the controlled-upload gate.</summary>
+    public bool HasDocument { get; set; }
+
+    /// <summary>Original file name of the uploaded evidence, for display and download.</summary>
+    public string? DocumentFileName { get; set; }
     public int? ExpectedDays { get; set; }
     public bool IsMandatory { get; set; }
     public bool IsBlockingOnFail { get; set; }
@@ -3256,6 +3286,14 @@ public class CreatePreEmploymentCheckItemDto : CreateDtoBase
     public int? ExpectedDays { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class UpdatePreEmploymentCheckItemDto : UpdateDtoBase
 {
     [MaxLength(200)]
@@ -3276,8 +3314,8 @@ public class UpdatePreEmploymentCheckItemDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? Remarks { get; set; }
 
-    [MaxLength(500)]
-    public string? DocumentPath { get; set; }
+    // ⚠ DocumentPath removed: evidence is uploaded through the controlled-upload gate, not named by
+    // the caller. See PreEmploymentCheckItem.DocumentPath.
 
     public int? ExpectedDays { get; set; }
     public Guid? ReviewedById { get; set; }
@@ -3308,9 +3346,21 @@ public class ReferenceCheckResponseDto : BaseDto
     public bool? ConfirmedDatesOfEmployment { get; set; }
     public bool? ConfirmedPositionHeld { get; set; }
     public bool? ConfirmedReasonForLeaving { get; set; }
-    public string? DocumentPath { get; set; }
+    /// <summary>True once evidence has been uploaded through the controlled-upload gate.</summary>
+    public bool HasDocument { get; set; }
+
+    /// <summary>Original file name of the uploaded evidence, for display and download.</summary>
+    public string? DocumentFileName { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class CreateReferenceCheckResponseDto : CreateDtoBase
 {
     [Required]
@@ -3351,10 +3401,17 @@ public class CreateReferenceCheckResponseDto : CreateDtoBase
     public bool? ConfirmedPositionHeld { get; set; }
     public bool? ConfirmedReasonForLeaving { get; set; }
 
-    [MaxLength(500)]
-    public string? DocumentPath { get; set; }
+    // ⚠ DocumentPath removed — a written reference is uploaded through the gate.
 }
 
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class UpdateReferenceCheckResponseDto : UpdateDtoBase
 {
     public ReferenceRating? OverallRating { get; set; }
@@ -3367,13 +3424,28 @@ public class UpdateReferenceCheckResponseDto : UpdateDtoBase
     public bool? ConfirmedPositionHeld { get; set; }
     public bool? ConfirmedReasonForLeaving { get; set; }
 
-    [MaxLength(500)]
-    public string? DocumentPath { get; set; }
+    // ⚠ DocumentPath removed — a written reference is uploaded through the gate.
 }
 
 #endregion
 
 #region Pre-Employment Check Templates
+
+/// <summary>
+/// The stored-document handles behind one piece of pre-employment evidence, for the download route.
+/// Not a client-facing shape — the controller turns it into a file stream.
+/// </summary>
+public class PreEmploymentDocumentHandleDto
+{
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>Legacy path, for documents stored before the controlled-upload gate.</summary>
+    public string? LegacyPath { get; set; }
+
+    public string FileName { get; set; } = string.Empty;
+}
 
 public class PreEmploymentCheckTemplateDto : BaseDto
 {

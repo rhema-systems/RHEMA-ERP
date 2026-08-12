@@ -1,24 +1,59 @@
+using ErpSystem.Api.Filters;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Pre-employment checks against a conditional offer — medical, police clearance, background,
+/// academic and professional verification, references, credit and drug testing.
+///
+/// <para><b>HR-only, reads included, and the most sensitive data in the module:</b> criminal-record
+/// results, medical outcomes and referees' candid opinions about a named person. This controller
+/// previously carried a bare <c>[Authorize]</c>, so any authenticated employee could read all of
+/// it and record results against anyone.</para>
+///
+/// <para>⚠ Completing a check is gated: mandatory and blocking items must have a recorded outcome
+/// first. Waived and not-applicable items count as settled, not as failures.</para>
+/// </summary>
 [ApiController]
 [Route("api/pre-employment-checks")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[RecruitmentBusinessRules]
 public class PreEmploymentCheckController : ControllerBase
 {
     private readonly IPreEmploymentCheckService _service;
     private readonly ICurrentUserService _currentUser;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<PreEmploymentCheckController> _logger;
 
-    public PreEmploymentCheckController(IPreEmploymentCheckService service, ICurrentUserService currentUser)
+    public PreEmploymentCheckController(
+        IPreEmploymentCheckService service,
+        ICurrentUserService currentUser,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ILogger<PreEmploymentCheckController> logger)
     {
         _service = service;
         _currentUser = currentUser;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
 
     // =========================================================================
@@ -103,6 +138,7 @@ public class PreEmploymentCheckController : ControllerBase
     public async Task<ActionResult<PreEmploymentCheckItemDto>> AddItem(
         Guid checkId, [FromBody] CreatePreEmploymentCheckItemDto dto)
     {
+        dto.PreEmploymentCheckId = checkId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -155,6 +191,7 @@ public class PreEmploymentCheckController : ControllerBase
     public async Task<ActionResult<ReferenceCheckResponseDto>> AddReferenceResponse(
         Guid checkItemId, [FromBody] CreateReferenceCheckResponseDto dto)
     {
+        dto.CheckItemId = checkItemId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId = _currentUser.TenantId;
@@ -187,6 +224,88 @@ public class PreEmploymentCheckController : ControllerBase
     {
         await _service.DeleteReferenceResponseAsync(id);
         return NoContent();
+    }
+
+    // =========================================================================
+    // EVIDENCE DOCUMENTS
+    // =========================================================================
+    //
+    // ⚠ Evidence goes through the controlled-upload gate — virus scan, then DMS registration —
+    // exactly like requisition and appraisal attachments. It used to be a `documentPath` string on
+    // the request payload, so a caller named any path they liked and nothing ever scanned or stored
+    // a file. `HrPreEmploymentDocuments` is its own storage category because these are third-party
+    // verification results about a named person: the most sensitive documents recruitment holds.
+
+    /// <summary>Uploads the evidence behind one check item — a clearance certificate, a report.</summary>
+    [HttpPost("items/{itemId:guid}/document")]
+    [RequestSizeLimit(20 * 1024 * 1024)]
+    public Task<IActionResult> UploadItemDocument(Guid itemId, IFormFile file, CancellationToken ct)
+        => HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "PreEmploymentCheckItem",
+            sourceRecordId: itemId,
+            sourceLabel: "Pre-employment check evidence",
+            documentType: "PreEmploymentCheckEvidence",
+            description: null,
+            persist: (_, document) => _service.RecordItemDocumentAsync(
+                itemId, document.FileUploadRecordId, document.DocumentRecordId,
+                document.DocumentVersionId, Path.GetFileName(file.FileName), ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrPreEmploymentDocuments);
+
+    /// <summary>Streams the evidence behind a check item.</summary>
+    [HttpGet("items/{itemId:guid}/document")]
+    public async Task<IActionResult> DownloadItemDocument(Guid itemId, CancellationToken ct)
+    {
+        var handle = await _service.GetItemDocumentHandleAsync(itemId, ct);
+        return await ServeDocumentAsync(handle, ct);
+    }
+
+    /// <summary>Uploads a written reference returned by a referee.</summary>
+    [HttpPost("reference-responses/{responseId:guid}/document")]
+    [RequestSizeLimit(20 * 1024 * 1024)]
+    public Task<IActionResult> UploadReferenceDocument(Guid responseId, IFormFile file, CancellationToken ct)
+        => HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: "ReferenceCheckResponse",
+            sourceRecordId: responseId,
+            sourceLabel: "Written reference",
+            documentType: "ReferenceCheckResponse",
+            description: null,
+            persist: (_, document) => _service.RecordReferenceDocumentAsync(
+                responseId, document.FileUploadRecordId, document.DocumentRecordId,
+                document.DocumentVersionId, Path.GetFileName(file.FileName), ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrPreEmploymentDocuments);
+
+    /// <summary>Streams a written reference.</summary>
+    [HttpGet("reference-responses/{responseId:guid}/document")]
+    public async Task<IActionResult> DownloadReferenceDocument(Guid responseId, CancellationToken ct)
+    {
+        var handle = await _service.GetReferenceDocumentHandleAsync(responseId, ct);
+        return await ServeDocumentAsync(handle, ct);
+    }
+
+    /// <summary>
+    /// Shared tail of both download routes. The service has already established that the record is
+    /// in the caller's tenant — the DMS performs no entitlement check of its own.
+    /// </summary>
+    private async Task<IActionResult> ServeDocumentAsync(
+        PreEmploymentDocumentHandleDto? handle, CancellationToken ct)
+    {
+        if (handle is null)
+            return NotFound(new { message = "No document has been attached." });
+
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest(new { message = "Tenant context could not be resolved." });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            handle.DocumentRecordId, handle.DocumentVersionId, handle.FileUploadRecordId,
+            handle.LegacyPath,
+            fallbackFileName: handle.FileName,
+            fallbackContentType: "application/octet-stream",
+            inline: false, ct);
     }
 
     // =========================================================================

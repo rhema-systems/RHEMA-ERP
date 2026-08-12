@@ -285,6 +285,19 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("JobOffer") || key == Normalize("JOB_OFFER") || key == Normalize("Job Offer"))
+            {
+                var offer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobOffer>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Application);
+                info.EntityType = "JobOffer";
+                info.EntityNumber = offer?.OfferNumber;
+                info.EntityName = offer == null
+                    ? null
+                    : $"{offer.OfferNumber} — {offer.PositionTitle}";
+                info.ActionUrl = $"/hr/recruitment/offers/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
             {
                 info.EntityType = "TrainingNomination";

@@ -190,7 +190,6 @@ public static class RecruitmentMappingExtensions
             NumberOfInterviewRounds = dto.NumberOfInterviewRounds,
             TargetStartDate = dto.TargetStartDate,
             IsSalaryVisible = dto.IsSalaryVisible,
-            EmploymentType = dto.EmploymentType,
             WorkMode = dto.WorkMode,
             SalaryRangeMin = dto.SalaryRangeMin,
             SalaryRangeMax = dto.SalaryRangeMax,
@@ -2661,13 +2660,12 @@ public static class RecruitmentMappingExtensions
             TenantId = tenantId,
             JobApplicationId = dto.JobApplicationId,
             OfferStatus = JobOfferStatus.Draft,
-            PositionId = dto.PositionId,
-            PositionTitle = dto.PositionTitle,
-            ReportsToTitle = dto.ReportsToTitle,
-            GradeTitle = dto.GradeTitle,
+            // PositionId, PositionTitle, ReportsToTitle, GradeTitle and EmploymentType are set by
+            // CreateAsync from the application's vacancy and position — they are snapshots of the
+            // role, not negotiable terms, and are no longer on the payload at all.
+
             LocationLevelId = dto.LocationLevelId,
             LocationId = dto.LocationId,
-            EmploymentType = dto.EmploymentType,
             ContractDurationMonths = dto.ContractDurationMonths,
             ProbationPeriodMonths = dto.ProbationPeriodMonths,
             NoticePeriodMonths = dto.NoticePeriodMonths,
@@ -2694,13 +2692,11 @@ public static class RecruitmentMappingExtensions
 
     public static void UpdateEntity(this JobOffer entity, UpdateJobOfferDto dto, Guid userId)
     {
-        entity.PositionTitle = dto.PositionTitle;
-        entity.ReportsToTitle = dto.ReportsToTitle;
-        entity.GradeTitle = dto.GradeTitle;
+        // The role snapshot — position title, reporting line, grade, employment type and work mode —
+        // belongs to the position and the vacancy, and is set once at create. It used to be written
+        // from this payload, which let an edit falsify the role the offer describes.
         entity.LocationLevelId = dto.LocationLevelId;
         entity.LocationId = dto.LocationId;
-        entity.EmploymentType = dto.EmploymentType;
-        entity.WorkMode = dto.WorkMode;
         entity.ContractDurationMonths = dto.ContractDurationMonths;
         entity.ProbationPeriodMonths = dto.ProbationPeriodMonths;
         entity.NoticePeriodMonths = dto.NoticePeriodMonths;
@@ -2932,7 +2928,9 @@ public static class RecruitmentMappingExtensions
             Passed = entity.Passed,
             Instructions = entity.Instructions,
             Remarks = entity.Remarks,
-            DocumentPath = entity.DocumentPath,
+            HasDocument = entity.DocumentFileUploadRecordId.HasValue
+                          || !string.IsNullOrWhiteSpace(entity.DocumentPath),
+            DocumentFileName = entity.DocumentFileName,
             ExpectedDays = entity.ExpectedDays,
             IsMandatory = entity.IsMandatory,
             IsBlockingOnFail = entity.IsBlockingOnFail,
@@ -2976,7 +2974,7 @@ public static class RecruitmentMappingExtensions
             entity.Status = dto.Passed.Value ? CheckItemStatus.Verified : CheckItemStatus.Failed;
         entity.Instructions = dto.Instructions;
         entity.Remarks = dto.Remarks;
-        entity.DocumentPath = dto.DocumentPath;
+        // DocumentPath is no longer settable from a payload — see UpdatePreEmploymentCheckItemDto.
         entity.ExpectedDays = dto.ExpectedDays;
         entity.ReviewedById = dto.ReviewedById;
         entity.ReviewedDate = dto.ReviewedDate;
@@ -3017,7 +3015,9 @@ public static class RecruitmentMappingExtensions
             ConfirmedDatesOfEmployment = entity.ConfirmedDatesOfEmployment,
             ConfirmedPositionHeld = entity.ConfirmedPositionHeld,
             ConfirmedReasonForLeaving = entity.ConfirmedReasonForLeaving,
-            DocumentPath = entity.DocumentPath,
+            HasDocument = entity.DocumentFileUploadRecordId.HasValue
+                          || !string.IsNullOrWhiteSpace(entity.DocumentPath),
+            DocumentFileName = entity.DocumentFileName,
         };
     }
 
@@ -3041,7 +3041,7 @@ public static class RecruitmentMappingExtensions
             ConfirmedDatesOfEmployment = dto.ConfirmedDatesOfEmployment,
             ConfirmedPositionHeld = dto.ConfirmedPositionHeld,
             ConfirmedReasonForLeaving = dto.ConfirmedReasonForLeaving,
-            DocumentPath = dto.DocumentPath,
+            // DocumentPath arrives through the upload gate, not the payload.
             CreatedBy = userId.ToString(),
         };
     }
@@ -3054,7 +3054,7 @@ public static class RecruitmentMappingExtensions
         entity.ConfirmedDatesOfEmployment = dto.ConfirmedDatesOfEmployment;
         entity.ConfirmedPositionHeld = dto.ConfirmedPositionHeld;
         entity.ConfirmedReasonForLeaving = dto.ConfirmedReasonForLeaving;
-        entity.DocumentPath = dto.DocumentPath;
+        // DocumentPath arrives through the upload gate, not the payload.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

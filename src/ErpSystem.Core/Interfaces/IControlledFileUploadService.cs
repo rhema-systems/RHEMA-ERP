@@ -42,6 +42,17 @@ public static class ControlledFileUploadCategories
     public const string HrRecruitmentAttachments = "hr-recruitment-attachments";
 
     /// <summary>
+    /// Evidence behind a pre-employment check on a conditional offer — police clearance
+    /// certificates, medical reports, academic transcripts, written references.
+    ///
+    /// <para>Deliberately its own category rather than sharing
+    /// <see cref="HrCandidateDocuments"/>: these are third-party verification results about a named
+    /// person, frequently the most sensitive documents recruitment ever holds, and keeping them
+    /// separate means a retention or access policy can be set for them alone.</para>
+    /// </summary>
+    public const string HrPreEmploymentDocuments = "hr-pre-employment-documents";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -68,7 +79,8 @@ public static class ControlledFileUploadCategories
                 HrOfferLetters,
                 HrMedicalExamDocuments,
                 HrAppraisalAttachments,
-                HrRecruitmentAttachments
+                HrRecruitmentAttachments,
+                HrPreEmploymentDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

@@ -168,3 +168,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260805104205_HrRemoveDuplicateShadowForeignKeys")] partial class HrRemoveDuplicateShadowForeignKeys { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260805114001_MergeFinanceControlHardeningAndSharedReporting")] partial class MergeFinanceControlHardeningAndSharedReporting { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260810121459_HrRecruitmentAttachmentDocumentLinks")] partial class HrRecruitmentAttachmentDocumentLinks { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260811151131_HrPreEmploymentDocumentLinks")] partial class HrPreEmploymentDocumentLinks { }

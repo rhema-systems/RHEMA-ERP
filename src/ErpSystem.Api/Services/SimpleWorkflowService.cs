@@ -1506,6 +1506,33 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = requisition.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "JOB_OFFER", "JobOffer", "Job Offer"))
+        {
+            var offer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobOffer>()
+                .FirstOrDefaultAsync(o => o.Id == entityId)
+                ?? throw new InvalidOperationException("Job offer not found");
+
+            // What the offer commits, and where it sits in the band, is the routing threshold here —
+            // an offer at the bottom of a junior band and one above the midpoint of a senior one are
+            // not the same decision. `aboveBandMidpoint` is precomputed because a definition
+            // condition cannot do the arithmetic itself.
+            context["offerNumber"] = offer.OfferNumber;
+            context["positionId"] = offer.PositionId;
+            context["positionTitle"] = offer.PositionTitle;
+            context["employmentType"] = offer.EmploymentType.ToString();
+            context["baseSalary"] = offer.BaseSalary ?? 0m;
+            context["currencyCode"] = offer.CurrencyCode ?? string.Empty;
+            context["salaryGradeMin"] = offer.SalaryGradeMin ?? 0m;
+            context["salaryGradeMax"] = offer.SalaryGradeMax ?? 0m;
+            context["aboveBandMidpoint"] =
+                offer.BaseSalary.HasValue && offer.SalaryGradeMin.HasValue && offer.SalaryGradeMax.HasValue
+                && offer.BaseSalary.Value > (offer.SalaryGradeMin.Value + offer.SalaryGradeMax.Value) / 2m;
+            context["isConditional"] = offer.IsConditional;
+            context["version"] = offer.Version;
+            context["preparedById"] = offer.PreparedById;
+            context["status"] = offer.OfferStatus.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "TRAINING_NOMINATION", "TrainingNomination", "Training Nomination"))
         {
             var nomination = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingNomination>()

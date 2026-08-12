@@ -1,14 +1,25 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Reusable pre-employment check templates — "which checks a hire of this kind needs".
+///
+/// <para>⚠ Setup data, and previously the worst-scoped surface in recruitment: the service behind
+/// this controller had no tenancy at all, so the list returned every tenant's templates and every
+/// by-id operation acted on whichever tenant owned that id. Scoping is now explicit in the service
+/// and its repository.</para>
+/// </summary>
 [ApiController]
 [Route("api/pre-employment-check-templates")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[RecruitmentBusinessRules]
 public class PreEmploymentCheckTemplateController : ControllerBase
 {
     private readonly IPreEmploymentCheckTemplateService _service;
@@ -123,7 +134,9 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     [HttpDelete("{id:guid}/items/{itemId:guid}")]
     public async Task<IActionResult> DeleteItem(Guid id, Guid itemId)
     {
-        await _service.DeleteItemAsync(itemId);
+        // The route always carried the owning template id; the service simply ignored it and found
+        // the item by scanning every tenant's templates. It is passed through now.
+        await _service.DeleteItemAsync(id, itemId);
         return NoContent();
     }
 }

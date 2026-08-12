@@ -1,7 +1,9 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,9 +12,22 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <summary>Request body for confirming a hire start date.</summary>
 public sealed record ConfirmStartRequest(DateTime ActualStartDate, Guid? LinkedEmployeeId);
 
+/// <summary>
+/// Hire records — the handover from recruitment to employment.
+///
+/// <para><b>HR-only, reads included:</b> a hire record carries the agreed salary, the start date and
+/// the link to the employee record it created. It previously carried a bare <c>[Authorize]</c>.</para>
+///
+/// <para>⚠ <c>confirm-start</c> is the consequential one: it creates the <c>Employee</c>, the
+/// contract, the probation period, the salary assignment, the position history and the candidate's
+/// qualifications, work history, referees and skills — and burns an employee number. It is
+/// idempotent by design (it refuses once the hire is linked to an employee), which is also why
+/// <c>Active</c> cannot be reached through the status endpoint.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-hires")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[RecruitmentBusinessRules]
 public class JobHireController : ControllerBase
 {
     private readonly IJobHireService _service;
@@ -78,6 +93,8 @@ public class JobHireController : ControllerBase
     public async Task<ActionResult<JobHireRecordDto>> UpdateStatus(
         Guid id, [FromBody] UpdateJobHireRecordStatusDto dto)
     {
+        // The service keys off the body's id, so a mismatch used to move a different hire.
+        dto.HireRecordId = id;
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;

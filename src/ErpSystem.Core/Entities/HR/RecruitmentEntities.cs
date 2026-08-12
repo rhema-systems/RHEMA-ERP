@@ -2532,9 +2532,29 @@ public class PreEmploymentCheckItem : TenantEntity
 
     [MaxLength(2000)]
     public string? Remarks { get; set; }
- 
+
+    /// <summary>
+    /// ⚠ Legacy. A caller-supplied server path, settable straight from the request payload — the
+    /// same shape the recruitment and appraisal attachments were moved off. Retained only so
+    /// documents stored before the change still resolve; nothing writes it any more. The evidence
+    /// for a check now arrives through the controlled-upload gate and lands in the three columns
+    /// below.
+    /// </summary>
     [MaxLength(500)]
     public string? DocumentPath { get; set; }
+
+    /// <summary>Upload-record id from the controlled-upload gate (virus scan + storage).</summary>
+    public Guid? DocumentFileUploadRecordId { get; set; }
+
+    /// <summary>Central DMS document record, when the gate registered one.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central DMS version, when the gate registered one.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>Original file name, kept so a download can be served with a sensible name.</summary>
+    [MaxLength(255)]
+    public string? DocumentFileName { get; set; }
 
     /// <summary>Expected number of calendar days to complete this check.</summary>
     public int? ExpectedDays { get; set; }
@@ -2670,9 +2690,26 @@ public class ReferenceCheckResponse : TenantEntity
     public bool? ConfirmedPositionHeld { get; set; }
  
     public bool? ConfirmedReasonForLeaving { get; set; }
- 
+
+    /// <summary>
+    /// ⚠ Legacy caller-supplied path — see the note on <see cref="PreEmploymentCheckItem.DocumentPath"/>.
+    /// A written reference returned by a referee now goes through the controlled-upload gate.
+    /// </summary>
     [MaxLength(500)]
     public string? DocumentPath { get; set; }
+
+    /// <summary>Upload-record id from the controlled-upload gate (virus scan + storage).</summary>
+    public Guid? DocumentFileUploadRecordId { get; set; }
+
+    /// <summary>Central DMS document record, when the gate registered one.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central DMS version, when the gate registered one.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>Original file name, kept so a download can be served with a sensible name.</summary>
+    [MaxLength(255)]
+    public string? DocumentFileName { get; set; }
 }
  
 // =============================================================================
