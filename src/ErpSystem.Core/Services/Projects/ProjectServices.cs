@@ -643,6 +643,13 @@ public partial class ProjectService : IProjectService
     public async Task<ProjectMemberDto> AddMemberAsync(Guid projectId, AddProjectMemberDto dto)
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManageMembers);
+        if (dto.UserId == Guid.Empty)
+            throw new InvalidOperationException("Select an active user before adding a project member.");
+        var selectedUser = await _userService.GetUserByIdAsync(dto.UserId);
+        if (selectedUser is null || selectedUser.TenantId != _currentUserProvider.TenantId ||
+            !selectedUser.IsActive)
+            throw new InvalidOperationException(
+                "The selected user is not an active member of the current tenant.");
         var repo = _unitOfWork.Repository<ProjectMember>();
         var existing = await repo.FirstOrDefaultAsync(x => x.ProjectId == projectId && x.UserId == dto.UserId && x.Role == dto.Role && x.TenantId == _currentUserProvider.TenantId);
         if (existing != null)

@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities;
@@ -26,7 +27,10 @@ public sealed class QuantitySurveyAdvanceRecoveryService(
     IProjectService projectService,
     IVendorPaymentService vendorPaymentService) : IQuantitySurveyAdvanceRecoveryService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
     private Guid TenantId => currentUser.TenantId is { } value && value != Guid.Empty
         ? value : throw new UnauthorizedAccessException("A valid tenant context is required.");
     private Guid UserId => Guid.TryParse(currentUser.UserId, out var value) && value != Guid.Empty
@@ -292,8 +296,16 @@ public sealed class QuantitySurveyAdvanceRecoveryService(
             value.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Verified &&
             (!value.EffectiveFrom.HasValue || value.EffectiveFrom <= now) && (!value.EffectiveTo.HasValue || value.EffectiveTo >= now), token)
             ?? throw Conflict("The effective QS-DEC-008 valuation and certificate decision is not approved and evidence-verified.");
-        var value = JsonSerializer.Deserialize<QsValuationCertificateValue>(decision.ValueJson, JsonOptions)
-            ?? throw Conflict("QS-DEC-008 is unreadable.");
+        QsValuationCertificateValue value;
+        try
+        {
+            value = JsonSerializer.Deserialize<QsValuationCertificateValue>(decision.ValueJson, JsonOptions)
+                ?? throw new JsonException();
+        }
+        catch (JsonException)
+        {
+            throw Conflict("QS-DEC-008 contains invalid valuation and certificate policy data.");
+        }
         if (!value.ApplyAdvanceRecovery) throw Conflict("Advance recovery is disabled by the effective QS-DEC-008 policy.");
         return new(profile.Id, decision.Id, Hash(new { Profile = profile.Id, Decision = decision.Id, value.ApplyAdvanceRecovery }));
     }

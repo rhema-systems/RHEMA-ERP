@@ -17,14 +17,15 @@ public static class AuditOperationClassifier
         if (ContainsAny(value, "receive", "received", "receipt", "acknowledge", "acknowledged")) return AuditOperationKind.Receive;
         if (ContainsAny(value, "post", "posted", "posting", "capitalize", "capitalized")) return AuditOperationKind.Post;
         if (ContainsAny(value, "approve", "approved", "authorize", "authorized", "accept", "accepted", "publish", "published",
-                "resolve", "resolved", "endorse", "endorsed", "apply", "applied", "close", "closed", "record measurement sheet", "recordmeasurementsheet"))
+                "resolve", "resolved", "endorse", "endorsed", "apply", "applied", "close", "closed", "verify", "record measurement sheet", "recordmeasurementsheet"))
             return AuditOperationKind.Approve;
         if (ContainsAny(value, "update", "updated", "amend", "amended", "edit", "edited", "change", "changed", "revise", "revised",
                 "correct", "corrected", "save", "saved", "link", "linked", "unlink", "unlinked", "retire", "retired", "recall", "recalled",
-                "delete", "deleted", "commit", "committed", "review", "reviewed", "schedule", "scheduled", "response", "attendance", "vet", "refresh", "confirm", "confirmed", "configure", "configured"))
+                "delete", "deleted", "commit", "committed", "review", "reviewed", "schedule", "scheduled", "response", "attendance", "vet", "refresh", "confirm", "confirmed", "configure", "configured",
+                "settlecontractclaim", "assesssubcontractvaluation", "respondsubcontractcharge", "communicatesubcontractcharge", "allocatesubcontractcharge", "releasesubcontractchargeallocation"))
             return AuditOperationKind.Update;
         if (ContainsAny(value, "create", "created", "register", "registered", "generate", "generated", "submit", "submitted", "clone", "cloned",
-                "seed", "seeded", "stage", "staged", "calculate", "calculated", "open", "opened", "attach", "attached", "prepare", "prepared", "handoff"))
+                "seed", "seeded", "stage", "staged", "calculate", "calculated", "open", "opened", "attach", "attached", "prepare", "prepared", "handoff", "signdayworksheet"))
             return AuditOperationKind.Create;
         return AuditOperationKind.Other;
     }

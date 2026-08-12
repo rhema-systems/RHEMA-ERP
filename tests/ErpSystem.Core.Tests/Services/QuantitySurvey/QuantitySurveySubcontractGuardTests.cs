@@ -53,12 +53,15 @@ public sealed class QuantitySurveySubcontractGuardTests
             .And.Contain("BusinessPartnerUsers.IgnoreQueryFilters()")
             .And.Contain("ProjectExternalAccessPolicies")
             .And.Contain("value.TenantId == TenantId")
+            .And.Contain("value.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus")
+            .And.Contain("value.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus")
             .And.Contain("LastMutationClientRequestId == request.ClientRequestId")
             .And.Contain("QuantitySurveySubcontractRevisions.AsNoTracking()")
             .And.Contain("ApprovedBackChargeAmount = 0")
             .And.Contain("ApprovedContraChargeAmount = 0")
             .And.NotContain("catch (Exception")
-            .And.NotContain("exception.ToString()");
+            .And.NotContain("exception.ToString()")
+            .And.NotContain("BusinessPartnerLifecyclePolicy.IsOperationalRegistration(value.RegistrationStatus)");
     }
 
     private static string Source(params string[] path) =>

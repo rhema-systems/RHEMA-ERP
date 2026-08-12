@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Documents;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.QuantitySurvey;
@@ -38,7 +39,10 @@ public sealed class QuantitySurveyPaymentCertificateService(
     IControlledFileUploadService controlledFiles,
     ICentralDocumentRepositoryFileService centralDocuments) : IQuantitySurveyPaymentCertificateService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
     private Guid TenantId => currentUser.TenantId is { } value && value != Guid.Empty
         ? value : throw new UnauthorizedAccessException("A valid tenant context is required.");
     private Guid UserId => Guid.TryParse(currentUser.UserId, out var value) && value != Guid.Empty
@@ -611,8 +615,16 @@ public sealed class QuantitySurveyPaymentCertificateService(
             value.ApprovalStatus == QuantitySurveyConfigurationApprovalStatus.Approved &&
             value.EvidenceStatus == QuantitySurveyConfigurationEvidenceStatus.Verified, token)
             ?? throw Conflict("The valuation's approved QS-DEC-008 decision is unavailable.");
-        var value = JsonSerializer.Deserialize<QsValuationCertificateValue>(decision.ValueJson, JsonOptions)
-            ?? throw Conflict("QS-DEC-008 is unreadable.");
+        QsValuationCertificateValue value;
+        try
+        {
+            value = JsonSerializer.Deserialize<QsValuationCertificateValue>(decision.ValueJson, JsonOptions)
+                ?? throw new JsonException();
+        }
+        catch (JsonException)
+        {
+            throw Conflict("QS-DEC-008 contains invalid valuation and certificate policy data.");
+        }
         var workflowDefinition = await db.WorkflowDefinitions.AsNoTracking().Include(item => item.EntityType).Include(item => item.Steps)
             .FirstOrDefaultAsync(item => item.TenantId == TenantId && item.Id == value.CertificateWorkflowDefinitionId &&
                 !item.IsDeleted && item.IsActive && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published, token)

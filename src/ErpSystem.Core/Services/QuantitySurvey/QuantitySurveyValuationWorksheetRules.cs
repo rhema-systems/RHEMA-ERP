@@ -61,7 +61,7 @@ public static class QuantitySurveyValuationWorksheetRules
 
     public static QuantitySurveyValuationLineCalculation Calculate(
         QuantitySurveyValuationSourceLine source, decimal claimedToDate, decimal certifiedToDate,
-        decimal retentionPercentage, string? reviewNote)
+        decimal retentionPercentage, string? reviewNote, bool requireDisputeReviewNote = true)
     {
         claimedToDate = Quantity(claimedToDate);
         certifiedToDate = Quantity(certifiedToDate);
@@ -77,7 +77,7 @@ public static class QuantitySurveyValuationWorksheetRules
 
         var note = string.IsNullOrWhiteSpace(reviewNote) ? null : reviewNote.Trim();
         var disputedQuantity = Quantity(claimedToDate - certifiedToDate);
-        if (disputedQuantity > 0 && string.IsNullOrWhiteSpace(note))
+        if (requireDisputeReviewNote && disputedQuantity > 0 && string.IsNullOrWhiteSpace(note))
             throw Validation($"Enter a review note for the disputed quantity on {source.Label}.");
         if (note?.Length > 1000) throw Validation("A line review note cannot exceed 1000 characters.");
 

@@ -146,9 +146,9 @@ public sealed class QuantitySurveyDesignExtractionContractTests
     private static string PathFor(string relativePath) =>
         Path.Combine(ContractRoot(), relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-    private static string ContractRoot()
+    private static string ContractRoot([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")
     {
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        for (var directory = new FileInfo(sourceFile).Directory; directory is not null; directory = directory.Parent)
         {
             var candidate = Path.Combine(directory.FullName, "docs", "integrations", "quantity-survey");
             if (Directory.Exists(candidate)) return candidate;

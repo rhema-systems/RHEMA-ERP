@@ -40,7 +40,7 @@ public sealed class QuantitySurveyRemeasurementGuardTests
         service.Should().Contain("ValidateRemeasurementVersionAsync");
         service.Should().Contain("ApplyApprovedRemeasurementToWorkingBoqAsync");
         service.Should().NotContain("SubmitAsync(");
-        approval.Should().Contain("ApplyApprovedRemeasurementToWorkingBoqAsync(candidate)");
+        approval.Should().Contain("ApplyApprovedRemeasurementToWorkingBoqAsync(candidate, correlationId)");
         approval.Should().Contain("QuantitySurveyWorkflowBindingRegistry.Boq");
     }
 

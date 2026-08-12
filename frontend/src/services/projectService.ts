@@ -2724,6 +2724,9 @@ export interface AddProjectMemberDto {
   role: string;
 }
 
+const GUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface CreateProjectWorkItemDto {
   parentId?: string;
   projectPackageId?: string;
@@ -7354,6 +7357,11 @@ class ProjectService {
     projectId: string,
     dto: AddProjectMemberDto
   ): Promise<ProjectMemberDto> {
+    if (!GUID_PATTERN.test(dto.userId.trim())) {
+      throw new Error(
+        'Select a valid active user before adding a project member.'
+      );
+    }
     const response = await fetch(
       `${API_BASE_URL}/projects/${projectId}/members`,
       {

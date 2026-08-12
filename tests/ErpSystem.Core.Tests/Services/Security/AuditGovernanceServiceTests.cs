@@ -35,6 +35,15 @@ public sealed class AuditGovernanceServiceTests
         yield return ["ScheduleJointMeasurement", AuditOperationKind.Update];
         yield return ["EndorseJointMeasurement", AuditOperationKind.Approve];
         yield return ["ApplyJointMeasurementBoqRevision", AuditOperationKind.Approve];
+        yield return ["SettleContractClaim", AuditOperationKind.Update];
+        yield return ["SignDayworkSheet", AuditOperationKind.Create];
+        yield return ["VerifyDayworkSheet", AuditOperationKind.Approve];
+        yield return ["AssessSubcontractValuation", AuditOperationKind.Update];
+        yield return ["IssueSubcontractCharge", AuditOperationKind.Dispatch];
+        yield return ["RespondSubcontractCharge", AuditOperationKind.Update];
+        yield return ["CommunicateSubcontractCharge", AuditOperationKind.Update];
+        yield return ["AllocateSubcontractCharge", AuditOperationKind.Update];
+        yield return ["ReleaseSubcontractChargeAllocation", AuditOperationKind.Update];
     }
 
     [Theory]

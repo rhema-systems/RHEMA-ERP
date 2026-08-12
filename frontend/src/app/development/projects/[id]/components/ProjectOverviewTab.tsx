@@ -586,7 +586,7 @@ export function ProjectOverviewTab({
                 <SelectContent>{memberRoleOptions.map((item) => <SelectItem key={item} value={item}>{formatCatalogLabel(item)}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="flex items-end"><Button onClick={onAddMember}><Plus className="mr-2 h-4 w-4" />Add</Button></div>
+            <div className="flex items-end"><Button onClick={onAddMember} disabled={!member.userId}><Plus className="mr-2 h-4 w-4" />Add</Button></div>
           </div>
           {project.members.map((item) => <div key={item.id} className="flex items-center justify-between rounded-lg border p-4"><div><div className="font-medium">{getResolvedUserLabel(item.userId, item.userDisplayName)}</div><div className="text-sm text-muted-foreground">{item.role}</div></div><Button variant="ghost" size="sm" onClick={() => onRemoveMember(item.id)}><Trash2 className="h-4 w-4" /></Button></div>)}
         </CardContent>

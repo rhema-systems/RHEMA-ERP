@@ -30,6 +30,41 @@ describe('projectService', () => {
     );
   });
 
+  it('posts a selected project member using the controlled user UUID', async () => {
+    const dto = {
+      userId: '58cafd8b-42ce-4f67-8dbb-08de862e82ee',
+      role: 'QuantitySurveyor',
+    };
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'member-1', ...dto, isActive: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await projectService.addMember('cb8af66a-941e-4dd1-8fbd-d05f7c0cb681', dto);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '/projects/cb8af66a-941e-4dd1-8fbd-d05f7c0cb681/members'
+      ),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(dto) })
+    );
+  });
+
+  it('rejects an invalid project-member identifier before calling the API', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch');
+
+    await expect(
+      projectService.addMember('project-1', {
+        userId: 'admin',
+        role: 'QuantitySurveyor',
+      })
+    ).rejects.toThrow('Select a valid active user');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('requests resource optimization suggestions from the expected endpoint', async () => {
     const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response(

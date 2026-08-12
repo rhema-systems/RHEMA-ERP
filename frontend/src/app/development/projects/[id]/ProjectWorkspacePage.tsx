@@ -664,6 +664,8 @@ const GANTT_DAY_WIDTH = 36;
 const GANTT_LEFT_GRID_TEMPLATE = '52px 240px 62px 54px 92px 72px 72px 52px';
 const GANTT_LEFT_GRID_WIDTH = 696;
 const PROJECT_WORKSPACE_CACHE_TTL_MS = 5 * 60 * 1000;
+const USER_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type UserLabelLike = {
   id?: string;
@@ -2106,10 +2108,10 @@ export default function ProjectWorkspacePage({
         isWorkspaceCacheFresh(projectWorkspaceBootstrapCache.loadedAt)
           ? Promise.resolve(projectWorkspaceBootstrapCache.value)
           : Promise.all([
-              projectService.getProjectTypes(),
-              projectService.getProjectPriorities(),
-              projectService.getProjectTemplates(),
-              projectService.getPortfolios(),
+              projectService.getProjectTypes().catch(() => []),
+              projectService.getProjectPriorities().catch(() => []),
+              projectService.getProjectTemplates().catch(() => []),
+              projectService.getPortfolios().catch(() => []),
               businessPartnerService.getAllPartnersForDropdown(),
               businessPartnerService
                 .getActivePartners('Customer')
@@ -4555,7 +4557,8 @@ export default function ProjectWorkspacePage({
       : values;
   }, [customerVariationDraft.timing]);
   const activeUsers = useMemo(
-    () => users.filter((user) => user.isActive),
+    () =>
+      users.filter((user) => user.isActive && USER_ID_PATTERN.test(user.id)),
     [users]
   );
   const customerBusinessPartners = useMemo(
