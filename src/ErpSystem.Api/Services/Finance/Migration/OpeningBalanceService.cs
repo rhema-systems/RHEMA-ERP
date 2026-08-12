@@ -149,8 +149,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var requestedAssetIds = dto.FixedAssetIds.Distinct().ToArray();
-        if (requestedAssetIds.Length == 0)
+        var requestedBookValueIds = dto.FixedAssetBookValueIds.Distinct().ToArray();
+        if (requestedBookValueIds.Length == 0)
         {
             // An explicit selection prevents a user from accidentally posting every imported asset
             // when the screen is filtered or when another preparer imports more rows concurrently.
@@ -164,19 +164,22 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             .Include(value => value.AccountingBook)
             .Where(value =>
                 value.TenantId == tenantId &&
-                requestedAssetIds.Contains(value.FixedAssetId) &&
+                requestedBookValueIds.Contains(value.Id) &&
                 value.BookClassification == book &&
                 !value.IsDeleted &&
                 !value.FixedAsset.IsDeleted)
             .OrderBy(value => value.FixedAsset.AssetCode)
             .ToListAsync(cancellationToken);
 
-        var loadedAssetIds = bookValues.Select(value => value.FixedAssetId).Distinct().ToHashSet();
-        var missingAssetIds = requestedAssetIds.Where(id => !loadedAssetIds.Contains(id)).ToArray();
-        if (missingAssetIds.Length > 0)
+        var loadedBookValueIds = bookValues.Select(value => value.Id).ToHashSet();
+        var missingBookValueIds = requestedBookValueIds.Where(id => !loadedBookValueIds.Contains(id)).ToArray();
+        if (missingBookValueIds.Length > 0)
         {
+            // Treat a cross-tenant row and a row from a different accounting book identically.
+            // This avoids leaking another tenant's evidence while ensuring a stale UI selection
+            // can never be reinterpreted as the current header book.
             throw new InvalidOperationException(
-                $"{missingAssetIds.Length} selected asset(s) have no {book} opening book value for the current tenant.");
+                $"{missingBookValueIds.Length} selected fixed-asset book value(s) do not belong to the {book} book for the current tenant.");
         }
 
         var openingDate = dto.OpeningDate.Date;

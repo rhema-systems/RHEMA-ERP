@@ -64,7 +64,13 @@ public sealed class CreateFixedAssetOpeningBalanceBatchDto
     public Guid FiscalPeriodId { get; set; }
     public string BookClassification { get; set; } = "IFRS";
     public string? IdempotencyKey { get; set; }
-    public IReadOnlyList<Guid> FixedAssetIds { get; set; } = Array.Empty<Guid>();
+    /// <summary>
+    /// Identifies the exact imported book-value rows selected by the operator. Asset IDs are not
+    /// sufficiently precise because one asset can carry IFRS, Tax, or other parallel books; using
+    /// the book-value key prevents a later header-book change from silently selecting different
+    /// accounting evidence for the same asset.
+    /// </summary>
+    public IReadOnlyList<Guid> FixedAssetBookValueIds { get; set; } = Array.Empty<Guid>();
 }
 
 public sealed class SubledgerOpeningBalanceReadinessDto

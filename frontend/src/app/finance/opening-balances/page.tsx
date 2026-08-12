@@ -136,7 +136,10 @@ export default function OpeningBalancesPage() {
     const [currentBatch, setCurrentBatch] = useState<OpeningBalanceBatch | null>(null);
     const [isDirty, setIsDirty] = useState(false);
     const [validation, setValidation] = useState<OpeningBalanceValidationResult | null>(null);
-    const [selectedFixedAssetIds, setSelectedFixedAssetIds] = useState<string[]>([]);
+    // Keep the exact book-value evidence key, not only the asset key. A single asset can have
+    // parallel IFRS/Tax books, and a stale selection must never switch accounting books merely
+    // because the operator changes the batch header after selecting a row.
+    const [selectedFixedAssetBookValueIds, setSelectedFixedAssetBookValueIds] = useState<string[]>([]);
     const [comment, setComment] = useState('');
     const [header, setHeader] = useState({
         batchNumber: '',
@@ -369,7 +372,7 @@ export default function OpeningBalancesPage() {
             toast({ title: 'Opening period required', description: 'Select the opening date and fiscal period on the GL Batch tab first.', variant: 'destructive' });
             return;
         }
-        if (selectedFixedAssetIds.length === 0) {
+        if (selectedFixedAssetBookValueIds.length === 0) {
             toast({ title: 'Select assets', description: 'Select at least one unposted fixed-asset opening row.', variant: 'destructive' });
             return;
         }
@@ -385,10 +388,10 @@ export default function OpeningBalancesPage() {
                 openingDate: header.openingDate,
                 fiscalPeriodId: header.fiscalPeriodId,
                 bookClassification: header.bookClassification,
-                fixedAssetIds: selectedFixedAssetIds,
+                fixedAssetBookValueIds: selectedFixedAssetBookValueIds,
             });
             applyBatchToForm(created);
-            setSelectedFixedAssetIds([]);
+            setSelectedFixedAssetBookValueIds([]);
             setActiveTab('gl');
             router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
             await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
@@ -718,6 +721,10 @@ export default function OpeningBalancesPage() {
                                             <Select
                                                 value={header.bookClassification}
                                                 onValueChange={(value) => {
+                                                    // A book change changes the register population being approved.
+                                                    // Clear the visible selection as an immediate UX safeguard; the API
+                                                    // separately validates exact book-value IDs as the trust boundary.
+                                                    setSelectedFixedAssetBookValueIds([]);
                                                     setIsDirty(true);
                                                     setHeader(current => ({ ...current, bookClassification: value }));
                                                     setLines(current => current.map(line => {
@@ -1183,11 +1190,11 @@ export default function OpeningBalancesPage() {
                                                             <input
                                                                 type="checkbox"
                                                                 aria-label={`Select ${candidate.assetCode}`}
-                                                                checked={selectedFixedAssetIds.includes(candidate.fixedAssetId)}
+                                                                checked={selectedFixedAssetBookValueIds.includes(candidate.fixedAssetBookValueId)}
                                                                 disabled={!selectable || busyAction !== null}
-                                                                onChange={(event) => setSelectedFixedAssetIds(current => event.target.checked
-                                                                    ? [...new Set([...current, candidate.fixedAssetId])]
-                                                                    : current.filter(id => id !== candidate.fixedAssetId))}
+                                                                onChange={(event) => setSelectedFixedAssetBookValueIds(current => event.target.checked
+                                                                    ? [...new Set([...current, candidate.fixedAssetBookValueId])]
+                                                                    : current.filter(id => id !== candidate.fixedAssetBookValueId))}
                                                             />
                                                         </td>
                                                         <td className="p-3">
@@ -1213,14 +1220,14 @@ export default function OpeningBalancesPage() {
                                 <div className="flex gap-2">
                                     <Button
                                         variant="outline"
-                                        onClick={() => setSelectedFixedAssetIds((subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
+                                        onClick={() => setSelectedFixedAssetBookValueIds((subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
                                             .filter(candidate => candidate.bookClassification === header.bookClassification && !candidate.openingPostedToGl)
-                                            .map(candidate => candidate.fixedAssetId))}
+                                            .map(candidate => candidate.fixedAssetBookValueId))}
                                         disabled={busyAction !== null}
                                     >
                                         Select Ready
                                     </Button>
-                                    <Button onClick={handleCreateFixedAssetBatch} disabled={busyAction !== null || selectedFixedAssetIds.length === 0}>
+                                    <Button onClick={handleCreateFixedAssetBatch} disabled={busyAction !== null || selectedFixedAssetBookValueIds.length === 0}>
                                         {busyAction === 'fixed-assets' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
                                         Prepare GL Batch
                                     </Button>

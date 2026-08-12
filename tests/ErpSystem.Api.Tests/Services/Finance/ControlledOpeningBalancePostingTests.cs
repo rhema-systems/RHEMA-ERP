@@ -42,7 +42,7 @@ public sealed class ControlledOpeningBalancePostingTests
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
             BookClassification = "IFRS",
-            FixedAssetIds = new[] { assetFixture.Asset.Id }
+            FixedAssetBookValueIds = new[] { assetFixture.BookValue.Id }
         });
 
         // Accounts and amounts are server-derived from the approved asset category and imported
@@ -92,7 +92,7 @@ public sealed class ControlledOpeningBalancePostingTests
         {
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
-            FixedAssetIds = new[] { assetFixture.Asset.Id }
+            FixedAssetBookValueIds = new[] { assetFixture.BookValue.Id }
         });
 
         var value = await db.FixedAssetBookValues.SingleAsync(item => item.Id == assetFixture.BookValue.Id);
@@ -125,11 +125,54 @@ public sealed class ControlledOpeningBalancePostingTests
         {
             OpeningDate = new DateTime(2026, 1, 1),
             FiscalPeriodId = fixture.Period.Id,
-            FixedAssetIds = new[] { otherAsset.Asset.Id }
+            FixedAssetBookValueIds = new[] { otherAsset.BookValue.Id }
         });
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*current tenant*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SubledgerOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task FixedAssetOpeningBatch_ShouldNotReinterpretSelectedEvidenceAcrossBooks()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        var assetFixture = SeedFixedAssetOpeningFixture(db, tenantId, fixture.Cash, fixture.Equity);
+        var taxBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "TAX", Name = "Tax", AllowsPosting = true
+        };
+        var taxBookValue = new FixedAssetBookValue
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            FixedAssetId = assetFixture.Asset.Id, FixedAsset = assetFixture.Asset,
+            AccountingBookId = taxBook.Id, AccountingBook = taxBook, BookClassification = "TAX",
+            AcquisitionCost = 900m, AccumulatedDepreciation = 300m, NetBookValue = 600m,
+            UsefulLifeMonths = 120, RemainingUsefulLifeMonths = 80,
+            OpeningAsOfDate = new DateTime(2026, 1, 1), OpeningSource = "OpeningImport"
+        };
+        assetFixture.Asset.BookValues.Add(taxBookValue);
+        db.AccountingBooks.Add(taxBook);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        // This reproduces the reviewed UI race: a TAX row was selected and the header later
+        // changed to IFRS. The exact book-value key must be rejected, never translated to the
+        // IFRS row belonging to the same fixed asset.
+        var act = () => service.CreateFixedAssetBatchAsync(new CreateFixedAssetOpeningBalanceBatchDto
+        {
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            BookClassification = "IFRS",
+            FixedAssetBookValueIds = new[] { taxBookValue.Id }
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*do not belong to the IFRS book*");
+        (await db.OpeningBalanceBatches.CountAsync()).Should().Be(0);
     }
 
     [Fact]
