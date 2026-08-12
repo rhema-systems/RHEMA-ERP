@@ -12,6 +12,12 @@ public interface IOpeningBalanceService
         CreateFixedAssetOpeningBalanceBatchDto dto,
         CancellationToken cancellationToken = default);
 
+    Task<OpeningBalanceBatchDto> CreateSupplierAdvanceBatchAsync(CreateSupplierAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchDto> CreateCustomerAdvanceBatchAsync(CreateCustomerAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchDto> CreateApWithholdingBatchAsync(CreateApWithholdingOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchDto> CreateArWithholdingBatchAsync(CreateArWithholdingOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<SpecializedOpeningBalanceOptionsDto> GetSpecializedOptionsAsync(CancellationToken cancellationToken = default);
+
     Task<SubledgerOpeningBalanceReadinessDto> GetSubledgerReadinessAsync(
         CancellationToken cancellationToken = default);
 

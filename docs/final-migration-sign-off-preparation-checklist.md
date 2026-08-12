@@ -113,8 +113,8 @@ The run returns a tenant-scoped status, check list, evidence export manifest, li
 - `FIN-LIM-0048` reviewed against production cutover subledger balance requirements.
 - Sign-off run request declares whether AP/AR/fixed-asset source-level openings are in scope.
 - Core AP/AR/fixed-asset opening scope is accepted only when canonical opening invoices and controlled fixed-asset register batches reconcile to posted GL.
-- `FIN-LIM-0048` remains a sign-off decision for specialised unapplied advances and withholding/certificate opening records until TDC confirms whether those data shapes exist at cutover.
-- Unapplied payment/receipt and functional-currency advance balances are reviewed separately from invoice aging; foreign-currency advances remain safely rejected pending dedicated FX settlement support.
+- TDC has confirmed specialised unapplied advances and withholding/certificate records are present; confirm every item is loaded through the controlled specialised opening workflow before accepting `FIN-LIM-0048` implementation evidence.
+- Unapplied payment/receipt balances are reviewed separately from invoice aging. Foreign-currency advances require approved rate evidence; statutory WHT openings are reviewed in functional currency.
 - Reversal/correction limitations reviewed against cutover correction policy.
 
 ## Rollback And Reset

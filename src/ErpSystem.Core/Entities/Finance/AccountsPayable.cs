@@ -446,6 +446,19 @@ public class VendorPayment : TenantEntity
     /// </summary>
     public bool IsSupplierAdvance { get; set; }
 
+    /// <summary>
+    /// Identifies a canonical AP record created from approved cutover evidence rather than a
+    /// current-period bank disbursement. The type distinguishes supplier advances from WHT
+    /// liabilities so downstream settlement and compliance services can reuse this payment
+    /// without mistaking the migration-clearing journal for a cash movement.
+    /// </summary>
+    [MaxLength(40)]
+    public string? OpeningBalanceType { get; set; }
+    public Guid? OpeningBalanceBatchId { get; set; }
+
+    [MaxLength(100)]
+    public string? OpeningSourceReference { get; set; }
+
     [NotMapped]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 

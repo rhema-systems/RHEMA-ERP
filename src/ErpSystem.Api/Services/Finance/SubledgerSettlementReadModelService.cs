@@ -20,6 +20,11 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
     private const string CustomerPaymentType = "CustomerPayment";
     private const string SalesCreditNoteType = "SalesCreditNote";
     private const string CustomerCreditNoteType = "CustomerCreditNote";
+    private const string OpeningBalanceBatchType = "OpeningBalanceBatch";
+    private const string OpeningBalancePostingAction = "PostOpeningBalance";
+    private const string MigrationModule = "MIGRATION";
+    private const string SupplierAdvanceOpeningType = "SupplierAdvanceOpening";
+    private const string CustomerAdvanceOpeningType = "CustomerAdvanceOpening";
 
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -316,6 +321,8 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
     {
         var postedInvoiceEvents = await GetPostingEventsAsync(tenantId, "AP", VendorInvoiceType, asOfDate, cancellationToken);
         var postedPaymentEvents = await GetPostingEventsAsync(tenantId, "AP", VendorPaymentType, asOfDate, cancellationToken);
+        await AddOpeningAdvancePostingEventsAsync(
+            tenantId, asOfDate, postedPaymentEvents, isSupplierAdvance: true, cancellationToken);
         var postedAdvanceApplicationEvents = await GetPostingEventsAsync(tenantId, "AP", "VendorPaymentAdvanceApplication", asOfDate, cancellationToken);
         var invoiceIds = postedInvoiceEvents.Keys.ToList();
         var invoices = await _context.VendorInvoices
@@ -507,6 +514,8 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
     {
         var postedInvoiceEvents = await GetPostingEventsAsync(tenantId, "AR", CustomerInvoiceType, asOfDate, cancellationToken);
         var postedReceiptEvents = await GetPostingEventsAsync(tenantId, "AR", CustomerPaymentType, asOfDate, cancellationToken);
+        await AddOpeningAdvancePostingEventsAsync(
+            tenantId, asOfDate, postedReceiptEvents, isSupplierAdvance: false, cancellationToken);
         var postedAdvanceApplicationEvents = await GetPostingEventsAsync(tenantId, "AR", "CustomerPaymentAdvanceApplication", asOfDate, cancellationToken);
         var postedSalesCreditNoteEvents = await GetPostingEventsAsync(tenantId, "AR", SalesCreditNoteType, asOfDate, cancellationToken);
         var postedCompatibilityCreditNoteEvents = await GetPostingEventsAsync(tenantId, "AR", CustomerCreditNoteType, asOfDate, cancellationToken);
@@ -979,6 +988,75 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
         return count;
     }
 
+    private async Task AddOpeningAdvancePostingEventsAsync(
+        Guid tenantId,
+        DateTime asOfDate,
+        IDictionary<Guid, FinancePostingEvent> destination,
+        bool isSupplierAdvance,
+        CancellationToken cancellationToken)
+    {
+        // Normal payments own their FinancePostingEvent. Cutover advances are different: the
+        // approved OpeningBalanceBatch owns the central posting because no new cash moves at
+        // go-live, while VendorPayment/CustomerPayment remains the canonical advance lot. Resolve
+        // that deliberate two-record lineage here instead of manufacturing duplicate posting events.
+        var sourceRows = isSupplierAdvance
+            ? await _context.Set<VendorPayment>()
+                .AsNoTracking()
+                .Where(payment => payment.TenantId == tenantId && !payment.IsDeleted
+                    && payment.IsSupplierAdvance
+                    && payment.OpeningBalanceType == SupplierAdvanceOpeningType
+                    && payment.OpeningBalanceBatchId.HasValue
+                    && payment.JournalEntryId.HasValue
+                    && payment.PaymentDate.Date <= asOfDate.Date)
+                .Select(payment => new OpeningAdvanceSource(payment.Id, payment.OpeningBalanceBatchId!.Value, payment.JournalEntryId!.Value))
+                .ToListAsync(cancellationToken)
+            : await _context.Set<CustomerPayment>()
+                .AsNoTracking()
+                .Where(payment => payment.TenantId == tenantId && !payment.IsDeleted
+                    && payment.IsCustomerAdvance
+                    && payment.OpeningBalanceType == CustomerAdvanceOpeningType
+                    && payment.OpeningBalanceBatchId.HasValue
+                    && payment.JournalEntryId.HasValue
+                    && payment.PaymentDate.Date <= asOfDate.Date)
+                .Select(payment => new OpeningAdvanceSource(payment.Id, payment.OpeningBalanceBatchId!.Value, payment.JournalEntryId!.Value))
+                .ToListAsync(cancellationToken);
+
+        if (sourceRows.Count == 0)
+        {
+            return;
+        }
+
+        var batchIds = sourceRows.Select(item => item.BatchId).Distinct().ToList();
+        var batchEvents = await _context.FinancePostingEvents
+            .AsNoTracking()
+            .Where(postingEvent => postingEvent.TenantId == tenantId && !postingEvent.IsDeleted
+                && postingEvent.SourceModule == MigrationModule
+                && postingEvent.SourceDocumentType == OpeningBalanceBatchType
+                // Opening batches use a distinct action so operational payment postings and
+                // cutover postings remain distinguishable in the immutable posting ledger.
+                && postingEvent.PostingAction == OpeningBalancePostingAction
+                && postingEvent.PostingStatus == PostedStatus
+                && postingEvent.JournalEntryId.HasValue
+                && postingEvent.PostingDate.Date <= asOfDate.Date
+                && batchIds.Contains(postingEvent.SourceDocumentId))
+            .OrderByDescending(postingEvent => postingEvent.PostedAt ?? postingEvent.PostingDate)
+            .ToListAsync(cancellationToken);
+
+        var eventByBatch = batchEvents
+            .GroupBy(postingEvent => postingEvent.SourceDocumentId)
+            .ToDictionary(group => group.Key, group => group.First());
+        foreach (var source in sourceRows)
+        {
+            // Require the source back-reference and batch event to name the same journal. A stale
+            // or tampered linkage is excluded from settlement evidence rather than guessed.
+            if (eventByBatch.TryGetValue(source.BatchId, out var postingEvent)
+                && postingEvent.JournalEntryId == source.JournalEntryId)
+            {
+                destination[source.SourceId] = postingEvent;
+            }
+        }
+    }
+
     private async Task<Dictionary<Guid, FinancePostingEvent>> GetPostingEventsAsync(
         Guid tenantId,
         string sourceModule,
@@ -1004,6 +1082,8 @@ public sealed class SubledgerSettlementReadModelService : ISubledgerSettlementRe
             .GroupBy(e => e.SourceDocumentId)
             .ToDictionary(g => g.Key, g => g.First());
     }
+
+    private sealed record OpeningAdvanceSource(Guid SourceId, Guid BatchId, Guid JournalEntryId);
 
     private async Task<Dictionary<Guid, FxRealizedSettlement>> GetFxSettlementsAsync(
         Guid tenantId,

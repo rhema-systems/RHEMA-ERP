@@ -47,7 +47,8 @@ type OpeningLine = {
     notes: string;
 };
 
-type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | null;
+type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | 'specialized' | null;
+type SpecializedOpeningKind = 'supplierAdvance' | 'customerAdvance' | 'apWithholding' | 'arWithholding';
 
 const BASE_CURRENCY = 'GHS';
 
@@ -141,6 +142,12 @@ export default function OpeningBalancesPage() {
     // because the operator changes the batch header after selecting a row.
     const [selectedFixedAssetBookValueIds, setSelectedFixedAssetBookValueIds] = useState<string[]>([]);
     const [comment, setComment] = useState('');
+    const [specialized, setSpecialized] = useState({
+        kind: 'supplierAdvance' as SpecializedOpeningKind,
+        partyId: '', taxId: '', sourceReference: '', currencyCode: BASE_CURRENCY,
+        amount: '', exchangeRateId: '', exchangeRate: '1', taxableBase: '', netPaidAmount: '',
+        certificateNumber: '', certificateDate: '',
+    });
     const [header, setHeader] = useState({
         batchNumber: '',
         sourceReference: '',
@@ -184,6 +191,11 @@ export default function OpeningBalancesPage() {
     const subledgerReadinessQuery = useQuery({
         queryKey: ['opening-balance-subledger-readiness'],
         queryFn: () => financeDataService.getSubledgerOpeningBalanceReadiness(),
+    });
+
+    const specializedOptionsQuery = useQuery({
+        queryKey: ['opening-balance-specialized-options'],
+        queryFn: () => financeDataService.getSpecializedOpeningBalanceOptions(),
     });
 
     const accountingBooks = useMemo<AccountingBook[]>(() => {
@@ -403,6 +415,78 @@ export default function OpeningBalancesPage() {
         }
     };
 
+    const handleCreateSpecializedBatch = async () => {
+        if (!header.openingDate || !header.fiscalPeriodId || !specialized.partyId || Number(specialized.amount) <= 0) {
+            toast({ title: 'Cutover evidence required', description: 'Select the period, party and a positive amount.', variant: 'destructive' });
+            return;
+        }
+        const isWithholding = specialized.kind === 'apWithholding' || specialized.kind === 'arWithholding';
+        const tax = specializedOptionsQuery.data?.withholdingTaxes.find(item => item.id === specialized.taxId);
+        if (isWithholding && !tax) {
+            toast({ title: 'WHT configuration required', description: 'Select an active withholding tax.', variant: 'destructive' });
+            return;
+        }
+        if (specialized.kind === 'apWithholding' && !tax?.payableAccountId) {
+            toast({ title: 'WHT payable account required', description: 'The selected tax has no payable account mapping.', variant: 'destructive' });
+            return;
+        }
+        if (specialized.kind === 'arWithholding' && !tax?.receivableAccountId) {
+            toast({ title: 'WHT receivable account required', description: 'The selected tax has no receivable account mapping.', variant: 'destructive' });
+            return;
+        }
+
+        const common = {
+            sourceReference: specialized.sourceReference.trim() || undefined,
+            openingDate: header.openingDate,
+            fiscalPeriodId: header.fiscalPeriodId,
+            bookClassification: header.bookClassification,
+            currencyCode: isWithholding
+                ? (specializedOptionsQuery.data?.functionalCurrencyCode || BASE_CURRENCY)
+                : specialized.currencyCode.trim().toUpperCase(),
+            amount: Number(specialized.amount),
+            exchangeRateId: specialized.exchangeRateId.trim() || undefined,
+            exchangeRate: Number(specialized.exchangeRate) || 1,
+        };
+
+        try {
+            setBusyAction('specialized');
+            // The server creates both the canonical AP/AR record and its frozen opening batch.
+            // The UI never exposes generated GL lines for editing, preserving source-to-ledger truth.
+            let created: OpeningBalanceBatch;
+            if (specialized.kind === 'supplierAdvance') {
+                created = await financeDataService.createSupplierAdvanceOpeningBalance({ ...common, supplierId: specialized.partyId });
+            } else if (specialized.kind === 'customerAdvance') {
+                created = await financeDataService.createCustomerAdvanceOpeningBalance({ ...common, customerId: specialized.partyId });
+            } else if (specialized.kind === 'apWithholding' && tax?.payableAccountId) {
+                created = await financeDataService.createApWithholdingOpeningBalance({
+                    ...common, supplierId: specialized.partyId, taxId: tax.id,
+                    withholdingTaxAccountId: tax.payableAccountId,
+                    taxableBase: Number(specialized.taxableBase), netPaidAmount: Number(specialized.netPaidAmount),
+                });
+            } else if (specialized.kind === 'arWithholding' && tax?.receivableAccountId) {
+                created = await financeDataService.createArWithholdingOpeningBalance({
+                    ...common, customerId: specialized.partyId, taxId: tax.id,
+                    withholdingTaxAccountId: tax.receivableAccountId,
+                    certificateNumber: specialized.certificateNumber.trim() || undefined,
+                    certificateDate: specialized.certificateDate || undefined,
+                });
+            } else {
+                // Defensive guard for stale lookup data changed between the initial validation
+                // and submission. The backend repeats the authoritative tax-account check.
+                throw new Error('The selected WHT tax account mapping is no longer available.');
+            }
+            applyBatchToForm(created);
+            setActiveTab('gl');
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            toast({ title: 'Specialised opening batch prepared', description: 'Validate and submit the generated evidence for approval.' });
+        } catch (error: any) {
+            toast({ title: 'Preparation failed', description: error?.message || 'Unable to prepare specialised cutover evidence.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
     const handleUpdateBatch = async () => {
         if (!currentBatch || clientErrors.length > 0) {
             if (clientErrors.length > 0) {
@@ -591,6 +675,7 @@ export default function OpeningBalancesPage() {
                 <TabsList>
                     <TabsTrigger value="gl">GL Batch</TabsTrigger>
                     <TabsTrigger value="subledger">Subledger</TabsTrigger>
+                    <TabsTrigger value="specialized">Advances &amp; WHT</TabsTrigger>
                     <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
                 </TabsList>
 
@@ -1233,6 +1318,96 @@ export default function OpeningBalancesPage() {
                                     </Button>
                                 </div>
                             </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="specialized" className="space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Specialised cutover evidence</CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                                Prepare TDC&apos;s unapplied advances, unremitted supplier WHT and outstanding customer WHT certificates as canonical Finance records. The server derives and freezes the balancing GL batch.
+                            </p>
+                        </CardHeader>
+                        <CardContent className="space-y-5">
+                            <Alert>
+                                <ClipboardCheck className="h-4 w-4" />
+                                <AlertTitle>No cash is posted again</AlertTitle>
+                                <AlertDescription>
+                                    These balances arose before go-live, so migration clearing offsets the source account. Maker-checker approval and central posting still apply.
+                                </AlertDescription>
+                            </Alert>
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                <div className="space-y-2">
+                                    <Label>Opening type</Label>
+                                    <Select value={specialized.kind} onValueChange={value => setSpecialized(current => ({ ...current, kind: value as SpecializedOpeningKind, partyId: '', taxId: '' }))}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="supplierAdvance">Unapplied supplier advance</SelectItem>
+                                            <SelectItem value="customerAdvance">Unapplied customer advance</SelectItem>
+                                            <SelectItem value="apWithholding">Unremitted supplier WHT</SelectItem>
+                                            <SelectItem value="arWithholding">Outstanding customer WHT certificate</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>{specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding' ? 'Supplier' : 'Customer'}</Label>
+                                    <Select value={specialized.partyId} onValueChange={value => setSpecialized(current => ({ ...current, partyId: value }))}>
+                                        <SelectTrigger><SelectValue placeholder="Select party" /></SelectTrigger>
+                                        <SelectContent>
+                                            {(specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding'
+                                                ? specializedOptionsQuery.data?.suppliers
+                                                : specializedOptionsQuery.data?.customers)?.map(item => (
+                                                <SelectItem key={item.id} value={item.id}>{item.code} · {item.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Source reference</Label>
+                                    <Input value={specialized.sourceReference} onChange={event => setSpecialized(current => ({ ...current, sourceReference: event.target.value }))} placeholder="Legacy register/certificate reference" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Amount</Label>
+                                    <Input type="number" min="0.01" step="0.01" value={specialized.amount} onChange={event => setSpecialized(current => ({ ...current, amount: event.target.value }))} />
+                                </div>
+                                {(specialized.kind === 'supplierAdvance' || specialized.kind === 'customerAdvance') && <>
+                                    <div className="space-y-2">
+                                        <Label>Currency</Label>
+                                        <Input maxLength={3} value={specialized.currencyCode} onChange={event => setSpecialized(current => ({ ...current, currencyCode: event.target.value.toUpperCase() }))} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Approved exchange-rate ID</Label>
+                                        <Input value={specialized.exchangeRateId} onChange={event => setSpecialized(current => ({ ...current, exchangeRateId: event.target.value }))} placeholder="Required only for foreign currency" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Exchange rate</Label>
+                                        <Input type="number" min="0.000001" step="0.000001" value={specialized.exchangeRate} onChange={event => setSpecialized(current => ({ ...current, exchangeRate: event.target.value }))} />
+                                    </div>
+                                </>}
+                                {(specialized.kind === 'apWithholding' || specialized.kind === 'arWithholding') && <div className="space-y-2">
+                                    <Label>Withholding tax</Label>
+                                    <Select value={specialized.taxId} onValueChange={value => setSpecialized(current => ({ ...current, taxId: value }))}>
+                                        <SelectTrigger><SelectValue placeholder="Select configured WHT" /></SelectTrigger>
+                                        <SelectContent>{specializedOptionsQuery.data?.withholdingTaxes.map(item => (
+                                            <SelectItem key={item.id} value={item.id}>{item.code} · {item.name} ({item.rate}%)</SelectItem>
+                                        ))}</SelectContent>
+                                    </Select>
+                                </div>}
+                                {specialized.kind === 'apWithholding' && <>
+                                    <div className="space-y-2"><Label>Taxable base</Label><Input type="number" min="0.01" step="0.01" value={specialized.taxableBase} onChange={event => setSpecialized(current => ({ ...current, taxableBase: event.target.value }))} /></div>
+                                    <div className="space-y-2"><Label>Net amount paid before cutover</Label><Input type="number" min="0" step="0.01" value={specialized.netPaidAmount} onChange={event => setSpecialized(current => ({ ...current, netPaidAmount: event.target.value }))} /></div>
+                                </>}
+                                {specialized.kind === 'arWithholding' && <>
+                                    <div className="space-y-2"><Label>Certificate number</Label><Input value={specialized.certificateNumber} onChange={event => setSpecialized(current => ({ ...current, certificateNumber: event.target.value }))} /></div>
+                                    <div className="space-y-2"><Label>Certificate date</Label><Input type="date" value={specialized.certificateDate} onChange={event => setSpecialized(current => ({ ...current, certificateDate: event.target.value }))} /></div>
+                                </>}
+                            </div>
+                            <Button onClick={handleCreateSpecializedBatch} disabled={busyAction !== null || specializedOptionsQuery.isLoading}>
+                                {busyAction === 'specialized' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
+                                Prepare controlled batch
+                            </Button>
                         </CardContent>
                     </Card>
                 </TabsContent>

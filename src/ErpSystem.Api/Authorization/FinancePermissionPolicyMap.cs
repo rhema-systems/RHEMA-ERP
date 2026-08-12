@@ -457,7 +457,10 @@ public static class FinancePermissionPolicyMap
             // Fixed-asset batches are another preparation route into the same maker-checker
             // opening-balance aggregate; they must not inherit the more powerful adjustment
             // permission merely because the action name differs from the original Create action.
-            "Create" or "CreateFixedAssetBatch" or "Update" or "Validate" => One(FinancePermissions.PrepareOpeningBalances),
+            "GetSpecializedOptions" => One(FinancePermissions.ViewFinance),
+            "Create" or "CreateFixedAssetBatch" or "CreateSupplierAdvance" or "CreateCustomerAdvance"
+                or "CreateApWithholding" or "CreateArWithholding" or "Update" or "Validate"
+                => One(FinancePermissions.PrepareOpeningBalances),
             "Submit" => new[] { FinancePermissions.PrepareOpeningBalances, FinancePermissions.WorkflowSubmit },
             _ => One(FinancePermissions.RunMigrationAdjustments)
         };

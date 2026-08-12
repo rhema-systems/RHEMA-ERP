@@ -2,6 +2,8 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -26,6 +28,10 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     private const string StatusPostingFailed = "PostingFailed";
     private const string FixedAssetOpeningCost = "FixedAssetOpeningCost";
     private const string FixedAssetOpeningDepreciation = "FixedAssetOpeningDep";
+    private const string SupplierAdvanceOpening = "SupplierAdvanceOpening";
+    private const string CustomerAdvanceOpening = "CustomerAdvanceOpening";
+    private const string ApWithholdingOpening = "ApWhtOpening";
+    private const string ArWithholdingOpening = "ArWhtOpening";
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
@@ -114,6 +120,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 AccountId = lineDto.AccountId,
                 DebitAmount = RoundMoney(lineDto.DebitAmount),
                 CreditAmount = RoundMoney(lineDto.CreditAmount),
+                TransactionDebitAmount = lineDto.TransactionDebitAmount,
+                TransactionCreditAmount = lineDto.TransactionCreditAmount,
                 TransactionCurrencyCode = NormalizeCurrency(lineDto.TransactionCurrencyCode, functionalCurrency),
                 FunctionalCurrencyCode = NormalizeCurrency(lineDto.FunctionalCurrencyCode, functionalCurrency),
                 ExchangeRateId = lineDto.ExchangeRateId,
@@ -276,6 +284,32 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             .Select(invoice => new { invoice.JournalEntryId, invoice.BaseCurrencyAmount })
             .ToListAsync(cancellationToken);
         var candidates = await GetFixedAssetOpeningCandidatesAsync(tenantId, cancellationToken);
+        var vendorOpeningFacts = await _db.Set<VendorPayment>().AsNoTracking()
+            .Where(payment => payment.TenantId == tenantId && !payment.IsDeleted && payment.OpeningBalanceType != null)
+            .Select(payment => new
+            {
+                payment.OpeningBalanceType,
+                payment.JournalEntryId,
+                payment.TotalAmount,
+                payment.ExchangeRate,
+                payment.WithholdingTaxAmount
+            })
+            .ToListAsync(cancellationToken);
+        var customerOpeningFacts = await _db.Set<CustomerPayment>().AsNoTracking()
+            .Where(payment => payment.TenantId == tenantId && !payment.IsDeleted && payment.OpeningBalanceType != null)
+            .Select(payment => new
+            {
+                payment.OpeningBalanceType,
+                payment.JournalEntryId,
+                payment.TotalAmount,
+                payment.ExchangeRate,
+                payment.WithholdingTaxAmount
+            })
+            .ToListAsync(cancellationToken);
+        var supplierAdvances = vendorOpeningFacts.Where(item => item.OpeningBalanceType == SupplierAdvanceOpening).ToList();
+        var customerAdvances = customerOpeningFacts.Where(item => item.OpeningBalanceType == CustomerAdvanceOpening).ToList();
+        var apWithholding = vendorOpeningFacts.Where(item => item.OpeningBalanceType == ApWithholdingOpening).ToList();
+        var arWithholding = customerOpeningFacts.Where(item => item.OpeningBalanceType == ArWithholdingOpening).ToList();
 
         var warnings = new List<string>();
         if (ap.Any(item => !item.JournalEntryId.HasValue))
@@ -284,6 +318,9 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             warnings.Add("One or more AR opening invoices are not posted and therefore do not yet support customer aging sign-off.");
         if (candidates.Any(item => !item.OpeningPostedToGl))
             warnings.Add("One or more imported fixed-asset opening book values are not linked to an approved opening GL journal.");
+        if (supplierAdvances.Concat(apWithholding).Any(item => !item.JournalEntryId.HasValue)
+            || customerAdvances.Concat(arWithholding).Any(item => !item.JournalEntryId.HasValue))
+            warnings.Add("One or more specialised advance/WHT cutover facts are awaiting approved opening-batch posting.");
 
         return new SubledgerOpeningBalanceReadinessDto
         {
@@ -293,6 +330,18 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             ArOpeningInvoiceCount = ar.Count,
             PostedArOpeningInvoiceCount = ar.Count(item => item.JournalEntryId.HasValue),
             ArOpeningInvoiceFunctionalAmount = RoundMoney(ar.Sum(item => item.BaseCurrencyAmount)),
+            SupplierAdvanceOpeningCount = supplierAdvances.Count,
+            PostedSupplierAdvanceOpeningCount = supplierAdvances.Count(item => item.JournalEntryId.HasValue),
+            SupplierAdvanceOpeningFunctionalAmount = RoundMoney(supplierAdvances.Sum(item => item.TotalAmount * item.ExchangeRate)),
+            CustomerAdvanceOpeningCount = customerAdvances.Count,
+            PostedCustomerAdvanceOpeningCount = customerAdvances.Count(item => item.JournalEntryId.HasValue),
+            CustomerAdvanceOpeningFunctionalAmount = RoundMoney(customerAdvances.Sum(item => item.TotalAmount * item.ExchangeRate)),
+            ApWithholdingOpeningCount = apWithholding.Count,
+            PostedApWithholdingOpeningCount = apWithholding.Count(item => item.JournalEntryId.HasValue),
+            ApWithholdingOpeningAmount = RoundMoney(apWithholding.Sum(item => item.WithholdingTaxAmount)),
+            ArWithholdingOpeningCount = arWithholding.Count,
+            PostedArWithholdingOpeningCount = arWithholding.Count(item => item.JournalEntryId.HasValue),
+            ArWithholdingOpeningAmount = RoundMoney(arWithholding.Sum(item => item.WithholdingTaxAmount)),
             FixedAssetOpeningBookValueCount = candidates.Count,
             PostedFixedAssetOpeningBookValueCount = candidates.Count(item => item.OpeningPostedToGl),
             FixedAssetOpeningCost = RoundMoney(candidates.Sum(item => item.AcquisitionCost)),
@@ -302,6 +351,311 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             Warnings = warnings
         };
     }
+
+    public async Task<OpeningBalanceBatchDto> CreateSupplierAdvanceBatchAsync(
+        CreateSupplierAdvanceOpeningBalanceDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var supplier = await _db.Suppliers.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == dto.SupplierId && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Supplier was not found for the current tenant.");
+        var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken);
+        var advanceAccountId = context.Settings.SupplierAdvanceAccountId
+            ?? throw new InvalidOperationException("Supplier Advance Account is not configured in Finance Settings.");
+        var paymentId = Guid.NewGuid();
+        var payment = new VendorPayment
+        {
+            Id = paymentId, TenantId = tenantId, SupplierId = supplier.Id,
+            PaymentNumber = BuildOpeningReference("AP-ADV-OPEN", paymentId), PaymentDate = dto.OpeningDate.Date,
+            TotalAmount = RoundMoney(dto.Amount), AllocatedAmount = 0m, IsSupplierAdvance = true,
+            CurrencyCode = context.Currency, ExchangeRate = context.Rate, ExchangeRateId = dto.ExchangeRateId,
+            Status = VendorPaymentStatus.Draft, OpeningBalanceType = SupplierAdvanceOpening,
+            OpeningSourceReference = NormalizeOptional(dto.SourceReference), TransactionReference = NormalizeOptional(dto.SourceReference),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUser.UserName ?? "system", CreatedById = CurrentUserId()
+        };
+        _db.Set<VendorPayment>().Add(payment);
+        var batch = await CreateSpecializedBatchAsync(dto, paymentId, SupplierAdvanceOpening,
+            advanceAccountId, debit: context.FunctionalAmount, credit: 0m,
+            context.Settings.MigrationClearingAccountId!.Value, clearingDebit: 0m, clearingCredit: context.FunctionalAmount,
+            transactionDebit: dto.Amount, transactionCredit: dto.Amount, context, cancellationToken);
+        payment.OpeningBalanceBatchId = batch.Id;
+        await _db.SaveChangesAsync(cancellationToken);
+        return batch;
+    }
+
+    public async Task<SpecializedOpeningBalanceOptionsDto> GetSpecializedOptionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var settings = await _db.FinanceSettings.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+
+        // Return only the tenant-scoped lookup projection needed by the Finance cutover screen.
+        // This keeps source IDs server-owned and avoids coupling the workflow to another module's UI.
+        var suppliers = await _db.Suppliers.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Status == "Active")
+            .OrderBy(item => item.Name)
+            .Select(item => new OpeningBalancePartyOptionDto { Id = item.Id, Code = item.SupplierCode, Name = item.Name })
+            .ToListAsync(cancellationToken);
+        var customers = await _db.Set<Customer>().AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status == "Active")
+            .OrderBy(item => item.CustomerName)
+            .Select(item => new OpeningBalancePartyOptionDto { Id = item.Id, Code = item.CustomerCode, Name = item.CustomerName })
+            .ToListAsync(cancellationToken);
+        var taxes = await _db.Taxes.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Category == TaxCategory.Withholding)
+            .OrderBy(item => item.Code)
+            .Select(item => new OpeningBalanceWhtOptionDto
+            {
+                Id = item.Id, Code = item.Code, Name = item.Name, Rate = item.Rate,
+                PayableAccountId = item.TaxPayableAccountId, ReceivableAccountId = item.TaxReceivableAccountId
+            })
+            .ToListAsync(cancellationToken);
+
+        return new SpecializedOpeningBalanceOptionsDto
+        {
+            FunctionalCurrencyCode = NormalizeCurrency(settings?.BaseCurrency, "GHS"),
+            Suppliers = suppliers,
+            Customers = customers,
+            WithholdingTaxes = taxes
+        };
+    }
+
+    public async Task<OpeningBalanceBatchDto> CreateCustomerAdvanceBatchAsync(
+        CreateCustomerAdvanceOpeningBalanceDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var customer = await _db.Set<Customer>().AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == dto.CustomerId && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Customer was not found for the current tenant.");
+        var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken);
+        var advanceAccountId = context.Settings.CustomerAdvanceAccountId
+            ?? throw new InvalidOperationException("Customer Advance Account is not configured in Finance Settings.");
+        var paymentId = Guid.NewGuid();
+        var reference = BuildOpeningReference("AR-ADV-OPEN", paymentId);
+        var payment = new CustomerPayment
+        {
+            Id = paymentId, TenantId = tenantId, CustomerId = customer.Id,
+            PaymentNumber = reference, ReferenceNumber = reference, PaymentDate = dto.OpeningDate.Date,
+            TotalAmount = RoundMoney(dto.Amount), AllocatedAmount = 0m, IsCustomerAdvance = true,
+            CurrencyCode = context.Currency, ExchangeRate = context.Rate, ExchangeRateId = dto.ExchangeRateId,
+            PaymentMethod = "OpeningBalance", Status = "Pending", OpeningBalanceType = CustomerAdvanceOpening,
+            OpeningSourceReference = NormalizeOptional(dto.SourceReference), TransactionReference = NormalizeOptional(dto.SourceReference),
+            CreatedAt = DateTime.UtcNow, CreatedBy = _currentUser.UserName ?? "system", CreatedById = CurrentUserId()
+        };
+        _db.Set<CustomerPayment>().Add(payment);
+        var batch = await CreateSpecializedBatchAsync(dto, paymentId, CustomerAdvanceOpening,
+            // The source-bearing line must be the customer-advance liability, not migration clearing.
+            // Validation and later settlement rebuilds follow this line back to the canonical receipt lot.
+            advanceAccountId, debit: 0m, credit: context.FunctionalAmount,
+            context.Settings.MigrationClearingAccountId!.Value, clearingDebit: context.FunctionalAmount, clearingCredit: 0m,
+            transactionDebit: dto.Amount, transactionCredit: dto.Amount, context, cancellationToken);
+        payment.OpeningBalanceBatchId = batch.Id;
+        await _db.SaveChangesAsync(cancellationToken);
+        return batch;
+    }
+
+    public async Task<OpeningBalanceBatchDto> CreateApWithholdingBatchAsync(
+        CreateApWithholdingOpeningBalanceDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var supplier = await _db.Suppliers.AsNoTracking().FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == dto.SupplierId && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Supplier was not found for the current tenant.");
+        var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken, requireFunctionalCurrency: true);
+        await ValidateWithholdingConfigurationAsync(dto.TaxId, dto.WithholdingTaxAccountId, useReceivableAccount: false, cancellationToken);
+        if (dto.TaxableBase < dto.Amount || dto.NetPaidAmount < 0m)
+            throw new InvalidOperationException("AP WHT opening taxable base/net-paid evidence is invalid.");
+        var paymentId = Guid.NewGuid();
+        var reference = BuildOpeningReference("AP-WHT-OPEN", paymentId);
+        var payment = new VendorPayment
+        {
+            Id = paymentId, TenantId = tenantId, SupplierId = supplier.Id, PaymentNumber = reference,
+            PaymentDate = dto.OpeningDate.Date, TotalAmount = RoundMoney(dto.NetPaidAmount), AllocatedAmount = RoundMoney(dto.NetPaidAmount),
+            CurrencyCode = context.Currency, ExchangeRate = 1m, Status = VendorPaymentStatus.Draft,
+            WithholdingTaxId = dto.TaxId, WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+            WithholdingTaxBaseAmount = RoundMoney(dto.TaxableBase), WithholdingTaxAmount = RoundMoney(dto.Amount),
+            // Preserve the statutory rate as immutable cutover evidence. Certificate and remittance
+            // reports use this snapshot rather than silently inheriting a later tax-master change.
+            WithholdingTaxRate = RoundRate(dto.Amount / dto.TaxableBase * 100m),
+            OpeningBalanceType = ApWithholdingOpening, OpeningSourceReference = NormalizeOptional(dto.SourceReference),
+            TransactionReference = NormalizeOptional(dto.SourceReference), CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUser.UserName ?? "system", CreatedById = CurrentUserId()
+        };
+        _db.Set<VendorPayment>().Add(payment);
+        var batch = await CreateSpecializedBatchAsync(dto, paymentId, ApWithholdingOpening,
+            // WHT source evidence belongs on the statutory payable line. Keeping the canonical
+            // payment ID off migration clearing prevents evidence drift during approval checks.
+            dto.WithholdingTaxAccountId, debit: 0m, credit: context.FunctionalAmount,
+            context.Settings.MigrationClearingAccountId!.Value, clearingDebit: context.FunctionalAmount, clearingCredit: 0m,
+            transactionDebit: dto.Amount, transactionCredit: dto.Amount, context, cancellationToken);
+        payment.OpeningBalanceBatchId = batch.Id;
+        await _db.SaveChangesAsync(cancellationToken);
+        return batch;
+    }
+
+    public async Task<OpeningBalanceBatchDto> CreateArWithholdingBatchAsync(
+        CreateArWithholdingOpeningBalanceDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var customer = await _db.Set<Customer>().AsNoTracking().FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == dto.CustomerId && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Customer was not found for the current tenant.");
+        var context = await ResolveSpecializedOpeningContextAsync(dto, cancellationToken, requireFunctionalCurrency: true);
+        await ValidateWithholdingConfigurationAsync(dto.TaxId, dto.WithholdingTaxAccountId, useReceivableAccount: true, cancellationToken);
+        var paymentId = Guid.NewGuid();
+        var reference = BuildOpeningReference("AR-WHT-OPEN", paymentId);
+        var payment = new CustomerPayment
+        {
+            Id = paymentId, TenantId = tenantId, CustomerId = customer.Id, PaymentNumber = reference, ReferenceNumber = reference,
+            PaymentDate = dto.OpeningDate.Date, TotalAmount = 0m, AllocatedAmount = 0m,
+            CurrencyCode = context.Currency, ExchangeRate = 1m, PaymentMethod = "OpeningBalance", Status = "Pending",
+            WithholdingTaxId = dto.TaxId, WithholdingTaxAccountId = dto.WithholdingTaxAccountId,
+            WithholdingTaxAmount = RoundMoney(dto.Amount), WithholdingCertificateNumber = NormalizeOptional(dto.CertificateNumber),
+            WithholdingCertificateDate = dto.CertificateDate?.Date, OpeningBalanceType = ArWithholdingOpening,
+            OpeningSourceReference = NormalizeOptional(dto.SourceReference), TransactionReference = NormalizeOptional(dto.SourceReference),
+            CreatedAt = DateTime.UtcNow, CreatedBy = _currentUser.UserName ?? "system", CreatedById = CurrentUserId()
+        };
+        _db.Set<CustomerPayment>().Add(payment);
+        var batch = await CreateSpecializedBatchAsync(dto, paymentId, ArWithholdingOpening,
+            dto.WithholdingTaxAccountId, debit: context.FunctionalAmount, credit: 0m,
+            context.Settings.MigrationClearingAccountId!.Value, clearingDebit: 0m, clearingCredit: context.FunctionalAmount,
+            transactionDebit: dto.Amount, transactionCredit: dto.Amount, context, cancellationToken);
+        payment.OpeningBalanceBatchId = batch.Id;
+        await _db.SaveChangesAsync(cancellationToken);
+        return batch;
+    }
+
+    private async Task<OpeningBalanceBatchDto> CreateSpecializedBatchAsync(
+        CreateSpecializedOpeningBalanceDto dto,
+        Guid sourceId,
+        string evidenceType,
+        Guid primaryAccountId,
+        decimal debit,
+        decimal credit,
+        Guid offsetAccountId,
+        decimal clearingDebit,
+        decimal clearingCredit,
+        decimal transactionDebit,
+        decimal transactionCredit,
+        SpecializedOpeningContext context,
+        CancellationToken cancellationToken)
+    {
+        // Only the source-facing line carries the canonical record ID. The migration-clearing
+        // line is the balancing cutover bridge and must not be mistaken for a second subledger fact.
+        var primaryTransactionDebit = debit > 0m ? RoundMoney(transactionDebit) : 0m;
+        var primaryTransactionCredit = credit > 0m ? RoundMoney(transactionCredit) : 0m;
+        return await CreateBatchAsync(new CreateOpeningBalanceBatchDto
+        {
+            BatchNumber = dto.BatchNumber ?? string.Empty,
+            SourceReference = NormalizeOptional(dto.SourceReference),
+            Description = NormalizeOptional(dto.Description) ?? $"{evidenceType} cutover at {dto.OpeningDate:yyyy-MM-dd}",
+            OpeningDate = dto.OpeningDate.Date,
+            FiscalPeriodId = dto.FiscalPeriodId,
+            BookClassification = dto.BookClassification,
+            IdempotencyKey = $"MIGRATION:{evidenceType}:{TenantId:N}:{sourceId:N}",
+            Lines = new[]
+            {
+                new CreateOpeningBalanceLineDto
+                {
+                    AccountId = primaryAccountId, DebitAmount = debit, CreditAmount = credit,
+                    TransactionDebitAmount = primaryTransactionDebit, TransactionCreditAmount = primaryTransactionCredit,
+                    TransactionCurrencyCode = context.Currency, FunctionalCurrencyCode = context.FunctionalCurrency,
+                    ExchangeRateId = context.ExchangeRateId, ExchangeRateDate = dto.OpeningDate.Date,
+                    CounterpartyType = evidenceType, CounterpartyId = sourceId,
+                    SourceReference = NormalizeOptional(dto.SourceReference), Notes = $"Controlled {evidenceType} source evidence"
+                },
+                new CreateOpeningBalanceLineDto
+                {
+                    AccountId = offsetAccountId, DebitAmount = clearingDebit, CreditAmount = clearingCredit,
+                    TransactionDebitAmount = clearingDebit, TransactionCreditAmount = clearingCredit,
+                    TransactionCurrencyCode = context.FunctionalCurrency, FunctionalCurrencyCode = context.FunctionalCurrency,
+                    SourceReference = NormalizeOptional(dto.SourceReference), Notes = $"Migration clearing offset for {evidenceType}"
+                }
+            }
+        }, cancellationToken);
+    }
+
+    private async Task<SpecializedOpeningContext> ResolveSpecializedOpeningContextAsync(
+        CreateSpecializedOpeningBalanceDto dto,
+        CancellationToken cancellationToken,
+        bool requireFunctionalCurrency = false)
+    {
+        if (dto.Amount <= 0m || dto.OpeningDate == default || dto.FiscalPeriodId == Guid.Empty)
+            throw new InvalidOperationException("A positive amount, opening date, and fiscal period are required.");
+        var settings = await _db.FinanceSettings.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("Finance Settings are required for specialised opening balances.");
+        if (!settings.MigrationClearingAccountId.HasValue)
+            throw new InvalidOperationException("Migration Clearing Account is not configured in Finance Settings.");
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var currency = NormalizeCurrency(dto.CurrencyCode, functionalCurrency);
+        if (requireFunctionalCurrency && !string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Statutory WHT opening balances must use functional currency {functionalCurrency}.");
+        var rate = string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase) ? 1m : dto.ExchangeRate;
+        if (rate <= 0m)
+            throw new InvalidOperationException("A positive opening exchange rate is required.");
+        if (!string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!dto.ExchangeRateId.HasValue)
+                throw new InvalidOperationException("Foreign-currency opening advances require approved exchange-rate evidence.");
+            var approvedRate = await _db.ExchangeRates.AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == TenantId && item.Id == dto.ExchangeRateId.Value && !item.IsDeleted,
+                cancellationToken)
+                ?? throw new InvalidOperationException("Opening exchange-rate evidence was not found for the current tenant.");
+            if (approvedRate.ApprovalStatus != RateApprovalStatus.Approved ||
+                !string.Equals(approvedRate.TargetCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(approvedRate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                RoundRate(approvedRate.Rate) != RoundRate(rate))
+                throw new InvalidOperationException("Opening exchange-rate currency/value does not match approved rate evidence.");
+        }
+        return new SpecializedOpeningContext(settings, functionalCurrency, currency, rate,
+            RoundMoney(dto.Amount * rate), dto.ExchangeRateId);
+    }
+
+    private async Task ValidateWithholdingConfigurationAsync(
+        Guid taxId,
+        Guid accountId,
+        bool useReceivableAccount,
+        CancellationToken cancellationToken)
+    {
+        if (taxId == Guid.Empty || accountId == Guid.Empty)
+            throw new InvalidOperationException("A configured WHT tax and GL account are required.");
+        var tax = await _db.Taxes.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == TenantId && item.Id == taxId && !item.IsDeleted && item.IsActive && item.Category == TaxCategory.Withholding,
+            cancellationToken);
+        var account = await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == TenantId && item.Id == accountId && !item.IsDeleted,
+            cancellationToken);
+        // BusinessEntity.IsActive is a computed CLR property and therefore cannot be translated
+        // by every EF provider. Materialise the single tenant-scoped account before evaluating it.
+        if (tax == null || account == null || !account.IsActive)
+            throw new InvalidOperationException("WHT tax/account configuration was not found or is inactive for the current tenant.");
+
+        // A preparer must not be able to route a statutory opening balance through an arbitrary
+        // active GL account. Enforce the payable/receivable mapping approved on the tax master.
+        var configuredAccountId = useReceivableAccount ? tax.TaxReceivableAccountId : tax.TaxPayableAccountId;
+        if (configuredAccountId != accountId)
+        {
+            throw new InvalidOperationException(useReceivableAccount
+                ? "The selected account is not the receivable account configured for this WHT tax."
+                : "The selected account is not the payable account configured for this WHT tax.");
+        }
+    }
+
+    private static string BuildOpeningReference(string prefix, Guid id) => $"{prefix}-{id:N}"[..Math.Min(50, prefix.Length + 1 + 32)];
+    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static decimal RoundRate(decimal value) => decimal.Round(value, 6, MidpointRounding.AwayFromZero);
+    private sealed record SpecializedOpeningContext(
+        FinanceSettings Settings,
+        string FunctionalCurrency,
+        string Currency,
+        decimal Rate,
+        decimal FunctionalAmount,
+        Guid? ExchangeRateId);
 
     public async Task<OpeningBalanceBatchDto?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
         => await MapBatchAsync(batchId, cancellationToken);
@@ -352,13 +706,13 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     {
         var tenantId = TenantId;
         var batch = await LoadBatchAsync(tenantId, batchId, cancellationToken);
-        if (HasFixedAssetOpeningEvidence(batch))
+        if (HasGeneratedSubledgerOpeningEvidence(batch))
         {
             // Generated fixed-asset lines are derived from the imported register and category GL
             // mappings. Letting a user replace them with arbitrary accounts would break the exact
             // subledger-to-ledger evidence FIN-LIM-0048 is intended to provide.
             throw new InvalidOperationException(
-                "Generated fixed-asset opening batches cannot be edited manually. Correct the imported register or category mapping and create a new batch.");
+                "Generated subledger opening batches cannot be edited manually. Correct the source evidence and create a new batch.");
         }
         if (!IsEditableStatus(batch.Status))
         {
@@ -421,6 +775,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             line.AccountId = lineDto.AccountId;
             line.DebitAmount = RoundMoney(lineDto.DebitAmount);
             line.CreditAmount = RoundMoney(lineDto.CreditAmount);
+            line.TransactionDebitAmount = lineDto.TransactionDebitAmount;
+            line.TransactionCreditAmount = lineDto.TransactionCreditAmount;
             line.TransactionCurrencyCode = NormalizeCurrency(lineDto.TransactionCurrencyCode, functionalCurrency);
             line.FunctionalCurrencyCode = NormalizeCurrency(lineDto.FunctionalCurrencyCode, functionalCurrency);
             line.ExchangeRateId = lineDto.ExchangeRateId;
@@ -537,9 +893,14 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
             if (!string.Equals(line.TransactionCurrencyCode, tenantFunctionalCurrency, StringComparison.OrdinalIgnoreCase))
             {
-                // This GL-only import records functional debit/credit amounts. It cannot safely
-                // reconstruct an original foreign amount for the posting-engine FX snapshot.
-                errors.Add($"Line {line.LineNumber}: foreign-currency opening balances are not supported by the controlled GL opening-balance flow.");
+                // Freehand GL imports still cannot invent an original foreign amount. The only
+                // exception is a server-generated specialised advance line: its canonical payment,
+                // approved rate ID, native amount, and functional amount are revalidated below.
+                if (!IsSpecializedOpeningLine(line) || !line.ExchangeRateId.HasValue ||
+                    (!line.TransactionDebitAmount.HasValue && !line.TransactionCreditAmount.HasValue))
+                {
+                    errors.Add($"Line {line.LineNumber}: foreign-currency opening balances are not supported outside controlled specialised source and approved FX evidence.");
+                }
             }
 
             var account = line.Account;
@@ -566,6 +927,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         }
 
         await ValidateFixedAssetOpeningEvidenceAsync(batch, errors, cancellationToken);
+        await ValidateSpecializedOpeningEvidenceAsync(batch, errors, cancellationToken);
 
         RecalculateTotals(batch);
         if (batch.TotalDebit != batch.TotalCredit)
@@ -754,6 +1116,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                 result.JournalEntryId,
                 result.PostingEventId,
                 cancellationToken);
+            await ApplySpecializedOpeningLinksAsync(batch, result.JournalEntryId, cancellationToken);
             await _db.SaveChangesAsync(cancellationToken);
 
             await RecordAuditAsync(
@@ -908,8 +1271,19 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                     DebitAmount = l.DebitAmount,
                     CreditAmount = l.CreditAmount,
                     TransactionCurrency = l.TransactionCurrencyCode,
-                    TransactionDebitAmount = l.DebitAmount,
-                    TransactionCreditAmount = l.CreditAmount,
+                    // Functional GL values and native cutover quantities are deliberately
+                    // separate. A USD advance may carry USD 100 at GHS 15 without recording
+                    // the GHS 1,500 functional value as if it were USD 1,500.
+                    TransactionDebitAmount = l.TransactionDebitAmount ?? l.DebitAmount,
+                    TransactionCreditAmount = l.TransactionCreditAmount ?? l.CreditAmount,
+                    // FinancePostingEngine keeps this compatibility field as the explicit
+                    // original-foreign-amount gate, even when debit/credit native amounts are
+                    // already supplied. Populate it only for the controlled foreign source line.
+                    ForeignCurrencyAmount = string.Equals(l.TransactionCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                        ? null
+                        : l.TransactionDebitAmount.GetValueOrDefault() > 0m
+                            ? l.TransactionDebitAmount
+                            : l.TransactionCreditAmount,
                     ExchangeRateId = l.ExchangeRateId,
                     ExchangeRateDate = l.ExchangeRateDate,
                     SourceReferenceNumber = l.SourceReference ?? batch.SourceReference ?? batch.BatchNumber,
@@ -1126,6 +1500,151 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
     private static bool HasFixedAssetOpeningEvidence(OpeningBalanceBatch batch)
         => batch.Lines.Any(IsFixedAssetOpeningLine);
 
+    private async Task ValidateSpecializedOpeningEvidenceAsync(
+        OpeningBalanceBatch batch,
+        ICollection<string> errors,
+        CancellationToken cancellationToken)
+    {
+        var line = batch.Lines.SingleOrDefault(IsSpecializedOpeningLine);
+        if (line?.CounterpartyId == null)
+            return;
+
+        if (line.CounterpartyType is SupplierAdvanceOpening or ApWithholdingOpening)
+        {
+            var payment = await _db.Set<VendorPayment>().AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == batch.TenantId && item.Id == line.CounterpartyId && !item.IsDeleted,
+                cancellationToken);
+            if (payment == null || payment.OpeningBalanceBatchId != batch.Id || payment.JournalEntryId.HasValue ||
+                !string.Equals(payment.OpeningBalanceType, line.CounterpartyType, StringComparison.Ordinal))
+            {
+                errors.Add("AP specialised opening source evidence is missing, changed, or already posted.");
+                return;
+            }
+            var expected = line.CounterpartyType == SupplierAdvanceOpening
+                ? RoundMoney(payment.TotalAmount * payment.ExchangeRate)
+                : RoundMoney(payment.WithholdingTaxAmount);
+            if ((line.CounterpartyType == SupplierAdvanceOpening && line.DebitAmount != expected) ||
+                (line.CounterpartyType == ApWithholdingOpening && line.CreditAmount != expected))
+                errors.Add("AP specialised opening amount changed after batch preparation.");
+            if (line.CounterpartyType == SupplierAdvanceOpening)
+            {
+                await ValidateAdvanceFxEvidenceAsync(
+                    batch, line, payment.CurrencyCode, payment.TotalAmount, payment.ExchangeRate,
+                    payment.ExchangeRateId, sourceUsesDebit: true, errors, cancellationToken);
+            }
+        }
+        else
+        {
+            var payment = await _db.Set<CustomerPayment>().AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == batch.TenantId && item.Id == line.CounterpartyId && !item.IsDeleted,
+                cancellationToken);
+            if (payment == null || payment.OpeningBalanceBatchId != batch.Id || payment.JournalEntryId.HasValue ||
+                !string.Equals(payment.OpeningBalanceType, line.CounterpartyType, StringComparison.Ordinal))
+            {
+                errors.Add("AR specialised opening source evidence is missing, changed, or already posted.");
+                return;
+            }
+            var expected = line.CounterpartyType == CustomerAdvanceOpening
+                ? RoundMoney(payment.TotalAmount * payment.ExchangeRate)
+                : RoundMoney(payment.WithholdingTaxAmount);
+            if ((line.CounterpartyType == CustomerAdvanceOpening && line.CreditAmount != expected) ||
+                (line.CounterpartyType == ArWithholdingOpening && line.DebitAmount != expected))
+                errors.Add("AR specialised opening amount changed after batch preparation.");
+            if (line.CounterpartyType == CustomerAdvanceOpening)
+            {
+                await ValidateAdvanceFxEvidenceAsync(
+                    batch, line, payment.CurrencyCode, payment.TotalAmount, payment.ExchangeRate,
+                    payment.ExchangeRateId, sourceUsesDebit: false, errors, cancellationToken);
+            }
+        }
+    }
+
+    private async Task ValidateAdvanceFxEvidenceAsync(
+        OpeningBalanceBatch batch,
+        OpeningBalanceLine line,
+        string sourceCurrency,
+        decimal nativeAmount,
+        decimal sourceRate,
+        Guid? sourceRateId,
+        bool sourceUsesDebit,
+        ICollection<string> errors,
+        CancellationToken cancellationToken)
+    {
+        var functionalCurrency = NormalizeCurrency(line.FunctionalCurrencyCode, "GHS");
+        var currency = NormalizeCurrency(sourceCurrency, functionalCurrency);
+        var expectedNative = RoundMoney(nativeAmount);
+        var lineNative = sourceUsesDebit ? line.TransactionDebitAmount : line.TransactionCreditAmount;
+        if (!string.Equals(line.TransactionCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
+            lineNative != expectedNative)
+        {
+            errors.Add("Advance native-currency evidence changed after batch preparation.");
+        }
+
+        if (string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (RoundRate(sourceRate) != 1m)
+                errors.Add("Functional-currency opening advance must retain an exchange rate of 1.");
+            return;
+        }
+
+        if (!sourceRateId.HasValue || line.ExchangeRateId != sourceRateId)
+        {
+            errors.Add("Foreign-currency opening advance lost its approved exchange-rate linkage.");
+            return;
+        }
+
+        // Approval can be withdrawn or the master record can be corrected between preparation
+        // and posting. Re-check the frozen rate evidence at the maker-checker boundary.
+        var approvedRate = await _db.ExchangeRates.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == batch.TenantId && item.Id == sourceRateId.Value && !item.IsDeleted,
+            cancellationToken);
+        if (approvedRate == null || approvedRate.ApprovalStatus != RateApprovalStatus.Approved ||
+            !string.Equals(approvedRate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(approvedRate.TargetCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
+            RoundRate(approvedRate.Rate) != RoundRate(sourceRate))
+        {
+            errors.Add("Foreign-currency opening advance rate is missing, unapproved, or no longer matches its source evidence.");
+        }
+    }
+
+    private async Task ApplySpecializedOpeningLinksAsync(
+        OpeningBalanceBatch batch,
+        Guid journalEntryId,
+        CancellationToken cancellationToken)
+    {
+        var line = batch.Lines.SingleOrDefault(IsSpecializedOpeningLine);
+        if (line?.CounterpartyId == null)
+            return;
+        var now = DateTime.UtcNow;
+        if (line.CounterpartyType is SupplierAdvanceOpening or ApWithholdingOpening)
+        {
+            var payment = await _db.Set<VendorPayment>().FirstAsync(item =>
+                item.TenantId == batch.TenantId && item.Id == line.CounterpartyId, cancellationToken);
+            payment.JournalEntryId = journalEntryId;
+            payment.Status = VendorPaymentStatus.Cleared;
+            payment.UpdatedAt = now;
+            payment.UpdatedBy = _currentUser.UserName ?? "system";
+            payment.LastModifiedById = CurrentUserId();
+        }
+        else
+        {
+            var payment = await _db.Set<CustomerPayment>().FirstAsync(item =>
+                item.TenantId == batch.TenantId && item.Id == line.CounterpartyId, cancellationToken);
+            payment.JournalEntryId = journalEntryId;
+            payment.Status = "Cleared";
+            payment.ClearedDate = batch.OpeningDate.Date;
+            payment.UpdatedAt = now;
+            payment.UpdatedBy = _currentUser.UserName ?? "system";
+            payment.LastModifiedById = CurrentUserId();
+        }
+    }
+
+    private static bool HasGeneratedSubledgerOpeningEvidence(OpeningBalanceBatch batch)
+        => HasFixedAssetOpeningEvidence(batch) || batch.Lines.Any(IsSpecializedOpeningLine);
+
+    private static bool IsSpecializedOpeningLine(OpeningBalanceLine line)
+        => line.CounterpartyType is SupplierAdvanceOpening or CustomerAdvanceOpening or ApWithholdingOpening or ArWithholdingOpening;
+
     private static bool IsFixedAssetOpeningLine(OpeningBalanceLine line)
         => string.Equals(line.CounterpartyType, FixedAssetOpeningCost, StringComparison.Ordinal)
             || string.Equals(line.CounterpartyType, FixedAssetOpeningDepreciation, StringComparison.Ordinal);
@@ -1181,6 +1700,8 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
                     AccountName = l.Account?.AccountName ?? string.Empty,
                     DebitAmount = l.DebitAmount,
                     CreditAmount = l.CreditAmount,
+                    TransactionDebitAmount = l.TransactionDebitAmount,
+                    TransactionCreditAmount = l.TransactionCreditAmount,
                     TransactionCurrencyCode = l.TransactionCurrencyCode,
                     FunctionalCurrencyCode = l.FunctionalCurrencyCode,
                     ExchangeRateId = l.ExchangeRateId,

@@ -139,7 +139,7 @@ Focused tests are in `tests/ErpSystem.Api.Tests/Services/Finance/ControlledOpeni
 - `FIN-LIM-0007` is resolved for tenant-safe back-reference diagnostic and repair tooling.
 - `FIN-LIM-0008` is resolved for bank snapshot diagnostic and rebuild tooling.
 - `FIN-LIM-0017` is narrowed by the opening-balance and migration tooling foundation but final production migration execution and accountant sign-off evidence remain open.
-- `FIN-LIM-0048` is now partially resolved by canonical AP/AR opening invoices and the controlled fixed-asset register-to-GL workflow documented in `docs/subledger-opening-balance-cutover-foundation.md`. Specialised advance and withholding/certificate openings remain subject to TDC cutover confirmation and rehearsal.
+- `FIN-LIM-0048` implementation is resolved by canonical AP/AR opening invoices, controlled fixed-asset register-to-GL posting, and specialised supplier/customer advance and WHT/certificate opening workflows documented in `docs/subledger-opening-balance-cutover-foundation.md`. TDC representative-data rehearsal and accountant sign-off remain governed by `FIN-LIM-0017`.
 
 ## PR Definition Of Done
 

@@ -1527,6 +1527,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
+            // Specialised cutover facts are intentionally linked to their controlled opening batch.
+            // This index keeps evidence validation and settlement-read-model rebuilds tenant-local.
+            entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
+                .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
             entity.HasIndex(e => new { e.TenantId, e.LiquidityAccountId, e.PaymentDate });
             entity.HasIndex(e => e.ReversalJournalEntryId);
             entity.HasIndex(e => e.ReversalPostingEventId);
@@ -2385,6 +2389,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.InvoicePaymentSodControlEventId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
+            // See the equivalent AR index: opening batches are the posting source while the
+            // payment remains the canonical AP advance/WHT fact used after go-live.
+            entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
+                .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
             entity.HasIndex(e => e.WorkflowInstanceId);
             entity.HasIndex(e => e.AppliedApprovalPolicySetId);
             entity.HasIndex(e => e.ReversalJournalEntryId);
