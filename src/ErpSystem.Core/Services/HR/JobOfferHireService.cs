@@ -656,6 +656,14 @@ public class JobOfferService : IJobOfferService
     {
         var benefit = await GetOwnedBenefitAsync(updateDto.Id);
 
+        // ⚠ This guard was missing. Adding a benefit and removing one both refuse outside
+        // Draft/PendingApproval, but editing one did not — so a benefit could not be added to a Sent
+        // offer, yet its monetary value could be rewritten to anything after the candidate had the
+        // letter in hand. Three doors onto the same collection, one of them unlocked.
+        var owningOffer = await GetOwnedOfferAsync(benefit.JobOfferId);
+        if (owningOffer.OfferStatus != JobOfferStatus.Draft && owningOffer.OfferStatus != JobOfferStatus.PendingApproval)
+            throw new InvalidOperationException("Benefits can only be edited on a Draft or Pending-Approval offer.");
+
         if (updateDto.BenefitName != null)  benefit.BenefitName  = updateDto.BenefitName.Trim();
         if (updateDto.Description != null)  benefit.Description  = updateDto.Description;
         if (updateDto.MonetaryValue.HasValue) benefit.MonetaryValue = updateDto.MonetaryValue;

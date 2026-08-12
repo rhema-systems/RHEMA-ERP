@@ -36,12 +36,14 @@ import { ApplicationDecisionBar } from '@/components/hr/recruitment/ApplicationD
 import { ApplicationReviewsPanel } from '@/components/hr/recruitment/ApplicationReviewsPanel';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
+import { jobOfferService } from '@/services/hr/offers.service';
 import { jobApplicationService } from '@/services/hr/recruitment-pipeline.service';
 import {
   APPLICANT_TEST_TYPES,
   COMMUNICATION_DIRECTIONS,
   COMMUNICATION_TYPES,
   parseScoreBreakdown,
+  TERMINAL_APPLICATION_STATUSES,
   type CommunicationDirection,
   type CommunicationType,
   type JobApplicantTestType,
@@ -106,6 +108,14 @@ export default function ApplicationDetailPage() {
   const comms = useQuery({
     queryKey: ['hr', 'application-communications', id],
     queryFn: () => jobApplicationService.getCommunications(id),
+    enabled: !!id,
+  });
+
+  // Raising an offer is not gated by application status server-side — only that the application
+  // resolves to a vacancy and a position — so this is offered whenever nothing has been raised yet.
+  const offer = useQuery({
+    queryKey: ['hr', 'offer-for-application', id],
+    queryFn: () => jobOfferService.getByApplication(id),
     enabled: !!id,
   });
 
@@ -190,14 +200,32 @@ export default function ApplicationDetailPage() {
         description={`${a.applicationNumber} · ${a.jobTitle || a.vacancyNumber}`}
         backHref="/hr/recruitment/applications"
         actions={
-          <Button variant="outline" onClick={() => rescore.mutate()} disabled={rescore.isPending}>
-            {rescore.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={() => rescore.mutate()} disabled={rescore.isPending}>
+              {rescore.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Calculator className="mr-2 h-4 w-4" />
+              )}
+              Re-score
+            </Button>
+            {offer.data ? (
+              <Button asChild variant="outline">
+                <Link href={`/hr/recruitment/offers/${offer.data.id}`}>
+                  {offer.data.offerNumber} · {offer.data.offerStatusName}
+                </Link>
+              </Button>
             ) : (
-              <Calculator className="mr-2 h-4 w-4" />
+              !TERMINAL_APPLICATION_STATUSES.includes(a.status) && (
+                <Button asChild>
+                  <Link href={`/hr/recruitment/offers/new?applicationId=${id}`}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Extend an offer
+                  </Link>
+                </Button>
+              )
             )}
-            Re-score
-          </Button>
+          </div>
         }
       />
 

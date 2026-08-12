@@ -1,10 +1,22 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Briefcase, Building2, CalendarClock, ClipboardList, FileText, Megaphone, UserCheck, Users } from 'lucide-react';
+import {
+  Briefcase,
+  Building2,
+  CalendarClock,
+  ClipboardList,
+  FileText,
+  HandCoins,
+  Megaphone,
+  ShieldCheck,
+  UserCheck,
+  Users,
+} from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
+import { jobOfferService } from '@/services/hr/offers.service';
 import {
   jobPostingService,
   positionVacancyService,
@@ -71,6 +83,24 @@ const ITEMS: NavCardItem[] = [
     href: '/hr/recruitment/my-panel',
     icon: UserCheck,
   },
+  {
+    title: 'Offers',
+    description: 'Terms raised against an application, through approval to the candidate’s response.',
+    href: '/hr/recruitment/offers',
+    icon: HandCoins,
+  },
+  {
+    title: 'Hires',
+    description: 'The handover from recruitment to employment — start dates and confirming an employee.',
+    href: '/hr/recruitment/hires',
+    icon: UserCheck,
+  },
+  {
+    title: 'Pre-employment checks',
+    description: 'Medical, police clearance, background and reference checks, across every offer.',
+    href: '/hr/recruitment/pre-employment-checks',
+    icon: ShieldCheck,
+  },
 ];
 
 export default function RecruitmentLandingPage() {
@@ -87,6 +117,11 @@ export default function RecruitmentLandingPage() {
   const adverts = useQuery({
     queryKey: ['hr', 'postings', 'active'],
     queryFn: () => jobPostingService.getActive(),
+  });
+
+  const expiringOffers = useQuery({
+    queryKey: ['hr', 'offers', 'expiring'],
+    queryFn: () => jobOfferService.getExpiring(7),
   });
 
   const r = requisitions.data;
@@ -109,6 +144,12 @@ export default function RecruitmentLandingPage() {
           },
           { label: 'Approved requisitions', value: r?.approved ?? '—' },
           { label: 'Live adverts', value: adverts.data?.length ?? '—' },
+          {
+            label: 'Offers expiring soon',
+            value: expiringOffers.data?.length ?? '—',
+            hint: 'Within 7 days',
+            tone: (expiringOffers.data?.length ?? 0) > 0 ? 'warning' : 'default',
+          },
         ]}
       />
 

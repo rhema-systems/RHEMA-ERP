@@ -239,6 +239,36 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   phone: 'outline',
   video: 'outline',
   hybrid: 'outline',
+
+  // Offers, hires and pre-employment checks (recruitment slice D). "Accepted" and "ChecksCleared"
+  // are the outcomes worth spotting; "ConditionallyAccepted" and "Negotiating" are work in hand.
+  negotiating: 'secondary',
+  accepted: 'default',
+  declined: 'destructive',
+  conditionallyaccepted: 'secondary',
+  checkscleared: 'default',
+
+  // CheckItemStatus. "Verified" is a pass; "NotApplicable" is settled, not a problem, so it reads
+  // neutral rather than as an alert — the same reasoning "Waived" already carries above.
+  requested: 'secondary',
+  received: 'secondary',
+  verified: 'default',
+  notapplicable: 'outline',
+
+  // PreEmploymentCheckStatus. "CompletedWithCaution" is not clean but is not a failure either.
+  completedwithcaution: 'secondary',
+
+  // JobHireStatus.
+  pendingonboarding: 'secondary',
+  onboardinginprogress: 'secondary',
+  onboardingcompleted: 'default',
+
+  // ReferenceRating — a referee's verdict, not a process state, but the same badge reads it well.
+  excellent: 'default',
+  good: 'default',
+  satisfactory: 'secondary',
+  poor: 'destructive',
+  unsatisfactory: 'destructive',
 };
 
 interface StatusBadgeProps {

@@ -19,6 +19,7 @@ import {
   Workflow,
   HelpCircle,
   LayoutList,
+  ClipboardCheck,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -182,6 +183,13 @@ export default function HrAdministrationPage() {
                 'Reusable interview shapes — which question types a panel covers, and how many of each.',
               href: '/administration/hr/recruitment/question-presets',
               icon: LayoutList,
+            },
+            {
+              title: 'Pre-Employment Check Templates',
+              description:
+                'Standard sets of checks — medical, police clearance, references — applied to an offer in one step.',
+              href: '/administration/hr/recruitment/check-templates',
+              icon: ClipboardCheck,
             },
           ]}
         />

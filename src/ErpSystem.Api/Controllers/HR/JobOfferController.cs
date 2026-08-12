@@ -288,6 +288,65 @@ public class JobOfferController : ControllerBase
     // BENEFITS — POSITION GRADE INTEGRATION
     // =========================================================================
 
+    /// <summary>
+    /// The offer's benefit lines.
+    ///
+    /// <para>⚠ These four routes are new. <c>IJobOfferService</c> has carried
+    /// <c>AddBenefitAsync</c>, <c>GetBenefitsAsync</c>, <c>UpdateBenefitAsync</c> and
+    /// <c>DeleteBenefitAsync</c> — implemented, tenant-scoped and status-guarded — since the port,
+    /// and <b>nothing routed to any of them</b>. Only the position-grade import below was reachable,
+    /// so a negotiated line the grade cannot supply (relocation, a car allowance) could be seeded
+    /// from a position and then never corrected or removed. Another whole feature that had never
+    /// executed; see hr-dead-path-defects.</para>
+    ///
+    /// <para>Editing is confined to Draft and PendingApproval by the service, like adding and
+    /// removing — the terms stop being negotiable once an offer is approved, and a revision is the
+    /// route to changing them after that.</para>
+    /// </summary>
+    [HttpGet("{id:guid}/benefits")]
+    public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> GetBenefits(Guid id)
+        => Ok(await _service.GetBenefitsAsync(id));
+
+    [HttpPost("{id:guid}/benefits")]
+    public async Task<ActionResult<JobOfferBenefitDto>> AddBenefit(
+        Guid id, [FromBody] CreateJobOfferBenefitDto dto)
+    {
+        // The route owns the offer id — the body's was free to name a different one.
+        dto.JobOfferId = id;
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.AddBenefitAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("benefits/{benefitId:guid}")]
+    public async Task<ActionResult<JobOfferBenefitDto>> UpdateBenefit(
+        Guid benefitId, [FromBody] UpdateJobOfferBenefitDto dto)
+    {
+        if (benefitId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateBenefitAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("benefits/{benefitId:guid}")]
+    public async Task<IActionResult> DeleteBenefit(Guid benefitId)
+    {
+        await _service.DeleteBenefitAsync(benefitId);
+        return NoContent();
+    }
+
     /// <summary>Preview benefits from the position grade without persisting them.</summary>
     [HttpGet("{id:guid}/suggest-benefits")]
     public async Task<ActionResult<IEnumerable<JobOfferBenefitDto>>> SuggestBenefits(
