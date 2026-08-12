@@ -1,17 +1,22 @@
+using System.Reflection;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Reports;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Data.Repositories;
 using ErpSystem.Data.Seeders;
 using ErpSystem.Data.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -22,15 +27,119 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementStatutoryReportServiceTests
 {
     [Fact]
-    public void CatalogueDefinesTheSevenTdc0701ReportsOnTheSharedReportProtocol()
+    public void CatalogueDefinesTheElevenProcurementReportsOnTheSharedReportProtocol()
     {
-        ProcurementStatutoryReportCatalogue.Definitions.Should().HaveCount(7);
+        ProcurementStatutoryReportCatalogue.Definitions.Should().HaveCount(11);
         ProcurementStatutoryReportCatalogue.Definitions.Select(item => item.Code).Should().OnlyHaveUniqueItems();
         ProcurementStatutoryReportCatalogue.Definitions.Should().OnlyContain(item =>
             item.Query.StartsWith(ProcurementStatutoryReportCatalogue.QueryPrefix, StringComparison.Ordinal) &&
             item.Columns.Count > 0 &&
             item.Tags.Contains("TDC-0701") &&
             item.Tags.Contains("RPT-001"));
+    }
+
+    [Fact]
+    public void OperationalReportMigrationSeedsExactlyFourTenantIdempotentDefinitions()
+    {
+        var migration = new AddProcurementOperationalReportCatalogue();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        var sqlOperations = builder.Operations.OfType<SqlOperation>().ToList();
+        var sql = string.Join(Environment.NewLine, sqlOperations.Select(item => item.Sql));
+
+        sqlOperations.Should().HaveCount(4);
+        foreach (var code in new[]
+                 {
+                     ProcurementStatutoryReportCatalogue.RequisitionStatusCode,
+                     ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode,
+                     ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
+                     ProcurementStatutoryReportCatalogue.CertificateTrackingCode
+                 })
+            sql.Should().Contain(ProcurementStatutoryReportCatalogue.QueryPrefix + code);
+        sql.Should().Contain("[tenant].[Id]").And.Contain("NOT EXISTS");
+        sql.Should().NotContain("CREATE TABLE").And.NotContain("ALTER TABLE");
+    }
+
+    [Fact]
+    public async Task OperationalRegistersUseTypedOwnersAndExcludeForeignTenantRows()
+    {
+        await using var fixture = new Fixture();
+        AddOperationalRegisterRows(fixture.Context, fixture.TenantId, "LOCAL");
+        AddOperationalRegisterRows(fixture.Context, fixture.ForeignTenantId, "FOREIGN");
+        await fixture.Context.SaveChangesAsync();
+
+        var cases = new[]
+        {
+            (ProcurementStatutoryReportCatalogue.RequisitionStatusCode, "RequisitionNumber", "PR-LOCAL"),
+            (ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode, "OrderNumber", "PO-LOCAL"),
+            (ProcurementStatutoryReportCatalogue.CommitmentRegisterCode, "ReservationReference", "COM-LOCAL"),
+            (ProcurementStatutoryReportCatalogue.CertificateTrackingCode, "CertificateNumber", "CERT-LOCAL")
+        };
+        foreach (var (code, key, expected) in cases)
+        {
+            var result = await fixture.Service.ExecuteAsync(
+                ProcurementStatutoryReportCatalogue.QueryPrefix + code,
+                new ExecuteReportDto { Page = 1, PageSize = 100 },
+                isAdministrator: true);
+
+            result.TotalRows.Should().Be(1, code);
+            result.Data.Should().ContainSingle();
+            result.Data.Single()[key].Should().Be(expected);
+            result.Data.Single().Values.Any(value =>
+                    (Convert.ToString(value) ?? string.Empty)
+                    .Contains("FOREIGN", StringComparison.OrdinalIgnoreCase))
+                .Should().BeFalse();
+        }
+    }
+
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task OperationalRegistersTranslateAndExecuteAgainstConfiguredSqlServer()
+    {
+        var connection = Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")
+            ?? throw new InvalidOperationException("RHEMA_TEST_SQLSERVER is required.");
+        var tenantId = Guid.Parse("10000000-0000-0000-0000-000000000004");
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(connection).Options;
+        await using var context = new ApplicationDbContext(options);
+        using var unitOfWork = new UnitOfWork(context);
+        var currentUser = new Mock<ICurrentUserProvider>();
+        currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+        currentUser.SetupGet(item => item.UserId).Returns(Guid.NewGuid());
+        currentUser.SetupGet(item => item.IsAuthenticated).Returns(true);
+        var access = new Mock<IProcurementAccessControlService>();
+        access.Setup(item => item.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto { Allowed = true, Code = "ACCESS_ALLOWED" });
+        var service = new ProcurementStatutoryReportService(unitOfWork, access.Object, currentUser.Object);
+
+        foreach (var code in new[]
+                 {
+                     ProcurementStatutoryReportCatalogue.RequisitionStatusCode,
+                     ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode,
+                     ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
+                     ProcurementStatutoryReportCatalogue.CertificateTrackingCode
+                 })
+        {
+            var result = await service.ExecuteAsync(
+                ProcurementStatutoryReportCatalogue.QueryPrefix + code,
+                new ExecuteReportDto { Page = 1, PageSize = 100 },
+                isAdministrator: true);
+            result.TotalRows.Should().Be(0);
+            result.Columns.Should().NotBeEmpty();
+        }
+
+        var seededQueries = await context.Reports.IgnoreQueryFilters().AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.Type == ProcurementStatutoryReportCatalogue.ReportType)
+            .Select(item => item.Query)
+            .ToListAsync();
+        seededQueries.Should().Contain(new[]
+        {
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.RequisitionStatusCode,
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode,
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.CommitmentRegisterCode,
+            ProcurementStatutoryReportCatalogue.QueryPrefix + ProcurementStatutoryReportCatalogue.CertificateTrackingCode
+        });
     }
 
     [Fact]
@@ -120,10 +229,10 @@ public sealed class ProcurementStatutoryReportServiceTests
         await seeder.SeedAsync();
         await seeder.SeedAsync();
 
-        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(14);
+        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(22);
         (await context.Reports.IgnoreQueryFilters()
                 .CountAsync(item => item.TenantId == firstTenantId && item.ModuleId != null))
-            .Should().Be(7);
+            .Should().Be(11);
 
         var deleted = await context.Reports.IgnoreQueryFilters()
             .FirstAsync(item => item.TenantId == firstTenantId);
@@ -135,7 +244,65 @@ public sealed class ProcurementStatutoryReportServiceTests
 
         deleted.IsDeleted.Should().BeFalse();
         deleted.DeletedAt.Should().BeNull();
-        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(14);
+        (await context.Reports.IgnoreQueryFilters().CountAsync()).Should().Be(22);
+    }
+
+    private static void AddOperationalRegisterRows(ApplicationDbContext context, Guid tenantId, string suffix)
+    {
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserName = $"requester-{suffix.ToLowerInvariant()}",
+            FirstName = suffix, LastName = "Requester", Email = $"{suffix.ToLowerInvariant()}@example.test"
+        };
+        var requisition = new PurchaseRequisition
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, RequisitionNumber = $"PR-{suffix}",
+            RequisitionDate = new DateTime(2026, 8, 1), RequestedById = user.Id, RequestedBy = user,
+            Status = "Approved", Currency = "GHS", TotalAmount = 100m
+        };
+        var budget = new ProcurementBudget
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BudgetCode = $"BUD-{suffix}", Title = $"Budget {suffix}",
+            DepartmentId = Guid.NewGuid(), FiscalYear = 2026, Currency = "GHS", Status = "Active"
+        };
+        var partner = new BusinessPartner
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = $"SUP-{suffix}",
+            PartnerName = $"Supplier {suffix}", PartnerType = "Supplier", RegistrationStatus = "Approved"
+        };
+        var purchaseOrder = new PurchaseOrder
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, OrderNumber = $"PO-{suffix}",
+            BusinessPartnerId = partner.Id, BusinessPartner = partner, OrderDate = new DateTime(2026, 8, 2),
+            Status = "Approved", Currency = "GHS", TotalAmount = 100m,
+            SourceRequisitionId = requisition.Id, SourceRequisitionNumber = requisition.RequisitionNumber
+        };
+        var project = new Project
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectCode = $"PROJECT-{suffix}",
+            Title = $"Project {suffix}", Status = "Active"
+        };
+
+        context.Users.Add(user);
+        context.PurchaseRequisitions.Add(requisition);
+        context.ProcurementBudgets.Add(budget);
+        context.ProcurementBudgetCommitments.Add(new ProcurementBudgetCommitment
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProcurementBudgetId = budget.Id,
+            PurchaseRequisitionId = requisition.Id, ReservationReference = $"COM-{suffix}",
+            ReservedAmount = 100m, Currency = "GHS", ReservedAtUtc = new DateTime(2026, 8, 1),
+            ReservedById = user.Id, ReservedByName = $"{suffix} Requester", CorrelationId = $"corr-{suffix}"
+        });
+        context.BusinessPartners.Add(partner);
+        context.PurchaseOrders.Add(purchaseOrder);
+        context.Projects.Add(project);
+        context.ProjectPaymentCertificates.Add(new ProjectPaymentCertificate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = project.Id, Project = project,
+            ClientRequestId = Guid.NewGuid(), CertificateNumber = $"CERT-{suffix}", Title = $"Certificate {suffix}",
+            Status = ProjectPaymentCertificateStatuses.Approved, ApprovalStatus = "Approved",
+            IssueDate = new DateTime(2026, 8, 3), PreparedAt = new DateTime(2026, 8, 3), Currency = "GHS"
+        });
     }
 
     [Fact]
@@ -282,6 +449,15 @@ public sealed class ProcurementStatutoryReportServiceTests
         {
             _unitOfWork.Dispose();
             await Context.DisposeAsync();
+        }
+    }
+
+    private sealed class SqlServerFactAttribute : FactAttribute
+    {
+        public SqlServerFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")))
+                Skip = "Set RHEMA_TEST_SQLSERVER to run the procurement operational-report SQL translation gate.";
         }
     }
 }

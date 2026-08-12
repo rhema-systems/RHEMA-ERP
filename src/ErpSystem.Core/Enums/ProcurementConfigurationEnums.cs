@@ -39,6 +39,19 @@ public enum ProcurementCategoryClass
     GeneralServices = 4
 }
 
+/// <summary>
+/// Identifies the authoritative operational record that confirms a supplier's
+/// performance before Accounts Payable can match an invoice. The values are
+/// intentionally shared by Procurement, Projects/QS, and Finance; ownership of
+/// the source record remains with the originating module.
+/// </summary>
+public enum ProcurementAcceptedSupplyKind
+{
+    GoodsReceiptInspection = 1,
+    ServiceCompletion = 2,
+    WorksPaymentCertificate = 3
+}
+
 public enum ProcurementMethodType
 {
     RequestForQuotation = 0,

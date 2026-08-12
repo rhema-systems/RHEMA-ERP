@@ -909,12 +909,17 @@ public class SupplierConsolidationRepository : GenericRepository<SupplierConsoli
 
 public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyProcurementPlan>, IEmergencyProcurementPlanRepository
 {
-    public EmergencyProcurementPlanRepository(ApplicationDbContext context) : base(context) { }
+    private readonly ICurrentUserProvider _currentUserProvider;
+
+    public EmergencyProcurementPlanRepository(ApplicationDbContext context, ICurrentUserProvider currentUserProvider) : base(context)
+    {
+        _currentUserProvider = currentUserProvider;
+    }
 
     public async Task<EmergencyProcurementPlan?> GetByPlanCodeAsync(string planCode)
     {
         return await _dbSet
-            .Where(e => e.PlanCode == planCode && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.PlanCode == planCode && !e.IsDeleted)
             .Include(e => e.Department)
             .FirstOrDefaultAsync();
     }
@@ -922,7 +927,7 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
     public async Task<IEnumerable<EmergencyProcurementPlan>> GetByDepartmentAsync(Guid departmentId)
     {
         return await _dbSet
-            .Where(e => e.DepartmentId == departmentId && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.DepartmentId == departmentId && !e.IsDeleted)
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync();
     }
@@ -930,7 +935,7 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
     public async Task<IEnumerable<EmergencyProcurementPlan>> GetByStatusAsync(string status)
     {
         return await _dbSet
-            .Where(e => e.Status == status && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.Status == status && !e.IsDeleted)
             .Include(e => e.Department)
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync();
@@ -940,7 +945,7 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
     {
         var today = DateTime.UtcNow;
         return await _dbSet
-            .Where(e => e.Status == "Active" &&
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.Status == "Approved" &&
                    (!e.EffectiveDate.HasValue || e.EffectiveDate <= today) &&
                    (!e.ExpiryDate.HasValue || e.ExpiryDate >= today) &&
                    !e.IsDeleted)
@@ -952,7 +957,7 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
     public async Task<EmergencyProcurementPlan?> GetWithItemsAsync(Guid id)
     {
         return await _dbSet
-            .Where(e => e.Id == id && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.Id == id && !e.IsDeleted)
             .Include(e => e.Department)
             .Include(e => e.CriticalItems.Where(i => !i.IsDeleted))
             .FirstOrDefaultAsync();
@@ -961,18 +966,23 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
     public async Task<EmergencyProcurementPlan?> GetWithFullDetailsAsync(Guid id)
     {
         return await _dbSet
-            .Where(e => e.Id == id && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.Id == id && !e.IsDeleted)
             .Include(e => e.Department)
             .Include(e => e.CriticalItems.Where(i => !i.IsDeleted))
             .Include(e => e.EmergencySuppliers.Where(s => !s.IsDeleted))
             .Include(e => e.ApprovedBy)
+            .Include(e => e.PurchaseRequisition)
+            .Include(e => e.ExceptionRule)
+            .Include(e => e.WorkflowInstance)
+            .Include(e => e.CentralDocumentVersion).ThenInclude(e => e!.DocumentRecord)
+            .Include(e => e.PostAwardCentralDocumentVersion).ThenInclude(e => e!.DocumentRecord)
             .FirstOrDefaultAsync();
     }
 
     public async Task<IEnumerable<EmergencyProcurementPlan>> GetByEmergencyTypeAsync(string emergencyType)
     {
         return await _dbSet
-            .Where(e => e.EmergencyType == emergencyType && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.EmergencyType == emergencyType && !e.IsDeleted)
             .Include(e => e.Department)
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync();
@@ -982,7 +992,7 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
     {
         var today = DateTime.UtcNow;
         return await _dbSet
-            .Where(e => e.NextReviewDate.HasValue && e.NextReviewDate <= today && e.Status == "Active" && !e.IsDeleted)
+            .Where(e => e.TenantId == _currentUserProvider.TenantId && e.NextReviewDate.HasValue && e.NextReviewDate <= today && e.Status == "Approved" && !e.IsDeleted)
             .Include(e => e.Department)
             .OrderBy(e => e.NextReviewDate)
             .ToListAsync();
@@ -996,7 +1006,7 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
         Guid? departmentId = null,
         string? emergencyType = null)
     {
-        var query = _dbSet.Where(e => !e.IsDeleted);
+        var query = _dbSet.Where(e => e.TenantId == _currentUserProvider.TenantId && !e.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -1039,8 +1049,14 @@ public class EmergencyProcurementPlanRepository : GenericRepository<EmergencyPro
 
     public async Task<string> GeneratePlanCodeAsync()
     {
-        var count = await _dbSet.CountAsync();
-        return $"EP-{DateTime.UtcNow:yyyyMM}-{(count + 1):D4}";
+        var prefix = $"EP-{DateTime.UtcNow:yyyyMM}-";
+        var codes = await _dbSet.IgnoreQueryFilters()
+            .Where(item => item.TenantId == _currentUserProvider.TenantId && item.PlanCode.StartsWith(prefix))
+            .Select(item => item.PlanCode)
+            .ToListAsync();
+        var sequence = codes.Select(code => int.TryParse(code[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty().Max() + 1;
+        return $"{prefix}{sequence:D4}";
     }
 }
 

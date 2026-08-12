@@ -9,279 +9,184 @@ namespace ErpSystem.Api.Controllers.Procurement;
 [Authorize]
 [ApiController]
 [Route("api/procurement/[controller]")]
-public class EmergencyProcurementPlansController : ControllerBase
+public sealed class EmergencyProcurementPlansController : ControllerBase
 {
-    private readonly IEmergencyProcurementPlanService _planService;
-    private readonly ILogger<EmergencyProcurementPlansController> _logger;
+    private readonly IEmergencyProcurementPlanService _service;
 
-    public EmergencyProcurementPlansController(
-        IEmergencyProcurementPlanService planService,
-        ILogger<EmergencyProcurementPlansController> logger)
-    {
-        _planService = planService;
-        _logger = logger;
-    }
+    public EmergencyProcurementPlansController(IEmergencyProcurementPlanService service) => _service = service;
 
     [HttpGet]
-    public async Task<ActionResult<PagedResult<EmergencyProcurementPlanDto>>> GetPlans(
+    public Task<IActionResult> GetPlans(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 10,
         [FromQuery] string? search = null, [FromQuery] string? status = null,
-        [FromQuery] string? emergencyType = null)
-    {
-        try
-        {
-            var result = await _planService.GetPlansAsync(page, pageSize, search, status, emergencyType);
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting emergency procurement plans");
-            return StatusCode(500, "An error occurred while retrieving emergency procurement plans");
-        }
-    }
+        [FromQuery] string? emergencyType = null) =>
+        ExecuteAsync(() => _service.GetPlansAsync(page, pageSize, search, status, emergencyType));
 
-    [HttpGet("{id}")]
-    public async Task<ActionResult<EmergencyProcurementPlanDetailDto>> GetPlan(Guid id)
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetPlan(Guid id)
     {
-        try
-        {
-            var plan = await _planService.GetByIdAsync(id);
-            if (plan == null) return NotFound($"Emergency plan with ID {id} not found");
-            return Ok(plan);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting emergency plan {PlanId}", id);
-            return StatusCode(500, "An error occurred while retrieving the emergency plan");
-        }
+        var value = await _service.GetByIdAsync(id);
+        return value is null ? NotFound(Problem(404, "EMERGENCY_PLAN_NOT_FOUND", "The emergency plan was not found.")) : Ok(value);
     }
 
     [HttpGet("by-number/{planNumber}")]
-    public async Task<ActionResult<EmergencyProcurementPlanDto>> GetByPlanNumber(string planNumber)
+    public async Task<IActionResult> GetByPlanNumber(string planNumber)
     {
-        try
-        {
-            var plan = await _planService.GetByPlanNumberAsync(planNumber);
-            if (plan == null) return NotFound($"Emergency plan with number {planNumber} not found");
-            return Ok(plan);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting emergency plan by number {PlanNumber}", planNumber);
-            return StatusCode(500, "An error occurred while retrieving the emergency plan");
-        }
+        var value = await _service.GetByPlanNumberAsync(planNumber);
+        return value is null ? NotFound(Problem(404, "EMERGENCY_PLAN_NOT_FOUND", "The emergency plan was not found.")) : Ok(value);
     }
 
     [HttpGet("type/{emergencyType}")]
-    public async Task<ActionResult<IEnumerable<EmergencyProcurementPlanDto>>> GetByType(string emergencyType)
-    {
-        try { return Ok(await _planService.GetByEmergencyTypeAsync(emergencyType)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting plans for type {EmergencyType}", emergencyType);
-            return StatusCode(500, "An error occurred while retrieving plans");
-        }
-    }
+    public Task<IActionResult> GetByType(string emergencyType) =>
+        ExecuteAsync(() => _service.GetByEmergencyTypeAsync(emergencyType));
 
     [HttpGet("active")]
-    public async Task<ActionResult<IEnumerable<EmergencyProcurementPlanDto>>> GetActivePlans()
-    {
-        try { return Ok(await _planService.GetActivePlansAsync()); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting active emergency plans");
-            return StatusCode(500, "An error occurred while retrieving active plans");
-        }
-    }
+    public Task<IActionResult> GetActivePlans() => ExecuteAsync(_service.GetActivePlansAsync);
 
     [HttpGet("triggered")]
-    public async Task<ActionResult<IEnumerable<EmergencyProcurementPlanDto>>> GetTriggeredPlans()
-    {
-        try { return Ok(await _planService.GetTriggeredPlansAsync()); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting triggered emergency plans");
-            return StatusCode(500, "An error occurred while retrieving triggered plans");
-        }
-    }
+    public Task<IActionResult> GetTriggeredPlans() => ExecuteAsync(_service.GetTriggeredPlansAsync);
+
+    [HttpGet("governance/options")]
+    public Task<IActionResult> GetGovernanceOptions(CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.GetGovernanceOptionsAsync(cancellationToken));
 
     [HttpPost]
-    public async Task<ActionResult<EmergencyProcurementPlanDetailDto>> CreatePlan([FromBody] CreateEmergencyProcurementPlanDto dto)
+    public async Task<IActionResult> CreatePlan([FromBody] CreateEmergencyProcurementPlanDto dto)
     {
         try
         {
-            var plan = await _planService.CreateAsync(dto);
-            return CreatedAtAction(nameof(GetPlan), new { id = plan.Id }, plan);
+            var value = await _service.CreateAsync(dto);
+            return CreatedAtAction(nameof(GetPlan), new { id = value.Id }, value);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating emergency plan");
-            return StatusCode(500, "An error occurred while creating the emergency plan");
-        }
+        catch (EmergencyPurchaseValidationException exception)
+        { return UnprocessableEntity(Problem(422, exception.Code, exception.Message)); }
+        catch (EmergencyPurchaseConflictException exception)
+        { return Conflict(Problem(409, exception.Code, exception.Message)); }
+        catch (EmergencyPurchaseAuthorizationException exception)
+        { return StatusCode(403, Problem(403, "EMERGENCY_PURCHASE_FORBIDDEN", exception.Message)); }
     }
 
-    [HttpPut("{id}")]
-    public async Task<ActionResult<EmergencyProcurementPlanDetailDto>> UpdatePlan(Guid id, [FromBody] CreateEmergencyProcurementPlanDto dto)
-    {
-        try { return Ok(await _planService.UpdateAsync(id, dto)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating emergency plan {PlanId}", id);
-            return StatusCode(500, "An error occurred while updating the emergency plan");
-        }
-    }
+    [HttpPut("{id:guid}")]
+    public Task<IActionResult> UpdatePlan(Guid id, [FromBody] CreateEmergencyProcurementPlanDto dto) =>
+        ExecuteAsync(() => _service.UpdateAsync(id, dto));
 
-    [HttpDelete("{id}")]
-    public async Task<ActionResult> DeletePlan(Guid id)
-    {
-        try { await _planService.DeleteAsync(id); return NoContent(); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting emergency plan {PlanId}", id);
-            return StatusCode(500, "An error occurred while deleting the emergency plan");
-        }
-    }
+    [HttpDelete("{id:guid}")]
+    public Task<IActionResult> DeletePlan(Guid id) => ExecuteNoContentAsync(() => _service.DeleteAsync(id));
 
-    [HttpPost("{id}/activate")]
-    public async Task<ActionResult<EmergencyProcurementPlanDetailDto>> ActivatePlan(Guid id)
-    {
-        try { return Ok(await _planService.ActivateAsync(id)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error activating emergency plan {PlanId}", id);
-            return StatusCode(500, "An error occurred while activating the emergency plan");
-        }
-    }
+    // Compatibility endpoints remain explicit hard denials in the service so
+    // stale clients cannot bypass the governed lifecycle.
+    [HttpPost("{id:guid}/activate")]
+    public Task<IActionResult> ActivatePlan(Guid id) => ExecuteAsync(() => _service.ActivateAsync(id));
 
-    [HttpPost("{id}/trigger")]
-    public async Task<ActionResult<EmergencyProcurementPlanDetailDto>> TriggerPlan(Guid id)
-    {
-        try { return Ok(await _planService.TriggerAsync(id)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error triggering emergency plan {PlanId}", id);
-            return StatusCode(500, "An error occurred while triggering the emergency plan");
-        }
-    }
+    [HttpPost("{id:guid}/trigger")]
+    public Task<IActionResult> TriggerPlan(Guid id) => ExecuteAsync(() => _service.TriggerAsync(id));
 
-    [HttpPost("{id}/deactivate")]
-    public async Task<ActionResult<EmergencyProcurementPlanDetailDto>> DeactivatePlan(Guid id)
-    {
-        try { return Ok(await _planService.DeactivateAsync(id)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deactivating emergency plan {PlanId}", id);
-            return StatusCode(500, "An error occurred while deactivating the emergency plan");
-        }
-    }
+    [HttpPost("{id:guid}/deactivate")]
+    public Task<IActionResult> DeactivatePlan(Guid id) => ExecuteAsync(() => _service.DeactivateAsync(id));
 
-    [HttpPost("{planId}/items")]
-    public async Task<ActionResult<EmergencyProcurementItemDto>> AddItem(Guid planId, [FromBody] CreateEmergencyProcurementItemDto dto)
-    {
-        try { return Ok(await _planService.AddItemAsync(planId, dto)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding item to emergency plan {PlanId}", planId);
-            return StatusCode(500, "An error occurred while adding the item");
-        }
-    }
+    [HttpPost("{id:guid}/exception/prepare")]
+    public Task<IActionResult> PrepareException(Guid id, PrepareEmergencyPurchaseRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.PrepareExceptionAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpPut("items/{itemId}")]
-    public async Task<ActionResult<EmergencyProcurementItemDto>> UpdateItem(Guid itemId, [FromBody] CreateEmergencyProcurementItemDto dto)
-    {
-        try { return Ok(await _planService.UpdateItemAsync(itemId, dto)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating emergency item {ItemId}", itemId);
-            return StatusCode(500, "An error occurred while updating the item");
-        }
-    }
+    [HttpPost("{id:guid}/exception/audit/submit")]
+    public Task<IActionResult> SubmitForAudit(Guid id, EmergencyPurchaseLifecycleRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.SubmitForAuditAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpDelete("items/{itemId}")]
-    public async Task<ActionResult> DeleteItem(Guid itemId)
-    {
-        try { await _planService.DeleteItemAsync(itemId); return NoContent(); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting emergency item {ItemId}", itemId);
-            return StatusCode(500, "An error occurred while deleting the item");
-        }
-    }
+    [HttpPost("{id:guid}/exception/audit/vouch")]
+    [Authorize(Roles = "TDC_INTERNAL_AUDIT")]
+    public Task<IActionResult> Vouch(Guid id, VouchEmergencyPurchaseRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.VouchAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpGet("{planId}/items/critical")]
-    public async Task<ActionResult<IEnumerable<EmergencyProcurementItemDto>>> GetCriticalItems(Guid planId)
-    {
-        try { return Ok(await _planService.GetCriticalItemsAsync(planId)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting critical items for plan {PlanId}", planId);
-            return StatusCode(500, "An error occurred while retrieving critical items");
-        }
-    }
+    [HttpPost("{id:guid}/exception/approval/submit")]
+    public Task<IActionResult> SubmitForApproval(Guid id, EmergencyPurchaseLifecycleRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.SubmitForApprovalAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpPost("{planId}/suppliers")]
-    public async Task<ActionResult<EmergencySupplierDto>> AddSupplier(Guid planId, [FromBody] CreateEmergencySupplierDto dto)
-    {
-        try { return Ok(await _planService.AddSupplierAsync(planId, dto)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding supplier to emergency plan {PlanId}", planId);
-            return StatusCode(500, "An error occurred while adding the supplier");
-        }
-    }
+    [HttpPost("{id:guid}/exception/approval/decision")]
+    [Authorize(Roles = "TDC_MANAGING_DIRECTOR,TDC_BOARD_APPROVER")]
+    public Task<IActionResult> Decide(Guid id, DecideEmergencyPurchaseRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.DecideAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpPut("suppliers/{supplierId}")]
-    public async Task<ActionResult<EmergencySupplierDto>> UpdateSupplier(Guid supplierId, [FromBody] CreateEmergencySupplierDto dto)
-    {
-        try { return Ok(await _planService.UpdateSupplierAsync(supplierId, dto)); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating emergency supplier {SupplierId}", supplierId);
-            return StatusCode(500, "An error occurred while updating the supplier");
-        }
-    }
+    [HttpPost("{id:guid}/exception/trigger")]
+    public Task<IActionResult> TriggerGoverned(Guid id, EmergencyPurchaseLifecycleRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.TriggerGovernedAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpDelete("suppliers/{supplierId}")]
-    public async Task<ActionResult> DeleteSupplier(Guid supplierId)
-    {
-        try { await _planService.DeleteSupplierAsync(supplierId); return NoContent(); }
-        catch (KeyNotFoundException ex) { return NotFound(ex.Message); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting emergency supplier {SupplierId}", supplierId);
-            return StatusCode(500, "An error occurred while deleting the supplier");
-        }
-    }
+    [HttpPost("{id:guid}/exception/post-award")]
+    public Task<IActionResult> FilePostAward(Guid id, FileEmergencyPurchasePostAwardRequest request, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => _service.FilePostAwardAsync(id, request, Correlation(), cancellationToken));
 
-    [HttpGet("{planId}/suppliers/active")]
-    public async Task<ActionResult<IEnumerable<EmergencySupplierDto>>> GetActiveSuppliers(Guid planId)
-    {
-        try { return Ok(await _planService.GetActiveSuppliersAsync(planId)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting active suppliers for plan {PlanId}", planId);
-            return StatusCode(500, "An error occurred while retrieving active suppliers");
-        }
-    }
+    [HttpPost("{planId:guid}/items")]
+    public Task<IActionResult> AddItem(Guid planId, [FromBody] CreateEmergencyProcurementItemDto dto) =>
+        ExecuteAsync(() => _service.AddItemAsync(planId, dto));
+
+    [HttpPut("items/{itemId:guid}")]
+    public Task<IActionResult> UpdateItem(Guid itemId, [FromBody] CreateEmergencyProcurementItemDto dto) =>
+        ExecuteAsync(() => _service.UpdateItemAsync(itemId, dto));
+
+    [HttpDelete("items/{itemId:guid}")]
+    public Task<IActionResult> DeleteItem(Guid itemId) => ExecuteNoContentAsync(() => _service.DeleteItemAsync(itemId));
+
+    [HttpGet("{planId:guid}/items/critical")]
+    public Task<IActionResult> GetCriticalItems(Guid planId) => ExecuteAsync(() => _service.GetCriticalItemsAsync(planId));
+
+    [HttpPost("{planId:guid}/suppliers")]
+    public Task<IActionResult> AddSupplier(Guid planId, [FromBody] CreateEmergencySupplierDto dto) =>
+        ExecuteAsync(() => _service.AddSupplierAsync(planId, dto));
+
+    [HttpPut("suppliers/{supplierId:guid}")]
+    public Task<IActionResult> UpdateSupplier(Guid supplierId, [FromBody] CreateEmergencySupplierDto dto) =>
+        ExecuteAsync(() => _service.UpdateSupplierAsync(supplierId, dto));
+
+    [HttpDelete("suppliers/{supplierId:guid}")]
+    public Task<IActionResult> DeleteSupplier(Guid supplierId) => ExecuteNoContentAsync(() => _service.DeleteSupplierAsync(supplierId));
+
+    [HttpGet("{planId:guid}/suppliers/active")]
+    public Task<IActionResult> GetActiveSuppliers(Guid planId) => ExecuteAsync(() => _service.GetActiveSuppliersAsync(planId));
 
     [HttpGet("suppliers/category/{category}")]
-    public async Task<ActionResult<IEnumerable<EmergencySupplierDto>>> GetSuppliersByCategory(string category)
+    public Task<IActionResult> GetSuppliersByCategory(string category) => ExecuteAsync(() => _service.GetSuppliersByCategoryAsync(category));
+
+    private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
-        try { return Ok(await _planService.GetSuppliersByCategoryAsync(category)); }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting suppliers for category {Category}", category);
-            return StatusCode(500, "An error occurred while retrieving suppliers");
-        }
+        try { return Ok(await action()); }
+        catch (EmergencyPurchaseNotFoundException exception)
+        { return NotFound(Problem(404, exception.Code, exception.Message)); }
+        catch (KeyNotFoundException exception)
+        { return NotFound(Problem(404, "EMERGENCY_RESOURCE_NOT_FOUND", exception.Message)); }
+        catch (EmergencyPurchaseConflictException exception)
+        { return Conflict(Problem(409, exception.Code, exception.Message)); }
+        catch (EmergencyPurchaseValidationException exception)
+        { return UnprocessableEntity(Problem(422, exception.Code, exception.Message)); }
+        catch (EmergencyPurchaseAuthorizationException exception)
+        { return StatusCode(403, Problem(403, "EMERGENCY_PURCHASE_FORBIDDEN", exception.Message)); }
     }
+
+    private async Task<IActionResult> ExecuteNoContentAsync(Func<Task> action)
+    {
+        try { await action(); return NoContent(); }
+        catch (EmergencyPurchaseNotFoundException exception)
+        { return NotFound(Problem(404, exception.Code, exception.Message)); }
+        catch (KeyNotFoundException exception)
+        { return NotFound(Problem(404, "EMERGENCY_RESOURCE_NOT_FOUND", exception.Message)); }
+        catch (EmergencyPurchaseConflictException exception)
+        { return Conflict(Problem(409, exception.Code, exception.Message)); }
+        catch (EmergencyPurchaseValidationException exception)
+        { return UnprocessableEntity(Problem(422, exception.Code, exception.Message)); }
+        catch (EmergencyPurchaseAuthorizationException exception)
+        { return StatusCode(403, Problem(403, "EMERGENCY_PURCHASE_FORBIDDEN", exception.Message)); }
+    }
+
+    private object Problem(int status, string code, string detail) => new
+    {
+        type = $"https://tdc.gov.gh/problems/{code.ToLowerInvariant().Replace('_', '-')}",
+        title = status == 403 ? "Emergency-purchase access forbidden" : "Emergency-purchase request failed",
+        status,
+        detail,
+        instance = Request.Path.Value,
+        code,
+        correlationId = Correlation()
+    };
+
+    private string Correlation() =>
+        Request.Headers.TryGetValue("X-Correlation-ID", out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value.ToString() : HttpContext.TraceIdentifier;
 }

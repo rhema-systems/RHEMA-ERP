@@ -85,6 +85,14 @@ export interface CatalogueItem {
 
 const procurementCatalogue: CatalogueItem[] = [
   {
+    code: 'requisition-status',
+    title: 'Requisition Status',
+    description:
+      'Track purchase requisition approval, budget, sourcing and order-conversion progress.',
+    group: 'Planning and performance',
+    icon: ClipboardCheck,
+  },
+  {
     code: 'app-vs-actual',
     title: 'APP vs Actual',
     description:
@@ -113,6 +121,30 @@ const procurementCatalogue: CatalogueItem[] = [
     title: 'Contract Register',
     description:
       'Review executed contracts, suppliers, values and lifecycle status.',
+    group: 'Sourcing and contracts',
+    icon: FileCheck2,
+  },
+  {
+    code: 'purchase-order-register',
+    title: 'Purchase Order Register',
+    description:
+      'Review purchase orders, suppliers, governed sources, approvals and receipt progress.',
+    group: 'Sourcing and contracts',
+    icon: FileSpreadsheet,
+  },
+  {
+    code: 'commitment-register',
+    title: 'Commitment Register',
+    description:
+      'Review budget reservations, overrides, consumption, releases and PO adjustments.',
+    group: 'Sourcing and contracts',
+    icon: Scale,
+  },
+  {
+    code: 'certificate-tracking',
+    title: 'Certificate Tracking',
+    description:
+      'Track Works payment certificates through approval, AP handoff and payment status.',
     group: 'Sourcing and contracts',
     icon: FileCheck2,
   },
@@ -336,6 +368,13 @@ const supplierFilterReports = new Set([
   'contract-register',
   'supplier-performance',
   'award-notification',
+  'purchase-order-register',
+  'certificate-tracking',
+]);
+const procurementFiscalYearReports = new Set([
+  'app-vs-actual',
+  'requisition-status',
+  'commitment-register',
 ]);
 const inventoryAnalyticsReports = new Set([
   'balance-register',
@@ -430,7 +469,7 @@ export function StatutoryReportCataloguePage({
         ? complianceStatusReports.has(selectedCode)
         : !!selectedCode;
   const showFiscalYear =
-    !isInventory && !isCompliance && selectedCode === 'app-vs-actual';
+    !isInventory && !isCompliance && procurementFiscalYearReports.has(selectedCode);
   const showSupplier =
     !isInventory && !isCompliance && supplierFilterReports.has(selectedCode);
   const showWarehouse =

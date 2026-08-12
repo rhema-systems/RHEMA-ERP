@@ -107,20 +107,11 @@ public class TenderBidsController : ControllerBase
                     return NotFound($"Bid with ID {id} not found");
                 }
 
-                // Verify the bid belongs to this business partner OR the user is assigned to the tender
+                // A tender assignment grants access to the opportunity, never to another
+                // supplier's sealed bid. External users may read only their own bid.
                 if (bid.BusinessPartnerId != businessPartner.Id)
                 {
-                    // Check if user is assigned to this tender via TenderAssignment
-                    var assignments = await _assignmentRepository.GetByBusinessPartnerIdAsync(businessPartner.Id);
-                    var isAssigned = assignments.Any(a =>
-                        a.TenderId == bid.TenderId &&
-                        (a.AssignmentType == "AllUsers" || a.AssignedToUserId == _currentUserProvider.UserId)
-                    );
-
-                    if (!isAssigned)
-                    {
-                        return NotFound($"Bid with ID {id} not found");
-                    }
+                    return NotFound($"Bid with ID {id} not found");
                 }
             }
 

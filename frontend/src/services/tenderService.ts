@@ -7,10 +7,11 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
 const getAuthHeaders = () => {
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  const token =
+    localStorage.getItem('token') || localStorage.getItem('authToken');
   return {
     'Content-Type': 'application/json',
-    ...(token && { 'Authorization': `Bearer ${token}` })
+    ...(token && { Authorization: `Bearer ${token}` }),
   };
 };
 
@@ -33,6 +34,7 @@ export interface TenderDto {
   sourcePurchaseRequisitionId?: string;
   sourcingReleaseId?: string;
   sourcingCaseId?: string;
+  sourcingMethod?: number;
   bidCount: number;
   invitationCount: number;
   createdAt: string;
@@ -456,16 +458,20 @@ class TenderService {
   async getTenders(params?: TenderListParams): Promise<PagedResult<TenderDto>> {
     const queryParams = new URLSearchParams();
     if (params?.page) queryParams.append('page', params.page.toString());
-    if (params?.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params?.pageSize)
+      queryParams.append('pageSize', params.pageSize.toString());
     if (params?.search) queryParams.append('search', params.search);
     if (params?.status) queryParams.append('status', params.status);
     if (params?.tenderType) queryParams.append('tenderType', params.tenderType);
     if (params?.fromDate) queryParams.append('fromDate', params.fromDate);
     if (params?.toDate) queryParams.append('toDate', params.toDate);
 
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders?${queryParams}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders?${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       throw new Error('Failed to fetch tenders');
@@ -493,9 +499,12 @@ class TenderService {
    * Get tenders assigned to current user as evaluator
    */
   async getMyAssignedTenders(): Promise<TenderDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/my-assigned`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/my-assigned`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       throw new Error('Failed to fetch assigned tenders');
@@ -544,10 +553,13 @@ class TenderService {
    * Submit a tender for approval (unified workflow)
    */
   async submitTenderForApproval(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${id}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -559,11 +571,14 @@ class TenderService {
    * Approve a tender (unified workflow)
    */
   async approveTender(id: string, notes?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ notes: notes || undefined }),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${id}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ notes: notes || undefined }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -575,11 +590,14 @@ class TenderService {
    * Reject a tender (unified workflow)
    */
   async rejectTender(id: string, reason: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ reason }),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${id}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ reason }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -591,11 +609,14 @@ class TenderService {
    * Publish a tender
    */
   async publishTender(id: string, data: PublishTenderDto): Promise<TenderDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/publish`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${id}/publish`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -609,10 +630,13 @@ class TenderService {
    * Close a tender
    */
   async closeTender(id: string): Promise<TenderDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${id}/close`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${id}/close`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -640,12 +664,18 @@ class TenderService {
   /**
    * Add item to tender
    */
-  async addTenderItem(tenderId: string, data: CreateTenderItemDto): Promise<TenderItemDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/items`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async addTenderItem(
+    tenderId: string,
+    data: CreateTenderItemDto
+  ): Promise<TenderItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/items`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -658,12 +688,19 @@ class TenderService {
   /**
    * Update tender item
    */
-  async updateTenderItem(tenderId: string, itemId: string, data: CreateTenderItemDto): Promise<TenderItemDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/items/${itemId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async updateTenderItem(
+    tenderId: string,
+    itemId: string,
+    data: CreateTenderItemDto
+  ): Promise<TenderItemDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/items/${itemId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -677,10 +714,13 @@ class TenderService {
    * Delete tender item
    */
   async deleteTenderItem(tenderId: string, itemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/items/${itemId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/items/${itemId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -696,9 +736,12 @@ class TenderService {
    * Get all LOTs for a tender
    */
   async getTenderLots(tenderId: string): Promise<TenderLotDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/lots`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/lots`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       throw new Error('Failed to fetch tender lots');
@@ -711,9 +754,12 @@ class TenderService {
    * Get a specific LOT by ID
    */
   async getTenderLot(lotId: string): Promise<TenderLotDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/lots/${lotId}`, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/lots/${lotId}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       throw new Error('Failed to fetch tender lot');
@@ -725,12 +771,18 @@ class TenderService {
   /**
    * Add LOT to tender
    */
-  async addTenderLot(tenderId: string, data: CreateTenderLotDto): Promise<TenderLotDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/lots`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async addTenderLot(
+    tenderId: string,
+    data: CreateTenderLotDto
+  ): Promise<TenderLotDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/lots`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -743,12 +795,18 @@ class TenderService {
   /**
    * Update tender LOT
    */
-  async updateTenderLot(lotId: string, data: UpdateTenderLotDto): Promise<TenderLotDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/lots/${lotId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async updateTenderLot(
+    lotId: string,
+    data: UpdateTenderLotDto
+  ): Promise<TenderLotDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/lots/${lotId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -762,10 +820,13 @@ class TenderService {
    * Delete tender LOT
    */
   async deleteTenderLot(lotId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/lots/${lotId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/lots/${lotId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -777,10 +838,13 @@ class TenderService {
    * Assign an item to a LOT
    */
   async assignItemToLot(itemId: string, lotId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/items/${itemId}/assign-lot/${lotId}`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/items/${itemId}/assign-lot/${lotId}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -792,10 +856,13 @@ class TenderService {
    * Remove an item from its LOT
    */
   async removeItemFromLot(itemId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/items/${itemId}/remove-from-lot`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/items/${itemId}/remove-from-lot`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -821,13 +888,17 @@ class TenderService {
       formData.append('documentName', documentName);
     }
 
-    const { ['Content-Type']: _contentType, ...headers } = getAuthHeaders() as Record<string, string>;
+    const { ['Content-Type']: _contentType, ...headers } =
+      getAuthHeaders() as Record<string, string>;
 
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/documents`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/documents`,
+      {
+        method: 'POST',
+        headers,
+        body: formData,
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -840,12 +911,18 @@ class TenderService {
   /**
    * Delete tender document
    */
-  async deleteTenderDocument(tenderId: string, documentId: string): Promise<void> {
+  async deleteTenderDocument(
+    tenderId: string,
+    documentId: string
+  ): Promise<void> {
     const headers = getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/documents/${documentId}`, {
-      method: 'DELETE',
-      headers,
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/documents/${documentId}`,
+      {
+        method: 'DELETE',
+        headers,
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -856,18 +933,22 @@ class TenderService {
   /**
    * Download tender document
    */
-  downloadTenderDocument(tenderId: string, documentId: string, documentName: string): void {
+  downloadTenderDocument(
+    tenderId: string,
+    documentId: string,
+    documentName: string
+  ): void {
     const headers = getAuthHeaders();
     const url = `${API_BASE_URL}/procurement/Tenders/${tenderId}/documents/${documentId}/download`;
 
     fetch(url, { headers })
-      .then(response => {
+      .then((response) => {
         if (!response.ok) {
           throw new Error('Failed to download document');
         }
         return response.blob();
       })
-      .then(blob => {
+      .then((blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -877,7 +958,7 @@ class TenderService {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       })
-      .catch(error => {
+      .catch((error) => {
         console.error('Error downloading document:', error);
         throw error;
       });
@@ -886,12 +967,18 @@ class TenderService {
   /**
    * Invite tenderers
    */
-  async inviteTenderers(tenderId: string, data: InviteTenderersDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/invitations`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async inviteTenderers(
+    tenderId: string,
+    data: InviteTenderersDto
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/invitations`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -902,12 +989,18 @@ class TenderService {
   /**
    * Add tender fee
    */
-  async addTenderFee(tenderId: string, data: CreateTenderFeeDto): Promise<TenderFeeDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/fees`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async addTenderFee(
+    tenderId: string,
+    data: CreateTenderFeeDto
+  ): Promise<TenderFeeDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/fees`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -920,12 +1013,19 @@ class TenderService {
   /**
    * Update tender fee
    */
-  async updateTenderFee(tenderId: string, feeId: string, data: CreateTenderFeeDto): Promise<TenderFeeDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/fees/${feeId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async updateTenderFee(
+    tenderId: string,
+    feeId: string,
+    data: CreateTenderFeeDto
+  ): Promise<TenderFeeDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/fees/${feeId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -939,10 +1039,13 @@ class TenderService {
    * Delete tender fee
    */
   async deleteTenderFee(tenderId: string, feeId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/fees/${feeId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/fees/${feeId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -954,10 +1057,13 @@ class TenderService {
    * Get tender evaluators
    */
   async getTenderEvaluators(tenderId: string): Promise<TenderEvaluatorDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluators`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluators`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -970,12 +1076,18 @@ class TenderService {
   /**
    * Assign evaluators
    */
-  async assignEvaluators(tenderId: string, data: AssignEvaluatorsDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluators`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async assignEvaluators(
+    tenderId: string,
+    data: AssignEvaluatorsDto
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluators`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -987,10 +1099,13 @@ class TenderService {
    * Remove evaluator
    */
   async removeEvaluator(tenderId: string, evaluatorId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluators/${evaluatorId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/evaluators/${evaluatorId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -1001,11 +1116,17 @@ class TenderService {
   /**
    * Get tender clarifications
    */
-  async getTenderClarifications(tenderId: string, publicOnly: boolean = true): Promise<TenderClarificationDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/clarifications?publicOnly=${publicOnly}`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+  async getTenderClarifications(
+    tenderId: string,
+    publicOnly: boolean = true
+  ): Promise<TenderClarificationDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/clarifications?publicOnly=${publicOnly}`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -1018,12 +1139,18 @@ class TenderService {
   /**
    * Create clarification (ask question)
    */
-  async createClarification(tenderId: string, data: CreateClarificationDto): Promise<TenderClarificationDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/clarifications`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async createClarification(
+    tenderId: string,
+    data: CreateClarificationDto
+  ): Promise<TenderClarificationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/clarifications`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -1036,12 +1163,19 @@ class TenderService {
   /**
    * Answer clarification
    */
-  async answerClarification(tenderId: string, clarificationId: string, data: AnswerClarificationDto): Promise<TenderClarificationDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/Tenders/${tenderId}/clarifications/${clarificationId}/answer`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+  async answerClarification(
+    tenderId: string,
+    clarificationId: string,
+    data: AnswerClarificationDto
+  ): Promise<TenderClarificationDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/Tenders/${tenderId}/clarifications/${clarificationId}/answer`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -1059,11 +1193,14 @@ class TenderService {
    * Configure QCBS evaluation settings for a tender
    */
   async configureQCBS(tenderId: string, data: ConfigureQCBSDto): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluation/${tenderId}/configure-qcbs`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/TenderEvaluation/${tenderId}/configure-qcbs`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -1075,10 +1212,13 @@ class TenderService {
    * Run QCBS evaluation for a tender
    */
   async evaluateQCBS(tenderId: string): Promise<QCBSEvaluationResultDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/qcbs/${tenderId}`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/TenderEvaluations/qcbs/${tenderId}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -1091,11 +1231,16 @@ class TenderService {
   /**
    * Get QCBS evaluation results for a tender
    */
-  async getQCBSEvaluationResults(tenderId: string): Promise<QCBSEvaluationResultDto | null> {
-    const response = await fetch(`${API_BASE_URL}/procurement/TenderEvaluations/qcbs/${tenderId}`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+  async getQCBSEvaluationResults(
+    tenderId: string
+  ): Promise<QCBSEvaluationResultDto | null> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/TenderEvaluations/qcbs/${tenderId}`,
+      {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (response.status === 404) {
       return null; // QCBS evaluation has not been run yet
@@ -1113,42 +1258,103 @@ class TenderService {
 export const tenderService = new TenderService();
 
 // Export individual functions for convenience
-export const getTenders = (params?: TenderListParams) => tenderService.getTenders(params);
+export const getTenders = (params?: TenderListParams) =>
+  tenderService.getTenders(params);
 export const getTenderById = (id: string) => tenderService.getTenderById(id);
 export const getMyAssignedTenders = () => tenderService.getMyAssignedTenders();
-export const createTender = (data: CreateTenderDto) => tenderService.createTender(data);
-export const updateTender = (id: string, data: UpdateTenderDto) => tenderService.updateTender(id, data);
-export const submitTenderForApproval = (id: string) => tenderService.submitTenderForApproval(id);
-export const approveTender = (id: string, notes?: string) => tenderService.approveTender(id, notes);
-export const rejectTender = (id: string, reason: string) => tenderService.rejectTender(id, reason);
-export const publishTender = (id: string, data: PublishTenderDto) => tenderService.publishTender(id, data);
+export const createTender = (data: CreateTenderDto) =>
+  tenderService.createTender(data);
+export const updateTender = (id: string, data: UpdateTenderDto) =>
+  tenderService.updateTender(id, data);
+export const submitTenderForApproval = (id: string) =>
+  tenderService.submitTenderForApproval(id);
+export const approveTender = (id: string, notes?: string) =>
+  tenderService.approveTender(id, notes);
+export const rejectTender = (id: string, reason: string) =>
+  tenderService.rejectTender(id, reason);
+export const publishTender = (id: string, data: PublishTenderDto) =>
+  tenderService.publishTender(id, data);
 export const closeTender = (id: string) => tenderService.closeTender(id);
 export const deleteTender = (id: string) => tenderService.deleteTender(id);
-export const addTenderItem = (tenderId: string, data: CreateTenderItemDto) => tenderService.addTenderItem(tenderId, data);
-export const updateTenderItem = (tenderId: string, itemId: string, data: CreateTenderItemDto) => tenderService.updateTenderItem(tenderId, itemId, data);
-export const deleteTenderItem = (tenderId: string, itemId: string) => tenderService.deleteTenderItem(tenderId, itemId);
+export const addTenderItem = (tenderId: string, data: CreateTenderItemDto) =>
+  tenderService.addTenderItem(tenderId, data);
+export const updateTenderItem = (
+  tenderId: string,
+  itemId: string,
+  data: CreateTenderItemDto
+) => tenderService.updateTenderItem(tenderId, itemId, data);
+export const deleteTenderItem = (tenderId: string, itemId: string) =>
+  tenderService.deleteTenderItem(tenderId, itemId);
 // LOT functions
-export const getTenderLots = (tenderId: string) => tenderService.getTenderLots(tenderId);
-export const getTenderLot = (lotId: string) => tenderService.getTenderLot(lotId);
-export const addTenderLot = (tenderId: string, data: CreateTenderLotDto) => tenderService.addTenderLot(tenderId, data);
-export const updateTenderLot = (lotId: string, data: UpdateTenderLotDto) => tenderService.updateTenderLot(lotId, data);
-export const deleteTenderLot = (lotId: string) => tenderService.deleteTenderLot(lotId);
-export const assignItemToLot = (itemId: string, lotId: string) => tenderService.assignItemToLot(itemId, lotId);
-export const removeItemFromLot = (itemId: string) => tenderService.removeItemFromLot(itemId);
-export const uploadTenderDocument = (tenderId: string, file: File, documentType: string, documentName?: string, isPublic?: boolean) => tenderService.uploadTenderDocument(tenderId, file, documentType, documentName, isPublic);
-export const deleteTenderDocument = (tenderId: string, documentId: string) => tenderService.deleteTenderDocument(tenderId, documentId);
-export const downloadTenderDocument = (tenderId: string, documentId: string, documentName: string) => tenderService.downloadTenderDocument(tenderId, documentId, documentName);
-export const inviteTenderers = (tenderId: string, data: InviteTenderersDto) => tenderService.inviteTenderers(tenderId, data);
-export const addTenderFee = (tenderId: string, data: CreateTenderFeeDto) => tenderService.addTenderFee(tenderId, data);
-export const updateTenderFee = (tenderId: string, feeId: string, data: CreateTenderFeeDto) => tenderService.updateTenderFee(tenderId, feeId, data);
-export const deleteTenderFee = (tenderId: string, feeId: string) => tenderService.deleteTenderFee(tenderId, feeId);
-export const getTenderEvaluators = (tenderId: string) => tenderService.getTenderEvaluators(tenderId);
-export const assignEvaluators = (tenderId: string, data: AssignEvaluatorsDto) => tenderService.assignEvaluators(tenderId, data);
-export const removeEvaluator = (tenderId: string, evaluatorId: string) => tenderService.removeEvaluator(tenderId, evaluatorId);
-export const getTenderClarifications = (tenderId: string, publicOnly?: boolean) => tenderService.getTenderClarifications(tenderId, publicOnly);
-export const createClarification = (tenderId: string, data: CreateClarificationDto) => tenderService.createClarification(tenderId, data);
-export const answerClarification = (tenderId: string, clarificationId: string, data: AnswerClarificationDto) => tenderService.answerClarification(tenderId, clarificationId, data);
+export const getTenderLots = (tenderId: string) =>
+  tenderService.getTenderLots(tenderId);
+export const getTenderLot = (lotId: string) =>
+  tenderService.getTenderLot(lotId);
+export const addTenderLot = (tenderId: string, data: CreateTenderLotDto) =>
+  tenderService.addTenderLot(tenderId, data);
+export const updateTenderLot = (lotId: string, data: UpdateTenderLotDto) =>
+  tenderService.updateTenderLot(lotId, data);
+export const deleteTenderLot = (lotId: string) =>
+  tenderService.deleteTenderLot(lotId);
+export const assignItemToLot = (itemId: string, lotId: string) =>
+  tenderService.assignItemToLot(itemId, lotId);
+export const removeItemFromLot = (itemId: string) =>
+  tenderService.removeItemFromLot(itemId);
+export const uploadTenderDocument = (
+  tenderId: string,
+  file: File,
+  documentType: string,
+  documentName?: string,
+  isPublic?: boolean
+) =>
+  tenderService.uploadTenderDocument(
+    tenderId,
+    file,
+    documentType,
+    documentName,
+    isPublic
+  );
+export const deleteTenderDocument = (tenderId: string, documentId: string) =>
+  tenderService.deleteTenderDocument(tenderId, documentId);
+export const downloadTenderDocument = (
+  tenderId: string,
+  documentId: string,
+  documentName: string
+) => tenderService.downloadTenderDocument(tenderId, documentId, documentName);
+export const inviteTenderers = (tenderId: string, data: InviteTenderersDto) =>
+  tenderService.inviteTenderers(tenderId, data);
+export const addTenderFee = (tenderId: string, data: CreateTenderFeeDto) =>
+  tenderService.addTenderFee(tenderId, data);
+export const updateTenderFee = (
+  tenderId: string,
+  feeId: string,
+  data: CreateTenderFeeDto
+) => tenderService.updateTenderFee(tenderId, feeId, data);
+export const deleteTenderFee = (tenderId: string, feeId: string) =>
+  tenderService.deleteTenderFee(tenderId, feeId);
+export const getTenderEvaluators = (tenderId: string) =>
+  tenderService.getTenderEvaluators(tenderId);
+export const assignEvaluators = (tenderId: string, data: AssignEvaluatorsDto) =>
+  tenderService.assignEvaluators(tenderId, data);
+export const removeEvaluator = (tenderId: string, evaluatorId: string) =>
+  tenderService.removeEvaluator(tenderId, evaluatorId);
+export const getTenderClarifications = (
+  tenderId: string,
+  publicOnly?: boolean
+) => tenderService.getTenderClarifications(tenderId, publicOnly);
+export const createClarification = (
+  tenderId: string,
+  data: CreateClarificationDto
+) => tenderService.createClarification(tenderId, data);
+export const answerClarification = (
+  tenderId: string,
+  clarificationId: string,
+  data: AnswerClarificationDto
+) => tenderService.answerClarification(tenderId, clarificationId, data);
 // QCBS Evaluation functions
-export const configureQCBS = (tenderId: string, data: ConfigureQCBSDto) => tenderService.configureQCBS(tenderId, data);
-export const evaluateQCBS = (tenderId: string) => tenderService.evaluateQCBS(tenderId);
-export const getQCBSEvaluationResults = (tenderId: string) => tenderService.getQCBSEvaluationResults(tenderId);
+export const configureQCBS = (tenderId: string, data: ConfigureQCBSDto) =>
+  tenderService.configureQCBS(tenderId, data);
+export const evaluateQCBS = (tenderId: string) =>
+  tenderService.evaluateQCBS(tenderId);
+export const getQCBSEvaluationResults = (tenderId: string) =>
+  tenderService.getQCBSEvaluationResults(tenderId);

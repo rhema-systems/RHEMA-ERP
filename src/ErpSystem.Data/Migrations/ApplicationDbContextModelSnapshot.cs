@@ -22725,6 +22725,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApAccountId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("AcceptedSupplyKind")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("AcceptedSupplySourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AcceptedSupplySourceReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("AcceptedSupplySnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("AcceptedSupplyValidatedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("ApprovalComments")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -22938,9 +22955,19 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "MatchingControlEventId");
 
+                    b.HasIndex(new[] { "TenantId", "AcceptedSupplyKind", "AcceptedSupplySourceId" }, "UX_VendorInvoice_AcceptedCertificate")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
+
                     b.ToTable("VendorInvoice", null, t =>
                         {
                             t.HasTrigger("TR_VendorInvoice_TDC0504MandatoryMatch");
+
+                            t.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
+
+                            t.HasCheckConstraint("CK_VendorInvoice_AcceptedSupplyCoherent", "([AcceptedSupplyKind] IS NULL AND [AcceptedSupplySourceId] IS NULL AND [AcceptedSupplySourceReference] IS NULL AND [AcceptedSupplySnapshotHash] IS NULL AND [AcceptedSupplyValidatedAtUtc] IS NULL) OR ([AcceptedSupplyKind] BETWEEN 1 AND 3 AND [AcceptedSupplySourceId] IS NOT NULL AND LEN([AcceptedSupplySourceReference]) BETWEEN 1 AND 100 AND LEN([AcceptedSupplySnapshotHash]) = 64 AND [AcceptedSupplyValidatedAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_VendorInvoice_AcceptedSupplyPurchaseOrder", "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
 
                             t.HasCheckConstraint("CK_VendorInvoice_TDC0504MatchingTolerances", "[MatchingPriceTolerancePercent] BETWEEN 0 AND 100 AND [MatchingQuantityTolerancePercent] BETWEEN 0 AND 100");
 
@@ -101842,8 +101869,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("ApprovedDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ApprovalAuthority")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("ApprovalReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<decimal>("BudgetReserve")
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid?>("CentralDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -101888,8 +101926,46 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("EscalationContacts")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("EvidenceReference")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ExceptionJustification")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("ExceptionRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ExceptionalSourcingTenderId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ExpiryDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FiledAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("FiledById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("IntegrityHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("InternalAuditVouchNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("InternalAuditVouchedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("InternalAuditVouchedById")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -101899,6 +101975,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime?>("LastReviewDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("LifecycleSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("MaxApprovalLimit")
                         .HasColumnType("decimal(18,4)");
@@ -101915,14 +101995,49 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("PostAwardCentralDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PostAwardEvidenceReference")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("PostAwardFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PostAwardJustification")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PreparedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PurchaseRequisitionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("RapidProcurementProcess")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime?>("SubmittedForApprovalAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("SubmittedForAuditAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -101941,9 +102056,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("UtilizedReserve")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("WorkflowDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ApprovedById");
+
+                    b.HasIndex("CentralDocumentVersionId");
 
                     b.HasIndex("CriticalityLevel");
 
@@ -101951,14 +102074,51 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("EmergencyType");
 
-                    b.HasIndex("PlanCode")
-                        .IsUnique();
+                    b.HasIndex("FileUploadRecordId");
+
+                    b.HasIndex("FiledById");
+
+                    b.HasIndex("InternalAuditVouchedById");
+
+                    b.HasIndex("PostAwardCentralDocumentVersionId");
+
+                    b.HasIndex("PostAwardFileUploadRecordId");
+
+                    b.HasIndex("PreparedById");
 
                     b.HasIndex("Status");
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("EmergencyProcurementPlans");
+                    b.HasIndex("WorkflowDefinitionId");
+
+                    b.HasIndex("TenantId", "ExceptionRuleId");
+
+                    b.HasIndex("TenantId", "ExceptionalSourcingTenderId");
+
+                    b.HasIndex("TenantId", "PlanCode")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "PurchaseRequisitionId")
+                        .IsUnique()
+                        .HasFilter("[PurchaseRequisitionId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "WorkflowInstanceId");
+
+                    b.ToTable("EmergencyProcurementPlans", t =>
+                        {
+                            t.HasCheckConstraint("CK_EmergencyProcurementPlans_ApprovalLineage", "([Status] IN ('Draft','Prepared','PendingAudit','AuditVouched') AND [WorkflowInstanceId] IS NULL AND [ApprovedById] IS NULL AND [ApprovedDate] IS NULL) OR ([Status] IN ('PendingApproval','Rejected') AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NULL AND [ApprovedDate] IS NULL AND [ApprovalReference] IS NULL) OR ([Status] IN ('Approved','Triggered','Filed') AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NOT NULL AND [ApprovedDate] IS NOT NULL AND [ApprovalReference] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_EmergencyProcurementPlans_AuditLineage", "([Status] IN ('Draft','Prepared','PendingAudit') AND [InternalAuditVouchedById] IS NULL AND [InternalAuditVouchedAtUtc] IS NULL) OR ([Status] IN ('AuditVouched','PendingApproval','Approved','Rejected','Triggered','Filed') AND [InternalAuditVouchedById] IS NOT NULL AND [InternalAuditVouchedAtUtc] IS NOT NULL AND LEN([InternalAuditVouchNote]) >= 10)");
+
+                            t.HasCheckConstraint("CK_EmergencyProcurementPlans_FilingLineage", "([Status] <> 'Filed' AND [ExceptionalSourcingTenderId] IS NULL AND [PostAwardJustification] IS NULL AND [PostAwardCentralDocumentVersionId] IS NULL AND [PostAwardFileUploadRecordId] IS NULL AND [PostAwardEvidenceReference] IS NULL AND [FiledAtUtc] IS NULL AND [FiledById] IS NULL) OR ([Status] = 'Filed' AND [ExceptionalSourcingTenderId] IS NOT NULL AND [PostAwardJustification] IS NOT NULL AND [PostAwardCentralDocumentVersionId] IS NOT NULL AND [PostAwardFileUploadRecordId] IS NOT NULL AND [PostAwardEvidenceReference] IS NOT NULL AND [FiledAtUtc] IS NOT NULL AND [FiledById] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_EmergencyProcurementPlans_GovernedStatus", "[Status] IN ('Draft','Prepared','PendingAudit','AuditVouched','PendingApproval','Approved','Rejected','Triggered','Filed')");
+
+                            t.HasCheckConstraint("CK_EmergencyProcurementPlans_PreparedLineage", "([Status] = 'Draft' AND [PurchaseRequisitionId] IS NULL AND [ExceptionRuleId] IS NULL AND [WorkflowDefinitionId] IS NULL AND [PreparedById] IS NULL AND [PreparedAtUtc] IS NULL) OR ([Status] <> 'Draft' AND [PurchaseRequisitionId] IS NOT NULL AND [ExceptionRuleId] IS NOT NULL AND [WorkflowDefinitionId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL AND [FileUploadRecordId] IS NOT NULL AND LEN([EvidenceReference]) > 0 AND LEN([ExceptionJustification]) >= 20 AND [PreparedById] IS NOT NULL AND [PreparedAtUtc] IS NOT NULL AND [ApprovalAuthority] IN ('ManagingDirector','Board') AND LEN([IntegrityHash]) = 64)");
+
+                            t.HasTrigger("TR_EmergencyProcurementPlans_Governance");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.EmergencySupplier", b =>
@@ -121472,6 +121632,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<int?>("ProcurementCategory")
+                        .HasColumnType("int");
+
                     b.Property<int?>("ProcurementSourceType")
                         .HasColumnType("int");
 
@@ -121623,6 +121786,10 @@ namespace ErpSystem.Data.Migrations
                             t.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
 
                             t.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
+
+                            t.HasCheckConstraint("CK_PurchaseOrders_GovernedCategoryRequired", "[ProcurementSourceType] IS NULL OR [ProcurementSourceType] = 5 OR [ProcurementCategory] IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_PurchaseOrders_ProcurementCategory", "[ProcurementCategory] IS NULL OR [ProcurementCategory] BETWEEN 0 AND 4");
 
                             t.HasCheckConstraint("CK_PurchaseOrders_ApprovedSourceLineage", "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
                         });
@@ -182216,9 +182383,59 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("ApprovedById");
 
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentVersion", "CentralDocumentVersion")
+                        .WithMany()
+                        .HasForeignKey("CentralDocumentVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Department", "Department")
                         .WithMany()
                         .HasForeignKey("DepartmentId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPolicyExceptionRule", "ExceptionRule")
+                        .WithMany()
+                        .HasForeignKey("ExceptionRuleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Tender", null)
+                        .WithMany()
+                        .HasForeignKey("ExceptionalSourcingTenderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.FileUploadRecord", null)
+                        .WithMany()
+                        .HasForeignKey("FileUploadRecordId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("FiledById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("InternalAuditVouchedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentVersion", "PostAwardCentralDocumentVersion")
+                        .WithMany()
+                        .HasForeignKey("PostAwardCentralDocumentVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.FileUploadRecord", null)
+                        .WithMany()
+                        .HasForeignKey("PostAwardFileUploadRecordId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("PreparedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseRequisition", "PurchaseRequisition")
+                        .WithMany()
+                        .HasForeignKey("PurchaseRequisitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -182226,11 +182443,33 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowDefinition", "WorkflowDefinition")
+                        .WithMany()
+                        .HasForeignKey("WorkflowDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowInstance", "WorkflowInstance")
+                        .WithMany()
+                        .HasForeignKey("WorkflowInstanceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ApprovedBy");
+
+                    b.Navigation("CentralDocumentVersion");
 
                     b.Navigation("Department");
 
+                    b.Navigation("ExceptionRule");
+
+                    b.Navigation("PostAwardCentralDocumentVersion");
+
+                    b.Navigation("PurchaseRequisition");
+
                     b.Navigation("Tenant");
+
+                    b.Navigation("WorkflowDefinition");
+
+                    b.Navigation("WorkflowInstance");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.EmergencySupplier", b =>

@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/command';
 import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
+import { purchasingService } from '@/services/purchasingService';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { businessPartnerService } from '@/services/businessPartnerService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
@@ -77,6 +78,8 @@ const invoiceSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
     supplierInvoiceNumber: z.string().optional(),
     purchaseOrderId: z.string().optional(),
+    acceptedSupplyKind: z.enum(['GoodsReceiptInspection', 'ServiceCompletion', 'WorksPaymentCertificate']).optional(),
+    acceptedSupplySourceId: z.string().optional(),
     invoiceDate: z.date(),
     dueDate: z.date(),
     paymentTermId: z.string().optional(),
@@ -100,6 +103,7 @@ export default function CreateVendorInvoicePage() {
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
+    const preselectedPurchaseOrderId = searchParams.get('purchaseOrderId');
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
@@ -108,6 +112,9 @@ export default function CreateVendorInvoicePage() {
     const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
     const [supplierComboOpen, setSupplierComboOpen] = useState(false);
     const [supplierSearch, setSupplierSearch] = useState('');
+    const [selectedPurchaseOrderId, setSelectedPurchaseOrderId] = useState(
+        preselectedPurchaseOrderId || ''
+    );
 
     // GL Account combobox state
     const [glAccountOpenIndex, setGlAccountOpenIndex] = useState<number | null>(null);
@@ -167,6 +174,30 @@ export default function CreateVendorInvoicePage() {
         queryFn: () => inventoryManagementService.getWarehouses(),
     });
 
+    const { data: purchaseOrdersData, isLoading: purchaseOrdersLoading } = useQuery({
+        queryKey: ['ap-purchase-orders', selectedSupplier?.id],
+        queryFn: () => purchasingService.getPurchaseOrders({
+            pageSize: 100,
+            supplierId: selectedSupplier.id,
+        }),
+        enabled: Boolean(selectedSupplier?.id),
+    });
+
+    const { data: selectedPurchaseOrder } = useQuery({
+        queryKey: ['ap-purchase-order', selectedPurchaseOrderId],
+        queryFn: () => purchasingService.getPurchaseOrderById(selectedPurchaseOrderId),
+        enabled: Boolean(selectedPurchaseOrderId),
+    });
+
+    const serviceCategory = selectedPurchaseOrder?.procurementCategory &&
+        selectedPurchaseOrder.procurementCategory !== 'Goods' &&
+        selectedPurchaseOrder.procurementCategory !== 'Works';
+    const { data: acceptedSupplyOptions, isLoading: acceptedSupplyLoading } = useQuery({
+        queryKey: ['ap-accepted-supply-options', selectedPurchaseOrderId],
+        queryFn: () => accountsPayableService.getAcceptedSupplyOptions(selectedPurchaseOrderId),
+        enabled: Boolean(selectedPurchaseOrderId && serviceCategory),
+    });
+
     useEffect(() => {
         paymentTermService.getByApplicableTo('Supplier')
             .then((terms) => setPaymentTerms(terms || []))
@@ -208,6 +239,7 @@ export default function CreateVendorInvoicePage() {
         defaultValues: {
             supplierId: preselectedSupplierId || '',
             supplierInvoiceNumber: '',
+            purchaseOrderId: preselectedPurchaseOrderId || undefined,
             invoiceDate: new Date(),
             dueDate: addDays(new Date(), 30),
             paymentTermId: '',
@@ -404,8 +436,12 @@ export default function CreateVendorInvoicePage() {
         return formatCurrency(amount, watchCurrencyCode);
     };
 
-    const onSupplierChange = async (supplierId: string) => {
+    const onSupplierChange = async (supplierId: string, preservePurchaseOrderId?: string) => {
         form.setValue('supplierId', supplierId);
+        form.setValue('purchaseOrderId', preservePurchaseOrderId || undefined);
+        form.setValue('acceptedSupplyKind', undefined);
+        form.setValue('acceptedSupplySourceId', undefined);
+        setSelectedPurchaseOrderId(preservePurchaseOrderId || '');
         if (!suppliersData?.items) return;
 
         const supplier = suppliersData.items.find(s => s.id === supplierId);
@@ -441,11 +477,50 @@ export default function CreateVendorInvoicePage() {
         }
     };
 
+    const onPurchaseOrderChange = async (purchaseOrderId: string) => {
+        const value = purchaseOrderId === 'none' ? '' : purchaseOrderId;
+        setSelectedPurchaseOrderId(value);
+        form.setValue('purchaseOrderId', value || undefined);
+        form.setValue('acceptedSupplyKind', undefined);
+        form.setValue('acceptedSupplySourceId', undefined);
+    };
+
+    useEffect(() => {
+        if (!selectedPurchaseOrder) return;
+        if (selectedPurchaseOrder.procurementCategory === 'Works') {
+            toast({
+                title: 'Use the QS certificate handoff',
+                description: 'Works invoices are created from an approved QS payment certificate.',
+                variant: 'destructive',
+            });
+            onPurchaseOrderChange('none');
+            return;
+        }
+        form.setValue('currencyCode', selectedPurchaseOrder.currency || 'GHS');
+        form.setValue('exchangeRate', 1);
+        form.setValue('lineItems', selectedPurchaseOrder.items.map(item => ({
+            lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Expense',
+            inventoryItemId: item.inventoryItemId || undefined,
+            warehouseId: item.warehouseId || undefined,
+            purchaseOrderItemId: item.id,
+            description: item.itemDescription || item.itemName || item.itemCode,
+            quantity: item.remainingQuantity > 0 ? item.remainingQuantity : item.orderedQuantity,
+            unitPrice: item.unitPrice,
+            discountPercentage: 0,
+            taxGroupId: 'none',
+            unit: item.unitOfMeasure,
+        })));
+        if (selectedPurchaseOrder.procurementCategory === 'Goods')
+            form.setValue('acceptedSupplyKind', undefined);
+        else
+            form.setValue('acceptedSupplyKind', 'ServiceCompletion');
+    }, [form, selectedPurchaseOrder, toast]);
+
     useEffect(() => {
         if (preselectedSupplierId && suppliersData?.items) {
-            onSupplierChange(preselectedSupplierId);
+            onSupplierChange(preselectedSupplierId, preselectedPurchaseOrderId || undefined);
         }
-    }, [preselectedSupplierId, suppliersData, paymentTerms]);
+    }, [preselectedSupplierId, preselectedPurchaseOrderId, suppliersData, paymentTerms]);
 
     const getAccountDisplay = (accountId: string | undefined) => {
         if (!accountId) return null;
@@ -463,6 +538,14 @@ export default function CreateVendorInvoicePage() {
         setIsSubmitting(true);
         try {
             const isOpeningBalance = data.isOpeningBalance;
+            if (serviceCategory && !data.acceptedSupplySourceId) {
+                toast({
+                    title: 'Service completion required',
+                    description: 'Select an approved service completion before recording this invoice.',
+                    variant: 'destructive',
+                });
+                return;
+            }
             if (!isOpeningBalance && selectedWithholdingTax && !selectedWithholdingTax.taxPayableAccountId) {
                 toast({
                     title: 'WHT account missing',
@@ -483,6 +566,8 @@ export default function CreateVendorInvoicePage() {
                 withholdingTaxRate: isOpeningBalance ? 0 : watchWithholdingTaxRate,
                 withholdingTaxAccountId: isOpeningBalance ? null : selectedWithholdingTax?.taxPayableAccountId || null,
                 isOpeningBalance,
+                acceptedSupplyKind: serviceCategory ? 'ServiceCompletion' : undefined,
+                acceptedSupplySourceId: serviceCategory ? data.acceptedSupplySourceId : undefined,
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
                     return {
@@ -595,6 +680,60 @@ export default function CreateVendorInvoicePage() {
                                 <p className="text-sm text-red-500">{form.formState.errors.supplierId.message}</p>
                             )}
                         </div>
+
+                        {!watchIsOpeningBalance && selectedSupplier && (
+                            <div className="space-y-2">
+                                <Label>Purchase order</Label>
+                                <Select
+                                    value={selectedPurchaseOrderId || 'none'}
+                                    onValueChange={onPurchaseOrderChange}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={purchaseOrdersLoading ? 'Loading...' : 'Select a purchase order'} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No purchase order</SelectItem>
+                                        {(purchaseOrdersData?.items || [])
+                                            .filter(order => order.procurementCategory !== 'Works' &&
+                                                !['Cancelled', 'Rejected'].includes(order.status))
+                                            .map(order => (
+                                                <SelectItem key={order.id} value={order.id}>
+                                                    {order.orderNumber} · {order.procurementCategory || 'Category missing'}
+                                                </SelectItem>
+                                            ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        {serviceCategory && (
+                            <div className="space-y-2">
+                                <Label>Approved service completion</Label>
+                                <Controller
+                                    control={form.control}
+                                    name="acceptedSupplySourceId"
+                                    render={({ field }) => (
+                                        <Select value={field.value || ''} onValueChange={field.onChange}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder={acceptedSupplyLoading ? 'Loading...' : 'Select approved completion'} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {(acceptedSupplyOptions?.options || []).map(option => (
+                                                    <SelectItem key={option.sourceId} value={option.sourceId}>
+                                                        {option.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    )}
+                                />
+                                {!acceptedSupplyLoading && acceptedSupplyOptions && !acceptedSupplyOptions.ready && (
+                                    <p className="text-sm text-destructive">
+                                        {acceptedSupplyOptions.blockedReasons.join(' ')}
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
                         <div className="space-y-2">
                             <Label>Supplier Invoice #</Label>

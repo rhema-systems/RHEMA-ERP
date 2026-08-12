@@ -1635,42 +1635,6 @@ public class ProcurementPlanService : IProcurementPlanService
             throw;
         }
 
-        // Commit budget when PO is created
-        if (plan != null)
-        {
-            try
-            {
-                // Find budget linked to this plan
-                var budgets = await _budgetRepository.GetByPlanIdAsync(plan.Id);
-                var budget = budgets.FirstOrDefault(b => b.Status == "Active" || b.Status == "Approved");
-
-                // If no plan-specific budget, check department budgets for the fiscal year
-                if (budget == null)
-                {
-                    var departmentBudgets = await _budgetRepository.GetByDepartmentAsync(plan.DepartmentId);
-                    budget = departmentBudgets
-                        .Where(b => b.FiscalYear == plan.FiscalYear && (b.Status == "Active" || b.Status == "Approved"))
-                        .FirstOrDefault();
-                }
-
-                if (budget != null)
-                {
-                    await _budgetService.CommitBudgetAsync(budget.Id, lineTotal, planItem.ItemCategory);
-                    _logger.LogInformation("Committed {Amount} to budget {BudgetCode} for PO {PONumber}, category: {Category}",
-                        lineTotal, budget.BudgetCode, purchaseOrder.OrderNumber, planItem.ItemCategory ?? "N/A");
-                }
-                else
-                {
-                    _logger.LogWarning("No budget found for plan {PlanId} to commit PO amount", plan.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to commit budget for PO {PONumber}: {ErrorMessage}", purchaseOrder.OrderNumber, ex.Message);
-                // Don't fail the PO creation if budget commitment fails
-            }
-        }
-
         var result = new PlanItemConversionResultDto
         {
             PlanItemId = planItem.Id,

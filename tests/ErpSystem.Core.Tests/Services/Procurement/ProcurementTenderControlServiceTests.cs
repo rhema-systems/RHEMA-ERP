@@ -142,6 +142,70 @@ public sealed class ProcurementTenderControlServiceTests
     }
 
     [Fact]
+    public async Task QbsAllowsFinancialReviewOnlyForUniqueHighestTechnicalBid()
+    {
+        await using var fixture = new Fixture(ProcurementMethodType.QualityBasedSelection);
+        await fixture.OpenAsync();
+        var opened = await fixture.Service.GetAsync(fixture.Tender.Id);
+        opened.SubmissionReceipts.Should().OnlyContain(item => item.BidAmount == 0m && item.Currency == string.Empty,
+            "QBS financial proposals must remain sealed during technical opening");
+        (await fixture.Service.ShouldConcealFinancialProposalAsync(fixture.Tender.Id, fixture.Bids[0].Id)).Should().BeTrue();
+        var technical = await fixture.Service.SaveTechnicalEvaluationAsync(
+            fixture.Tender.Id, fixture.TechnicalRequest(opened.RowVersion), "qbs-technical");
+        fixture.CurrentUserId = Guid.NewGuid();
+
+        var invalid = fixture.FinancialRequest(technical.RowVersion);
+        await fixture.Service.Invoking(service => service.SaveFinancialEvaluationAsync(
+                fixture.Tender.Id, invalid, "qbs-invalid"))
+            .Should().ThrowAsync<ProcurementTenderControlValidationException>()
+            .Where(exception => exception.Code == "QBS_RECOMMENDATION_INVALID");
+
+        var selected = invalid.Scores.Single(item => item.BidId == fixture.Bids[0].Id);
+        invalid.Scores = [selected];
+        invalid.RecommendedBidId = fixture.Bids[0].Id;
+        var result = await fixture.Service.SaveFinancialEvaluationAsync(
+            fixture.Tender.Id, invalid, "qbs-valid");
+
+        result.RecommendedBidId.Should().Be(fixture.Bids[0].Id);
+        result.Status.Should().Be(ProcurementTenderControlStatus.FinancialEvaluated);
+        result.SubmissionReceipts.Single(item => item.TenderBidId == fixture.Bids[0].Id).BidAmount.Should().BePositive();
+        result.SubmissionReceipts.Where(item => item.TenderBidId != fixture.Bids[0].Id)
+            .Should().OnlyContain(item => item.BidAmount == 0m && item.Currency == string.Empty,
+                "QBS may open only the uniquely highest-ranked technical proposal");
+        (await fixture.Service.ShouldConcealFinancialProposalAsync(fixture.Tender.Id, fixture.Bids[0].Id)).Should().BeFalse();
+        (await fixture.Service.ShouldConcealFinancialProposalAsync(fixture.Tender.Id, fixture.Bids[2].Id)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task QcbsRejectsClientRecommendationThatIsNotServerCalculatedWinner()
+    {
+        await using var fixture = new Fixture(ProcurementMethodType.QualityAndCostBasedSelection);
+        await fixture.OpenAsync();
+        var opened = await fixture.Service.GetAsync(fixture.Tender.Id);
+        opened.SubmissionReceipts.Should().OnlyContain(item => item.BidAmount == 0m && item.Currency == string.Empty,
+            "QCBS financial proposals must remain sealed during technical opening");
+        var technical = await fixture.Service.SaveTechnicalEvaluationAsync(
+            fixture.Tender.Id, fixture.TechnicalRequest(opened.RowVersion), "qcbs-technical");
+        fixture.CurrentUserId = Guid.NewGuid();
+        var request = fixture.FinancialRequest(technical.RowVersion);
+        request.RecommendedBidId = fixture.Bids[2].Id;
+
+        await fixture.Service.Invoking(service => service.SaveFinancialEvaluationAsync(
+                fixture.Tender.Id, request, "qcbs-wrong-winner"))
+            .Should().ThrowAsync<ProcurementTenderControlValidationException>()
+            .Where(exception => exception.Code == "QCBS_RECOMMENDATION_INVALID");
+
+        request.RecommendedBidId = fixture.Bids[0].Id;
+        var result = await fixture.Service.SaveFinancialEvaluationAsync(
+            fixture.Tender.Id, request, "qcbs-calculated-winner");
+        result.RecommendedBidId.Should().Be(fixture.Bids[0].Id);
+        result.SubmissionReceipts.Should().OnlyContain(item => item.BidAmount > 0m && item.Currency == "GHS",
+            "QCBS opens financial proposals only after technical qualification");
+        (await fixture.Service.ShouldConcealFinancialProposalAsync(fixture.Tender.Id, fixture.Bids[0].Id)).Should().BeFalse();
+        (await fixture.Service.ShouldConcealFinancialProposalAsync(fixture.Tender.Id, fixture.Bids[2].Id)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ExactWorkflowApprovalControlsAwardContractAndBidderAcceptance()
     {
         await using var fixture = new Fixture();
@@ -393,8 +457,13 @@ public sealed class ProcurementTenderControlServiceTests
             Rule = new ProcurementPolicyMethodRule
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId, PolicySetId = Guid.NewGuid(),
-                RuleCode = method == ProcurementMethodType.InternationalCompetitiveTendering
-                    ? "ICT-GOODS-001" : "NCT-GOODS-001",
+                RuleCode = method switch
+                {
+                    ProcurementMethodType.InternationalCompetitiveTendering => "ICT-GOODS-001",
+                    ProcurementMethodType.QualityBasedSelection => "QBS-GOODS-001",
+                    ProcurementMethodType.QualityAndCostBasedSelection => "QCBS-GOODS-001",
+                    _ => "NCT-GOODS-001"
+                },
                 Name = "Competitive tendering", Category = ProcurementCategoryClass.Goods,
                 Method = method, IsAllowed = true, IsEnabled = true,
                 MinimumQuotationCount = 2, WorkflowDefinitionId = WorkflowDefinitionId,
@@ -448,12 +517,13 @@ public sealed class ProcurementTenderControlServiceTests
             Tender = new Tender
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId,
-                TenderNumber = method == ProcurementMethodType.InternationalCompetitiveTendering
-                    ? "ICT-2026-001" : "NCT-2026-001",
+                TenderNumber = $"{method}-2026-001",
                 Title = "Network infrastructure", TenderType = "ITB", Status = "Approved",
                 EstimatedValue = Case.EstimatedValue, Currency = Case.CurrencyCode,
                 SourcePurchaseRequisitionId = Requisition.Id, SourcingReleaseId = ReleaseId,
-                SourcingCaseId = Case.Id, CreatedById = Guid.NewGuid()
+                SourcingCaseId = Case.Id, CreatedById = Guid.NewGuid(),
+                UseQCBSEvaluation = method == ProcurementMethodType.QualityAndCostBasedSelection,
+                MinimumTechnicalScore = 80m, TechnicalWeight = 60m, FinancialWeight = 40m
             };
             Suppliers = Enumerable.Range(1, 3).Select(index => new BusinessPartner
             {
@@ -509,6 +579,9 @@ public sealed class ProcurementTenderControlServiceTests
                 });
             SupplierValidation.Setup(service => service.ValidateForTenderAsync(
                     It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<decimal?>()))
+                .ReturnsAsync(SupplierValidationResult.Success());
+            SupplierValidation.Setup(service => service.EvaluateEligibilityAsync(
+                    It.IsAny<SupplierEligibilityEvaluationRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(SupplierValidationResult.Success());
             ControlEvents.Setup(service => service.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))

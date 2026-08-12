@@ -10,6 +10,7 @@ const readiness = {
   tenderId: 't', tenderNumber: 'T-1', tenderTitle: 'Tender', tenderStatus: 'Approved', method: 4,
   methodRuleCode: 'M', exceptionRuleCode: 'E', authorityRouteReference: 'A', minimumSupplierCount: 1,
   boardApprovalRequired: true, managingDirectorApprovalRequired: false, ppaApprovalRequired: true,
+  justificationRequired: true, evidenceRequired: true, postAwardFilingRequired: true,
   supplierOptions: [], evidenceRequirements: [{ evidenceRuleId: 'r', ruleCode: 'R', requirementKey: 'K', evidenceName: 'Approval letter', requiresVerification: true }],
 };
 
@@ -20,9 +21,10 @@ const request = {
 };
 
 describe('exceptional sourcing controls', () => {
-  it('labels both exceptional methods', () => {
+  it('labels every controlled noncompetitive method', () => {
     expect(exceptionalMethodLabel(3)).toBe('Restricted Tendering');
     expect(exceptionalMethodLabel(4)).toBe('Single Source');
+    expect(exceptionalMethodLabel(5)).toBe('Petty Purchase');
   });
   it('requires verified mandatory evidence', () => {
     expect(validateExceptionalPreparation(readiness, { ...request, evidenceChecklist: [] })).toContain('Evidence is required');
@@ -34,5 +36,14 @@ describe('exceptional sourcing controls', () => {
   it('exposes one ordered action at each lifecycle state', () => {
     expect(getExceptionalSourcingActions({ status: Status.Approved } as never).canNegotiate).toBe(true);
     expect(getExceptionalSourcingActions({ status: Status.Filed } as never).immutable).toBe(true);
+    expect(getExceptionalSourcingActions({ status: Status.Accepted, method: 5 } as never)).toMatchObject({
+      canFile: false, immutable: true,
+    });
+  });
+  it('does not require justification when the locked DEC-005 rule waives it', () => {
+    expect(validateExceptionalPreparation(
+      { ...readiness, method: 5, justificationRequired: false, postAwardFilingRequired: false },
+      { ...request, justification: '', justificationEvidenceReference: '' },
+    )).toBeNull();
   });
 });

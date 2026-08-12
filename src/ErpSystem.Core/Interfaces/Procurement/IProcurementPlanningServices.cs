@@ -262,6 +262,14 @@ public interface IEmergencyProcurementPlanService
     Task<EmergencyProcurementPlanDetailDto> TriggerAsync(Guid id);
     Task<EmergencyProcurementPlanDetailDto> DeactivateAsync(Guid id);
     Task DeleteAsync(Guid id);
+    Task<EmergencyPurchaseGovernanceOptionsDto> GetGovernanceOptionsAsync(CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> PrepareExceptionAsync(Guid id, PrepareEmergencyPurchaseRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> SubmitForAuditAsync(Guid id, EmergencyPurchaseLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> VouchAsync(Guid id, VouchEmergencyPurchaseRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> SubmitForApprovalAsync(Guid id, EmergencyPurchaseLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> DecideAsync(Guid id, DecideEmergencyPurchaseRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> TriggerGovernedAsync(Guid id, EmergencyPurchaseLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<EmergencyProcurementPlanDetailDto> FilePostAwardAsync(Guid id, FileEmergencyPurchasePostAwardRequest request, string correlationId, CancellationToken cancellationToken = default);
 
     // Critical Items
     Task<EmergencyProcurementItemDto> AddItemAsync(Guid planId, CreateEmergencyProcurementItemDto dto);
@@ -276,5 +284,10 @@ public interface IEmergencyProcurementPlanService
     Task<IEnumerable<EmergencySupplierDto>> GetActiveSuppliersAsync(Guid planId);
     Task<IEnumerable<EmergencySupplierDto>> GetSuppliersByCategoryAsync(string category);
 }
+
+public sealed class EmergencyPurchaseNotFoundException(string code, string message) : InvalidOperationException(message) { public string Code { get; } = code; }
+public sealed class EmergencyPurchaseConflictException(string code, string message) : InvalidOperationException(message) { public string Code { get; } = code; }
+public sealed class EmergencyPurchaseValidationException(string code, string message) : InvalidOperationException(message) { public string Code { get; } = code; }
+public sealed class EmergencyPurchaseAuthorizationException(string message) : UnauthorizedAccessException(message);
 
 #endregion

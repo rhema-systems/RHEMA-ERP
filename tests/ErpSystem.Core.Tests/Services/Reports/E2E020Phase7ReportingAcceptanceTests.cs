@@ -24,11 +24,15 @@ public sealed class E2E020Phase7ReportingAcceptanceTests
     {
         var cases = Cases();
 
-        cases.Should().HaveCount(24);
+        cases.Should().HaveCount(28);
         cases.Select(item => item.Query).Should().OnlyHaveUniqueItems();
         cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.AppVsActualCode);
         cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.ContractRegisterCode);
         cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.SupplierPerformanceCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.RequisitionStatusCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.CommitmentRegisterCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.CertificateTrackingCode);
         cases.Should().Contain(item => item.Code == InventoryStatutoryReportCatalogue.BalanceCode);
         cases.Should().Contain(item => item.Code == InventoryStatutoryReportCatalogue.MovementCode);
         cases.Should().Contain(item => item.Code == InventoryStatutoryReportCatalogue.AgeingCode);

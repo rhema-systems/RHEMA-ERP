@@ -1500,13 +1500,13 @@ public class TenderEvaluationService : ITenderEvaluationService
 
     private async Task EnsureLegacyEvaluationAllowedAsync(Guid tenderId)
     {
-        if (await _tenderControlService.IsNctOrIctAsync(tenderId))
+        if (await _tenderControlService.IsControlledTenderMethodAsync(tenderId))
             throw new ProcurementTenderControlConflictException(
                 "TENDER_STATUTORY_EVALUATION_REQUIRED",
-                "NCT/ICT technical and financial evaluations must use the signed statutory control.");
+                "NCT, ICT, QBS, and QCBS evaluations must use the signed controlled tender lifecycle.");
         if (await _exceptionalSourcingControlService.IsExceptionalAsync(tenderId))
             throw new ProcurementExceptionalSourcingConflictException(
                 "EXCEPTIONAL_RECOMMENDATION_CONTROL_REQUIRED",
-                "Restricted and single-source recommendations must follow approved supplier identity and completed negotiation in the dedicated control.");
+                "Restricted, single-source, and petty-purchase recommendations must follow the approved supplier identity and negotiation in the dedicated control.");
     }
 }

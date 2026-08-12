@@ -2012,12 +2012,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("VendorInvoice", table =>
             {
                 table.HasTrigger("TR_VendorInvoice_TDC0504MandatoryMatch");
+                table.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_TDC0504MatchingTolerances",
                     "[MatchingPriceTolerancePercent] BETWEEN 0 AND 100 AND [MatchingQuantityTolerancePercent] BETWEEN 0 AND 100");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_TDC0504SnapshotHash",
                     "[MatchingSnapshotHash] IS NULL OR LEN([MatchingSnapshotHash]) = 64");
+                table.HasCheckConstraint(
+                    "CK_VendorInvoice_AcceptedSupplyCoherent",
+                    "([AcceptedSupplyKind] IS NULL AND [AcceptedSupplySourceId] IS NULL AND [AcceptedSupplySourceReference] IS NULL AND [AcceptedSupplySnapshotHash] IS NULL AND [AcceptedSupplyValidatedAtUtc] IS NULL) OR ([AcceptedSupplyKind] BETWEEN 1 AND 3 AND [AcceptedSupplySourceId] IS NOT NULL AND LEN([AcceptedSupplySourceReference]) BETWEEN 1 AND 100 AND LEN([AcceptedSupplySnapshotHash]) = 64 AND [AcceptedSupplyValidatedAtUtc] IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_VendorInvoice_AcceptedSupplyPurchaseOrder",
+                    "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
             });
             entity.HasOne(e => e.Supplier)
                 .WithMany()
@@ -2061,6 +2068,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.MatchingControlEventId });
             entity.HasIndex(e => new { e.TenantId, e.MatchExceptionControlEventId });
+            entity.HasIndex(e => new
+                {
+                    e.TenantId,
+                    e.AcceptedSupplyKind,
+                    e.AcceptedSupplySourceId
+                },
+                "UX_VendorInvoice_AcceptedCertificate")
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
         });
 
         builder.Entity<VendorInvoiceLineItem>(entity =>
@@ -9093,10 +9109,60 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // EmergencyProcurementPlan entity
         builder.Entity<EmergencyProcurementPlan>(entity =>
         {
-            entity.HasIndex(e => e.PlanCode).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PlanCode }).IsUnique();
             entity.HasIndex(e => e.EmergencyType);
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.CriticalityLevel);
+            entity.HasIndex(e => new { e.TenantId, e.PurchaseRequisitionId })
+                .IsUnique().HasFilter("[PurchaseRequisitionId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.ExceptionRuleId });
+            entity.HasIndex(e => new { e.TenantId, e.WorkflowInstanceId });
+            entity.HasIndex(e => new { e.TenantId, e.ExceptionalSourcingTenderId });
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.ToTable("EmergencyProcurementPlans", table =>
+            {
+                table.HasTrigger("TR_EmergencyProcurementPlans_Governance");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_GovernedStatus",
+                    "[Status] IN ('Draft','Prepared','PendingAudit','AuditVouched','PendingApproval','Approved','Rejected','Triggered','Filed')");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_PreparedLineage",
+                    "([Status] = 'Draft' AND [PurchaseRequisitionId] IS NULL AND [ExceptionRuleId] IS NULL AND [WorkflowDefinitionId] IS NULL AND [PreparedById] IS NULL AND [PreparedAtUtc] IS NULL) OR " +
+                    "([Status] <> 'Draft' AND [PurchaseRequisitionId] IS NOT NULL AND [ExceptionRuleId] IS NOT NULL AND [WorkflowDefinitionId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL AND [FileUploadRecordId] IS NOT NULL AND LEN([EvidenceReference]) > 0 AND LEN([ExceptionJustification]) >= 20 AND [PreparedById] IS NOT NULL AND [PreparedAtUtc] IS NOT NULL AND [ApprovalAuthority] IN ('ManagingDirector','Board') AND LEN([IntegrityHash]) = 64)");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_AuditLineage",
+                    "([Status] IN ('Draft','Prepared','PendingAudit') AND [InternalAuditVouchedById] IS NULL AND [InternalAuditVouchedAtUtc] IS NULL) OR " +
+                    "([Status] IN ('AuditVouched','PendingApproval','Approved','Rejected','Triggered','Filed') AND [InternalAuditVouchedById] IS NOT NULL AND [InternalAuditVouchedAtUtc] IS NOT NULL AND LEN([InternalAuditVouchNote]) >= 10)");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_ApprovalLineage",
+                    "([Status] IN ('Draft','Prepared','PendingAudit','AuditVouched') AND [WorkflowInstanceId] IS NULL AND [ApprovedById] IS NULL AND [ApprovedDate] IS NULL) OR " +
+                    "([Status] IN ('PendingApproval','Rejected') AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NULL AND [ApprovedDate] IS NULL AND [ApprovalReference] IS NULL) OR " +
+                    "([Status] IN ('Approved','Triggered','Filed') AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NOT NULL AND [ApprovedDate] IS NOT NULL AND [ApprovalReference] IS NOT NULL)");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_FilingLineage",
+                    "([Status] <> 'Filed' AND [ExceptionalSourcingTenderId] IS NULL AND [PostAwardJustification] IS NULL AND [PostAwardCentralDocumentVersionId] IS NULL AND [PostAwardFileUploadRecordId] IS NULL AND [PostAwardEvidenceReference] IS NULL AND [FiledAtUtc] IS NULL AND [FiledById] IS NULL) OR " +
+                    "([Status] = 'Filed' AND [ExceptionalSourcingTenderId] IS NOT NULL AND [PostAwardJustification] IS NOT NULL AND [PostAwardCentralDocumentVersionId] IS NOT NULL AND [PostAwardFileUploadRecordId] IS NOT NULL AND [PostAwardEvidenceReference] IS NOT NULL AND [FiledAtUtc] IS NOT NULL AND [FiledById] IS NOT NULL)");
+            });
+
+            entity.HasOne(e => e.PurchaseRequisition).WithMany()
+                .HasForeignKey(e => e.PurchaseRequisitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ExceptionRule).WithMany()
+                .HasForeignKey(e => e.ExceptionRuleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.WorkflowDefinition).WithMany()
+                .HasForeignKey(e => e.WorkflowDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.WorkflowInstance).WithMany()
+                .HasForeignKey(e => e.WorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CentralDocumentVersion).WithMany()
+                .HasForeignKey(e => e.CentralDocumentVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PostAwardCentralDocumentVersion).WithMany()
+                .HasForeignKey(e => e.PostAwardCentralDocumentVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FileUploadRecord>().WithMany()
+                .HasForeignKey(e => e.FileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FileUploadRecord>().WithMany()
+                .HasForeignKey(e => e.PostAwardFileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Tender>().WithMany()
+                .HasForeignKey(e => e.ExceptionalSourcingTenderId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany()
+                .HasForeignKey(e => e.PreparedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany()
+                .HasForeignKey(e => e.InternalAuditVouchedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany()
+                .HasForeignKey(e => e.FiledById).OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(e => e.CriticalItems)
                 .WithOne(i => i.EmergencyProcurementPlan)
@@ -9624,6 +9690,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 table.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
                 table.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
+                table.HasCheckConstraint(
+                    "CK_PurchaseOrders_ProcurementCategory",
+                    "[ProcurementCategory] IS NULL OR [ProcurementCategory] BETWEEN 0 AND 4");
+                table.HasCheckConstraint(
+                    "CK_PurchaseOrders_GovernedCategoryRequired",
+                    "[ProcurementSourceType] IS NULL OR [ProcurementSourceType] = 5 OR [ProcurementCategory] IS NOT NULL");
                 table.HasCheckConstraint(
                     "CK_PurchaseOrders_ApprovedSourceLineage",
                     "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");

@@ -7,6 +7,10 @@ export type PaymentBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Pro
 export type VendorInvoiceMatchExceptionStatus = 'PendingApproval' | 'Approved' | 'Rejected' | 'Cancelled' | 'Expired';
 export type VendorInvoiceMatchExceptionEvidenceKind = 'WorkflowEvidenceDocument' | 'CentralDocument';
 export type VendorInvoiceMatchCorrectiveActionStatus = 'Planned' | 'Completed';
+export type ProcurementAcceptedSupplyKind =
+    | 'GoodsReceiptInspection'
+    | 'ServiceCompletion'
+    | 'WorksPaymentCertificate';
 
 export interface VendorInvoice {
     id: string;
@@ -43,6 +47,11 @@ export interface VendorInvoice {
     matchingPriceTolerancePercent: number;
     matchingQuantityTolerancePercent: number;
     matchExceptionControlEventId?: string;
+    acceptedSupplyKind?: ProcurementAcceptedSupplyKind;
+    acceptedSupplySourceId?: string;
+    acceptedSupplySourceReference?: string;
+    acceptedSupplySnapshotHash?: string;
+    acceptedSupplyValidatedAtUtc?: string;
     status: VendorInvoiceStatus;
     approvalStatus: string;
     expenseAccountId?: string;
@@ -256,6 +265,8 @@ export interface VendorInvoiceCreateRequest {
     supplierInvoiceNumber?: string;
     supplierId: string;
     purchaseOrderId?: string;
+    acceptedSupplyKind?: ProcurementAcceptedSupplyKind;
+    acceptedSupplySourceId?: string;
     invoiceDate: string;
     receivedDate?: string;
     dueDate?: string;
@@ -276,6 +287,29 @@ export interface VendorInvoiceCreateRequest {
     reference?: string;
     isOpeningBalance?: boolean;
     lineItems: VendorInvoiceLineItemCreateRequest[];
+}
+
+export interface ProcurementAcceptedSupplyOption {
+    kind: ProcurementAcceptedSupplyKind;
+    sourceId: string;
+    sourceReference: string;
+    label: string;
+    category: string;
+    purchaseOrderId?: string;
+    businessPartnerId: string;
+    currencyCode: string;
+    acceptedAmount?: number;
+    acceptedAtUtc: string;
+    sourceIntegrityHash: string;
+}
+
+export interface ProcurementAcceptedSupplyOptions {
+    purchaseOrderId: string;
+    category: string;
+    ready: boolean;
+    options: ProcurementAcceptedSupplyOption[];
+    blockedReasons: string[];
+    worksHandoffRoute: string;
 }
 
 export interface VendorInvoiceUpdateRequest extends VendorInvoiceCreateRequest {

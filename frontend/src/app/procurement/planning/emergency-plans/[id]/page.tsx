@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Edit, PlayCircle, Power, RefreshCw, Siren } from 'lucide-react';
+import { ArrowLeft, Edit, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,7 @@ import {
   emergencyProcurementPlanService,
   type EmergencyProcurementPlanDetailDto,
 } from '@/services/procurementPlanningService';
+import EmergencyPurchaseGovernancePanel from '../EmergencyPurchaseGovernancePanel';
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : '-';
 
@@ -40,7 +41,6 @@ export default function EmergencyPlanDetailPage() {
   const params = useParams<{ id: string }>();
   const [plan, setPlan] = useState<EmergencyProcurementPlanDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [actioning, setActioning] = useState(false);
 
   const planNumber = useMemo(() => plan?.planNumber || plan?.planCode || '-', [plan]);
 
@@ -60,27 +60,6 @@ export default function EmergencyPlanDetailPage() {
   useEffect(() => {
     loadPlan();
   }, [params.id]);
-
-  const runAction = async (action: 'activate' | 'trigger' | 'deactivate') => {
-    if (!plan) return;
-    if (action === 'trigger' && !confirm(`Trigger emergency procurement for ${planNumber}?`)) return;
-
-    try {
-      setActioning(true);
-      const updated = action === 'activate'
-        ? await emergencyProcurementPlanService.activatePlan(plan.id)
-        : action === 'trigger'
-          ? await emergencyProcurementPlanService.triggerPlan(plan.id)
-          : await emergencyProcurementPlanService.deactivatePlan(plan.id);
-      setPlan(updated);
-      toast.success(action === 'activate' ? 'Emergency plan activated' : action === 'trigger' ? 'Emergency procurement triggered' : 'Emergency plan deactivated');
-    } catch (error) {
-      console.error('Error updating emergency plan:', error);
-      toast.error('Failed to update emergency plan');
-    } finally {
-      setActioning(false);
-    }
-  };
 
   if (loading) {
     return <div className="p-6 text-muted-foreground">Loading emergency plan...</div>;
@@ -111,33 +90,9 @@ export default function EmergencyPlanDetailPage() {
             Refresh
           </Button>
           {plan.status === 'Draft' && (
-            <>
-              <Button variant="outline" onClick={() => router.push(`/procurement/planning/emergency-plans/${plan.id}/edit`)}>
-                <Edit className="mr-2 h-4 w-4" />
-                Edit
-              </Button>
-              <Button onClick={() => runAction('activate')} disabled={actioning}>
-                <PlayCircle className="mr-2 h-4 w-4" />
-                Activate
-              </Button>
-            </>
-          )}
-          {plan.status === 'Active' && (
-            <>
-              <Button onClick={() => runAction('trigger')} disabled={actioning}>
-                <Siren className="mr-2 h-4 w-4" />
-                Trigger
-              </Button>
-              <Button variant="outline" onClick={() => runAction('deactivate')} disabled={actioning}>
-                <Power className="mr-2 h-4 w-4" />
-                Deactivate
-              </Button>
-            </>
-          )}
-          {plan.status === 'Triggered' && (
-            <Button variant="outline" onClick={() => runAction('deactivate')} disabled={actioning}>
-              <Power className="mr-2 h-4 w-4" />
-              Close
+            <Button variant="outline" onClick={() => router.push(`/procurement/planning/emergency-plans/${plan.id}/edit`)}>
+              <Edit className="mr-2 h-4 w-4" />
+              Edit
             </Button>
           )}
         </div>
@@ -161,6 +116,8 @@ export default function EmergencyPlanDetailPage() {
           <CardContent className="text-2xl font-semibold">{plan.emergencySuppliers.length}</CardContent>
         </Card>
       </div>
+
+      <EmergencyPurchaseGovernancePanel plan={plan} onUpdated={setPlan} />
 
       <Card>
         <CardHeader><CardTitle>Plan Details</CardTitle></CardHeader>

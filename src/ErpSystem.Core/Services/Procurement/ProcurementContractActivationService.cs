@@ -590,6 +590,9 @@ public sealed class ProcurementContractActivationService :
                 "CONTRACT_ACTIVATION_AWARD_MISMATCH",
                 "Contract supplier, bid, amount, currency, tender, or award status differs from the approved award."));
 
+        checks.Add(await EvaluateBudgetCommitmentAsync(
+            contract, cancellationToken));
+
         checks.Add(await EvaluateQuantitySurveyCommercialTermsAsync(contract, cancellationToken));
 
         var readiness = await ReadinessDecisions.GetQueryable(item =>
@@ -857,6 +860,83 @@ public sealed class ProcurementContractActivationService :
                 "CONTRACT_ACTIVATION_QS_POLICY_INVALID",
                 $"The effective QS commercial-terms policy is invalid: {exception.Message}");
         }
+    }
+
+    private async Task<ProcurementContractActivationCheckDto> EvaluateBudgetCommitmentAsync(
+        Contract contract,
+        CancellationToken cancellationToken)
+    {
+        var tender = await _unitOfWork.Repository<Tender>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == contract.TenderId &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (tender is null || !tender.SourcePurchaseRequisitionId.HasValue ||
+            !tender.SourcingReleaseId.HasValue)
+        {
+            return Failed("commitment", "Budget commitment",
+                "CONTRACT_ACTIVATION_BUDGET_LINEAGE_MISSING",
+                "The contract tender does not identify an approved requisition and sourcing release.");
+        }
+
+        var release = await _unitOfWork.Repository<ProcurementRequisitionSourcingRelease>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == tender.SourcingReleaseId.Value &&
+                item.PurchaseRequisitionId == tender.SourcePurchaseRequisitionId.Value &&
+                !item.IsDeleted)
+            .Include(item => item.PurchaseRequisition)
+            .Include(item => item.BudgetCommitment)
+                .ThenInclude(item => item.ProcurementBudget)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (release?.BudgetCommitment?.ProcurementBudget is null)
+        {
+            return Failed("commitment", "Budget commitment",
+                "CONTRACT_ACTIVATION_BUDGET_COMMITMENT_MISSING",
+                "The contract sourcing release has no authoritative budget commitment.");
+        }
+
+        var commitment = release.BudgetCommitment;
+        var budget = commitment.ProcurementBudget;
+        var result = ProcurementPurchaseOrderComplianceRules.ValidateCommitment(
+            new ProcurementCommitmentLifecycleSnapshot(
+                _currentUser.TenantId,
+                release.PurchaseRequisition.Id,
+                release.PurchaseRequisition.TenantId,
+                release.PurchaseRequisition.Currency,
+                release.PurchaseRequisition.BudgetId,
+                release.TenantId,
+                release.PurchaseRequisitionId,
+                release.BudgetCommitmentId,
+                release.BudgetCommitmentReference,
+                commitment.Id,
+                commitment.TenantId,
+                commitment.PurchaseRequisitionId,
+                commitment.ProcurementBudgetId,
+                commitment.ReservationReference,
+                commitment.Status,
+                commitment.ReservedAmount,
+                commitment.Currency,
+                budget.Id,
+                budget.TenantId,
+                budget.Status,
+                budget.Currency,
+                budget.CommittedAmount,
+                budget.ApprovedById,
+                budget.ApprovedDate,
+                budget.EffectiveDate,
+                budget.ExpiryDate,
+                contract.ContractValue,
+                contract.Currency,
+                DateTime.UtcNow));
+        return result.IsValid
+            ? Passed("commitment", "Budget commitment", result.Code,
+                result.Message, commitment.Id, commitment.ReservationReference)
+            : Failed("commitment", "Budget commitment", result.Code,
+                result.Message);
     }
 
     private async Task<bool> IsEvidenceCurrentAsync(

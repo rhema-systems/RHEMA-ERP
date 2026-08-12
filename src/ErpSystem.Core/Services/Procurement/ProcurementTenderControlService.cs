@@ -83,6 +83,78 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                                 method == ProcurementMethodType.InternationalCompetitiveTendering, cancellationToken);
     }
 
+    public async Task<bool> IsControlledTenderMethodAsync(Guid tenderId, CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        return await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Where(item => item.SourcingCaseId.HasValue)
+            .Join(Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted),
+                tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id, (_, sourcingCase) => sourcingCase.SelectedMethod)
+            .AnyAsync(method => method == ProcurementMethodType.NationalCompetitiveTendering ||
+                                method == ProcurementMethodType.InternationalCompetitiveTendering ||
+                                method == ProcurementMethodType.QualityBasedSelection ||
+                                method == ProcurementMethodType.QualityAndCostBasedSelection, cancellationToken);
+    }
+
+    public async Task<bool> ShouldConcealFinancialProposalAsync(
+        Guid tenderId,
+        Guid bidId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        var state = await Controls.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.TenderId == tenderId && !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => new
+            {
+                item.Method,
+                item.Status,
+                item.RecommendedBidId,
+                item.TechnicalEvaluationSnapshotJson
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (state is null)
+        {
+            return await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                .Where(item => item.SourcingCaseId.HasValue)
+                .Join(Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted),
+                    tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id, (_, sourcingCase) => sourcingCase.SelectedMethod)
+                .AnyAsync(method => IsQualitySelection(method), cancellationToken);
+        }
+
+        if (!IsQualitySelection(state.Method)) return false;
+        if (state.Status < ProcurementTenderControlStatus.FinancialEvaluated) return true;
+        if (state.Method == ProcurementMethodType.QualityBasedSelection)
+            return state.RecommendedBidId != bidId;
+        if (string.IsNullOrWhiteSpace(state.TechnicalEvaluationSnapshotJson)) return true;
+        try
+        {
+            using var document = JsonDocument.Parse(state.TechnicalEvaluationSnapshotJson);
+            if (!document.RootElement.TryGetProperty("scores", out var scores) ||
+                scores.ValueKind != JsonValueKind.Array)
+                return true;
+
+            foreach (var item in scores.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("bidId", out var bidIdValue) ||
+                    !bidIdValue.TryGetGuid(out var evaluatedBidId) ||
+                    !item.TryGetProperty("qualified", out var qualifiedValue) ||
+                    (qualifiedValue.ValueKind != JsonValueKind.True && qualifiedValue.ValueKind != JsonValueKind.False))
+                    continue;
+
+                if (evaluatedBidId == bidId)
+                    return !qualifiedValue.GetBoolean();
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
     public async Task<ProcurementTenderControlDto> GetAsync(Guid tenderId, CancellationToken cancellationToken = default)
     {
         EnsureReader();
@@ -101,7 +173,19 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         await EnsureCapabilityAsync(ManagePermission, tender.TenderNumber, correlation, cancellationToken);
         var lineage = await RevalidateAsync(tender, correlation, cancellationToken);
         if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
-            throw Conflict("TENDER_APPROVAL_REQUIRED", "An NCT/ICT tender must complete its document approval workflow before advertisement.");
+            throw Conflict("TENDER_APPROVAL_REQUIRED", "The tender must complete its document approval workflow before advertisement.");
+        if (lineage.Case.SelectedMethod == ProcurementMethodType.QualityAndCostBasedSelection)
+        {
+            if (!tender.UseQCBSEvaluation)
+                throw Validation("QCBS_CONFIGURATION_REQUIRED", "A QCBS sourcing case must use the controlled QCBS evaluation configuration.");
+            EnsureQcbsWeights(tender);
+        }
+        else if (lineage.Case.SelectedMethod == ProcurementMethodType.QualityBasedSelection)
+        {
+            if (tender.UseQCBSEvaluation)
+                throw Validation("QBS_CONFIGURATION_CONFLICT", "A QBS sourcing case cannot enable the QCBS price-weighted evaluation mode.");
+            EnsureTechnicalThreshold(tender);
+        }
         if (await Controls.ExistsAsync(item => item.TenantId == _currentUser.TenantId && item.TenderId == tenderId && !item.IsDeleted))
             throw Conflict("TENDER_ALREADY_ADVERTISED", "The statutory advertisement record already exists.");
         var deadline = EnsureUtc(request.SubmissionDeadlineUtc);
@@ -121,7 +205,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         Require(request.PublicationChannel, "TENDER_PUBLICATION_CHANNEL_REQUIRED", "Publication channel is required.");
         Require(request.AdvertisementEvidenceReference, "TENDER_ADVERTISEMENT_EVIDENCE_REQUIRED", "Advertisement evidence is required.");
         if (!lineage.MethodRule.WorkflowDefinitionId.HasValue)
-            throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The locked NCT/ICT method rule must select the shared award-approval workflow.");
+            throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The locked controlled method rule must select the shared award-approval workflow.");
 
         var now = DateTime.UtcNow;
         var control = new ProcurementTenderControl
@@ -250,7 +334,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         EnsureAuthenticatedTenant();
         if (bid.TenantId != _currentUser.TenantId)
             throw new ProcurementTenderControlAuthorizationException("The bid is outside the current tenant.");
-        if (!await IsNctOrIctAsync(bid.TenderId, cancellationToken)) return null;
+        if (!await IsControlledTenderMethodAsync(bid.TenderId, cancellationToken)) return null;
         var correlation = NormalizeCorrelation(correlationId);
         var control = await LoadControlAsync(bid.TenderId, tracked: true, cancellationToken);
         await RevalidateAsync(control.Tender, correlation, cancellationToken);
@@ -333,15 +417,21 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         Require(request.EvidenceReference, "TENDER_OPENING_EVIDENCE_REQUIRED", "Public-opening evidence is required.");
 
         var now = DateTime.UtcNow;
+        var qualitySelection = IsQualitySelection(control.Method);
         var snapshot = JsonSerializer.Serialize(new
         {
-            schemaVersion = "tdc.nct-ict-public-opening.v1", control.TenderId, openedAtUtc = now,
+            schemaVersion = qualitySelection
+                ? "tdc.quality-selection-technical-opening.v1"
+                : "tdc.nct-ict-public-opening.v1",
+            control.TenderId, method = control.Method, openedAtUtc = now,
             evidenceReference = request.EvidenceReference.Trim(),
             participants = participants.Select(item => new { item.UserId, name = item.Name.Trim(), role = item.Role.Trim(), item.IsObserver, signatureReference = item.SignatureReference.Trim() }).ToArray(),
             entries = control.SubmissionReceipts.Where(item => !item.IsDeleted).OrderBy(item => item.ReceivedAtUtc).Select(item => new
             {
                 item.TenderBidId, item.BusinessPartnerId, item.ReceiptNumber, item.ReceivedAtUtc, item.Disposition,
-                declaredAmount = item.TenderBid.TotalBidAmount, item.TenderBid.Currency, submissionIntegrityHash = item.IntegrityHash
+                declaredAmount = qualitySelection ? (decimal?)null : item.TenderBid.TotalBidAmount,
+                currency = qualitySelection ? null : item.TenderBid.Currency,
+                submissionIntegrityHash = item.IntegrityHash
             }).ToArray()
         }, JsonOptions);
         control.OpenedAtUtc = now;
@@ -362,10 +452,12 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         Touch(control, now);
         await Controls.UpdateAsync(control);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await RecordAsync(control, "PublicOpeningCompleted", ProcurementControlEventResult.Allowed,
+        await RecordAsync(control, qualitySelection ? "TechnicalProposalOpeningCompleted" : "PublicOpeningCompleted",
+            ProcurementControlEventResult.Allowed,
             new { ParticipantCount = participants.Count, ReceiptCount = control.SubmissionReceipts.Count },
             new { control.OpeningIntegrityHash, OnTimeCount = onTime.Count }, correlation, cancellationToken,
-            External(control.OpeningEvidenceReference, "Signed public opening register", "SRC-004"));
+            External(control.OpeningEvidenceReference,
+                qualitySelection ? "Signed technical-proposal opening register" : "Signed public opening register", "SRC-004"));
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 
@@ -410,9 +502,21 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             if (typed.Count != onTimeBids.Count || typed.Select(item => item.BidId).Distinct().Count() != typed.Count ||
                 typed.Any(item => !onTimeBids.Contains(item.BidId)))
                 throw Validation("TENDER_TECHNICAL_COVERAGE_INVALID", "Technical evaluation must cover every on-time opened bid exactly once.");
+            if (IsQualitySelection(control.Method))
+            {
+                EnsureTechnicalThreshold(control.Tender);
+                if (typed.Any(item => item.Qualified != (item.Score >= control.Tender.MinimumTechnicalScore)))
+                    throw Validation("TENDER_TECHNICAL_THRESHOLD_MISMATCH",
+                        $"QBS/QCBS qualification must be derived from the configured {control.Tender.MinimumTechnicalScore:0.##} technical threshold.");
+            }
             snapshot = JsonSerializer.Serialize(new
             {
-                schemaVersion = "tdc.nct-ict-technical-evaluation.v1", evaluatedAtUtc = now,
+                schemaVersion = IsQualitySelection(control.Method)
+                    ? "tdc.quality-selection-technical-evaluation.v1"
+                    : "tdc.nct-ict-technical-evaluation.v1",
+                method = control.Method,
+                minimumTechnicalScore = IsQualitySelection(control.Method) ? (decimal?)control.Tender.MinimumTechnicalScore : null,
+                evaluatedAtUtc = now,
                 evaluatorUserId = _currentUser.UserId, evaluatorName = ActorName(), evidenceReference = evidenceReference.Trim(),
                 scores = typed.OrderBy(item => item.BidId).Select(item => new { item.BidId, item.Score, item.Qualified, item.Reason }).ToArray()
             }, JsonOptions);
@@ -439,17 +543,68 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             }
             var qualified = QualifiedBidIds(control);
             var typed = (List<ProcurementTenderFinancialScoreRequest>)scores;
-            if (qualified.Count == 0 || typed.Count != qualified.Count || typed.Select(item => item.BidId).Distinct().Count() != typed.Count ||
+            if (qualified.Count == 0 ||
+                (control.Method != ProcurementMethodType.QualityBasedSelection && typed.Count != qualified.Count) ||
+                typed.Select(item => item.BidId).Distinct().Count() != typed.Count ||
                 typed.Any(item => !qualified.Contains(item.BidId)) || !recommendedBidId.HasValue || !qualified.Contains(recommendedBidId.Value))
                 throw Validation("TENDER_FINANCIAL_COVERAGE_INVALID", "Financial evaluation and recommendation must cover only every technically qualified bid.");
             Require(recommendationReason, "TENDER_RECOMMENDATION_REASON_REQUIRED", "Award recommendation reason is required.");
-            snapshot = JsonSerializer.Serialize(new
+            if (control.Method == ProcurementMethodType.QualityBasedSelection)
             {
-                schemaVersion = "tdc.nct-ict-financial-evaluation.v1", evaluatedAtUtc = now,
-                evaluatorUserId = _currentUser.UserId, evaluatorName = ActorName(), evidenceReference = evidenceReference.Trim(),
-                recommendedBidId, recommendationReason = recommendationReason!.Trim(),
-                scores = typed.OrderBy(item => item.BidId).Select(item => new { item.BidId, item.Score, item.EvaluatedAmount, item.Reason }).ToArray()
-            }, JsonOptions);
+                var ranked = TechnicalScores(control).Where(item => qualified.Contains(item.BidId))
+                    .OrderByDescending(item => item.Score).ThenBy(item => item.BidId).ToList();
+                if (ranked.Count > 1 && ranked[0].Score == ranked[1].Score)
+                    throw Validation("QBS_TECHNICAL_RANKING_TIED", "The highest-ranked QBS technical result is tied and must be resolved by the controlled committee before financial opening.");
+                var selected = ranked[0].BidId;
+                if (recommendedBidId.Value != selected || typed.Count != 1 || typed[0].BidId != selected)
+                    throw Validation("QBS_RECOMMENDATION_INVALID", "QBS financial review and recommendation must be limited to the uniquely highest-ranked technically qualified bid.");
+                snapshot = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = "tdc.qbs-financial-negotiation.v1", method = control.Method, evaluatedAtUtc = now,
+                    evaluatorUserId = _currentUser.UserId, evaluatorName = ActorName(), evidenceReference = evidenceReference.Trim(),
+                    recommendedBidId = selected, recommendationReason = recommendationReason!.Trim(),
+                    scores = typed.Select(item => new { item.BidId, TechnicalRank = 1, item.EvaluatedAmount, item.Reason }).ToArray()
+                }, JsonOptions);
+            }
+            else if (control.Method == ProcurementMethodType.QualityAndCostBasedSelection)
+            {
+                EnsureQcbsWeights(control.Tender);
+                if (typed.Any(item => item.EvaluatedAmount <= 0))
+                    throw Validation("QCBS_EVALUATED_AMOUNT_INVALID", "Every QCBS qualified bid requires a positive evaluated financial amount.");
+                var technicalScores = TechnicalScores(control).ToDictionary(item => item.BidId, item => item.Score);
+                var lowestAmount = typed.Min(item => item.EvaluatedAmount);
+                var calculated = typed.Select(item =>
+                {
+                    var financialScore = decimal.Round(lowestAmount / item.EvaluatedAmount * 100m, 4, MidpointRounding.AwayFromZero);
+                    var combinedScore = decimal.Round(
+                        technicalScores[item.BidId] * control.Tender.TechnicalWeight / 100m +
+                        financialScore * control.Tender.FinancialWeight / 100m,
+                        4, MidpointRounding.AwayFromZero);
+                    return new { item.BidId, TechnicalScore = technicalScores[item.BidId], FinancialScore = financialScore, CombinedScore = combinedScore, item.EvaluatedAmount, item.Reason };
+                }).OrderByDescending(item => item.CombinedScore).ThenBy(item => item.BidId).ToList();
+                if (calculated.Count > 1 && calculated[0].CombinedScore == calculated[1].CombinedScore)
+                    throw Validation("QCBS_COMBINED_SCORE_TIED", "The highest QCBS combined score is tied and must be resolved by the controlled committee before recommendation.");
+                if (recommendedBidId.Value != calculated[0].BidId)
+                    throw Validation("QCBS_RECOMMENDATION_INVALID", "The recommended QCBS bid must have the highest server-calculated combined technical and financial score.");
+                snapshot = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = "tdc.qcbs-combined-evaluation.v1", method = control.Method, evaluatedAtUtc = now,
+                    minimumTechnicalScore = control.Tender.MinimumTechnicalScore,
+                    technicalWeight = control.Tender.TechnicalWeight, financialWeight = control.Tender.FinancialWeight,
+                    evaluatorUserId = _currentUser.UserId, evaluatorName = ActorName(), evidenceReference = evidenceReference.Trim(),
+                    recommendedBidId, recommendationReason = recommendationReason!.Trim(), scores = calculated
+                }, JsonOptions);
+            }
+            else
+            {
+                snapshot = JsonSerializer.Serialize(new
+                {
+                    schemaVersion = "tdc.nct-ict-financial-evaluation.v1", method = control.Method, evaluatedAtUtc = now,
+                    evaluatorUserId = _currentUser.UserId, evaluatorName = ActorName(), evidenceReference = evidenceReference.Trim(),
+                    recommendedBidId, recommendationReason = recommendationReason!.Trim(),
+                    scores = typed.OrderBy(item => item.BidId).Select(item => new { item.BidId, item.Score, item.EvaluatedAmount, item.Reason }).ToArray()
+                }, JsonOptions);
+            }
         }
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -493,10 +648,11 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 throw;
             }
         }, cancellationToken);
-        await RecordAsync(control, technical ? "TechnicalEvaluationSigned" : "FinancialEvaluationAndRecommendationSigned",
+        await RecordAsync(control, technical ? "TechnicalEvaluationSigned" : "FinancialProposalOpenedEvaluatedAndRecommended",
             ProcurementControlEventResult.Allowed, new { EvidenceReference = evidenceReference, EvaluatorUserId = _currentUser.UserId },
             new { control.Status, Hash = technical ? control.TechnicalEvaluationIntegrityHash : control.FinancialEvaluationIntegrityHash, control.RecommendedBidId },
-            correlation, cancellationToken, External(evidenceReference.Trim(), technical ? "Technical evaluation" : "Financial evaluation", "SRC-007"));
+            correlation, cancellationToken, External(evidenceReference.Trim(), technical ? "Technical evaluation" :
+                IsQualitySelection(control.Method) ? "Financial proposal opening, evaluation, and recommendation" : "Financial evaluation", "SRC-007"));
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 
@@ -779,8 +935,8 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             .Include(item => item.AuthorityRoute).ThenInclude(item => item.Steps)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw Validation("TENDER_SOURCING_CASE_NOT_FOUND", "The locked sourcing case is unavailable.");
-        if (!IsNctOrIct(sourcingCase.SelectedMethod))
-            throw Validation("TENDER_METHOD_NOT_NCT_ICT", "This statutory control is available only for NCT or ICT sourcing cases.");
+        if (!IsControlledTenderMethod(sourcingCase.SelectedMethod))
+            throw Validation("TENDER_METHOD_NOT_CONTROLLED", "This control is available only for NCT, ICT, QBS, or QCBS sourcing cases.");
         ProcurementSourcingCaseEntryGateDto gate;
         try
         {
@@ -796,10 +952,10 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 item.Id == sourcingCase.MethodRuleId && item.TenantId == _currentUser.TenantId)
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw Validation("TENDER_METHOD_RULE_NOT_FOUND", "The exact method rule locked by the sourcing case no longer exists.");
-        if (rule.IsDeleted || !rule.IsEnabled || !rule.IsAllowed || !IsNctOrIct(rule.Method) ||
+        if (rule.IsDeleted || !rule.IsEnabled || !rule.IsAllowed || !IsControlledTenderMethod(rule.Method) ||
             gate.MethodRuleId != rule.Id || gate.EstimatedValue != tender.EstimatedValue ||
             !string.Equals(gate.CurrencyCode, tender.Currency, StringComparison.OrdinalIgnoreCase))
-            throw Validation("TENDER_SOURCE_LINEAGE_STALE", "The tender no longer matches its current NCT/ICT method, value, currency, or rule lineage.");
+            throw Validation("TENDER_SOURCE_LINEAGE_STALE", "The tender no longer matches its current controlled method, value, currency, or rule lineage.");
         return (sourcingCase, rule);
     }
 
@@ -1065,13 +1221,35 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
 
     private static HashSet<Guid> QualifiedBidIds(ProcurementTenderControl control)
     {
+        return TechnicalScores(control).Where(item => item.Qualified).Select(item => item.BidId).ToHashSet();
+    }
+
+    private static List<TechnicalScoreSnapshot> TechnicalScores(ProcurementTenderControl control)
+    {
         if (string.IsNullOrWhiteSpace(control.TechnicalEvaluationSnapshotJson) ||
             ComputeHash(control.TechnicalEvaluationSnapshotJson) != control.TechnicalEvaluationIntegrityHash)
             throw Conflict("TENDER_TECHNICAL_INTEGRITY_FAILED", "The signed technical evaluation failed integrity verification.");
         using var document = JsonDocument.Parse(control.TechnicalEvaluationSnapshotJson);
         return document.RootElement.GetProperty("scores").EnumerateArray()
-            .Where(item => item.GetProperty("qualified").GetBoolean())
-            .Select(item => item.GetProperty("bidId").GetGuid()).ToHashSet();
+            .Select(item => new TechnicalScoreSnapshot(
+                item.GetProperty("bidId").GetGuid(),
+                item.GetProperty("score").GetDecimal(),
+                item.GetProperty("qualified").GetBoolean()))
+            .ToList();
+    }
+
+    private static void EnsureTechnicalThreshold(Tender tender)
+    {
+        if (tender.MinimumTechnicalScore is < 0m or > 100m)
+            throw Validation("QUALITY_SELECTION_TECHNICAL_THRESHOLD_INVALID", "QBS/QCBS minimum technical score must be between 0 and 100.");
+    }
+
+    private static void EnsureQcbsWeights(Tender tender)
+    {
+        EnsureTechnicalThreshold(tender);
+        if (tender.TechnicalWeight <= 0m || tender.FinancialWeight <= 0m ||
+            tender.TechnicalWeight + tender.FinancialWeight != 100m)
+            throw Validation("QCBS_WEIGHTS_INVALID", "QCBS technical and financial weights must both be positive and total exactly 100.");
     }
 
     private static IEnumerable<Guid> SnapshotUserIds(string? json, string propertyName)
@@ -1108,6 +1286,17 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             .OrderBy(item => item.ReceivedAtUtc).FirstOrDefault();
         var ppaRequired = IsPpaRequired(control.SourcingCase.AuthorityRoute);
 
+        var technicalResults = string.IsNullOrWhiteSpace(control.TechnicalEvaluationSnapshotJson)
+            ? new List<TechnicalScoreSnapshot>()
+            : TechnicalScores(control);
+        var qualitySelection = IsQualitySelection(control.Method);
+        var financialStageCompleted = control.FinancialEvaluatedAtUtc.HasValue;
+        var qualifiedBidIds = technicalResults.Where(item => item.Qualified).Select(item => item.BidId).ToHashSet();
+        bool RevealAmount(ProcurementTenderSubmissionReceipt item) =>
+            !sealedRegister && (!qualitySelection ||
+                financialStageCompleted && (control.Method == ProcurementMethodType.QualityAndCostBasedSelection
+                    ? qualifiedBidIds.Contains(item.TenderBidId)
+                    : control.RecommendedBidId == item.TenderBidId));
         return new ProcurementTenderControlDto
         {
         TenderId = control.TenderId, TenderNumber = control.Tender.TenderNumber, TenderTitle = control.Tender.Title,
@@ -1120,6 +1309,8 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         AdvertisedAtUtc = control.AdvertisedAtUtc, SubmissionDeadlineUtc = control.SubmissionDeadlineUtc,
         OpeningScheduledAtUtc = control.OpeningScheduledAtUtc, OpenedAtUtc = control.OpenedAtUtc,
         TechnicalEvaluatedAtUtc = control.TechnicalEvaluatedAtUtc, FinancialEvaluatedAtUtc = control.FinancialEvaluatedAtUtc,
+        MinimumTechnicalScore = control.Tender.MinimumTechnicalScore,
+        TechnicalWeight = control.Tender.TechnicalWeight, FinancialWeight = control.Tender.FinancialWeight,
         RecommendedBidId = control.RecommendedBidId, WorkflowInstanceId = control.WorkflowInstanceId,
         AuthorityApprovalReference = control.AuthorityApprovalReference, PpaApprovalReference = control.PpaApprovalReference,
         AwardBidId = control.AwardBidId, AwardReference = control.AwardReference,
@@ -1133,7 +1324,13 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             BusinessPartnerName = sealedRegister ? "Sealed bidder" : item.BusinessPartner?.PartnerName ?? string.Empty,
             ReceiptNumber = item.ReceiptNumber,
             ReceivedAtUtc = item.ReceivedAtUtc, Disposition = item.Disposition, OpenedAtUtc = item.OpenedAtUtc,
+            BidAmount = RevealAmount(item) ? item.TenderBid.TotalBidAmount : 0m,
+            Currency = RevealAmount(item) ? item.TenderBid.Currency : string.Empty,
             IntegrityHash = item.IntegrityHash
+        }).ToList(),
+        TechnicalResults = technicalResults.Select(item => new ProcurementTenderTechnicalResultDto
+        {
+            BidId = item.BidId, Score = item.Score, Qualified = item.Qualified
         }).ToList(),
         Milestones =
         [
@@ -1200,6 +1397,10 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static bool IsNctOrIct(ProcurementMethodType method) =>
         method is ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering;
+    private static bool IsQualitySelection(ProcurementMethodType method) =>
+        method is ProcurementMethodType.QualityBasedSelection or ProcurementMethodType.QualityAndCostBasedSelection;
+    private static bool IsControlledTenderMethod(ProcurementMethodType method) =>
+        IsNctOrIct(method) || IsQualitySelection(method);
     private static DateTime EnsureUtc(DateTime value) => value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string NormalizeCorrelation(string? value) => string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : Truncate(value.Trim(), 100);
@@ -1216,4 +1417,6 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         Label = label,
         RequirementKey = requirement
     };
+
+    private sealed record TechnicalScoreSnapshot(Guid BidId, decimal Score, bool Qualified);
 }

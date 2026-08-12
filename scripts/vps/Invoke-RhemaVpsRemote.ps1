@@ -311,6 +311,10 @@ function Invoke-Preflight {
     # Trigger replacement only; all existing rows remain untouched.
     Write-Output 'GUARD_COVERAGE|20260809173500_AllowControlledSupplierApplicantContactCorrection'
     Write-Output 'GUARD_COVERAGE|20260809204500_AllowPreProvisioningSupplierContactCorrection'
+    # Existing plan codes are already globally unique; the new tenant indexes
+    # cannot collide. Added governance lineage is nullable/defaulted for Draft
+    # rows, and all THROW statements execute only in the post-migration trigger.
+    Write-Output 'GUARD_COVERAGE|20260812140000_GovernEmergencyPurchaseExceptions'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"
