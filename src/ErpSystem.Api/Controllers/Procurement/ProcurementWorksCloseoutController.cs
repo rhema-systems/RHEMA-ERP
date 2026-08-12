@@ -19,6 +19,7 @@ public sealed class ProcurementWorksCloseoutController : ControllerBase
     }
 
     [HttpGet("contracts/{contractId:guid}")]
+    [Authorize(Policy = "procurement.records.read")]
     public Task<IActionResult> GetOverview(
         Guid contractId,
         CancellationToken cancellationToken) =>
@@ -26,6 +27,7 @@ public sealed class ProcurementWorksCloseoutController : ControllerBase
             contractId, cancellationToken)));
 
     [HttpPost("contracts/{contractId:guid}/actions")]
+    [Authorize(Policy = "procurement.contract.manage")]
     public Task<IActionResult> Submit(
         Guid contractId,
         [FromBody] SubmitProcurementWorksCloseoutActionRequest request,
@@ -40,6 +42,7 @@ public sealed class ProcurementWorksCloseoutController : ControllerBase
         });
 
     [HttpPost("actions/{actionId:guid}/decision")]
+    [Authorize(Policy = "procurement.contract.approve")]
     public Task<IActionResult> Decide(
         Guid actionId,
         [FromBody] DecideProcurementWorksCloseoutActionRequest request,

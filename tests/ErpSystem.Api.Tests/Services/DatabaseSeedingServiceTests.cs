@@ -18,6 +18,22 @@ namespace ErpSystem.Api.Tests.Services;
 public class DatabaseSeedingServiceTests
 {
     [Fact]
+    public void FinanceRoleSeeder_ShouldGrantChiefAccountantAssignedPaymentApprovalPermission()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var chiefAccountantStart = source.IndexOf("[\"Chief Accountant\"] = new[]", StringComparison.Ordinal);
+        var managingDirectorStart = source.IndexOf("[\"Managing Director\"] = new[]", chiefAccountantStart, StringComparison.Ordinal);
+
+        chiefAccountantStart.Should().BeGreaterThan(-1);
+        managingDirectorStart.Should().BeGreaterThan(chiefAccountantStart);
+        source[chiefAccountantStart..managingDirectorStart]
+            .Should().Contain("\"Finance.AP.Payments.Approve\"",
+                "the payment policy assigns the Chief Accountant an independent approval stage");
+    }
+
+    [Fact]
     public async Task EnsureFinanceWorkflowsSeededAsync_ShouldPublishAndRepairPaymentRuntimeDefinitions()
     {
         await using var context = CreateContext();
@@ -228,6 +244,20 @@ public class DatabaseSeedingServiceTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, "src")) &&
+                File.Exists(Path.Combine(current.FullName, "ErpSystem.sln")))
+                return current.FullName;
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
     }
 
     private static UserManager<ApplicationUser> CreateUserManager()

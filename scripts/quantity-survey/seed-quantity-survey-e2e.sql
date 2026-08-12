@@ -68,6 +68,28 @@ IF @ExternalContractorUserId IS NULL OR @ExternalConsultantUserId IS NULL
 BEGIN TRY
     BEGIN TRANSACTION;
 
+    /* A deterministic foreign-tenant project gives the authenticated API matrix a real
+       row to hide. It contains no operational QS data and is never used as a positive
+       fixture. */
+    DECLARE @CrossTenantId uniqueidentifier='D6040000-0000-4000-8000-000000000001';
+    DECLARE @CrossTenantProjectId uniqueidentifier='D6040000-0000-4000-8000-000000000002';
+    IF NOT EXISTS (SELECT 1 FROM dbo.Tenants WHERE Id=@CrossTenantId)
+        INSERT dbo.Tenants
+            (Id,Name,Code,Status,LdapEnabled,IsDefaultForPublicUsers,IsDefaultForInternalUsers,
+             AllowSelfRegistration,RequireEmailVerification,UserAudience,DefaultPriority,
+             EnableAutoSelection,BaseCurrency,CurrencyDecimalPlaces,CreatedAt,CreatedBy,IsDeleted)
+        VALUES
+            (@CrossTenantId,N'QS E2E Isolation Tenant',N'QS-E2E-ISOLATION',1,0,0,0,0,0,0,0,0,
+             N'GHS',2,@Now,N'QS E2E Seeder',0);
+    IF NOT EXISTS (SELECT 1 FROM dbo.Projects WHERE Id=@CrossTenantProjectId)
+        INSERT dbo.Projects
+            (Id,ProjectCode,Title,Status,Methodology,BudgetStatus,ProgressPercent,ApprovalRequired,
+             ExternalPortalAccessEnabled,ExternalCollaborationEnabled,CreatedAt,CreatedBy,IsDeleted,
+             TenantId,SlackMonths)
+        VALUES
+            (@CrossTenantProjectId,N'QS-XTENANT-001',N'QS tenant-isolation sentinel',N'Planning',
+             N'Standard',N'Draft',0,0,0,0,@Now,N'QS E2E Seeder',0,@CrossTenantId,0);
+
     /* Security and assigned project scope. Role and permission masters remain owned by the shared seeder. */
     DECLARE @OfficerRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_QUANTITY_SURVEYOR');
     DECLARE @ApproverRoleId uniqueidentifier = (SELECT Id FROM dbo.AspNetRoles WHERE Name = N'TDC_SUPERVISING_QUANTITY_SURVEYOR');
@@ -91,6 +113,66 @@ BEGIN TRY
     IF NOT EXISTS (SELECT 1 FROM dbo.ProjectMembers WHERE ProjectId = @ProjectId AND UserId = @AdminId AND Role = N'QSAdministrator' AND IsDeleted = 0)
         INSERT dbo.ProjectMembers (Id,ProjectId,UserId,Role,IsActive,JoinedAt,CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
         VALUES (NEWID(),@ProjectId,@AdminId,N'QSAdministrator',1,@Now,@Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+
+    /* Finance-owned settlement prerequisite. Reuse a valid configured default when one
+       exists; otherwise create only the deterministic test bank account and make it the
+       tenant default. The QS fixture never creates a parallel ledger or posting path. */
+    DECLARE @FinanceCashGlAccountId uniqueidentifier =
+    (
+        SELECT TOP (1) Id
+        FROM dbo.Accounts
+        WHERE TenantId=@TenantId AND IsDeleted=0 AND Status=1
+          AND AllowDirectPosting=1 AND IsControlAccount=0
+          AND AccountCode IN (N'1000',N'001-000-1000')
+        ORDER BY CASE WHEN AccountCode=N'1000' THEN 0 ELSE 1 END
+    );
+    DECLARE @FinanceBankAccountId uniqueidentifier =
+    (
+        SELECT TOP (1) fs.DefaultBankAccountId
+        FROM dbo.FinanceSettings fs
+        JOIN dbo.BankAccounts ba ON ba.Id=fs.DefaultBankAccountId
+        WHERE fs.TenantId=@TenantId AND fs.IsDeleted=0
+          AND ba.TenantId=@TenantId AND ba.IsDeleted=0 AND ba.IsActive=1
+          AND ba.GLAccountId IS NOT NULL
+    );
+    IF @FinanceCashGlAccountId IS NULL
+        THROW 52014, 'QS E2E Finance acceptance requires the active direct-posting cash GL account 1000.', 1;
+    IF @FinanceBankAccountId IS NULL
+    BEGIN
+        SET @FinanceBankAccountId='D6030000-0000-4000-8000-000000000001';
+        IF NOT EXISTS (SELECT 1 FROM dbo.BankAccounts WHERE Id=@FinanceBankAccountId)
+            INSERT dbo.BankAccounts
+                (Id,AccountNumber,AccountName,BankName,BankBranch,Currency,AccountType,GLAccountId,
+                 CurrentBalance,AvailableBalance,OpeningBalance,IsActive,OpeningDate,Notes,
+                 CreatedAt,CreatedBy,CreatedById,IsDeleted,TenantId)
+            VALUES
+                (@FinanceBankAccountId,N'QS-E2E-CASH-001',N'QS E2E controlled cash settlement',N'TDC Test Cash Office',
+                 N'Head Office',N'GHS',1,@FinanceCashGlAccountId,0,0,0,1,CONVERT(date,@Now),
+                 N'Deterministic non-production Finance settlement fixture for QS acceptance only.',
+                 @Now,N'QS E2E Seeder',@AdminId,0,@TenantId);
+        ELSE
+            UPDATE dbo.BankAccounts
+            SET GLAccountId=@FinanceCashGlAccountId,IsActive=1,IsDeleted=0,DeletedAt=NULL,DeletedBy=NULL,
+                UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId
+            WHERE Id=@FinanceBankAccountId AND TenantId=@TenantId;
+
+        UPDATE dbo.FinanceSettings
+        SET DefaultBankAccountId=@FinanceBankAccountId,UpdatedAt=@Now,
+            UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId
+        WHERE TenantId=@TenantId AND IsDeleted=0;
+    END;
+
+    DECLARE @VatControlAccountId uniqueidentifier =
+        (SELECT TOP (1) Id FROM dbo.Accounts
+         WHERE TenantId=@TenantId AND IsDeleted=0 AND Status=1
+           AND IsControlAccount=1 AND AccountCode=N'2200');
+    IF @VatControlAccountId IS NULL
+        THROW 52015, 'QS E2E Finance acceptance requires the active Tax/VAT control account 2200.', 1;
+    UPDATE dbo.Taxes
+    SET TaxReceivableAccountId=COALESCE(TaxReceivableAccountId,@VatControlAccountId),
+        TaxPayableAccountId=COALESCE(TaxPayableAccountId,@VatControlAccountId),
+        UpdatedAt=@Now,UpdatedBy=N'QS E2E Seeder',LastModifiedById=@AdminId
+    WHERE TenantId=@TenantId AND IsDeleted=0 AND IsActive=1 AND Code=N'VAT-STD';
 
     /* Reuse existing development identities and partner masters for real external-actor acceptance. */
     DECLARE @ContractorMembershipId uniqueidentifier =
@@ -721,6 +803,13 @@ BEGIN TRY
         @ConsultantId AS ConsultantBusinessPartnerId,
         @ExternalContractorUserId AS ContractorPortalUserId,
         @ExternalConsultantUserId AS ConsultantPortalUserId,
+        @FinanceBankAccountId AS FinanceBankAccountId,
+        (SELECT TOP (1) Id FROM dbo.PaymentMethod
+         WHERE TenantId=@TenantId AND IsDeleted=0 AND IsActive=1 AND Code=N'CASH') AS CashPaymentMethodId,
+        @CrossTenantProjectId AS CrossTenantProjectId,
+        (SELECT TOP (1) Id FROM dbo.Projects
+         WHERE TenantId=@TenantId AND IsDeleted=0 AND Id<>@ProjectId
+         ORDER BY ProjectCode) AS UnassignedSameTenantProjectId,
         @ProfileId AS ConfigurationProfileId,
         (SELECT COUNT(*) FROM dbo.QuantitySurveyConfigurationDecisions WHERE ProfileId=@ProfileId AND Status=2 AND ApprovalStatus=1 AND EvidenceStatus=2 AND IsDeleted=0) AS ApprovedDecisions,
         (SELECT COUNT(*) FROM dbo.ProjectBoqVersionLines WHERE ProjectBoqVersionId=@BoqVersionId AND IsDeleted=0) AS ApprovedBoqLines;

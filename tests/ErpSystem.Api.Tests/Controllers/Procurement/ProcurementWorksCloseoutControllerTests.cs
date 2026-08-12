@@ -26,6 +26,15 @@ public sealed class ProcurementWorksCloseoutControllerTests
             .Where(method => method.DeclaringType == type)
             .Select(method => method.Name)
             .Should().Contain(["GetOverview", "Submit", "Decide"]);
+        type.GetMethod(nameof(ProcurementWorksCloseoutController.GetOverview))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.records.read");
+        type.GetMethod(nameof(ProcurementWorksCloseoutController.Submit))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.contract.manage");
+        type.GetMethod(nameof(ProcurementWorksCloseoutController.Decide))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy
+            .Should().Be("procurement.contract.approve");
     }
 
     [Fact]

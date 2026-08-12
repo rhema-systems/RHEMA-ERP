@@ -44,6 +44,18 @@ public sealed class QuantitySurveyDirectApiSecurityGateTests
         AssertProtected(actions);
     }
 
+    [Fact]
+    public void ProjectHostedQuantitySurveyLookup_ShouldHideForeignTenantProjectsAsNotFound()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Controllers", "Projects", "ProjectsController.cs"));
+
+        source.Should().Contain("QS_PROJECT_NOT_FOUND");
+        source.Should().Contain("outside your tenant scope");
+        source.Should().Contain("return NotFound(new ProblemDetails");
+    }
+
     private static void AssertProtected(IReadOnlyCollection<ControllerAction> actions)
     {
         var anonymous = actions.Where(value => value.AllowsAnonymous)
@@ -111,6 +123,20 @@ public sealed class QuantitySurveyDirectApiSecurityGateTests
 
     private static string Describe(ControllerAction value) =>
         $"{value.Controller.Name}.{value.Method.Name}";
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, "src")) &&
+                File.Exists(Path.Combine(current.FullName, "ErpSystem.sln")))
+                return current.FullName;
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
+    }
 
     private sealed record ControllerAction(
         Type Controller,

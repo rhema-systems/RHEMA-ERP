@@ -1160,14 +1160,33 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
-        public async Task<VendorPaymentDto> ReversePaymentAsync(
+        public Task<VendorPaymentDto> ReversePaymentAsync(
             Guid id,
             ReverseVendorPaymentDto dto,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) =>
+            ReversePaymentAsync(id, dto, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorPaymentDto> ReversePaymentAsync(
+            Guid id,
+            ReverseVendorPaymentDto dto,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
             ArgumentNullException.ThrowIfNull(dto);
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AP payment reversal.");
+
+            // SQL Server's retrying execution strategy must own the complete serializable
+            // transaction. Starting a user transaction before entering the strategy causes every
+            // production reversal to fail before the first write. The recursive scope mirrors the
+            // existing AP create/allocation/authorization transaction boundary and remains safe
+            // when a caller already owns a wider transaction.
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => ReversePaymentAsync(id, dto, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
 
             var initialPayment = await LoadPaymentForPostingAsync(id, cancellationToken);
             await _financeAccessScopeService.EnsureBankAccountAccessAsync(

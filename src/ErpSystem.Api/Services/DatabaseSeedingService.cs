@@ -7729,6 +7729,10 @@ namespace ErpSystem.Web.Services
                 {
                     "Finance.Read",
                     "Finance.Write",
+                    // Direct-payment policies assign their independent first-stage authority to
+                    // the Chief Accountant. The queue separately requires this permission, so the
+                    // role must be able to execute the approval it is configured to receive.
+                    "Finance.AP.Payments.Approve",
                     "Finance.BankAccounts.Manage",
                     "Finance.BankReconciliation.Perform",
                     "Finance.BankReconciliation.Approve",
