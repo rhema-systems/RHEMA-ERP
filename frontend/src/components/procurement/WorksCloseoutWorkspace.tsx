@@ -101,6 +101,14 @@ function checkStatus(value: WorksCloseoutCheck['status']): string {
     : value;
 }
 
+function checkMessage(check: WorksCloseoutCheck): string {
+  if (check.key === 'configuration' && checkStatus(check.status) === 'Failed') {
+    return 'Works closeout setup is not available. Ask an administrator to publish the required configuration.';
+  }
+
+  return check.message;
+}
+
 function retentionStage(value?: RetentionReleaseStage): string | undefined {
   if (value == null) return undefined;
   return typeof value === 'number' ? retentionReleaseStages[value] : value;
@@ -435,8 +443,7 @@ export function WorksCloseoutWorkspace({
           <div>
             <p className="font-semibold">Not a Works contract</p>
             <p className="text-sm text-muted-foreground">
-              TDC-0409 takeover and defects-liability controls are intentionally
-              unavailable for supply, service, and consultancy contracts.
+              Takeover and defects-liability controls are available only for Works contracts.
             </p>
           </div>
         </CardContent>
@@ -530,25 +537,11 @@ export function WorksCloseoutWorkspace({
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {check.message}
-                    </p>
-                    <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-                      {check.code}
+                      {checkMessage(check)}
                     </p>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {overview.decisionKeys.map((key) => (
-              <Badge
-                key={key}
-                variant="secondary"
-                className="font-mono text-[10px]"
-              >
-                {key}
-              </Badge>
             ))}
           </div>
         </CardContent>
@@ -1064,7 +1057,7 @@ export function WorksCloseoutWorkspace({
           </CardTitle>
           <CardDescription>
             Configuration, authority, workflow, source hashes, central evidence,
-            actors, and DEC-001 through DEC-014 are retained.
+            and actor history are retained.
           </CardDescription>
         </CardHeader>
         <CardContent>

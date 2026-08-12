@@ -419,8 +419,8 @@ export interface ContractOperationsDetail {
   kpis: Array<{
     key: string;
     label: string;
-    score?: number;
-    target?: number;
+    score?: number | null;
+    target?: number | null;
     status: string;
     sourceReference: string;
   }>;

@@ -461,6 +461,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
+                table.HasTrigger("TR_QsMeasurementSheets_Guard");
                 table.HasCheckConstraint("CK_QsMeasurementSheets_Status", "[Status] IN ('Draft','Recorded')");
                 table.HasCheckConstraint("CK_QsMeasurementSheets_Source", "[SourceType] IN (0,1) AND (([SourceType] = 0 AND [ProjectDrawingId] IS NOT NULL) OR ([SourceType] = 1 AND [SiteLocation] IS NOT NULL))");
                 table.HasCheckConstraint("CK_QsMeasurementSheets_Quantity", "[BoqQuantitySnapshot] >= 0 AND [TotalMeasuredQuantity] > 0");
@@ -476,6 +477,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
+                table.HasTrigger("TR_QsMeasurementLines_Guard");
                 table.HasCheckConstraint("CK_QsMeasurementLines_Formula", "[FormulaType] IN (0,1,2,3) AND [Timesing] > 0 AND (([FormulaType] = 0 AND [Length] IS NULL AND [Width] IS NULL AND [Height] IS NULL) OR ([FormulaType] = 1 AND [Length] > 0 AND [Width] IS NULL AND [Height] IS NULL) OR ([FormulaType] = 2 AND [Length] > 0 AND [Width] > 0 AND [Height] IS NULL) OR ([FormulaType] = 3 AND [Length] > 0 AND [Width] > 0 AND [Height] > 0))");
                 table.HasCheckConstraint("CK_QsMeasurementLines_Calculation", "[CalculatedQuantity] <> 0 AND (([IsDeduction] = 1 AND [CalculatedQuantity] < 0) OR ([IsDeduction] = 0 AND [CalculatedQuantity] > 0))");
             });
@@ -495,6 +497,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
+                table.HasTrigger("TR_QsMeasurementAttachments_Guard");
                 table.HasCheckConstraint("CK_QsMeasurementAttachments_Type", "[EvidenceType] IN (0,1,2,3)");
                 table.HasCheckConstraint("CK_QsMeasurementAttachments_File", "[FileSize] > 0 AND LEN([ChecksumSha256]) = 64 AND LEN([RequestHash]) = 64");
             });
@@ -506,6 +509,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.MeasurementSheet).WithMany().HasForeignKey(value => value.MeasurementSheetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(value => value.ActorUserId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table => table.HasTrigger("TR_QsMeasurementRevisions_Guard"));
         });
         builder.Entity<QuantitySurveyValuationWorksheet>(entity =>
         {
@@ -535,6 +539,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
+                table.HasTrigger("TR_QsValuationWorksheets_Guard");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Status", "[Status] IN ('Draft','ContractorSubmitted','UnderQsReview','QsVetted','ConsultantEndorsed','PendingApproval','Approved','Rejected')");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Approval", "[ApprovalStatus] IN ('Draft','Pending','Approved','Rejected')");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_StateAlignment", "([Status] IN ('Draft','ContractorSubmitted','UnderQsReview','QsVetted','ConsultantEndorsed') AND [ApprovalStatus] = 'Draft') OR ([Status] = 'PendingApproval' AND [ApprovalStatus] = 'Pending') OR ([Status] = 'Approved' AND [ApprovalStatus] = 'Approved') OR ([Status] = 'Rejected' AND [ApprovalStatus] = 'Rejected')");
@@ -556,6 +561,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
+                table.HasTrigger("TR_QsValuationWorksheetLines_Guard");
                 table.HasCheckConstraint("CK_QsValuationWorksheetLines_Quantities", "[BoqQuantitySnapshot] >= 0 AND [UnitRateSnapshot] >= 0 AND [MeasuredToDateQuantity] >= 0 AND [PreviouslyCertifiedQuantity] >= 0 AND [CurrentClaimedQuantity] >= [CurrentCertifiedQuantity] AND [CurrentCertifiedQuantity] >= [PreviouslyCertifiedQuantity] AND [CurrentClaimedQuantity] <= [MeasuredToDateQuantity] AND [DisputedQuantity] = [CurrentClaimedQuantity] - [CurrentCertifiedQuantity]");
                 table.HasCheckConstraint("CK_QsValuationWorksheetLines_Amounts", "[MeasuredToDateValue] >= 0 AND [PreviouslyCertifiedValue] >= 0 AND [CurrentClaimedValue] >= [CurrentCertifiedValue] AND [CurrentCertifiedValue] >= [PreviouslyCertifiedValue] AND [CurrentPeriodCertifiedValue] = [CurrentCertifiedValue] - [PreviouslyCertifiedValue] AND [DisputedValue] = [CurrentClaimedValue] - [CurrentCertifiedValue] AND [PreviousRetentionValue] >= 0 AND [RetentionToDateValue] >= [PreviousRetentionValue] AND [CurrentRetentionValue] = [RetentionToDateValue] - [PreviousRetentionValue] AND [NetCurrentValue] = [CurrentPeriodCertifiedValue] - [CurrentRetentionValue]");
                 table.HasCheckConstraint("CK_QsValuationWorksheetLines_DisputeNote", "[DisputedQuantity] = 0 OR LEN(LTRIM(RTRIM([ReviewNote]))) > 0");
@@ -569,6 +575,7 @@ public partial class ApplicationDbContext
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(value => value.ActorUserId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ErpSystem.Core.Entities.Procurement.BusinessPartner>().WithMany().HasForeignKey(value => value.ActorBusinessPartnerId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table => table.HasTrigger("TR_QsValuationWorksheetRevisions_AppendOnly"));
         });
         builder.Entity<QuantitySurveyValuationWorksheetEvidence>(entity =>
         {
@@ -585,6 +592,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(table =>
             {
+                table.HasTrigger("TR_QsValuationWorksheetEvidence_AppendOnly");
                 table.HasCheckConstraint("CK_QsValuationEvidence_Type", "[EvidenceType] IN (0,1,2,3,4,5,6)");
                 table.HasCheckConstraint("CK_QsValuationEvidence_File", "[FileSize] > 0 AND LEN([ChecksumSha256]) = 64 AND LEN([RequestHash]) = 64");
             });
@@ -596,6 +604,7 @@ public partial class ApplicationDbContext
             entity.HasOne(value => value.PaymentCertificate).WithMany().HasForeignKey(value => value.PaymentCertificateId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(value => value.ActorUserId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(value => value.Tenant).WithMany().HasForeignKey(value => value.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(table => table.HasTrigger("TR_QuantitySurveyPaymentCertificateRevisions_AppendOnly"));
         });
         builder.Entity<QuantitySurveyAdvanceRecoveryAgreement>(entity =>
         {
@@ -647,7 +656,11 @@ public partial class ApplicationDbContext
                 .HasFilter("[QuantitySurveyMaterialReconciliationId] IS NOT NULL AND [Status] <> 'Cancelled' AND [IsDeleted] = 0");
             entity.HasOne(value => value.QuantitySurveyMaterialReconciliation).WithMany()
                 .HasForeignKey(value => value.QuantitySurveyMaterialReconciliationId).OnDelete(DeleteBehavior.Restrict);
-            entity.ToTable(table => table.HasTrigger("TR_QS0507_PaymentCertificateMaterialLineage"));
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_ProjectPaymentCertificates_QsLifecycle");
+                table.HasTrigger("TR_QS0507_PaymentCertificateMaterialLineage");
+            });
         });
         builder.Entity<QuantitySurveyJointMeasurementRequest>(entity =>
         {

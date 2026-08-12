@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities;
@@ -37,7 +38,10 @@ public sealed class QuantitySurveySubcontractService(
     ICentralDocumentRepositoryFileService centralDocuments) : IQuantitySurveySubcontractService
 {
     private const long MaximumEvidenceBytes = 52_428_800;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
     private Guid TenantId => currentUser.TenantId is { } value && value != Guid.Empty
         ? value : throw new UnauthorizedAccessException("A valid tenant context is required.");
     private Guid UserId => Guid.TryParse(currentUser.UserId, out var value) && value != Guid.Empty
@@ -881,7 +885,9 @@ public sealed class QuantitySurveySubcontractService(
             value.Tender.SourcePurchaseRequisition.ProjectId == projectId);
 
     private IQueryable<BusinessPartner> PartnerQuery() => db.BusinessPartners.AsNoTracking().Where(value => value.TenantId == TenantId &&
-        !value.IsDeleted && value.IsActive && !value.IsBlacklisted && BusinessPartnerLifecyclePolicy.IsOperationalRegistration(value.RegistrationStatus) &&
+        !value.IsDeleted && value.IsActive && !value.IsBlacklisted &&
+        (value.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+         value.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
         (value.PartnerType == "Supplier" || value.PartnerType == "Contractor" || value.PartnerType == "Both"));
 
     private IQueryable<QuantitySurveySubcontract> Query(bool tracked = false)

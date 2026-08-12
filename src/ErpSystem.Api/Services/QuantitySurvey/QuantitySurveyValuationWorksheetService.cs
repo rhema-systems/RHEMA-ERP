@@ -15,6 +15,7 @@ using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Api.Services.QuantitySurvey;
 
@@ -27,6 +28,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
     private readonly IWorkflowStatusAdapterRegistry workflowAdapters;
     private readonly IControlledFileUploadService controlledFiles;
     private readonly ICentralDocumentRepositoryFileService centralDocuments;
+    private readonly ILogger<QuantitySurveyValuationWorksheetService> logger;
 
     public QuantitySurveyValuationWorksheetService(
         ApplicationDbContext db,
@@ -35,7 +37,8 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         IControlledFileUploadService controlledFiles,
-        ICentralDocumentRepositoryFileService centralDocuments)
+        ICentralDocumentRepositoryFileService centralDocuments,
+        ILogger<QuantitySurveyValuationWorksheetService> logger)
     {
         this.db = db;
         this.currentUser = currentUser;
@@ -44,6 +47,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
         this.workflowAdapters = workflowAdapters;
         this.controlledFiles = controlledFiles;
         this.centralDocuments = centralDocuments;
+        this.logger = logger;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -500,7 +504,13 @@ public sealed partial class QuantitySurveyValuationWorksheetService : IQuantityS
     private async Task SaveChangesAsync(CancellationToken token)
     {
         try { await db.SaveChangesAsync(token); }
-        catch (DbUpdateConcurrencyException) { throw Conflict("The valuation worksheet changed after it was loaded. Refresh and retry."); }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            var entries = string.Join(", ", exception.Entries.Select(entry => entry.Metadata.ClrType.Name));
+            logger.LogWarning(exception,
+                "QS valuation persistence reported a concurrency conflict for entries: {Entries}.", entries);
+            throw Conflict("The valuation worksheet changed after it was loaded. Refresh and retry.");
+        }
         catch (DbUpdateException exception) when (exception.InnerException is SqlException sql)
         {
             throw Conflict(sql.Number switch

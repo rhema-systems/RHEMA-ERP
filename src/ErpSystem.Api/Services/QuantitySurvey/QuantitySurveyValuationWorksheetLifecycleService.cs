@@ -1,5 +1,6 @@
 using System.Data;
 using System.Security.Cryptography;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -80,7 +81,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
         {
             var input = inputs[value.ProjectBoqVersionLineId];
             return QuantitySurveyValuationWorksheetRules.Calculate(value, input.CurrentClaimedQuantity,
-                value.PreviouslyCertifiedQuantity, retention, null);
+                value.PreviouslyCertifiedQuantity, retention, null, requireDisputeReviewNote: false);
         }).ToList();
         var totals = QuantitySurveyValuationWorksheetRules.Total(calculated);
         var mutationHash = Hash(new
@@ -113,7 +114,9 @@ public sealed partial class QuantitySurveyValuationWorksheetService
         ApplyRowVersion(entity, request.RowVersion);
         if (entity.Status != QuantitySurveyValuationWorkflowStatuses.Draft)
             throw Conflict("Only a Draft interim valuation claim can be submitted.");
-        await ValidateValuationReadinessAsync(entity, true, false, token);
+        // This action creates the contractor submission lineage. Requiring that
+        // lineage here would make the first governed submission impossible.
+        await ValidateValuationReadinessAsync(entity, false, false, token);
         if (entity.CurrentClaimedValue <= entity.PreviouslyCertifiedValue)
             throw Conflict("The contractor claim must contain a positive current-period value.");
         var signatureHash = ValidateValuationSignature(request.Signature, ContractorAttestation,
@@ -412,7 +415,8 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                 SourceEntityType = nameof(QuantitySurveyValuationWorksheetEvidence), SourceRecordId = evidenceId,
                 SourceRecordReference = entity.ProjectInterimValuation.ValuationNumber,
                 Title = $"{ValuationLabel(entity.ProjectInterimValuation)} · {title}",
-                DocumentType = request.EvidenceType.ToString(),
+                DocumentType = entity.EvidenceMetadataTemplate?.DocumentType
+                    ?? throw Conflict("The frozen interim-valuation DMS template is unavailable."),
                 MetadataTemplateCode = entity.EvidenceMetadataTemplateCodeSnapshot,
                 AccessProfile = entity.EvidenceMetadataTemplate?.AccessProfile ?? "Module restricted",
                 VersionStatus = "Validated", RequirePublishedGovernance = true,
@@ -427,9 +431,28 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                 ]
             }, token);
         }
-        catch { await controlledFiles.DeleteAsync(TenantId, upload.Record.Id, UserId, token); throw; }
+        catch (Exception failure)
+        {
+            await CleanupFailedValuationUploadAsync(upload.Record.Id, failure, token);
+            throw new InvalidOperationException("Unreachable after preserving the evidence-registration failure.");
+        }
         try
         {
+            // The shared upload and DMS owners save through this request-scoped DbContext.
+            // Reload the aggregate so its SQL rowversion cannot be stale when we touch it below.
+            db.ChangeTracker.Clear();
+            entity = await RequiredWorksheetAsync(worksheetId, true, token);
+            if (external)
+                actor = await RequireExternalValuationAsync(entity, false, true, token);
+            else
+                await RequireProjectAccessAsync(entity.ProjectId);
+            if (entity.Status is QuantitySurveyValuationWorkflowStatuses.PendingApproval or
+                QuantitySurveyValuationWorkflowStatuses.Approved or QuantitySurveyValuationWorkflowStatuses.Rejected)
+                throw Conflict("Evidence cannot be changed after the valuation enters approval or reaches a terminal state.");
+            if (entity.Evidence.Count >= MaximumValuationEvidenceFiles)
+                throw Validation($"An interim valuation can contain at most {MaximumValuationEvidenceFiles} evidence files.");
+            ValidateFrozenValuationPolicy(entity, policy);
+
             var before = Snapshot(entity);
             var evidence = new QuantitySurveyValuationWorksheetEvidence
             {
@@ -444,15 +467,54 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                 UploadedById = UserId, UploadedByName = UserName, UploadedAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = UserId
             };
-            entity.Evidence.Add(evidence);
-            TouchValuation(entity, QuantitySurveyAuditEventMap.AttachValuationEvidence, correlationId);
+            db.QuantitySurveyValuationWorksheetEvidence.Add(evidence);
             AddValuationRevision(entity, QuantitySurveyAuditEventMap.AttachValuationEvidence, title,
                 before, Snapshot(entity), correlationId, actor?.BusinessPartnerId);
             AddValuationAudit(entity, QuantitySurveyAuditEventMap.AttachValuationEvidence, before, Snapshot(entity), correlationId);
             await SaveChangesAsync(token);
             return MapValuationEvidence(evidence);
         }
-        catch { await centralDocuments.DeleteAsync(TenantId, document.DocumentRecordId, UserId, token); throw; }
+        catch (Exception failure)
+        {
+            await CleanupFailedValuationDocumentAsync(document.DocumentRecordId, failure, token);
+            throw new InvalidOperationException("Unreachable after preserving the valuation-evidence failure.");
+        }
+    }
+
+    private async Task CleanupFailedValuationUploadAsync(
+        Guid uploadId, Exception originalFailure, CancellationToken token)
+    {
+        db.ChangeTracker.Clear();
+        try
+        {
+            await controlledFiles.DeleteAsync(TenantId, uploadId, UserId, token);
+        }
+        catch (Exception cleanupFailure)
+        {
+            logger.LogError(cleanupFailure,
+                "Failed to compensate controlled QS valuation upload {UploadId} after {FailureType}.",
+                uploadId, originalFailure.GetType().Name);
+        }
+
+        ExceptionDispatchInfo.Capture(originalFailure).Throw();
+    }
+
+    private async Task CleanupFailedValuationDocumentAsync(
+        Guid documentRecordId, Exception originalFailure, CancellationToken token)
+    {
+        db.ChangeTracker.Clear();
+        try
+        {
+            await centralDocuments.DeleteAsync(TenantId, documentRecordId, UserId, token);
+        }
+        catch (Exception cleanupFailure)
+        {
+            logger.LogError(cleanupFailure,
+                "Failed to compensate central QS valuation document {DocumentRecordId} after {FailureType}.",
+                documentRecordId, originalFailure.GetType().Name);
+        }
+
+        ExceptionDispatchInfo.Capture(originalFailure).Throw();
     }
 
     public async Task<CentralDocumentRepositoryContent> OpenEvidenceAsync(

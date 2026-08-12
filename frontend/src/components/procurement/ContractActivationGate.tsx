@@ -52,6 +52,14 @@ function activationStatus(value: ContractActivation['status']): string {
   return typeof value === 'number' ? activationStatusNames[value] ?? String(value) : value;
 }
 
+function checkMessage(check: ContractActivationCheck): string {
+  if (check.key === 'configuration' && checkStatus(check.status) === 'Failed') {
+    return 'Contract activation setup is not available. Ask an administrator to publish the required configuration.';
+  }
+
+  return check.message;
+}
+
 function CheckIcon({ status }: { status: ContractActivationCheck['status'] }) {
   const value = checkStatus(status);
   if (value === 'Passed' || value === 'NotRequired') {
@@ -106,6 +114,10 @@ export function ContractActivationGate({
     [documents]
   );
   const current = overview?.history[0];
+  const activationComplete = Boolean(
+    overview?.contractStatus === 'Active' &&
+    overview.history.some((item) => activationStatus(item.status) === 'Activated')
+  );
   const failedChecks = overview?.checks.filter((check) => checkStatus(check.status) === 'Failed') ?? [];
   const requiredEvidenceKeys = overview?.requiredEvidenceKeys ?? [];
   const allEvidenceSelected = requiredEvidenceKeys.length > 0 &&
@@ -210,7 +222,7 @@ export function ContractActivationGate({
             <AlertTriangle className="mt-0.5 h-5 w-5" />
             <div>
               <p className="font-semibold">Activation controls unavailable</p>
-              <p className="text-sm">{error || 'The tenant-safe activation state could not be loaded.'}</p>
+              <p className="text-sm">{error || 'The activation state could not be loaded.'}</p>
             </div>
           </div>
           <Button variant="outline" onClick={() => void load()}>
@@ -242,7 +254,16 @@ export function ContractActivationGate({
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-2">
+          {activationComplete ? (
+            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
+              <CheckCircle2 className="mt-0.5 h-5 w-5" />
+              <div>
+                <p className="font-medium">Contract activated</p>
+                <p className="text-sm">The completed approval and activation history is retained below.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
             {overview.checks.map((check) => (
               <div key={check.key} className="rounded-lg border p-3">
                 <div className="flex items-start gap-2">
@@ -252,18 +273,13 @@ export function ContractActivationGate({
                       <p className="font-medium">{check.label}</p>
                       <Badge variant="outline">{checkStatus(check.status)}</Badge>
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">{check.message}</p>
-                    <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{check.code}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{checkMessage(check)}</p>
                   </div>
                 </div>
               </div>
             ))}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {overview.decisionKeys.map((key) => (
-              <Badge key={key} variant="secondary" className="font-mono text-[10px]">{key}</Badge>
-            ))}
-          </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

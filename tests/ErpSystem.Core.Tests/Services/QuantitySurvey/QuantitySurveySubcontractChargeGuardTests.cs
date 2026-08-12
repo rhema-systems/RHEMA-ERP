@@ -36,9 +36,11 @@ public sealed class QuantitySurveySubcontractChargeGuardTests
 
         chargeService.Should().Contain("QS-DEC-012")
             .And.Contain("QS-DEC-008")
+            .And.Contain("value.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus")
             .And.Contain("centralDocuments")
             .And.Contain("QuantitySurvey.SubcontractChargeNoticeIssued")
-            .And.Contain("QuantitySurvey.SubcontractChargeDecision");
+            .And.Contain("QuantitySurvey.SubcontractChargeDecision")
+            .And.NotContain("BusinessPartnerLifecyclePolicy.IsOperationalRegistration(value.RegistrationStatus)");
         valuationService.Should().Contain("QuantitySurveySubcontractChargeRules.SumApproved")
             .And.Contain("if (charges.Count > 0) await SaveAsync(token)")
             .And.Contain("Only independently approved, unapplied charge notices");

@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
@@ -37,7 +38,10 @@ public sealed class QuantitySurveySubcontractChargeService(
     private const long MaximumEvidenceBytes = 52_428_800;
     private const string IssueTopic = "QuantitySurvey.SubcontractChargeNoticeIssued";
     private const string DecisionTopic = "QuantitySurvey.SubcontractChargeDecision";
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
     private Guid TenantId => currentUser.TenantId is { } value && value != Guid.Empty
         ? value : throw new UnauthorizedAccessException("A valid tenant context is required.");
     private Guid UserId => Guid.TryParse(currentUser.UserId, out var value) && value != Guid.Empty
@@ -486,7 +490,8 @@ public sealed class QuantitySurveySubcontractChargeService(
             throw Conflict("The parent active Procurement Works contract no longer allows subcontracting.");
         if (!await db.BusinessPartners.AsNoTracking().AnyAsync(value => value.TenantId == TenantId &&
                 value.Id == subcontract.SubcontractorBusinessPartnerId && !value.IsDeleted && value.IsActive && !value.IsBlacklisted &&
-                BusinessPartnerLifecyclePolicy.IsOperationalRegistration(value.RegistrationStatus), token))
+                (value.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+                 value.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus), token))
             throw Conflict("The controlled subcontractor is no longer operational.");
         if (policy.EvidenceMetadataTemplateId == Guid.Empty || string.IsNullOrWhiteSpace(subcontract.PolicyHash))
             throw Conflict("The frozen subcontract charge policy lineage is incomplete.");

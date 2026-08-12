@@ -4706,6 +4706,68 @@ public class ProjectServiceTests
             EffectiveFrom = DateTime.UtcNow.AddDays(-1)
         };
 
+    [Fact]
+    public async Task AddMemberAsync_ShouldRequireAnActiveUserInTheCurrentTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-MEMBER-001",
+            Title = "Member validation"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.Projects.Add(project);
+        var foreignUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            UserName = "foreign.user",
+            IsActive = true
+        };
+        fixture.Users.Add(foreignUser);
+
+        var action = () => fixture.CreateService().AddMemberAsync(project.Id,
+            new AddProjectMemberDto { UserId = foreignUser.Id, Role = "QuantitySurveyor" });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not an active member of the current tenant*");
+        fixture.Members.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AddMemberAsync_ShouldPersistAControlledCurrentTenantUser()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-MEMBER-002",
+            Title = "Member validation"
+        };
+        var selectedUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserName = "qs.user",
+            IsActive = true
+        };
+        var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.Projects.Add(project);
+        fixture.Users.Add(selectedUser);
+
+        var result = await fixture.CreateService().AddMemberAsync(project.Id,
+            new AddProjectMemberDto { UserId = selectedUser.Id, Role = "QuantitySurveyor" });
+
+        result.UserId.Should().Be(selectedUser.Id);
+        fixture.Members.Should().ContainSingle(item => item.ProjectId == project.Id &&
+            item.UserId == selectedUser.Id && item.TenantId == tenantId);
+    }
+
     private sealed class ProjectServiceFixture
     {
         public List<Project> Projects { get; } = new();

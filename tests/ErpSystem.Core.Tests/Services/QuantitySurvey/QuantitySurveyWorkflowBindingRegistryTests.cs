@@ -16,7 +16,7 @@ public sealed class QuantitySurveyWorkflowBindingRegistryTests
             .Select(value => value.Code)
             .ToHashSet(StringComparer.Ordinal);
 
-        bindings.Should().HaveCount(11);
+        bindings.Should().HaveCount(12);
         bindings.Select(value => $"{value.DecisionKey}:{value.ConfigurationField}")
             .Should().OnlyHaveUniqueItems();
         bindings.Select(value => value.EntityTypeCode)

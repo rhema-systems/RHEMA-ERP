@@ -43,6 +43,8 @@ public sealed class QuantitySurveyMeasurementGuardTests
         service.Should().Contain("DecisionKey == \"QS-DEC-007\"");
         service.Should().Contain("FileVirusScanStatus.Clean");
         service.Should().Contain("RequirePublishedGovernance = true");
+        service.Should().Contain("DocumentType = sheet.EvidenceMetadataTemplate.DocumentType");
+        service.Should().NotContain("DocumentType = request.EvidenceType.ToString()");
         service.Should().Contain("ApplyRowVersion(entity, request.RowVersion)");
         service.Should().Contain("FixedEquals(existing.RequestHash, requestHash)");
         service.Should().NotContain("new Project(");

@@ -43,6 +43,18 @@ public sealed class QuantitySurveyValuationWorksheetRulesTests
     }
 
     [Fact]
+    public void Calculate_allows_an_unreviewed_contractor_claim_before_qs_certification()
+    {
+        var result = QuantitySurveyValuationWorksheetRules.Calculate(
+            Source(), 9m, 5m, 10m, null, requireDisputeReviewNote: false);
+
+        result.CurrentClaimedQuantity.Should().Be(9m);
+        result.CurrentCertifiedQuantity.Should().Be(5m);
+        result.DisputedQuantity.Should().Be(4m);
+        result.ReviewNote.Should().BeNull();
+    }
+
+    [Fact]
     public void Total_equals_the_sum_of_governed_line_calculations()
     {
         var first = QuantitySurveyValuationWorksheetRules.Calculate(Source(), 9m, 9m, 10m, null);

@@ -44,10 +44,15 @@ public sealed class QuantitySurveyValuationWorkflowGuardTests
         lifecycle.Should().Contain("WorkflowStepType.Approval");
         lifecycle.Should().Contain("controlledFiles.UploadAsync");
         lifecycle.Should().Contain("centralDocuments.RegisterAsync");
+        lifecycle.Should().Contain("entity.EvidenceMetadataTemplate?.DocumentType");
+        lifecycle.Should().NotContain("DocumentType = request.EvidenceType.ToString()");
+        lifecycle.Should().Contain("db.ChangeTracker.Clear()");
+        lifecycle.Should().Contain("CleanupFailedValuationDocumentAsync");
+        lifecycle.Should().Contain("ExceptionDispatchInfo.Capture(originalFailure).Throw()");
         lifecycle.Should().Contain("ProjectExternalAccessPolicies");
         lifecycle.Should().Contain("BusinessPartnerUsers");
+        lifecycle.Should().Contain("ValidateValuationReadinessAsync(entity, false, false, token);");
         lifecycle.Should().Contain("QuantitySurveyValuationWorksheetRules.RequireIndependentApprover");
-        lifecycle.Should().NotContain("catch (Exception");
     }
 
     [Fact]
@@ -69,6 +74,27 @@ public sealed class QuantitySurveyValuationWorkflowGuardTests
         portal.Should().Contain("service.saveContractorClaim");
         portal.Should().Contain("service.submitContractorClaim");
         portal.Should().Contain("service.endorseConsultant");
+    }
+
+    [Fact]
+    public void Every_qs_dec_008_runtime_consumer_accepts_the_registered_string_enum_contract()
+    {
+        var root = FindRepositoryRoot();
+        var services = new[]
+        {
+            "QuantitySurveyPaymentCertificateService.cs",
+            "QuantitySurveyAdvanceRecoveryService.cs",
+            "QuantitySurveySubcontractService.cs",
+            "QuantitySurveySubcontractChargeService.cs"
+        };
+
+        foreach (var service in services)
+        {
+            var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services",
+                "QuantitySurvey", service));
+            source.Should().Contain("new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)",
+                $"{service} consumes the string-valued QS-DEC-008 taxHandling field");
+        }
     }
 
     private static string FindRepositoryRoot([System.Runtime.CompilerServices.CallerFilePath] string sourceFile = "")

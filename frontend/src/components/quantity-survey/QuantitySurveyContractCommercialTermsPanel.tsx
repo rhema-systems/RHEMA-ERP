@@ -39,20 +39,20 @@ export function QuantitySurveyContractCommercialTermsPanel({
   const [form, setForm] = useState<ContractCommercialTerms | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!canRead) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const value = await service.workspace(contractId);
       setWorkspace(value);
       setForm(value.terms);
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Commercial terms could not be loaded.'
-      );
+      const message = error instanceof Error ? error.message : 'Commercial terms could not be loaded.';
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -108,14 +108,28 @@ export function QuantitySurveyContractCommercialTermsPanel({
   };
 
   if (!canRead) return null;
-  if (loading || !workspace || !form)
+  if (loading)
     return (
       <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading governed commercial terms…
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading commercial terms…
       </div>
+    );
+  if (loadError || !workspace || !form)
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Commercial terms could not be loaded</AlertTitle>
+        <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+          <span>{loadError || 'Refresh the contract and try again.'}</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+            <RefreshCw className="mr-2 h-4 w-4" /> Retry
+          </Button>
+        </AlertDescription>
+      </Alert>
     );
 
   const editable = workspace.isEditable && canManage;
+  const isDraft = form.contractStatus === 'Draft';
   const money = (value: number) =>
     new Intl.NumberFormat(undefined, {
       style: 'currency',
@@ -144,7 +158,13 @@ export function QuantitySurveyContractCommercialTermsPanel({
         </div>
       </div>
 
-      {workspace.readinessBlockers.length ? (
+      {!isDraft ? (
+        <Alert>
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertTitle>Commercial terms on record</AlertTitle>
+          <AlertDescription>These terms are locked because the contract is no longer in Draft.</AlertDescription>
+        </Alert>
+      ) : workspace.readinessBlockers.length ? (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Activation is not ready</AlertTitle>
@@ -158,7 +178,7 @@ export function QuantitySurveyContractCommercialTermsPanel({
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Commercial terms ready</AlertTitle>
-          <AlertDescription>The current terms pass the QS-0520 activation readiness check.</AlertDescription>
+          <AlertDescription>The current terms pass the activation readiness check.</AlertDescription>
         </Alert>
       )}
 

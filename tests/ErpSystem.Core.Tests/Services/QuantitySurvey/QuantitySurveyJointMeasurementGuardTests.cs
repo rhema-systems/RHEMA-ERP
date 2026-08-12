@@ -44,6 +44,8 @@ public sealed class QuantitySurveyJointMeasurementGuardTests
         service.Should().Contain("WorkflowSignatureValidator.Validate");
         service.Should().Contain("workflow.SubmitAsync");
         service.Should().Contain("controlledFiles.UploadAsync");
+        service.Should().Contain("DocumentType = entity.EvidenceMetadataTemplate.DocumentType");
+        service.Should().NotContain("DocumentType = request.EvidenceType.ToString()");
         service.Should().Contain("CreateProjectBoqRemeasurementAsync");
         service.Should().Contain("RemeasurementClientRequestId");
         project.Should().Contain("JointMeasurement");
