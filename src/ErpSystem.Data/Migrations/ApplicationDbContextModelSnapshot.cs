@@ -11122,6 +11122,17 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("OpeningBalanceBatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OpeningBalanceType")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("OpeningSourceReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTime>("PaymentDate")
                         .HasColumnType("datetime2");
 
@@ -11250,6 +11261,9 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("WithholdingTaxId");
 
                     b.HasIndex("TenantId", "PaymentMethodId");
+
+                    b.HasIndex("TenantId", "OpeningBalanceBatchId")
+                        .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "LiquidityAccountId", "PaymentDate");
 
@@ -19011,10 +19025,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("TransactionCreditAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("TransactionCurrencyCode")
                         .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal?>("TransactionDebitAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -23697,6 +23717,17 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("OpeningBalanceBatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OpeningBalanceType")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("OpeningSourceReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<Guid?>("PaymentBatchId")
                         .HasColumnType("uniqueidentifier");
 
@@ -23829,6 +23860,9 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "InvoicePaymentSodControlEventId");
 
                     b.HasIndex("TenantId", "PaymentMethodId");
+
+                    b.HasIndex("TenantId", "OpeningBalanceBatchId")
+                        .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
 
                     b.ToTable("VendorPayment", null, t =>
                         {

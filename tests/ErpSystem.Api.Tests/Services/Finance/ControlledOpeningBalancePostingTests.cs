@@ -2,11 +2,14 @@ using ErpSystem.Api.Services.Finance.Cash;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Api.Services.Finance.Migration;
+using ErpSystem.Api.Services.Finance.Taxation;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -24,6 +27,218 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class ControlledOpeningBalancePostingTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SpecializedOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task SupplierAndCustomerAdvanceOpenings_ShouldPostAndRemainVisibleAsUnappliedAdvances()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var supplierBatch = await service.CreateSupplierAdvanceBatchAsync(new CreateSupplierAdvanceOpeningBalanceDto
+        {
+            SupplierId = fixture.Supplier.Id,
+            SourceReference = "TDC-AP-ADV-001",
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            CurrencyCode = "GHS",
+            Amount = 1_500m
+        });
+        var customerBatch = await service.CreateCustomerAdvanceBatchAsync(new CreateCustomerAdvanceOpeningBalanceDto
+        {
+            CustomerId = fixture.Customer.Id,
+            SourceReference = "TDC-AR-ADV-001",
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            CurrencyCode = "GHS",
+            Amount = 900m
+        });
+
+        await service.SubmitForApprovalAsync(supplierBatch.Id);
+        await service.PostAsync(supplierBatch.Id);
+        await service.SubmitForApprovalAsync(customerBatch.Id);
+        await service.PostAsync(customerBatch.Id);
+
+        var supplierAdvance = await db.Set<VendorPayment>().SingleAsync(payment => payment.OpeningBalanceBatchId == supplierBatch.Id);
+        supplierAdvance.IsSupplierAdvance.Should().BeTrue();
+        supplierAdvance.TotalAmount.Should().Be(1_500m);
+        supplierAdvance.Status.Should().Be(VendorPaymentStatus.Cleared);
+        supplierAdvance.JournalEntryId.Should().NotBeNull();
+        var customerAdvance = await db.Set<CustomerPayment>().SingleAsync(payment => payment.OpeningBalanceBatchId == customerBatch.Id);
+        customerAdvance.IsCustomerAdvance.Should().BeTrue();
+        customerAdvance.TotalAmount.Should().Be(900m);
+        customerAdvance.Status.Should().Be("Cleared");
+        customerAdvance.JournalEntryId.Should().NotBeNull();
+
+        // A single opening-batch posting event is the immutable GL source. The rebuild deliberately
+        // follows the source back-link so the canonical advance lot is still available for matching.
+        var currentUser = CreateCurrentUser(tenantId);
+        var readModel = new SubledgerSettlementReadModelService(
+            db, currentUser.Object, Mock.Of<ILogger<SubledgerSettlementReadModelService>>());
+        await readModel.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+        {
+            SourceModule = "Both",
+            AsOfDate = new DateTime(2026, 1, 31)
+        });
+
+        (await db.SubledgerUnappliedSettlementBalances.SingleAsync(item => item.SettlementSourceId == supplierAdvance.Id))
+            .Classification.Should().Be(SubledgerUnappliedSettlementClassifications.SupplierAdvance);
+        (await db.SubledgerUnappliedSettlementBalances.SingleAsync(item => item.SettlementSourceId == customerAdvance.Id))
+            .Classification.Should().Be(SubledgerUnappliedSettlementClassifications.CustomerAdvance);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SpecializedOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task ForeignSupplierAdvanceOpening_ShouldPreserveNativeAndFunctionalEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        var rate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 15m, InverseRate = 0.066667m, EffectiveDate = new DateTime(2026, 1, 1),
+            RateType = ExchangeRateType.Daily, RateSource = "TDC cutover evidence", IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved, CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.Add(rate);
+        fixture.SupplierAdvance.IsMultiCurrency = true;
+        db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountId = fixture.SupplierAdvance.Id,
+            LinkedCurrencyCode = "USD", IsActive = true, EffectiveDate = new DateTime(2026, 1, 1),
+            RevaluationRequired = true, TransactionRateType = "Daily", RevaluationRateType = "Month-End"
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var batch = await service.CreateSupplierAdvanceBatchAsync(new CreateSupplierAdvanceOpeningBalanceDto
+        {
+            SupplierId = fixture.Supplier.Id,
+            SourceReference = "TDC-USD-ADV-001",
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            CurrencyCode = "USD",
+            Amount = 100m,
+            ExchangeRateId = rate.Id,
+            ExchangeRate = 15m
+        });
+
+        // Native USD is the future allocation quantity; GHS is the immutable GL value. Keeping
+        // both prevents later settlement code from treating GHS 1,500 as USD 1,500.
+        var sourceLine = await db.OpeningBalanceLines.SingleAsync(line =>
+            line.OpeningBalanceBatchId == batch.Id && line.CounterpartyType == "SupplierAdvanceOpening");
+        sourceLine.TransactionCurrencyCode.Should().Be("USD");
+        sourceLine.FunctionalCurrencyCode.Should().Be("GHS");
+        sourceLine.TransactionDebitAmount.Should().Be(100m);
+        sourceLine.DebitAmount.Should().Be(1_500m);
+        sourceLine.ExchangeRateId.Should().Be(rate.Id);
+
+        var payment = await db.Set<VendorPayment>().SingleAsync(item => item.OpeningBalanceBatchId == batch.Id);
+        payment.TotalAmount.Should().Be(100m);
+        payment.ExchangeRate.Should().Be(15m);
+        payment.ExchangeRateId.Should().Be(rate.Id);
+
+        await service.SubmitForApprovalAsync(batch.Id);
+        var posted = await service.PostAsync(batch.Id);
+        posted.Status.Should().Be("Posted");
+        var postedLine = await db.AccountTransactions.SingleAsync(transaction =>
+            transaction.JournalEntryId == posted.JournalEntryId && transaction.AccountId == fixture.SupplierAdvance.Id);
+        postedLine.TransactionCurrency.Should().Be("USD");
+        postedLine.TransactionDebitAmount.Should().Be(100m);
+        postedLine.DebitAmount.Should().Be(1_500m);
+        postedLine.ExchangeRateId.Should().Be(rate.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SpecializedOpeningBalances")]
+    [Trait("Requirement", "FIN-LIM-0048")]
+    public async Task WithholdingOpenings_ShouldFeedExistingCertificateAndStatutoryEvidenceWorkflows()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var apBatch = await service.CreateApWithholdingBatchAsync(new CreateApWithholdingOpeningBalanceDto
+        {
+            SupplierId = fixture.Supplier.Id,
+            TaxId = fixture.WithholdingTax.Id,
+            WithholdingTaxAccountId = fixture.WhtPayable.Id,
+            SourceReference = "TDC-WHT-PAY-001",
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            CurrencyCode = "GHS",
+            TaxableBase = 1_000m,
+            NetPaidAmount = 925m,
+            Amount = 75m
+        });
+        var arBatch = await service.CreateArWithholdingBatchAsync(new CreateArWithholdingOpeningBalanceDto
+        {
+            CustomerId = fixture.Customer.Id,
+            TaxId = fixture.WithholdingTax.Id,
+            WithholdingTaxAccountId = fixture.WhtReceivable.Id,
+            SourceReference = "TDC-WHT-CERT-001",
+            CertificateNumber = "GRA-CERT-OPEN-001",
+            CertificateDate = new DateTime(2025, 12, 20),
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            CurrencyCode = "GHS",
+            Amount = 45m
+        });
+
+        await service.SubmitForApprovalAsync(apBatch.Id);
+        await service.PostAsync(apBatch.Id);
+        await service.SubmitForApprovalAsync(arBatch.Id);
+        await service.PostAsync(arBatch.Id);
+
+        var compliance = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+        var register = await compliance.GetApCertificatesAsync(new WhtCertificateQueryDto { Page = 1, PageSize = 20 });
+        register.Items.Should().ContainSingle(item =>
+            item.WithholdingAmount == 75m && item.TaxableBase == 1_000m && item.TaxRate == 7.5m);
+        (await compliance.GetUnremittedLiabilitiesAsync(null, null, "GHS"))
+            .Should().ContainSingle(item => item.WithholdingAmount == 75m);
+
+        var arEvidence = await db.Set<CustomerPayment>().SingleAsync(payment => payment.OpeningBalanceBatchId == arBatch.Id);
+        arEvidence.WithholdingTaxAmount.Should().Be(45m);
+        arEvidence.WithholdingCertificateNumber.Should().Be("GRA-CERT-OPEN-001");
+        arEvidence.JournalEntryId.Should().NotBeNull();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-SpecializedOpeningBalances")]
+    [Trait("Category", "AccountingControl")]
+    public async Task WithholdingOpening_ShouldRejectAnAccountNotMappedOnTheTaxMaster()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+
+        var act = () => service.CreateApWithholdingBatchAsync(new CreateApWithholdingOpeningBalanceDto
+        {
+            SupplierId = fixture.Supplier.Id,
+            TaxId = fixture.WithholdingTax.Id,
+            WithholdingTaxAccountId = fixture.Equity.Id,
+            OpeningDate = new DateTime(2026, 1, 1),
+            FiscalPeriodId = fixture.Period.Id,
+            CurrencyCode = "GHS",
+            TaxableBase = 1_000m,
+            NetPaidAmount = 925m,
+            Amount = 75m
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not the payable account configured*");
+        (await db.OpeningBalanceBatches.CountAsync()).Should().Be(0);
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-SubledgerOpeningBalances")]
     [Trait("Requirement", "FIN-LIM-0048")]
@@ -1274,16 +1489,45 @@ public sealed class ControlledOpeningBalancePostingTests
         var period = SeedPeriod(db, tenantId, isOpen, isClosed);
         var cash = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var equity = SeedAccount(db, tenantId, "3000", AccountType.Equity);
+        var supplierAdvance = SeedAccount(db, tenantId, "1200", AccountType.Asset);
+        var customerAdvance = SeedAccount(db, tenantId, "2200", AccountType.Liability);
+        var whtPayable = SeedAccount(db, tenantId, "2300", AccountType.Liability);
+        var whtReceivable = SeedAccount(db, tenantId, "1300", AccountType.Asset);
+        var supplier = new Supplier
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, SupplierCode = $"SUP-{tenantId:N}"[..12],
+            Name = "TDC cutover supplier", IsActive = true, Status = "Active", TaxId = "TDC-SUP-TIN"
+        };
+        var customer = new Customer
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CustomerCode = $"CUS-{tenantId:N}"[..12],
+            CustomerName = "TDC cutover customer", ReferenceNumber = $"CUS-{tenantId:N}"[..18],
+            Status = "Active", IsActive = true, CurrencyCode = "GHS"
+        };
+        var withholdingTax = new Tax
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "WHT-SVC", Name = "Services WHT",
+            Rate = 7.5m, EffectiveFrom = new DateTime(2025, 1, 1), Category = TaxCategory.Withholding,
+            Applicability = TaxApplicability.Both, IsActive = true,
+            TaxPayableAccountId = whtPayable.Id, TaxReceivableAccountId = whtReceivable.Id
+        };
+        db.Suppliers.Add(supplier);
+        db.Set<Customer>().Add(customer);
+        db.Taxes.Add(withholdingTax);
         db.FinanceSettings.Add(new FinanceSettings
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             BaseCurrency = "GHS",
             MigrationClearingAccountId = equity.Id,
+            SupplierAdvanceAccountId = supplierAdvance.Id,
+            CustomerAdvanceAccountId = customerAdvance.Id,
             ReferenceNumber = "FIN-SETTINGS",
             Status = "Active"
         });
-        return new OpeningBalanceFixture(period, cash, equity);
+        return new OpeningBalanceFixture(
+            period, cash, equity, supplierAdvance, customerAdvance, whtPayable, whtReceivable,
+            supplier, customer, withholdingTax);
     }
 
     private static FixedAssetOpeningFixture SeedFixedAssetOpeningFixture(
@@ -1528,7 +1772,17 @@ public sealed class ControlledOpeningBalancePostingTests
         throw new InvalidOperationException("Repository root could not be located.");
     }
 
-    private sealed record OpeningBalanceFixture(FiscalPeriod Period, Account Cash, Account Equity);
+    private sealed record OpeningBalanceFixture(
+        FiscalPeriod Period,
+        Account Cash,
+        Account Equity,
+        Account SupplierAdvance,
+        Account CustomerAdvance,
+        Account WhtPayable,
+        Account WhtReceivable,
+        Supplier Supplier,
+        Customer Customer,
+        Tax WithholdingTax);
     private sealed record FixedAssetOpeningFixture(
         FixedAsset Asset,
         FixedAssetBookValue BookValue,

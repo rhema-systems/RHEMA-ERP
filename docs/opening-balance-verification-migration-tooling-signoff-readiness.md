@@ -110,8 +110,10 @@ GL-only opening balances are not sufficient for subledger sign-off where open so
 - AP opening invoices must be loaded through the existing canonical AP opening-invoice path if production cutover needs AP aging.
 - AR opening invoices must be loaded through the existing canonical AR opening-invoice path if production cutover needs AR aging.
 - Fixed asset opening registers must be imported as opening book values and posted through the generated, maker-checker-controlled fixed-asset opening batch if production cutover needs asset register reporting.
+- Unapplied supplier/customer advances must be prepared through **Advances & WHT** so they remain available as individually allocatable advance lots without replaying historical cash.
+- Unremitted AP WHT and outstanding AR WHT certificates must be prepared through the same workspace so statutory evidence survives cutover and reconciles to the tax control accounts.
 
-Generic GL lines still cannot masquerade as subledger evidence. Specialised unapplied advances and withholding/certificate opening records remain under `FIN-LIM-0048` until TDC confirms and rehearses their required cutover shape.
+Generic GL lines still cannot masquerade as subledger evidence. TDC confirmed the specialised cutover shape, and `FIN-LIM-0048` implementation now covers it; representative-data rehearsal and accountant sign-off remain under `FIN-LIM-0017`.
 
 ## Final Migration/Sign-Off Checklist
 
@@ -231,4 +233,4 @@ Focused tests are in `ControlledOpeningBalancePostingTests`:
 - `FIN-LIM-0007`: resolved for tenant-safe back-reference diagnostics and repair.
 - `FIN-LIM-0008`: resolved for bank snapshot diagnostics and rebuild.
 - `FIN-LIM-0017`: materially narrowed but still open until production migration execution and accountant sign-off evidence are completed.
-- `FIN-LIM-0048`: partially resolved for canonical AP/AR opening invoices and controlled fixed-asset register-to-GL opening evidence; specialised advance and withholding/certificate cutover requirements remain open pending TDC confirmation and rehearsal.
+- `FIN-LIM-0048`: implementation resolved for canonical AP/AR opening invoices, controlled fixed-asset register-to-GL evidence, unapplied advances, and WHT/certificate opening records. Representative-data rehearsal remains a `FIN-LIM-0017` acceptance activity.

@@ -59,6 +59,13 @@ public class OpeningBalanceLine : TenantEntity
     public decimal DebitAmount { get; set; }
     public decimal CreditAmount { get; set; }
 
+    /// <summary>
+    /// Optional native-currency quantities. GL debit/credit remain functional amounts; these
+    /// fields preserve the exact foreign advance lot that later allocation and FX accounting use.
+    /// </summary>
+    public decimal? TransactionDebitAmount { get; set; }
+    public decimal? TransactionCreditAmount { get; set; }
+
     [MaxLength(3)]
     public string TransactionCurrencyCode { get; set; } = "GHS";
 

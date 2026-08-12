@@ -29,6 +29,26 @@ public sealed class OpeningBalancesController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _openingBalanceService.CreateFixedAssetBatchAsync(dto, cancellationToken));
 
+    [HttpPost("supplier-advances")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateSupplierAdvance([FromBody] CreateSupplierAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateSupplierAdvanceBatchAsync(dto, cancellationToken));
+
+    [HttpPost("customer-advances")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateCustomerAdvance([FromBody] CreateCustomerAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateCustomerAdvanceBatchAsync(dto, cancellationToken));
+
+    [HttpPost("ap-withholding")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateApWithholding([FromBody] CreateApWithholdingOpeningBalanceDto dto, CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateApWithholdingBatchAsync(dto, cancellationToken));
+
+    [HttpPost("ar-withholding")]
+    public async Task<ActionResult<OpeningBalanceBatchDto>> CreateArWithholding([FromBody] CreateArWithholdingOpeningBalanceDto dto, CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.CreateArWithholdingBatchAsync(dto, cancellationToken));
+
+    [HttpGet("specialized-options")]
+    public async Task<ActionResult<SpecializedOpeningBalanceOptionsDto>> GetSpecializedOptions(CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.GetSpecializedOptionsAsync(cancellationToken));
+
     [HttpGet("subledger-readiness")]
     public async Task<ActionResult<SubledgerOpeningBalanceReadinessDto>> GetSubledgerReadiness(
         CancellationToken cancellationToken)
