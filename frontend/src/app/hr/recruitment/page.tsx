@@ -7,6 +7,7 @@ import {
   CalendarClock,
   ClipboardList,
   FileText,
+  Gauge,
   HandCoins,
   Megaphone,
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid, type NavCardItem } from '@/components/hr/common/NavCardGrid';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
+import { useAuth } from '@/hooks/use-auth';
 import { jobOfferService } from '@/services/hr/offers.service';
 import {
   jobPostingService,
@@ -34,7 +36,13 @@ import {
  * Screening and the pipeline board are deliberately absent here: both are scoped to one vacancy and
  * are reached from that vacancy, not from a register of their own.
  */
-const ITEMS: NavCardItem[] = [
+const HR_ITEMS: NavCardItem[] = [
+  {
+    title: 'Dashboard',
+    description: 'Pipeline shape, SLA breaches, what starts soon and what expires soon.',
+    href: '/hr/recruitment/dashboard',
+    icon: Gauge,
+  },
   {
     title: 'Establishment',
     description: 'Where headcount sits against the establishment, and the gaps that follow.',
@@ -103,25 +111,42 @@ const ITEMS: NavCardItem[] = [
   },
 ];
 
+/** Open to any authenticated employee, HR or not — see `/hr/recruitment/job-board`'s doc comment. */
+const EVERYONE_ITEMS: NavCardItem[] = [
+  {
+    title: 'Internal job board',
+    description: 'Open roles you can apply for, and the applications you have already made.',
+    href: '/hr/recruitment/job-board',
+    icon: Megaphone,
+  },
+];
+
 export default function RecruitmentLandingPage() {
+  const { hasAnyRole } = useAuth();
+  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+
   const requisitions = useQuery({
     queryKey: ['hr', 'requisitions', 'summary'],
     queryFn: () => staffRequisitionService.getStatusSummary(),
+    enabled: isHr,
   });
 
   const gaps = useQuery({
     queryKey: ['hr', 'position-vacancy-stats'],
     queryFn: () => positionVacancyService.getStats(),
+    enabled: isHr,
   });
 
   const adverts = useQuery({
     queryKey: ['hr', 'postings', 'active'],
     queryFn: () => jobPostingService.getActive(),
+    enabled: isHr,
   });
 
   const expiringOffers = useQuery({
     queryKey: ['hr', 'offers', 'expiring'],
     queryFn: () => jobOfferService.getExpiring(7),
+    enabled: isHr,
   });
 
   const r = requisitions.data;
@@ -134,26 +159,28 @@ export default function RecruitmentLandingPage() {
         backHref="/hr"
       />
 
-      <MetricTiles
-        tiles={[
-          { label: 'Open establishment gaps', value: gaps.data?.totalOpen ?? '—' },
-          {
-            label: 'Awaiting approval',
-            value: r ? r.submitted + r.underReview : '—',
-            hint: 'Requisitions with an approver',
-          },
-          { label: 'Approved requisitions', value: r?.approved ?? '—' },
-          { label: 'Live adverts', value: adverts.data?.length ?? '—' },
-          {
-            label: 'Offers expiring soon',
-            value: expiringOffers.data?.length ?? '—',
-            hint: 'Within 7 days',
-            tone: (expiringOffers.data?.length ?? 0) > 0 ? 'warning' : 'default',
-          },
-        ]}
-      />
+      {isHr && (
+        <MetricTiles
+          tiles={[
+            { label: 'Open establishment gaps', value: gaps.data?.totalOpen ?? '—' },
+            {
+              label: 'Awaiting approval',
+              value: r ? r.submitted + r.underReview : '—',
+              hint: 'Requisitions with an approver',
+            },
+            { label: 'Approved requisitions', value: r?.approved ?? '—' },
+            { label: 'Live adverts', value: adverts.data?.length ?? '—' },
+            {
+              label: 'Offers expiring soon',
+              value: expiringOffers.data?.length ?? '—',
+              hint: 'Within 7 days',
+              tone: (expiringOffers.data?.length ?? 0) > 0 ? 'warning' : 'default',
+            },
+          ]}
+        />
+      )}
 
-      <NavCardGrid items={ITEMS} />
+      <NavCardGrid items={isHr ? [...HR_ITEMS, ...EVERYONE_ITEMS] : EVERYONE_ITEMS} />
     </div>
   );
 }

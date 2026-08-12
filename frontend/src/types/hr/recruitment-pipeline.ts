@@ -573,6 +573,25 @@ export interface CreateJobApplication {
   coverLetter?: string | null;
 }
 
+// ── internal job board ──────────────────────────────────────────────────────
+// The one exception to this file's HR gate — see `api/job-applications`' class doc comment.
+// All three act on the caller's own applications only, taking the employee from the token.
+
+export interface InternalApplyForVacancy {
+  vacancyId: string;
+  yearsOfExperience?: number | null;
+  availableFrom?: string | null;
+  coverLetter?: string | null;
+}
+
+export type InternalSaveDraft = InternalApplyForVacancy;
+
+export interface InternalSubmitDraft {
+  yearsOfExperience?: number | null;
+  availableFrom?: string | null;
+  coverLetter?: string | null;
+}
+
 export interface ApplicationStageHistory {
   id: string;
   jobApplicationId: string;

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Loader2, Megaphone, Plus, Send, TimerOff, Trash2 } from 'lucide-react';
+import { ExternalLink, Loader2, Megaphone, Paperclip, Plus, Send, TimerOff, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
@@ -69,6 +70,7 @@ export function VacancyPostingsPanel({
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<JobPostingForm>(blank);
+  const [attachmentsFor, setAttachmentsFor] = useState<string | null>(null);
 
   const postings = useQuery({
     queryKey: ['hr', 'vacancy-postings', vacancyId],
@@ -179,7 +181,7 @@ export function VacancyPostingsPanel({
                 <TableHead>Published</TableHead>
                 <TableHead>Expires</TableHead>
                 <TableHead className="text-right">Applications</TableHead>
-                {canManage && <TableHead className="w-32" />}
+                <TableHead className="w-40" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -206,9 +208,18 @@ export function VacancyPostingsPanel({
                   <TableCell>{formatDate(p.actualPublishDate ?? p.publishDate)}</TableCell>
                   <TableCell>{formatDate(p.expiryDate)}</TableCell>
                   <TableCell className="text-right tabular-nums">{p.applicationCount}</TableCell>
-                  {canManage && (
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1">
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Attachments"
+                        onClick={() => setAttachmentsFor(p.id)}
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </Button>
+                      {canManage && (
+                        <>
                         {p.status === 'Draft' && (
                           <Button
                             variant="ghost"
@@ -246,15 +257,47 @@ export function VacancyPostingsPanel({
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         )}
-                      </div>
-                    </TableCell>
-                  )}
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
       </CardContent>
+
+      <Dialog open={attachmentsFor !== null} onOpenChange={(o) => !o && setAttachmentsFor(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Advert attachments</DialogTitle>
+            <DialogDescription>Creative assets, agency terms, or a signed insertion order.</DialogDescription>
+          </DialogHeader>
+          {attachmentsFor && (
+            <AttachmentsPanel
+              title="Attachments"
+              queryKey={['hr', 'posting-attachments', attachmentsFor]}
+              list={() => jobPostingService.getAttachments(attachmentsFor) as any}
+              upload={(file, description) =>
+                jobPostingService.uploadAttachment(attachmentsFor, file, description) as any
+              }
+              download={async (attachment: any) => {
+                const blob = await jobPostingService.downloadAttachment(attachmentsFor, attachment.id);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = attachment.fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              remove={canManage ? (attachmentId) => jobPostingService.deleteAttachment(attachmentId) : undefined}
+              readOnly={!canManage}
+              note="Files are scanned and stored in the document repository; they are never public links."
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

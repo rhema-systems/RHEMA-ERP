@@ -31,6 +31,9 @@ import type {
   CreateRecruitmentPipelineStage,
   EeoReport,
   HrPagedResult,
+  InternalApplyForVacancy,
+  InternalSaveDraft,
+  InternalSubmitDraft,
   JobApplication,
   JobApplicationDetail,
   JobApplicationSummary,
@@ -629,6 +632,25 @@ class JobApplicationService {
 
   recallShortlistApproval(vacancyId: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/vacancy/${vacancyId}/shortlist/recall-approval`, {});
+  }
+
+  // ── internal job board ────────────────────────────────────────────────────
+  // Open to any authenticated employee — see the class doc comment on the controller side.
+
+  applyInternal(payload: InternalApplyForVacancy): Promise<JobApplication> {
+    return apiService.post<JobApplication>(`${this.baseUrl}/apply-internal`, payload);
+  }
+
+  getMyApplications(): Promise<JobApplicationSummary[]> {
+    return apiService.get<JobApplicationSummary[]>(`${this.baseUrl}/my-applications`);
+  }
+
+  saveInternalDraft(payload: InternalSaveDraft): Promise<JobApplication> {
+    return apiService.post<JobApplication>(`${this.baseUrl}/internal/draft`, payload);
+  }
+
+  submitInternalDraft(id: string, payload: InternalSubmitDraft): Promise<JobApplication> {
+    return apiService.put<JobApplication>(`${this.baseUrl}/internal/${id}/submit`, payload);
   }
 }
 

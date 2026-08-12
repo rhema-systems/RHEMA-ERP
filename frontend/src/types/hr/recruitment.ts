@@ -381,6 +381,8 @@ export interface JobVacancySummary {
   numberOfPositions: number;
   hiringManagerName?: string | null;
   recruiterName?: string | null;
+  allowInternalCandidates: boolean;
+  allowExternalCandidates: boolean;
   applicationCount: number;
   shortlistedCount: number;
   offerCount: number;
@@ -448,6 +450,17 @@ export interface ShortlistingCriteria {
 export interface VacancyAttachment {
   id: string;
   jobVacancyId: string;
+  fileName: string;
+  filePath: string;
+  description?: string | null;
+  uploadDate: string;
+  uploadedById: string;
+  uploadedByName: string;
+}
+
+export interface JobPostingAttachment {
+  id: string;
+  jobPostingId: string;
   fileName: string;
   filePath: string;
   description?: string | null;

@@ -62,6 +62,9 @@ public class JobVacancyDto : BaseDto
     public Guid? RecruitmentPipelineId { get; set; }
     public string? PipelineName { get; set; }
 
+    public bool AllowInternalCandidates { get; set; }
+    public bool AllowExternalCandidates { get; set; }
+
     public int ApplicationCount { get; set; }
     public int ShortlistedCount { get; set; }
     public int InterviewCount { get; set; }
@@ -111,6 +114,8 @@ public class JobVacancySummaryDto
     public int NumberOfPositions { get; set; }
     public string? HiringManagerName { get; set; }
     public string? RecruiterName { get; set; }
+    public bool AllowInternalCandidates { get; set; }
+    public bool AllowExternalCandidates { get; set; }
     public int ApplicationCount { get; set; }
     public int ShortlistedCount { get; set; }
     public int OfferCount { get; set; }

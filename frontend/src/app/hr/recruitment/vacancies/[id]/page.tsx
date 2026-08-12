@@ -26,6 +26,7 @@ import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { VacancyPostingsPanel } from '@/components/hr/recruitment/VacancyPostingsPanel';
 import { VacancyCriteriaPanel } from '@/components/hr/recruitment/VacancyCriteriaPanel';
+import { EeoReportPanel } from '@/components/hr/recruitment/EeoReportPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, formatMoney, humanizeEnum } from '@/lib/hr/attendance-format';
@@ -262,6 +263,7 @@ export default function VacancyDetailPage() {
           <TabsTrigger value="adverts">Adverts</TabsTrigger>
           <TabsTrigger value="criteria">Shortlisting criteria</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
+          {isHr && <TabsTrigger value="eeo">EEO report</TabsTrigger>}
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
@@ -377,6 +379,12 @@ export default function VacancyDetailPage() {
             note="Files are scanned and stored in the document repository; they are never public links."
           />
         </TabsContent>
+
+        {isHr && (
+          <TabsContent value="eeo" className="pt-4">
+            <EeoReportPanel vacancyId={id} />
+          </TabsContent>
+        )}
 
         <TabsContent value="history" className="pt-4">
           <Card>

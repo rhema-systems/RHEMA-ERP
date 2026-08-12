@@ -5,6 +5,7 @@ import type {
   CreateStaffRequisition,
   HrPagedResult,
   JobPosting,
+  JobPostingAttachment,
   JobPostingForm,
   JobPostingStatus,
   JobPostingSummary,
@@ -256,6 +257,11 @@ class JobVacancyService {
     return apiService.get<JobVacancySummary[]>(`${this.baseUrl}/active`);
   }
 
+  /** Full DTOs (unlike the others here) — the internal job board filters on `allowInternalCandidates`. */
+  getPublished(): Promise<JobVacancy[]> {
+    return apiService.get<JobVacancy[]>(`${this.baseUrl}/published`);
+  }
+
   getByRequisition(requisitionId: string): Promise<JobVacancySummary[]> {
     return apiService.get<JobVacancySummary[]>(`${this.baseUrl}/requisition/${requisitionId}`);
   }
@@ -396,6 +402,29 @@ class JobPostingService {
 
   expire(id: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${id}/expire`, {});
+  }
+
+  // ── attachments ──────────────────────────────────────────────────────────
+  // ⚠ Multipart through the controlled-upload gate — never a JSON filePath.
+
+  getAttachments(postingId: string): Promise<JobPostingAttachment[]> {
+    return apiService.get<JobPostingAttachment[]>(`${this.baseUrl}/${postingId}/attachments`);
+  }
+
+  uploadAttachment(postingId: string, file: File, description: string | null): Promise<JobPostingAttachment> {
+    return hrDocumentService.upload<JobPostingAttachment>(
+      `${this.baseUrl}/${postingId}/attachments`,
+      file,
+      { description },
+    );
+  }
+
+  downloadAttachment(postingId: string, attachmentId: string): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/${postingId}/attachments/${attachmentId}/download`);
+  }
+
+  deleteAttachment(attachmentId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/attachments/${attachmentId}`);
   }
 }
 
