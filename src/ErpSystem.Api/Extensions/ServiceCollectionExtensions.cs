@@ -1587,8 +1587,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             var redisConnectionString = configuration.GetConnectionString("Redis");
 
             var healthChecksBuilder = services.AddHealthChecks()
-                .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("API is running"))
-                .AddCheck("startup", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("API started successfully"));
+                // Liveness must prove only that the API process can respond. Dependency failures
+                // belong to readiness; including SQL/Redis here can create a restart storm during
+                // a recoverable infrastructure outage.
+                .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("API is running"),
+                    tags: new[] { "live" })
+                .AddCheck("startup", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("API started successfully"),
+                    tags: new[] { "ready" });
 
             // Add database health check
             if (!string.IsNullOrEmpty(connectionString))
