@@ -25,6 +25,10 @@ public static class ProcurementStatutoryReportCatalogue
     public const string AwardNotificationCode = "award-notification";
     public const string SavingsCode = "savings-register";
     public const string EtcMinutesCode = "etc-minutes-register";
+    public const string RequisitionStatusCode = "requisition-status";
+    public const string PurchaseOrderRegisterCode = "purchase-order-register";
+    public const string CommitmentRegisterCode = "commitment-register";
+    public const string CertificateTrackingCode = "certificate-tracking";
 
     public static IReadOnlyList<ProcurementSystemReportDefinition> Definitions { get; } =
     [
@@ -86,7 +90,57 @@ public static class ProcurementStatutoryReportCatalogue
             C("StartedAt", "Started", "DateTime"), C("ClosedAt", "Closed", "DateTime"),
             C("EligibleVoters", "Eligible voters", "Integer"), C("SignedAttendance", "Signed attendance", "Integer"),
             C("QuorumMet", "Quorum met", "Boolean"), C("ChairPresent", "Chair present", "Boolean"),
-            C("SecretaryPresent", "Secretary present", "Boolean"), C("EvidenceReference", "Minutes/evidence reference"))
+            C("SecretaryPresent", "Secretary present", "Boolean"), C("EvidenceReference", "Minutes/evidence reference")),
+        Definition(RequisitionStatusCode, "Purchase Requisition Status Register",
+            "Purchase-requisition lifecycle register with approval, budget, sourcing and order-conversion status.",
+            C("RequisitionNumber", "Requisition number"), C("RequisitionDate", "Requisition date", "DateTime"),
+            C("RequiredDate", "Required date", "DateTime"), C("RequestedBy", "Requested by"),
+            C("Department", "Department"), C("CostCenter", "Cost centre"), C("Category", "Category"),
+            C("Priority", "Priority"), C("Status", "Status"), C("Currency", "Currency"),
+            C("TotalAmount", "Total amount", "Decimal", "N2"), C("LineCount", "Lines", "Integer"),
+            C("OrderedLineCount", "Ordered lines", "Integer"), C("PurchaseOrderCount", "Purchase orders", "Integer"),
+            C("ApprovalLevel", "Approval level", "Integer"), C("RequiredApprovalLevel", "Required approval level", "Integer"),
+            C("ApprovedAt", "Approved", "DateTime"), C("SourcePlanNumber", "Source plan"),
+            C("ProjectCode", "Project"), C("BudgetCode", "Budget"), C("ExceptionRuleCode", "Approved exception")),
+        Definition(PurchaseOrderRegisterCode, "Purchase Order Register",
+            "Purchase-order register with supplier, governed source, approval, delivery and receipt progress.",
+            C("OrderNumber", "PO number"), C("OrderDate", "Order date", "DateTime"),
+            C("SupplierCode", "Supplier code"), C("SupplierName", "Supplier"), C("Status", "Status"),
+            C("Category", "Category"), C("OrderType", "Order type"), C("Currency", "Currency"),
+            C("TotalAmount", "Total amount", "Decimal", "N2"), C("SourceRequisitionNumber", "Source requisition"),
+            C("SourceType", "Source type"), C("SourceReference", "Source reference"), C("TenderNumber", "Tender"),
+            C("ContractNumber", "Contract"), C("RevisionNumber", "Revision", "Integer"),
+            C("RequiredDate", "Required date", "DateTime"), C("PromisedDate", "Promised date", "DateTime"),
+            C("ReceivedDate", "Received date", "DateTime"), C("ApprovedAt", "Approved", "DateTime"),
+            C("LineCount", "Lines", "Integer"), C("ReceiptCount", "Receipts", "Integer"),
+            C("LatestReceiptAt", "Latest receipt", "DateTime")),
+        Definition(CommitmentRegisterCode, "Procurement Commitment Register",
+            "Budget-commitment register with requisition, reserve, override, consumption, release and amendment lineage.",
+            C("ReservationReference", "Commitment reference"), C("RequisitionNumber", "Requisition"),
+            C("BudgetCode", "Budget"), C("FiscalYear", "Fiscal year", "Integer"), C("Status", "Status"),
+            C("Currency", "Currency"), C("ReservedAmount", "Reserved amount", "Decimal", "N2"),
+            C("BudgetAvailableBefore", "Available before", "Decimal", "N2"),
+            C("BudgetAvailableAfter", "Available after", "Decimal", "N2"),
+            C("ReservedAt", "Reserved", "DateTime"), C("ReservedBy", "Reserved by"),
+            C("ConsumedAt", "Consumed", "DateTime"), C("ReleasedAt", "Released", "DateTime"),
+            C("ReleaseReason", "Release reason"), C("IsOverride", "Override", "Boolean"),
+            C("OverrideRuleCode", "Override rule"), C("OverrideApprovalReference", "Override approval"),
+            C("AdjustmentCount", "PO adjustments", "Integer"),
+            C("AdjustmentDelta", "Adjustment delta", "Decimal", "N2")),
+        Definition(CertificateTrackingCode, "Procurement Certificate Tracking Register",
+            "Projects/QS-owned payment-certificate register with contract, supplier, approval, AP handoff and payment status.",
+            C("CertificateNumber", "Certificate number"), C("Title", "Title"), C("IssueDate", "Issue date", "DateTime"),
+            C("ProjectCode", "Project code"), C("ProjectTitle", "Project"), C("ContractNumber", "Contract"),
+            C("SupplierCode", "Supplier code"), C("SupplierName", "Supplier"), C("Status", "Status"),
+            C("ApprovalStatus", "Approval status"), C("Currency", "Currency"),
+            C("GrossCertifiedAmount", "Gross certified", "Decimal", "N2"),
+            C("RetentionHeldAmount", "Retention held", "Decimal", "N2"),
+            C("DeductionsAmount", "Deductions", "Decimal", "N2"), C("TaxAmount", "Tax", "Decimal", "N2"),
+            C("NetCertifiedAmount", "Net certified", "Decimal", "N2"), C("ApprovedAt", "Approved", "DateTime"),
+            C("ApHandoffStatus", "AP handoff"), C("ApHandoffAt", "AP handoff date", "DateTime"),
+            C("PaymentStatus", "Payment status"), C("PaymentDueDate", "Payment due", "DateTime"),
+            C("VendorInvoiceLinked", "Vendor invoice linked", "Boolean"),
+            C("DocumentGenerated", "Certificate generated", "Boolean"))
     ];
 
     public static ProcurementSystemReportDefinition? Resolve(string? query)

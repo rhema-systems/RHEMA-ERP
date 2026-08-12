@@ -244,6 +244,25 @@ public class VendorInvoice : TenantEntity
     /// </summary>
     public Guid? MatchExceptionControlEventId { get; set; }
 
+    // ── Authoritative supply acceptance lineage ────────────────────────
+
+    /// <summary>
+    /// Typed owner of the accepted performance record used by matching.
+    /// Goods remains owned by Procurement receiving/inspection, Services by
+    /// Projects deliverables, and Works by QS payment certificates.
+    /// </summary>
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+
+    public Guid? AcceptedSupplySourceId { get; set; }
+
+    [MaxLength(100)]
+    public string? AcceptedSupplySourceReference { get; set; }
+
+    [MaxLength(64)]
+    public string? AcceptedSupplySnapshotHash { get; set; }
+
+    public DateTime? AcceptedSupplyValidatedAtUtc { get; set; }
+
     // ── Status & Approval ───────────────────────────────────────────────
 
     public VendorInvoiceStatus Status { get; set; } = VendorInvoiceStatus.Draft;

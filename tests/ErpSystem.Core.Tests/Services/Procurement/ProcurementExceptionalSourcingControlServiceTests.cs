@@ -180,6 +180,37 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
             .Where(exception => exception.Code == "EXCEPTIONAL_CONTROL_NOT_FOUND");
     }
 
+    [Fact]
+    public async Task PettyPurchaseUsesDec005SingleSupplierWorkflowWithoutPpaFiling()
+    {
+        await using var fixture = new Fixture(ProcurementMethodType.PettyPurchase);
+        var readiness = await fixture.Service.GetReadinessAsync(fixture.Tender.Id);
+        readiness.Method.Should().Be(ProcurementMethodType.PettyPurchase);
+        readiness.MinimumSupplierCount.Should().Be(1);
+        readiness.PpaApprovalRequired.Should().BeFalse();
+        readiness.PostAwardFilingRequired.Should().BeFalse();
+
+        var prepared = await fixture.PrepareAsync();
+        prepared.Method.Should().Be(ProcurementMethodType.PettyPurchase);
+        prepared.Suppliers.Should().ContainSingle();
+        var submitted = await fixture.Service.SubmitApprovalAsync(fixture.Tender.Id,
+            new SubmitProcurementExceptionalApprovalRequest { RowVersion = prepared.RowVersion }, "petty-submit");
+        fixture.CurrentUserId = Guid.NewGuid();
+        fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
+                "TenderException", fixture.Tender.Id, fixture.CurrentUserId, "approve", It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true, Status = WorkflowInstanceStatus.Completed,
+                WorkflowInstanceId = fixture.WorkflowInstanceId
+            });
+        var approved = await fixture.Service.DecideApprovalAsync(fixture.Tender.Id,
+            new DecideProcurementExceptionalApprovalRequest
+            {
+                Action = "Approve", RowVersion = submitted.RowVersion
+            }, "petty-approve");
+        approved.Status.Should().Be(ProcurementExceptionalSourcingControlStatus.Approved);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly UnitOfWork _unitOfWork;
@@ -210,7 +241,8 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
             Rule = new ProcurementPolicyMethodRule
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId, PolicySetId = Guid.NewGuid(),
-                RuleCode = method == ProcurementMethodType.SingleSource ? "SS-GOODS-001" : "RT-GOODS-001",
+                RuleCode = method == ProcurementMethodType.SingleSource ? "SS-GOODS-001" :
+                    method == ProcurementMethodType.PettyPurchase ? "PETTY-GOODS-001" : "RT-GOODS-001",
                 Name = method.ToString(), Category = ProcurementCategoryClass.Goods, Method = method,
                 IsAllowed = true, IsEnabled = true, RequiresCompetition = method == ProcurementMethodType.RestrictedTendering,
                 MinimumQuotationCount = method == ProcurementMethodType.RestrictedTendering ? 2 : 1,
@@ -219,20 +251,26 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
             ExceptionRule = new ProcurementPolicyExceptionRule
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId, PolicySetId = Rule.PolicySetId,
-                RuleCode = "EXCEPTION-DEC-006", ExceptionName = $"{method} prerequisites",
+                RuleCode = method == ProcurementMethodType.PettyPurchase ? "EXCEPTION-DEC-005" : "EXCEPTION-DEC-006",
+                ExceptionName = $"{method} prerequisites",
                 ExceptionType = method.ToString(), Category = ProcurementCategoryClass.Goods, Method = method,
                 Disposition = ProcurementExceptionDisposition.ApprovalRequired, JustificationRequired = true,
-                EvidenceRequired = true, PostAwardFilingRequired = true, ApproverRole = "Board and PPA",
-                WorkflowDefinitionId = WorkflowDefinitionId, SourceDecisionKey = "DEC-006", IsEnabled = true,
+                EvidenceRequired = true, PostAwardFilingRequired = method != ProcurementMethodType.PettyPurchase,
+                ApproverRole = method == ProcurementMethodType.PettyPurchase ? "Finance Manager" : "Board and PPA",
+                WorkflowDefinitionId = WorkflowDefinitionId,
+                SourceDecisionKey = method == ProcurementMethodType.PettyPurchase ? "DEC-005" : "DEC-006", IsEnabled = true,
                 EffectiveFrom = DateTime.UtcNow.AddDays(-10)
             };
             EvidenceRule = new ProcurementPolicyEvidenceRule
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId, PolicySetId = Rule.PolicySetId,
-                RuleCode = "EVID-DEC-006-001", EvidenceName = "PPA approval letter",
-                Stage = ProcurementEvidenceStage.Sourcing, Method = method,
-                SharedRequirementKey = "PROC-DEC-006-001", IsMandatory = true,
-                RequiresVerification = true, SourceDecisionKey = "DEC-006", IsEnabled = true,
+                RuleCode = method == ProcurementMethodType.PettyPurchase ? "EVID-DEC-005-001" : "EVID-DEC-006-001",
+                EvidenceName = method == ProcurementMethodType.PettyPurchase ? "Petty-purchase receipt or quotation" : "PPA approval letter",
+                Stage = method == ProcurementMethodType.PettyPurchase ? ProcurementEvidenceStage.Requisition : ProcurementEvidenceStage.Sourcing,
+                Method = method,
+                SharedRequirementKey = method == ProcurementMethodType.PettyPurchase ? "PROC-DEC-005-001" : "PROC-DEC-006-001",
+                IsMandatory = true, RequiresVerification = true,
+                SourceDecisionKey = method == ProcurementMethodType.PettyPurchase ? "DEC-005" : "DEC-006", IsEnabled = true,
                 EffectiveFrom = DateTime.UtcNow.AddDays(-10)
             };
             Route = new ProcurementRequisitionAuthorityRoute
@@ -249,8 +287,13 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
                 CapturedAtUtc = DateTime.UtcNow, CapturedById = CurrentUserId,
                 CapturedByName = "Controller", SnapshotJson = "{}", IntegrityHash = new string('a', 64)
             };
-            Route.Steps.Add(Step("AUTH-BOARD", "TDC Board", "Board Secretary", 1));
-            Route.Steps.Add(Step("AUTH-PPA", "Public Procurement Authority", "PPA Reviewer", 2));
+            if (method == ProcurementMethodType.PettyPurchase)
+                Route.Steps.Add(Step("AUTH-FINANCE", "Finance Manager", "Finance Manager", 1));
+            else
+            {
+                Route.Steps.Add(Step("AUTH-BOARD", "TDC Board", "Board Secretary", 1));
+                Route.Steps.Add(Step("AUTH-PPA", "Public Procurement Authority", "PPA Reviewer", 2));
+            }
             Case = new ProcurementSourcingCase
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId, PurchaseRequisitionId = Requisition.Id,
@@ -269,7 +312,8 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
             Tender = new Tender
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId,
-                TenderNumber = method == ProcurementMethodType.SingleSource ? "SS-2026-001" : "RT-2026-001",
+                TenderNumber = method == ProcurementMethodType.SingleSource ? "SS-2026-001" :
+                    method == ProcurementMethodType.PettyPurchase ? "PETTY-2026-001" : "RT-2026-001",
                 Title = "Exceptional infrastructure procurement", TenderType = "RFP", Status = "Approved",
                 EstimatedValue = Case.EstimatedValue, Currency = Case.CurrencyCode,
                 SubmissionDeadline = DateTime.UtcNow.AddDays(3), SourcePurchaseRequisitionId = Requisition.Id,
@@ -281,7 +325,7 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
                 PartnerName = $"Supplier {index}", PartnerType = "Supplier", RegistrationStatus = "Approved",
                 ApprovalStatus = "Approved", IsActive = true
             }).ToList();
-            Bids = Suppliers.Take(method == ProcurementMethodType.SingleSource ? 1 : 2).Select((supplier, index) => new TenderBid
+            Bids = Suppliers.Take(method is ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase ? 1 : 2).Select((supplier, index) => new TenderBid
             {
                 Id = Guid.NewGuid(), TenantId = CurrentTenantId, TenderId = Tender.Id,
                 BusinessPartnerId = supplier.Id, BusinessPartner = supplier, BidNumber = $"BID-{index + 1:000}",
@@ -306,6 +350,9 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
                     EstimatedValue = Tender.EstimatedValue!.Value, CurrencyCode = Tender.Currency!
                 });
             SupplierValidation.Setup(service => service.ValidateForTenderAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<decimal?>()))
+                .ReturnsAsync(SupplierValidationResult.Success());
+            SupplierValidation.Setup(service => service.EvaluateEligibilityAsync(
+                    It.IsAny<SupplierEligibilityEvaluationRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(SupplierValidationResult.Success());
             ControlEvents.Setup(service => service.RecordAsync(It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementControlEventDto());
@@ -380,7 +427,7 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
             Justification = "A necessary statutory exception supported by the attached market evidence.",
             JustificationEvidenceReference = "evidence://justification",
             SupplierSelectionEvidenceReference = "evidence://supplier-selection",
-            BusinessPartnerIds = Suppliers.Take(Case.SelectedMethod == ProcurementMethodType.SingleSource ? 1 : 2).Select(item => item.Id).ToList(),
+            BusinessPartnerIds = Suppliers.Take(Case.SelectedMethod is ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase ? 1 : 2).Select(item => item.Id).ToList(),
             EvidenceChecklist = [new ProcurementExceptionalEvidenceRequest
             {
                 RequirementKey = EvidenceRule.SharedRequirementKey!, EvidenceReference = "evidence://ppa-approval-letter",

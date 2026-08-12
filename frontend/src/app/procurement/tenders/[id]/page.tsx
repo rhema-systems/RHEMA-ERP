@@ -3,11 +3,43 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Edit, FileText, Package, Upload, DollarSign, Users, Award, MessageSquare, Clock, CheckCircle2, XCircle, Send, Download, AlertCircle, ClipboardList, MailCheck, Share2 } from 'lucide-react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ArrowLeft,
+  Edit,
+  FileText,
+  Package,
+  Upload,
+  DollarSign,
+  Users,
+  Award,
+  MessageSquare,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Send,
+  Download,
+  AlertCircle,
+  ClipboardList,
+  MailCheck,
+  Share2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderService from '@/services/tenderService';
 import { type TenderDetailDto } from '@/services/tenderService';
@@ -15,8 +47,14 @@ import { format } from 'date-fns';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { WorkflowApprovalActions, useWorkflowRecord } from '@/components/workflow';
-import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import {
+  WorkflowApprovalActions,
+  useWorkflowRecord,
+} from '@/components/workflow';
+import {
+  WorkflowTabContent,
+  WorkflowTabTrigger,
+} from '@/components/workflow/WorkflowRecordTab';
 import { TenderAward } from '@/components/procurement/tenders/TenderAward';
 import { AnswerClarificationDialog } from '@/components/procurement/tenders/AnswerClarificationDialog';
 import TenderEvaluators from '@/components/procurement/tenders/TenderEvaluators';
@@ -28,7 +66,9 @@ export default function TenderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tenderId = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
+  const tenderId = Array.isArray(params?.id)
+    ? params.id[0]
+    : (params?.id ?? '');
 
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +88,9 @@ export default function TenderDetailPage() {
     advertisementEvidenceReference: '',
   });
   const [externalEmailInput, setExternalEmailInput] = useState('');
-  const [externalRecipientEmails, setExternalRecipientEmails] = useState<string[]>([]);
+  const [externalRecipientEmails, setExternalRecipientEmails] = useState<
+    string[]
+  >([]);
   const [showAnswerDialog, setShowAnswerDialog] = useState(false);
   const [selectedClarification, setSelectedClarification] = useState<any>(null);
 
@@ -57,7 +99,10 @@ export default function TenderDetailPage() {
       setLoading(true);
       const data = await tenderService.getTenderById(tenderId);
       console.log('Internal Portal - Tender Data:', data);
-      console.log('Internal Portal - Required Documents:', data.requiredDocuments);
+      console.log(
+        'Internal Portal - Required Documents:',
+        data.requiredDocuments
+      );
       setTender(data);
     } catch (error) {
       console.error('Error loading tender details:', error);
@@ -74,18 +119,42 @@ export default function TenderDetailPage() {
   }, [tenderId]);
 
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
-      'Draft': { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
-      'Submitted': { variant: 'outline', className: 'bg-yellow-100 text-yellow-800' },
-      'Approved': { variant: 'default', className: 'bg-green-100 text-green-800' },
-      'Published': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
-      'Closed': { variant: 'outline', className: 'bg-yellow-100 text-yellow-800' },
-      'Awarded': { variant: 'default', className: 'bg-green-100 text-green-800' },
-      'Cancelled': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
-      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
+    const statusConfig: Record<
+      string,
+      {
+        variant: 'default' | 'secondary' | 'destructive' | 'outline';
+        className: string;
+      }
+    > = {
+      Draft: { variant: 'secondary', className: 'bg-gray-100 text-gray-800' },
+      Submitted: {
+        variant: 'outline',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      Approved: {
+        variant: 'default',
+        className: 'bg-green-100 text-green-800',
+      },
+      Published: { variant: 'default', className: 'bg-blue-100 text-blue-800' },
+      Closed: {
+        variant: 'outline',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      Awarded: { variant: 'default', className: 'bg-green-100 text-green-800' },
+      Cancelled: {
+        variant: 'destructive',
+        className: 'bg-red-100 text-red-800',
+      },
+      Rejected: {
+        variant: 'destructive',
+        className: 'bg-red-100 text-red-800',
+      },
     };
-    
-    const config = statusConfig[status] || { variant: 'outline' as const, className: '' };
+
+    const config = statusConfig[status] || {
+      variant: 'outline' as const,
+      className: '',
+    };
     return (
       <Badge variant={config.variant} className={config.className}>
         {status}
@@ -109,10 +178,10 @@ export default function TenderDetailPage() {
 
   const getTenderTypeLabel = (type: string) => {
     const typeMap: Record<string, string> = {
-      'RFQ': 'Request for Quotation',
-      'RFP': 'Request for Proposal',
-      'ITB': 'Invitation to Bid',
-      'EOI': 'Expression of Interest',
+      RFQ: 'Request for Quotation',
+      RFP: 'Request for Proposal',
+      ITB: 'Invitation to Bid',
+      EOI: 'Expression of Interest',
     };
     return typeMap[type] || type;
   };
@@ -122,10 +191,14 @@ export default function TenderDetailPage() {
     const submissionDeadline = tender?.submissionDeadline;
     const openingDate = tender?.openingDate;
     if (submissionDeadline) {
-      setPublishData(prev => ({
+      setPublishData((prev) => ({
         ...prev,
-        submissionDeadline: new Date(submissionDeadline).toISOString().slice(0, 16),
-        openingDate: openingDate ? new Date(openingDate).toISOString().slice(0, 16) : '',
+        submissionDeadline: new Date(submissionDeadline)
+          .toISOString()
+          .slice(0, 16),
+        openingDate: openingDate
+          ? new Date(openingDate).toISOString().slice(0, 16)
+          : '',
       }));
     }
     setShowPublishDialog(true);
@@ -138,14 +211,18 @@ export default function TenderDetailPage() {
       toast.error('Please enter a valid email address');
       return;
     }
-    setExternalRecipientEmails(prev =>
-      prev.some(e => e.toLowerCase() === email.toLowerCase()) ? prev : [...prev, email]
+    setExternalRecipientEmails((prev) =>
+      prev.some((e) => e.toLowerCase() === email.toLowerCase())
+        ? prev
+        : [...prev, email]
     );
     setExternalEmailInput('');
   };
 
   const removeExternalRecipientEmail = (email: string) => {
-    setExternalRecipientEmails(prev => prev.filter(e => e.toLowerCase() !== email.toLowerCase()));
+    setExternalRecipientEmails((prev) =>
+      prev.filter((e) => e.toLowerCase() !== email.toLowerCase())
+    );
   };
 
   const handlePublishConfirm = async () => {
@@ -175,7 +252,8 @@ export default function TenderDetailPage() {
       setPublishing(true);
 
       // Get invited business partner IDs from invitations
-      const invitedBusinessPartnerIds = tender?.invitations?.map(inv => inv.businessPartnerId) || [];
+      const invitedBusinessPartnerIds =
+        tender?.invitations?.map((inv) => inv.businessPartnerId) || [];
 
       await tenderService.publishTender(tenderId, {
         submissionDeadline: publishData.submissionDeadline,
@@ -185,13 +263,17 @@ export default function TenderDetailPage() {
         sendNotifications: true,
         advertisementReference: publishData.advertisementReference || undefined,
         publicationChannel: publishData.publicationChannel || undefined,
-        tenderDocumentReference: publishData.tenderDocumentReference || undefined,
+        tenderDocumentReference:
+          publishData.tenderDocumentReference || undefined,
         tenderDocumentVersion: publishData.tenderDocumentVersion || undefined,
         documentFee: publishData.documentFee,
-        advertisementEvidenceReference: publishData.advertisementEvidenceReference || undefined,
+        advertisementEvidenceReference:
+          publishData.advertisementEvidenceReference || undefined,
       });
 
-      toast.success('Tender published successfully! Notifications sent to invited suppliers.');
+      toast.success(
+        'Tender published successfully! Notifications sent to invited suppliers.'
+      );
       setShowPublishDialog(false);
       setExternalRecipientEmails([]);
       setExternalEmailInput('');
@@ -217,9 +299,15 @@ export default function TenderDetailPage() {
     canApproveReject: tender?.status === 'Submitted',
     enabled: Boolean(tender),
     commands: {
-      submit: async () => { await tenderService.submitTenderForApproval(tenderId); },
-      approve: async ({ comments }) => { await tenderService.approveTender(tenderId, comments || undefined); },
-      reject: async ({ comments }) => { await tenderService.rejectTender(tenderId, comments); },
+      submit: async () => {
+        await tenderService.submitTenderForApproval(tenderId);
+      },
+      approve: async ({ comments }) => {
+        await tenderService.approveTender(tenderId, comments || undefined);
+      },
+      reject: async ({ comments }) => {
+        await tenderService.rejectTender(tenderId, comments);
+      },
       afterAction: loadTenderDetails,
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
@@ -242,7 +330,10 @@ export default function TenderDetailPage() {
         <div className="text-center">
           <XCircle className="h-12 w-12 mx-auto mb-4 text-red-500" />
           <p className="text-lg text-gray-600">Tender not found</p>
-          <Button onClick={() => router.push('/procurement/tenders')} className="mt-4">
+          <Button
+            onClick={() => router.push('/procurement/tenders')}
+            className="mt-4"
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Tenders
           </Button>
@@ -256,7 +347,10 @@ export default function TenderDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => router.push('/procurement/tenders')}>
+          <Button
+            variant="ghost"
+            onClick={() => router.push('/procurement/tenders')}
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
@@ -274,17 +368,19 @@ export default function TenderDetailPage() {
           )}
 
           {tender.status === 'Draft' && (
-            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/edit`)}>
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(`/procurement/tenders/${tenderId}/edit`)
+              }
+            >
               <Edit className="h-4 w-4 mr-2" />
               Edit
             </Button>
           )}
 
           {(tender.status === 'Draft' || tender.status === 'Submitted') && (
-            <WorkflowApprovalActions
-              {...workflow.actionProps}
-              showStepBadge
-            />
+            <WorkflowApprovalActions {...workflow.actionProps} showStepBadge />
           )}
 
           {tender.status === 'Approved' && (
@@ -293,12 +389,21 @@ export default function TenderDetailPage() {
               Publish Tender
             </Button>
           )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
-            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/document-controls`)}>
-              <FileText className="h-4 w-4 mr-2" />
-              Document Register
-            </Button>
-          )}
+          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+            tender.sourcingCaseId &&
+            tender.tenderType !== 'RFQ' && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  router.push(
+                    `/procurement/tenders/${tenderId}/document-controls`
+                  )
+                }
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Document Register
+              </Button>
+            )}
           {tender.tenderType !== 'RFQ' && (
             <Button
               variant="outline"
@@ -316,9 +421,7 @@ export default function TenderDetailPage() {
             <Button
               variant="outline"
               onClick={() =>
-                router.push(
-                  `/procurement/tenders/${tenderId}/award-readiness`
-                )
+                router.push(`/procurement/tenders/${tenderId}/award-readiness`)
               }
             >
               <Award className="h-4 w-4 mr-2" />
@@ -342,27 +445,45 @@ export default function TenderDetailPage() {
             <Button
               variant="outline"
               onClick={() =>
-                router.push(
-                  `/procurement/tenders/${tenderId}/ghaneps-exchange`
-                )
+                router.push(`/procurement/tenders/${tenderId}/ghaneps-exchange`)
               }
             >
               <Share2 className="h-4 w-4 mr-2" />
               GHANEPS Exchange
             </Button>
           )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
-            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/controls`)}>
-              <Shield className="h-4 w-4 mr-2" />
-              NCT / ICT Controls
-            </Button>
-          )}
-          {['Approved', 'Published', 'Awarded'].includes(tender.status) && tender.sourcingCaseId && tender.tenderType !== 'RFQ' && (
-            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${tenderId}/exception-controls`)}>
-              <Shield className="h-4 w-4 mr-2" />
-              Restricted / Single Source
-            </Button>
-          )}
+          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+            tender.sourcingCaseId &&
+            [1, 2, 7, 8].includes(tender.sourcingMethod ?? -1) && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  router.push(`/procurement/tenders/${tenderId}/controls`)
+                }
+              >
+                <Shield className="h-4 w-4 mr-2" />
+                {[7, 8].includes(tender.sourcingMethod ?? -1)
+                  ? 'QBS / QCBS Controls'
+                  : 'NCT / ICT Controls'}
+              </Button>
+            )}
+          {['Approved', 'Published', 'Awarded'].includes(tender.status) &&
+            tender.sourcingCaseId &&
+            [3, 4, 5].includes(tender.sourcingMethod ?? -1) && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  router.push(
+                    `/procurement/tenders/${tenderId}/exception-controls`
+                  )
+                }
+              >
+                <Shield className="h-4 w-4 mr-2" />
+                {tender.sourcingMethod === 5
+                  ? 'Petty Purchase Control'
+                  : 'Restricted / Single Source'}
+              </Button>
+            )}
         </div>
       </div>
 
@@ -370,7 +491,9 @@ export default function TenderDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Tender Type</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Tender Type
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{tender.tenderType}</p>
@@ -378,15 +501,21 @@ export default function TenderDetailPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Estimated Value</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Estimated Value
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatCurrency(tender.estimatedValue, tender.currency)}</p>
+            <p className="text-2xl font-bold">
+              {formatCurrency(tender.estimatedValue, tender.currency)}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Bids Received</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Bids Received
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{tender.bids?.length || 0}</p>
@@ -394,16 +523,26 @@ export default function TenderDetailPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Submission Deadline</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-500">
+              Submission Deadline
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-lg font-semibold">{tender.submissionDeadline ? format(new Date(tender.submissionDeadline), 'PPP') : 'N/A'}</p>
+            <p className="text-lg font-semibold">
+              {tender.submissionDeadline
+                ? format(new Date(tender.submissionDeadline), 'PPP')
+                : 'N/A'}
+            </p>
           </CardContent>
         </Card>
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="space-y-4"
+      >
         <TabsList className="grid w-full grid-cols-12">
           <TabsTrigger value="overview">
             <FileText className="h-4 w-4 mr-2" />
@@ -475,32 +614,47 @@ export default function TenderDetailPage() {
                 <p className="text-sm text-gray-500">Status</p>
                 <div className="flex items-center gap-2">
                   {getStatusBadge(tender.status)}
-                  {tender.status === 'Submitted' && tender.currentWorkflowStepName && (
-                    <Badge variant="outline" className="text-xs">
-                      Step: {tender.currentWorkflowStepName}
-                    </Badge>
-                  )}
+                  {tender.status === 'Submitted' &&
+                    tender.currentWorkflowStepName && (
+                      <Badge variant="outline" className="text-xs">
+                        Step: {tender.currentWorkflowStepName}
+                      </Badge>
+                    )}
                 </div>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Estimated Value</p>
-                <p className="font-semibold">{formatCurrency(tender.estimatedValue, tender.currency)}</p>
+                <p className="font-semibold">
+                  {formatCurrency(tender.estimatedValue, tender.currency)}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Publish Date</p>
-                <p className="font-semibold">{formatDate(tender.publishDate)}</p>
+                <p className="font-semibold">
+                  {formatDate(tender.publishDate)}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Submission Deadline</p>
-                <p className="font-semibold">{formatDate(tender.submissionDeadline)}</p>
+                <p className="font-semibold">
+                  {formatDate(tender.submissionDeadline)}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Opening Date</p>
-                <p className="font-semibold">{formatDate(tender.openingDate)}</p>
+                <p className="font-semibold">
+                  {formatDate(tender.openingDate)}
+                </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Minimum Performance Rating</p>
-                <p className="font-semibold">{tender.minimumPerformanceRating ? `${tender.minimumPerformanceRating}/5 ⭐` : 'N/A'}</p>
+                <p className="text-sm text-gray-500">
+                  Minimum Performance Rating
+                </p>
+                <p className="font-semibold">
+                  {tender.minimumPerformanceRating
+                    ? `${tender.minimumPerformanceRating}/5 ⭐`
+                    : 'N/A'}
+                </p>
               </div>
               {tender.description && (
                 <div className="md:col-span-2">
@@ -524,12 +678,17 @@ export default function TenderDetailPage() {
               {tender.evaluationTemplateId ? (
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    Bids will be evaluated using the criteria defined in the assigned template.
+                    Bids will be evaluated using the criteria defined in the
+                    assigned template.
                   </p>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => router.push(`/administration/procurement/evaluation-templates?highlight=${tender.evaluationTemplateId}`)}
+                    onClick={() =>
+                      router.push(
+                        `/administration/procurement/evaluation-templates?highlight=${tender.evaluationTemplateId}`
+                      )
+                    }
                   >
                     View Template Details
                   </Button>
@@ -543,7 +702,9 @@ export default function TenderDetailPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => router.push(`/procurement/tenders/${tender.id}/edit`)}
+                      onClick={() =>
+                        router.push(`/procurement/tenders/${tender.id}/edit`)
+                      }
                     >
                       Assign Template
                     </Button>
@@ -583,7 +744,8 @@ export default function TenderDetailPage() {
                 <span>QCBS Evaluation</span>
                 {tender.useQCBSEvaluation && (
                   <Badge variant="outline" className="ml-2">
-                    Tech: {tender.technicalWeight}% | Fin: {tender.financialWeight}%
+                    Tech: {tender.technicalWeight}% | Fin:{' '}
+                    {tender.financialWeight}%
                   </Badge>
                 )}
               </div>
@@ -606,19 +768,29 @@ export default function TenderDetailPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="p-4 bg-white rounded-lg border">
                     <p className="text-sm text-gray-500">Technical Weight</p>
-                    <p className="text-2xl font-bold text-blue-600">{tender.technicalWeight}%</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {tender.technicalWeight}%
+                    </p>
                   </div>
                   <div className="p-4 bg-white rounded-lg border">
                     <p className="text-sm text-gray-500">Financial Weight</p>
-                    <p className="text-2xl font-bold text-green-600">{tender.financialWeight}%</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {tender.financialWeight}%
+                    </p>
                   </div>
                   <div className="p-4 bg-white rounded-lg border">
-                    <p className="text-sm text-gray-500">Minimum Technical Score</p>
-                    <p className="text-2xl font-bold text-orange-600">{tender.minimumTechnicalScore}%</p>
+                    <p className="text-sm text-gray-500">
+                      Minimum Technical Score
+                    </p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {tender.minimumTechnicalScore}%
+                    </p>
                   </div>
                 </div>
                 <div className="mt-4 p-3 bg-white rounded-lg border text-sm text-muted-foreground">
-                  <strong>Formula:</strong> Combined Score = (Technical Score × {tender.technicalWeight}%) + (Financial Score × {tender.financialWeight}%)
+                  <strong>Formula:</strong> Combined Score = (Technical Score ×{' '}
+                  {tender.technicalWeight}%) + (Financial Score ×{' '}
+                  {tender.financialWeight}%)
                   <br />
                   Financial Score = (Lowest Bid / Bidder&apos;s Price) × 100
                 </div>
@@ -632,7 +804,9 @@ export default function TenderDetailPage() {
                 <CardTitle>Terms and Conditions</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="whitespace-pre-wrap">{tender.termsAndConditions}</p>
+                <p className="whitespace-pre-wrap">
+                  {tender.termsAndConditions}
+                </p>
               </CardContent>
             </Card>
           )}
@@ -643,29 +817,45 @@ export default function TenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Tender Lots</CardTitle>
-              <CardDescription>{tender.lots?.length || 0} lot(s)</CardDescription>
+              <CardDescription>
+                {tender.lots?.length || 0} lot(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!tender.lots || tender.lots.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No lots added yet</p>
+                <p className="text-center py-8 text-gray-500">
+                  No lots added yet
+                </p>
               ) : (
                 <div className="space-y-4">
                   {tender.lots.map((lot, lotIndex) => (
-                    <div key={lot.id} className="border rounded-lg overflow-hidden">
+                    <div
+                      key={lot.id}
+                      className="border rounded-lg overflow-hidden"
+                    >
                       {/* Lot Header */}
                       <div className="bg-gray-50 px-4 py-3 border-b">
                         <div className="flex justify-between items-start">
                           <div>
-                            <h4 className="font-medium">{lot.lotCode}: {lot.title}</h4>
+                            <h4 className="font-medium">
+                              {lot.lotCode}: {lot.title}
+                            </h4>
                             {lot.description && (
-                              <p className="text-sm text-gray-500 mt-1">{lot.description}</p>
+                              <p className="text-sm text-gray-500 mt-1">
+                                {lot.description}
+                              </p>
                             )}
                           </div>
                           <div className="text-right text-sm">
                             {lot.estimatedValue && (
-                              <p className="font-medium">{lot.currency || 'USD'} {lot.estimatedValue.toLocaleString()}</p>
+                              <p className="font-medium">
+                                {lot.currency || 'USD'}{' '}
+                                {lot.estimatedValue.toLocaleString()}
+                              </p>
                             )}
-                            <p className="text-gray-500">{lot.items?.length || 0} item(s)</p>
+                            <p className="text-gray-500">
+                              {lot.items?.length || 0} item(s)
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -690,16 +880,31 @@ export default function TenderDetailPage() {
                                 <TableCell>{item.itemCode || '-'}</TableCell>
                                 <TableCell>
                                   <div>
-                                    <p className="font-medium">{item.description}</p>
+                                    <p className="font-medium">
+                                      {item.description}
+                                    </p>
                                     {item.specifications && (
-                                      <p className="text-sm text-gray-500">{item.specifications}</p>
+                                      <p className="text-sm text-gray-500">
+                                        {item.specifications}
+                                      </p>
                                     )}
                                   </div>
                                 </TableCell>
                                 <TableCell>{item.quantity}</TableCell>
-                                <TableCell>{item.unitOfMeasure || '-'}</TableCell>
-                                <TableCell>{item.requiredDeliveryDate ? format(new Date(item.requiredDeliveryDate), 'PP') : '-'}</TableCell>
-                                <TableCell>{item.deliveryLocation || '-'}</TableCell>
+                                <TableCell>
+                                  {item.unitOfMeasure || '-'}
+                                </TableCell>
+                                <TableCell>
+                                  {item.requiredDeliveryDate
+                                    ? format(
+                                        new Date(item.requiredDeliveryDate),
+                                        'PP'
+                                      )
+                                    : '-'}
+                                </TableCell>
+                                <TableCell>
+                                  {item.deliveryLocation || '-'}
+                                </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -719,14 +924,20 @@ export default function TenderDetailPage() {
             <CardHeader>
               <CardTitle>Proposal Template</CardTitle>
               <CardDescription>
-                Template for bidders to download and use when preparing their technical and commercial proposals
+                Template for bidders to download and use when preparing their
+                technical and commercial proposals
               </CardDescription>
             </CardHeader>
             <CardContent>
               {(() => {
                 // Support both new 'ProposalTemplate' and legacy 'TechnicalProposalTemplate' for backward compatibility
-                const proposalTemplate = tender.documents?.find(doc => doc.documentType === 'ProposalTemplate')
-                  || tender.documents?.find(doc => doc.documentType === 'TechnicalProposalTemplate');
+                const proposalTemplate =
+                  tender.documents?.find(
+                    (doc) => doc.documentType === 'ProposalTemplate'
+                  ) ||
+                  tender.documents?.find(
+                    (doc) => doc.documentType === 'TechnicalProposalTemplate'
+                  );
 
                 if (!proposalTemplate) {
                   return (
@@ -743,13 +954,19 @@ export default function TenderDetailPage() {
                       <div className="p-4 bg-blue-50 border-b border-blue-200">
                         <div className="flex items-center gap-2">
                           <FileText className="h-5 w-5 text-blue-600" />
-                          <span className="font-semibold text-blue-900">Proposal Template</span>
-                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                          <span className="font-semibold text-blue-900">
+                            Proposal Template
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-green-50 text-green-700 border-green-200"
+                          >
                             Uploaded
                           </Badge>
                         </div>
                         <p className="text-sm text-blue-700 mt-1">
-                          Guide for bidders to prepare their technical and commercial proposals
+                          Guide for bidders to prepare their technical and
+                          commercial proposals
                         </p>
                       </div>
                       <div className="p-4 bg-white">
@@ -757,16 +974,34 @@ export default function TenderDetailPage() {
                           <div className="flex items-center gap-3">
                             <FileText className="h-5 w-5 text-blue-600" />
                             <div>
-                              <p className="font-medium text-sm">{proposalTemplate.documentName}</p>
+                              <p className="font-medium text-sm">
+                                {proposalTemplate.documentName}
+                              </p>
                               <p className="text-xs text-gray-500">
-                                Uploaded {proposalTemplate.uploadedAt || proposalTemplate.uploadedDate ? format(new Date(proposalTemplate.uploadedAt || proposalTemplate.uploadedDate || ''), 'PPp') : ''}
+                                Uploaded{' '}
+                                {proposalTemplate.uploadedAt ||
+                                proposalTemplate.uploadedDate
+                                  ? format(
+                                      new Date(
+                                        proposalTemplate.uploadedAt ||
+                                          proposalTemplate.uploadedDate ||
+                                          ''
+                                      ),
+                                      'PPp'
+                                    )
+                                  : ''}
                               </p>
                             </div>
                           </div>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL?.replace('/api', '')}${proposalTemplate.filePath}`, '_blank')}
+                            onClick={() =>
+                              window.open(
+                                `${process.env.NEXT_PUBLIC_API_URL?.replace('/api', '')}${proposalTemplate.filePath}`,
+                                '_blank'
+                              )
+                            }
                           >
                             <Download className="h-4 w-4 mr-1" />
                             Download
@@ -789,8 +1024,12 @@ export default function TenderDetailPage() {
               <CardDescription>
                 {(() => {
                   try {
-                    const requirements = tender.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
-                    const requiredCount = requirements.filter((r: any) => r.isRequired).length;
+                    const requirements = tender.requiredDocuments
+                      ? JSON.parse(tender.requiredDocuments)
+                      : [];
+                    const requiredCount = requirements.filter(
+                      (r: any) => r.isRequired
+                    ).length;
                     const optionalCount = requirements.length - requiredCount;
                     const uploadedCount = tender.documents?.length || 0;
                     return `${requirements.length} requirement(s) - ${requiredCount} required, ${optionalCount} optional • ${uploadedCount} file(s) uploaded`;
@@ -803,12 +1042,20 @@ export default function TenderDetailPage() {
             <CardContent>
               {(() => {
                 try {
-                  const requirements = tender.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
+                  const requirements = tender.requiredDocuments
+                    ? JSON.parse(tender.requiredDocuments)
+                    : [];
                   const uploadedDocs = tender.documents || [];
-                  const acceptanceDeclarationDoc = uploadedDocs.find(doc => doc.documentType === 'AcceptanceDeclaration');
+                  const acceptanceDeclarationDoc = uploadedDocs.find(
+                    (doc) => doc.documentType === 'AcceptanceDeclaration'
+                  );
 
                   if (requirements.length === 0 && uploadedDocs.length === 0) {
-                    return <p className="text-center py-8 text-gray-500">No document requirements or uploads</p>;
+                    return (
+                      <p className="text-center py-8 text-gray-500">
+                        No document requirements or uploads
+                      </p>
+                    );
                   }
 
                   return (
@@ -821,16 +1068,24 @@ export default function TenderDetailPage() {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                   <FileText className="h-5 w-5 text-purple-600" />
-                                  <p className="font-semibold text-purple-900">Supplier Acceptance Declaration</p>
-                                  <Badge className="text-xs bg-purple-600">Required for Bidding</Badge>
+                                  <p className="font-semibold text-purple-900">
+                                    Supplier Acceptance Declaration
+                                  </p>
+                                  <Badge className="text-xs bg-purple-600">
+                                    Required for Bidding
+                                  </Badge>
                                   {acceptanceDeclarationDoc && (
-                                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs bg-green-50 text-green-700 border-green-200"
+                                    >
                                       Uploaded
                                     </Badge>
                                   )}
                                 </div>
                                 <p className="text-sm text-purple-700 mt-1">
-                                  Bidders must download, review, and accept this declaration before submitting their bid
+                                  Bidders must download, review, and accept this
+                                  declaration before submitting their bid
                                 </p>
                               </div>
                             </div>
@@ -841,10 +1096,16 @@ export default function TenderDetailPage() {
                                 <div className="flex items-center gap-3">
                                   <FileText className="h-5 w-5 text-purple-600" />
                                   <div>
-                                    <p className="font-medium text-sm">{acceptanceDeclarationDoc.documentName}</p>
+                                    <p className="font-medium text-sm">
+                                      {acceptanceDeclarationDoc.documentName}
+                                    </p>
                                     <p className="text-xs text-gray-500">
-                                      Uploaded: {formatDate(acceptanceDeclarationDoc.uploadedDate)}
-                                      {acceptanceDeclarationDoc.fileSize && ` • ${(acceptanceDeclarationDoc.fileSize / 1024 / 1024).toFixed(2)} MB`}
+                                      Uploaded:{' '}
+                                      {formatDate(
+                                        acceptanceDeclarationDoc.uploadedDate
+                                      )}
+                                      {acceptanceDeclarationDoc.fileSize &&
+                                        ` • ${(acceptanceDeclarationDoc.fileSize / 1024 / 1024).toFixed(2)} MB`}
                                     </p>
                                   </div>
                                 </div>
@@ -877,7 +1138,9 @@ export default function TenderDetailPage() {
                       {/* Show requirements with their uploaded files */}
                       {requirements.map((req: any, index: number) => {
                         // Find uploaded files matching this requirement
-                        const matchingDocs = uploadedDocs.filter(doc => doc.documentType === req.documentType);
+                        const matchingDocs = uploadedDocs.filter(
+                          (doc) => doc.documentType === req.documentType
+                        );
 
                         return (
                           <div
@@ -889,24 +1152,42 @@ export default function TenderDetailPage() {
                               <div className="flex items-start justify-between">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2">
-                                    <p className="font-medium">{req.documentName}</p>
-                                    <Badge variant={req.isRequired ? 'destructive' : 'secondary'} className="text-xs">
+                                    <p className="font-medium">
+                                      {req.documentName}
+                                    </p>
+                                    <Badge
+                                      variant={
+                                        req.isRequired
+                                          ? 'destructive'
+                                          : 'secondary'
+                                      }
+                                      className="text-xs"
+                                    >
                                       {req.isRequired ? 'Required' : 'Optional'}
                                     </Badge>
                                     {matchingDocs.length > 0 && (
-                                      <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                      <Badge
+                                        variant="outline"
+                                        className="text-xs bg-green-50 text-green-700 border-green-200"
+                                      >
                                         {matchingDocs.length} uploaded
                                       </Badge>
                                     )}
                                   </div>
                                   <p className="text-sm text-gray-600 mt-1">
-                                    Type: <span className="font-medium">{req.documentType}</span>
+                                    Type:{' '}
+                                    <span className="font-medium">
+                                      {req.documentType}
+                                    </span>
                                   </p>
                                   {req.description && (
-                                    <p className="text-sm text-gray-500 mt-1">{req.description}</p>
+                                    <p className="text-sm text-gray-500 mt-1">
+                                      {req.description}
+                                    </p>
                                   )}
                                   <p className="text-xs text-gray-500 mt-2">
-                                    Max Size: {req.maxFileSizeMB}MB • Allowed Types: {req.allowedFileTypes}
+                                    Max Size: {req.maxFileSizeMB}MB • Allowed
+                                    Types: {req.allowedFileTypes}
                                   </p>
                                 </div>
                               </div>
@@ -923,10 +1204,14 @@ export default function TenderDetailPage() {
                                     <div className="flex items-center gap-3">
                                       <FileText className="h-5 w-5 text-blue-600" />
                                       <div>
-                                        <p className="font-medium text-sm">{doc.documentName}</p>
+                                        <p className="font-medium text-sm">
+                                          {doc.documentName}
+                                        </p>
                                         <p className="text-xs text-gray-500">
-                                          Uploaded: {formatDate(doc.uploadedDate)}
-                                          {doc.fileSize && ` • ${(doc.fileSize / 1024 / 1024).toFixed(2)} MB`}
+                                          Uploaded:{' '}
+                                          {formatDate(doc.uploadedDate)}
+                                          {doc.fileSize &&
+                                            ` • ${(doc.fileSize / 1024 / 1024).toFixed(2)} MB`}
                                         </p>
                                       </div>
                                     </div>
@@ -948,12 +1233,16 @@ export default function TenderDetailPage() {
 
                       {/* Show uploaded files that don't match any requirement */}
                       {(() => {
-                        const unmatchedDocs = uploadedDocs.filter(doc =>
-                          doc.documentType !== 'AcceptanceDeclaration' && // Exclude acceptance declaration (shown separately)
-                          doc.documentType !== 'ProposalTemplate' && // Exclude proposal templates (shown in Proposal tab)
-                          doc.documentType !== 'TechnicalProposalTemplate' && // Legacy proposal template
-                          doc.documentType !== 'CommercialProposalTemplate' && // Legacy proposal template
-                          !requirements.some((req: any) => req.documentType === doc.documentType)
+                        const unmatchedDocs = uploadedDocs.filter(
+                          (doc) =>
+                            doc.documentType !== 'AcceptanceDeclaration' && // Exclude acceptance declaration (shown separately)
+                            doc.documentType !== 'ProposalTemplate' && // Exclude proposal templates (shown in Proposal tab)
+                            doc.documentType !== 'TechnicalProposalTemplate' && // Legacy proposal template
+                            doc.documentType !== 'CommercialProposalTemplate' && // Legacy proposal template
+                            !requirements.some(
+                              (req: any) =>
+                                req.documentType === doc.documentType
+                            )
                         );
 
                         if (unmatchedDocs.length > 0) {
@@ -967,7 +1256,8 @@ export default function TenderDetailPage() {
                                   </Badge>
                                 </div>
                                 <p className="text-sm text-gray-500 mt-1">
-                                  Documents that don't match any specific requirement
+                                  Documents that don't match any specific
+                                  requirement
                                 </p>
                               </div>
                               <div className="p-4 space-y-2">
@@ -979,10 +1269,14 @@ export default function TenderDetailPage() {
                                     <div className="flex items-center gap-3">
                                       <FileText className="h-5 w-5 text-blue-600" />
                                       <div>
-                                        <p className="font-medium text-sm">{doc.documentName}</p>
+                                        <p className="font-medium text-sm">
+                                          {doc.documentName}
+                                        </p>
                                         <p className="text-xs text-gray-500">
-                                          Type: {doc.documentType} • Uploaded: {formatDate(doc.uploadedDate)}
-                                          {doc.fileSize && ` • ${(doc.fileSize / 1024 / 1024).toFixed(2)} MB`}
+                                          Type: {doc.documentType} • Uploaded:{' '}
+                                          {formatDate(doc.uploadedDate)}
+                                          {doc.fileSize &&
+                                            ` • ${(doc.fileSize / 1024 / 1024).toFixed(2)} MB`}
                                         </p>
                                       </div>
                                     </div>
@@ -1002,7 +1296,11 @@ export default function TenderDetailPage() {
                   );
                 } catch (error) {
                   console.error('Error parsing document requirements:', error);
-                  return <p className="text-center py-8 text-red-500">Error loading documents</p>;
+                  return (
+                    <p className="text-center py-8 text-red-500">
+                      Error loading documents
+                    </p>
+                  );
                 }
               })()}
             </CardContent>
@@ -1014,11 +1312,15 @@ export default function TenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Tender Fees</CardTitle>
-              <CardDescription>{tender.fees?.length || 0} fee(s)</CardDescription>
+              <CardDescription>
+                {tender.fees?.length || 0} fee(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!tender.fees || tender.fees.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No fees configured</p>
+                <p className="text-center py-8 text-gray-500">
+                  No fees configured
+                </p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -1034,10 +1336,18 @@ export default function TenderDetailPage() {
                   <TableBody>
                     {tender.fees.map((fee) => (
                       <TableRow key={fee.id}>
-                        <TableCell><Badge>{fee.feeType}</Badge></TableCell>
-                        <TableCell className="font-semibold">{formatCurrency(fee.amount, fee.currency)}</TableCell>
+                        <TableCell>
+                          <Badge>{fee.feeType}</Badge>
+                        </TableCell>
+                        <TableCell className="font-semibold">
+                          {formatCurrency(fee.amount, fee.currency)}
+                        </TableCell>
                         <TableCell>{fee.paymentMethod || '-'}</TableCell>
-                        <TableCell>{fee.dueDate ? format(new Date(fee.dueDate), 'PP') : '-'}</TableCell>
+                        <TableCell>
+                          {fee.dueDate
+                            ? format(new Date(fee.dueDate), 'PP')
+                            : '-'}
+                        </TableCell>
                         <TableCell>
                           {fee.isMandatory ? (
                             <Badge variant="destructive">Required</Badge>
@@ -1060,11 +1370,15 @@ export default function TenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Business Partner Invitations</CardTitle>
-              <CardDescription>{tender.invitations?.length || 0} invitation(s)</CardDescription>
+              <CardDescription>
+                {tender.invitations?.length || 0} invitation(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!tender.invitations || tender.invitations.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No invitations sent yet</p>
+                <p className="text-center py-8 text-gray-500">
+                  No invitations sent yet
+                </p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -1078,11 +1392,20 @@ export default function TenderDetailPage() {
                   <TableBody>
                     {tender.invitations.map((invitation) => (
                       <TableRow key={invitation.id}>
-                        <TableCell className="font-medium">{invitation.businessPartnerName}</TableCell>
-                        <TableCell>{formatDate(invitation.invitedDate)}</TableCell>
+                        <TableCell className="font-medium">
+                          {invitation.businessPartnerName}
+                        </TableCell>
+                        <TableCell>
+                          {formatDate(invitation.invitedDate)}
+                        </TableCell>
                         <TableCell>
                           {(invitation.notificationSent ?? false) ? (
-                            <Badge variant="default" className="bg-green-100 text-green-800">Sent</Badge>
+                            <Badge
+                              variant="default"
+                              className="bg-green-100 text-green-800"
+                            >
+                              Sent
+                            </Badge>
                           ) : (
                             <Badge variant="outline">Not Sent</Badge>
                           )}
@@ -1104,11 +1427,15 @@ export default function TenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Clarifications & Questions</CardTitle>
-              <CardDescription>{tender.clarifications?.length || 0} clarification(s)</CardDescription>
+              <CardDescription>
+                {tender.clarifications?.length || 0} clarification(s)
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!tender.clarifications || tender.clarifications.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No clarifications requested yet</p>
+                <p className="text-center py-8 text-gray-500">
+                  No clarifications requested yet
+                </p>
               ) : (
                 <div className="space-y-4">
                   {tender.clarifications.map((clarification) => (
@@ -1116,30 +1443,50 @@ export default function TenderDetailPage() {
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div>
-                            <CardTitle className="text-base">Question from {clarification.businessPartnerName || 'Anonymous'}</CardTitle>
-                            <CardDescription>{formatDate(clarification.questionDate)}</CardDescription>
+                            <CardTitle className="text-base">
+                              Question from{' '}
+                              {clarification.businessPartnerName || 'Anonymous'}
+                            </CardTitle>
+                            <CardDescription>
+                              {formatDate(clarification.questionDate)}
+                            </CardDescription>
                           </div>
-                          <Badge variant={clarification.status === 'Answered' ? 'default' : 'outline'}>
+                          <Badge
+                            variant={
+                              clarification.status === 'Answered'
+                                ? 'default'
+                                : 'outline'
+                            }
+                          >
                             {clarification.status}
                           </Badge>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         <div>
-                          <p className="text-sm font-medium text-gray-500">Question:</p>
+                          <p className="text-sm font-medium text-gray-500">
+                            Question:
+                          </p>
                           <p className="mt-1">{clarification.question}</p>
                         </div>
-                        {clarification.status === 'Answered' && clarification.answer && (
-                          <div className="bg-blue-50 p-3 rounded-lg">
-                            <p className="text-sm font-medium text-blue-900">Answer:</p>
-                            <p className="mt-1 text-blue-800">{clarification.answer}</p>
-                            {clarification.answerDate && (
-                              <p className="text-xs text-blue-600 mt-2">
-                                Answered on {formatDate(clarification.answerDate)} by {clarification.answeredByName || 'Staff'}
+                        {clarification.status === 'Answered' &&
+                          clarification.answer && (
+                            <div className="bg-blue-50 p-3 rounded-lg">
+                              <p className="text-sm font-medium text-blue-900">
+                                Answer:
                               </p>
-                            )}
-                          </div>
-                        )}
+                              <p className="mt-1 text-blue-800">
+                                {clarification.answer}
+                              </p>
+                              {clarification.answerDate && (
+                                <p className="text-xs text-blue-600 mt-2">
+                                  Answered on{' '}
+                                  {formatDate(clarification.answerDate)} by{' '}
+                                  {clarification.answeredByName || 'Staff'}
+                                </p>
+                              )}
+                            </div>
+                          )}
                         {clarification.status === 'Pending' && (
                           <Button
                             size="sm"
@@ -1166,10 +1513,12 @@ export default function TenderDetailPage() {
           <Card>
             <CardContent className="flex flex-col justify-between gap-3 pt-6 sm:flex-row sm:items-center">
               <div>
-                <p className="font-medium">Source-specific committee controls</p>
+                <p className="font-medium">
+                  Source-specific committee controls
+                </p>
                 <p className="text-sm text-muted-foreground">
-                  Appointment acceptance, COI, signed quorum, scorer eligibility,
-                  immutable score locks, and controlled recall.
+                  Appointment acceptance, COI, signed quorum, scorer
+                  eligibility, immutable score locks, and controlled recall.
                 </p>
               </div>
               <Button
@@ -1185,7 +1534,11 @@ export default function TenderDetailPage() {
               </Button>
             </CardContent>
           </Card>
-          <TenderEvaluators tenderId={tenderId} tenderStatus={tender.status} onEvaluatorsChanged={loadTenderDetails} />
+          <TenderEvaluators
+            tenderId={tenderId}
+            tenderStatus={tender.status}
+            onEvaluatorsChanged={loadTenderDetails}
+          />
         </TabsContent>
 
         {/* Bids Tab */}
@@ -1193,11 +1546,15 @@ export default function TenderDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle>Submitted Bids</CardTitle>
-              <CardDescription>{tender.bids?.length || 0} bid(s) received</CardDescription>
+              <CardDescription>
+                {tender.bids?.length || 0} bid(s) received
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {!tender.bids || tender.bids.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No bids submitted yet</p>
+                <p className="text-center py-8 text-gray-500">
+                  No bids submitted yet
+                </p>
               ) : (
                 <Table>
                   <TableHeader>
@@ -1213,12 +1570,22 @@ export default function TenderDetailPage() {
                   <TableBody>
                     {tender.bids.map((bid) => (
                       <TableRow key={bid.id}>
-                        <TableCell className="font-mono">{bid.bidNumber}</TableCell>
-                        <TableCell className="font-medium">{bid.businessPartnerName}</TableCell>
-                        <TableCell className="font-semibold">{formatCurrency(bid.totalBidAmount, bid.currency)}</TableCell>
+                        <TableCell className="font-mono">
+                          {bid.bidNumber}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {bid.businessPartnerName}
+                        </TableCell>
+                        <TableCell className="font-semibold">
+                          {formatCurrency(bid.totalBidAmount, bid.currency)}
+                        </TableCell>
                         <TableCell>{formatDate(bid.submittedDate)}</TableCell>
                         <TableCell>
-                          <Badge variant={bid.status === 'Submitted' ? 'default' : 'outline'}>
+                          <Badge
+                            variant={
+                              bid.status === 'Submitted' ? 'default' : 'outline'
+                            }
+                          >
                             {bid.status}
                           </Badge>
                         </TableCell>
@@ -1226,7 +1593,9 @@ export default function TenderDetailPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => router.push(`/procurement/bids/${bid.id}`)}
+                            onClick={() =>
+                              router.push(`/procurement/bids/${bid.id}`)
+                            }
                           >
                             View Details
                           </Button>
@@ -1268,10 +1637,7 @@ export default function TenderDetailPage() {
         </TabsContent>
 
         {/* Approvals Tab */}
-        <WorkflowTabContent
-          value="approvals"
-          {...workflow.actionProps}
-        />
+        <WorkflowTabContent value="approvals" {...workflow.actionProps} />
       </Tabs>
 
       {/* Publish Tender Confirmation Dialog */}
@@ -1284,13 +1650,17 @@ export default function TenderDetailPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                Are you sure you want to publish this tender? Once published, email and in-app notifications will be sent to all invited suppliers.
+                Are you sure you want to publish this tender? Once published,
+                email and in-app notifications will be sent to all invited
+                suppliers.
               </p>
               <div className="rounded-lg border bg-amber-50 border-amber-200 p-3">
                 <div className="flex gap-2">
                   <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <p className="text-sm text-amber-800">
-                    <strong>Important:</strong> After publishing, the tender will be visible to invited suppliers and they can start submitting bids.
+                    <strong>Important:</strong> After publishing, the tender
+                    will be visible to invited suppliers and they can start
+                    submitting bids.
                   </p>
                 </div>
               </div>
@@ -1306,22 +1676,34 @@ export default function TenderDetailPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Type:</span>
-                  <span className="font-medium">{getTenderTypeLabel(tender?.tenderType || '')}</span>
+                  <span className="font-medium">
+                    {getTenderTypeLabel(tender?.tenderType || '')}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Estimated Value:</span>
-                  <span className="font-medium">{formatCurrency(tender?.estimatedValue, tender?.currency)}</span>
+                  <span className="text-muted-foreground">
+                    Estimated Value:
+                  </span>
+                  <span className="font-medium">
+                    {formatCurrency(tender?.estimatedValue, tender?.currency)}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Lots:</span>
-                  <span className="font-medium">{tender?.lots?.length || 0} lot(s)</span>
+                  <span className="font-medium">
+                    {tender?.lots?.length || 0} lot(s)
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Document Requirements:</span>
+                  <span className="text-muted-foreground">
+                    Document Requirements:
+                  </span>
                   <span className="font-medium">
                     {(() => {
                       try {
-                        const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
+                        const requirements = tender?.requiredDocuments
+                          ? JSON.parse(tender.requiredDocuments)
+                          : [];
                         return `${requirements.length} requirement(s)`;
                       } catch {
                         return '0 requirement(s)';
@@ -1331,15 +1713,27 @@ export default function TenderDetailPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Fees:</span>
-                  <span className="font-medium">{tender?.fees?.length || 0} fee(s)</span>
+                  <span className="font-medium">
+                    {tender?.fees?.length || 0} fee(s)
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Invited Suppliers:</span>
-                  <span className="font-medium">{tender?.invitations?.length || 0} supplier(s)</span>
+                  <span className="text-muted-foreground">
+                    Invited Suppliers:
+                  </span>
+                  <span className="font-medium">
+                    {tender?.invitations?.length || 0} supplier(s)
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Submission Deadline:</span>
-                  <span className="font-medium">{tender?.submissionDeadline ? format(new Date(tender.submissionDeadline), 'PPP') : 'Not set'}</span>
+                  <span className="text-muted-foreground">
+                    Submission Deadline:
+                  </span>
+                  <span className="font-medium">
+                    {tender?.submissionDeadline
+                      ? format(new Date(tender.submissionDeadline), 'PPP')
+                      : 'Not set'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1347,33 +1741,133 @@ export default function TenderDetailPage() {
             <div className="rounded-lg border bg-white p-4 space-y-3">
               <h4 className="font-semibold text-sm">Publication dates</h4>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2"><Label>Submission deadline</Label><Input type="datetime-local" value={publishData.submissionDeadline} onChange={(e) => setPublishData({ ...publishData, submissionDeadline: e.target.value })} /></div>
-                <div className="space-y-2"><Label>Public opening</Label><Input type="datetime-local" value={publishData.openingDate} onChange={(e) => setPublishData({ ...publishData, openingDate: e.target.value })} /></div>
+                <div className="space-y-2">
+                  <Label>Submission deadline</Label>
+                  <Input
+                    type="datetime-local"
+                    value={publishData.submissionDeadline}
+                    onChange={(e) =>
+                      setPublishData({
+                        ...publishData,
+                        submissionDeadline: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Public opening</Label>
+                  <Input
+                    type="datetime-local"
+                    value={publishData.openingDate}
+                    onChange={(e) =>
+                      setPublishData({
+                        ...publishData,
+                        openingDate: e.target.value,
+                      })
+                    }
+                  />
+                </div>
               </div>
             </div>
 
             {tender?.tenderType !== 'RFQ' && (
               <div className="rounded-lg border bg-white p-4 space-y-3">
-                <h4 className="font-semibold text-sm">NCT / ICT statutory advertisement</h4>
+                <h4 className="font-semibold text-sm">
+                  NCT / ICT statutory advertisement
+                </h4>
                 <p className="text-xs text-muted-foreground">
-                  Required when the immutable sourcing case selected NCT or ICT. Bind the approved version, fee terms and deadlines in the{' '}
+                  Required when the immutable sourcing case selected NCT or ICT.
+                  Bind the approved version, fee terms and deadlines in the{' '}
                   <Button
                     type="button"
                     variant="link"
                     className="h-auto p-0 text-xs"
-                    onClick={() => router.push(`/procurement/tenders/${tenderId}/document-controls`)}
+                    onClick={() =>
+                      router.push(
+                        `/procurement/tenders/${tenderId}/document-controls`
+                      )
+                    }
                   >
                     controlled document register
-                  </Button>
-                  {' '}before publication; the server validates the exact method, version and authority lineage.
+                  </Button>{' '}
+                  before publication; the server validates the exact method,
+                  version and authority lineage.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2"><Label>Advertisement reference</Label><Input value={publishData.advertisementReference} onChange={(e) => setPublishData({ ...publishData, advertisementReference: e.target.value })} /></div>
-                  <div className="space-y-2"><Label>Publication channel</Label><Input value={publishData.publicationChannel} onChange={(e) => setPublishData({ ...publishData, publicationChannel: e.target.value })} /></div>
-                  <div className="space-y-2"><Label>Approved document reference</Label><Input value={publishData.tenderDocumentReference} onChange={(e) => setPublishData({ ...publishData, tenderDocumentReference: e.target.value })} /></div>
-                  <div className="space-y-2"><Label>Document version</Label><Input value={publishData.tenderDocumentVersion} onChange={(e) => setPublishData({ ...publishData, tenderDocumentVersion: e.target.value })} /></div>
-                  <div className="space-y-2"><Label>Document fee (0 = free)</Label><Input type="number" min="0" value={publishData.documentFee} onChange={(e) => setPublishData({ ...publishData, documentFee: Number(e.target.value) })} /></div>
-                  <div className="space-y-2"><Label>Advertisement evidence</Label><Input value={publishData.advertisementEvidenceReference} onChange={(e) => setPublishData({ ...publishData, advertisementEvidenceReference: e.target.value })} /></div>
+                  <div className="space-y-2">
+                    <Label>Advertisement reference</Label>
+                    <Input
+                      value={publishData.advertisementReference}
+                      onChange={(e) =>
+                        setPublishData({
+                          ...publishData,
+                          advertisementReference: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Publication channel</Label>
+                    <Input
+                      value={publishData.publicationChannel}
+                      onChange={(e) =>
+                        setPublishData({
+                          ...publishData,
+                          publicationChannel: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Approved document reference</Label>
+                    <Input
+                      value={publishData.tenderDocumentReference}
+                      onChange={(e) =>
+                        setPublishData({
+                          ...publishData,
+                          tenderDocumentReference: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Document version</Label>
+                    <Input
+                      value={publishData.tenderDocumentVersion}
+                      onChange={(e) =>
+                        setPublishData({
+                          ...publishData,
+                          tenderDocumentVersion: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Document fee (0 = free)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={publishData.documentFee}
+                      onChange={(e) =>
+                        setPublishData({
+                          ...publishData,
+                          documentFee: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Advertisement evidence</Label>
+                    <Input
+                      value={publishData.advertisementEvidenceReference}
+                      onChange={(e) =>
+                        setPublishData({
+                          ...publishData,
+                          advertisementEvidenceReference: e.target.value,
+                        })
+                      }
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -1381,9 +1875,12 @@ export default function TenderDetailPage() {
             {/* External/Public Recipients (RFQ) */}
             {tender?.tenderType === 'RFQ' && (
               <div className="rounded-lg border bg-white p-4 space-y-3">
-                <h4 className="font-semibold text-sm">Public Suppliers (Email Only)</h4>
+                <h4 className="font-semibold text-sm">
+                  Public Suppliers (Email Only)
+                </h4>
                 <p className="text-xs text-muted-foreground">
-                  Add external email recipients to receive the RFQ PDF attachment. Emails are sent individually (no shared BCC list).
+                  Add external email recipients to receive the RFQ PDF
+                  attachment. Emails are sent individually (no shared BCC list).
                 </p>
 
                 <div className="space-y-2">
@@ -1400,7 +1897,11 @@ export default function TenderDetailPage() {
                         }
                       }}
                     />
-                    <Button type="button" variant="outline" onClick={addExternalRecipientEmail}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={addExternalRecipientEmail}
+                    >
                       Add
                     </Button>
                   </div>
@@ -1438,9 +1939,20 @@ export default function TenderDetailPage() {
                   <p className="font-medium mb-1">What happens next?</p>
                   <ul className="space-y-1 list-disc list-inside text-xs">
                     <li>Tender status will change to "Published"</li>
-                    <li>Email notifications will be sent to all {tender?.invitations?.length || 0} invited supplier(s){externalRecipientEmails.length > 0 ? ` + ${externalRecipientEmails.length} public recipient(s)` : ''}</li>
-                    <li>In-app notifications will be created for invited suppliers</li>
-                    <li>Suppliers can view the tender and submit bids until the deadline</li>
+                    <li>
+                      Email notifications will be sent to all{' '}
+                      {tender?.invitations?.length || 0} invited supplier(s)
+                      {externalRecipientEmails.length > 0
+                        ? ` + ${externalRecipientEmails.length} public recipient(s)`
+                        : ''}
+                    </li>
+                    <li>
+                      In-app notifications will be created for invited suppliers
+                    </li>
+                    <li>
+                      Suppliers can view the tender and submit bids until the
+                      deadline
+                    </li>
                   </ul>
                 </div>
               </div>

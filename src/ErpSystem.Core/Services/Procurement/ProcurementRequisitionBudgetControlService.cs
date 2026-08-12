@@ -201,6 +201,8 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
                 "PR_BUDGET_TRANSACTION_REQUIRED",
                 "Budget release must execute inside the purchase-requisition status transaction.");
 
+        await EnsureNoDownstreamExposureAsync(requisition, cancellationToken);
+
         var commitment = await Commitments.GetQueryable(item => item.PurchaseRequisitionId == requisition.Id &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .SingleOrDefaultAsync(cancellationToken);
@@ -261,6 +263,67 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             AvailableAmount = budget.RemainingAmount,
             Message = "The purchase-requisition budget commitment was released."
         };
+    }
+
+    private async Task EnsureNoDownstreamExposureAsync(
+        PurchaseRequisition requisition,
+        CancellationToken cancellationToken)
+    {
+        var purchaseOrder = await _unitOfWork.Repository<PurchaseOrder>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.SourceRequisitionId == requisition.Id &&
+                !item.IsDeleted &&
+                item.Status != "Cancelled" &&
+                item.Status != "Rejected")
+            .AsNoTracking()
+            .Select(item => item.OrderNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(purchaseOrder))
+        {
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_BUDGET_DOWNSTREAM_EXPOSURE_ACTIVE",
+                $"Budget commitment cannot be released while purchase order {purchaseOrder} remains active.");
+        }
+
+        var contract = await _unitOfWork.Repository<Contract>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted &&
+                item.Tender.TenantId == _currentUser.TenantId &&
+                !item.Tender.IsDeleted &&
+                item.Tender.SourcePurchaseRequisitionId == requisition.Id &&
+                item.Status != "Terminated")
+            .AsNoTracking()
+            .Select(item => item.ContractNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(contract))
+        {
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_BUDGET_DOWNSTREAM_EXPOSURE_ACTIVE",
+                $"Budget commitment cannot be released while contract {contract} remains active.");
+        }
+
+        var activation = await _unitOfWork.Repository<ProcurementContractActivation>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted &&
+                item.Contract.TenantId == _currentUser.TenantId &&
+                !item.Contract.IsDeleted &&
+                item.Contract.Tender.TenantId == _currentUser.TenantId &&
+                !item.Contract.Tender.IsDeleted &&
+                item.Contract.Tender.SourcePurchaseRequisitionId == requisition.Id &&
+                item.Status != ProcurementContractActivationStatus.Rejected &&
+                item.Status != ProcurementContractActivationStatus.Cancelled)
+            .AsNoTracking()
+            .Select(item => item.Contract.ContractNumber)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(activation))
+        {
+            throw new ProcurementRequisitionBudgetConflictException(
+                "PR_BUDGET_DOWNSTREAM_EXPOSURE_ACTIVE",
+                $"Budget commitment cannot be released while contract activation for {activation} remains active.");
+        }
     }
 
     public async Task<IReadOnlyList<PurchaseRequisitionBudgetControlHistoryDto>> GetHistoryAsync(

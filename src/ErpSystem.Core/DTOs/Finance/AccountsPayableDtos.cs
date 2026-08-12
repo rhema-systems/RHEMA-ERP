@@ -65,6 +65,11 @@ public class VendorInvoiceDto
     public decimal MatchingPriceTolerancePercent { get; set; }
     public decimal MatchingQuantityTolerancePercent { get; set; }
     public Guid? MatchExceptionControlEventId { get; set; }
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
+    public string? AcceptedSupplySourceReference { get; set; }
+    public string? AcceptedSupplySnapshotHash { get; set; }
+    public DateTime? AcceptedSupplyValidatedAtUtc { get; set; }
 
     // Status
     public VendorInvoiceStatus Status { get; set; }
@@ -123,6 +128,16 @@ public class VendorInvoiceCreateDto
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
 
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
+
+    /// <summary>
+    /// Server-only flag used by the QS owner when handing an approved Works
+    /// certificate to AP. It cannot be supplied by an API client.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsTrustedAcceptedSupplyHandoff { get; set; }
+
     // GL accounts
     public Guid? ExpenseAccountId { get; set; }
     public Guid? ApAccountId { get; set; }
@@ -142,6 +157,8 @@ public class VendorInvoiceUpdateDto
 
     public string? SupplierInvoiceNumber { get; set; }
     public Guid? PurchaseOrderId { get; set; }
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
 
     public DateTime InvoiceDate { get; set; }
     public DateTime? ReceivedDate { get; set; }

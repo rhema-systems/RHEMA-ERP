@@ -20,6 +20,54 @@ vi.mock('@tanstack/react-query', () => ({
         tags: ['app-vs-actual'],
       },
       {
+        id: '11111111-1111-1111-1111-111111111112',
+        name: 'Purchase Requisition Status Register',
+        description: 'Published report',
+        type: 'procurement',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-12T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['requisition-status'],
+      },
+      {
+        id: '11111111-1111-1111-1111-111111111113',
+        name: 'Purchase Order Register',
+        description: 'Published report',
+        type: 'procurement',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-12T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['purchase-order-register'],
+      },
+      {
+        id: '11111111-1111-1111-1111-111111111114',
+        name: 'Procurement Commitment Register',
+        description: 'Published report',
+        type: 'procurement',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-12T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['commitment-register'],
+      },
+      {
+        id: '11111111-1111-1111-1111-111111111115',
+        name: 'Procurement Certificate Tracking Register',
+        description: 'Published report',
+        type: 'procurement',
+        status: 'published',
+        createdBy: 'system',
+        createdAt: '2026-08-12T00:00:00Z',
+        isScheduled: false,
+        isFavorite: false,
+        tags: ['certificate-tracking'],
+      },
+      {
         id: '22222222-2222-2222-2222-222222222222',
         name: 'Balance Register',
         description: 'Published report',
@@ -125,10 +173,39 @@ describe('StatutoryReportCataloguePage navigation', () => {
       'href',
       '/reports/purchasing/app-vs-actual',
     );
+    expect(screen.getByRole('link', { name: /Requisition Status/ })).toHaveAttribute(
+      'href',
+      '/reports/purchasing/requisition-status',
+    );
+    expect(screen.getByRole('link', { name: /Purchase Order Register/ })).toHaveAttribute(
+      'href',
+      '/reports/purchasing/purchase-order-register',
+    );
+    expect(screen.getByRole('link', { name: /Commitment Register/ })).toHaveAttribute(
+      'href',
+      '/reports/purchasing/commitment-register',
+    );
+    expect(screen.getByRole('link', { name: /Certificate Tracking/ })).toHaveAttribute(
+      'href',
+      '/reports/purchasing/certificate-tracking',
+    );
     expect(screen.queryByText(/TDC-\d+/)).not.toBeInTheDocument();
     expect(screen.queryByText('Report criteria')).not.toBeInTheDocument();
     expect(screen.queryByText('Choose a report category to open its criteria and generation page.')).not.toBeInTheDocument();
     expect(screen.queryByText('Select a report to configure its filters and generate results.')).not.toBeInTheDocument();
+  });
+
+  it('uses controlled fiscal-year and supplier selectors for the new operational reports', async () => {
+    const requisition = renderCatalogue('requisition-status');
+    expect(await screen.findByRole('heading', { name: 'Requisition Status' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Fiscal year')).toBeInTheDocument();
+    expect(screen.queryByText('Supplier')).not.toBeInTheDocument();
+    requisition.unmount();
+
+    renderCatalogue('purchase-order-register');
+    expect(await screen.findByRole('heading', { name: 'Purchase Order Register' })).toBeInTheDocument();
+    expect(screen.getByText('Supplier')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Fiscal year')).not.toBeInTheDocument();
   });
 
   it('shows only relevant compact filters on the dedicated report route', async () => {

@@ -27,7 +27,8 @@ import type {
     VendorInvoiceMatchExceptionEvidenceRequest,
     VendorInvoiceMatchExceptionReport,
     VendorInvoiceMatchExceptionStatus,
-    ProcurementFinanceReconciliationReport
+    ProcurementFinanceReconciliationReport,
+    ProcurementAcceptedSupplyOptions
 } from '../types/ap';
 
 // Re-using the PagedResult structure from ar-service
@@ -116,6 +117,14 @@ class AccountsPayableService {
 
     public async createInvoice(data: VendorInvoiceCreateRequest): Promise<VendorInvoice> {
         return apiService.post<VendorInvoice>(`${this.baseUrl}/invoices`, data);
+    }
+
+    public async getAcceptedSupplyOptions(
+        purchaseOrderId: string
+    ): Promise<ProcurementAcceptedSupplyOptions> {
+        return apiService.get<ProcurementAcceptedSupplyOptions>(
+            `${this.baseUrl}/invoices/accepted-supply-options?purchaseOrderId=${encodeURIComponent(purchaseOrderId)}`
+        );
     }
 
     public async updateInvoice(id: string, data: VendorInvoiceUpdateRequest): Promise<VendorInvoice> {

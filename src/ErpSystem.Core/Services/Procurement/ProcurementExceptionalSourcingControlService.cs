@@ -95,7 +95,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         EnsureReader();
         var tender = await LoadTenderAsync(tenderId, tracked: false, cancellationToken);
         var lineage = await RevalidateAsync(tender, null, Guid.NewGuid().ToString("N"), cancellationToken);
-        var minimum = lineage.Case.SelectedMethod == ProcurementMethodType.SingleSource
+        var minimum = lineage.Case.SelectedMethod is ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase
             ? 1 : Math.Max(2, lineage.MethodRule.RequiresCompetition ? lineage.MethodRule.MinimumQuotationCount : 2);
         var suppliers = await Suppliers.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
                 item.IsActive && !item.IsBlacklisted && (item.PartnerType == "Supplier" || item.PartnerType == "Both" || item.PartnerType == "Contractor"))
@@ -109,6 +109,9 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             BoardApprovalRequired = lineage.BoardRequired,
             ManagingDirectorApprovalRequired = lineage.ManagingDirectorRequired,
             PpaApprovalRequired = lineage.PpaRequired,
+            JustificationRequired = lineage.ExceptionRule.JustificationRequired,
+            EvidenceRequired = lineage.ExceptionRule.EvidenceRequired,
+            PostAwardFilingRequired = lineage.ExceptionRule.PostAwardFilingRequired,
             EvidenceRequirements = lineage.EvidenceRules.Select(rule => new ProcurementExceptionalEvidenceRequirementDto
             {
                 EvidenceRuleId = rule.Id, RuleCode = rule.RuleCode,
@@ -131,22 +134,26 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         var tender = await LoadTenderAsync(tenderId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(ManagePermission, tender.TenderNumber, correlation, cancellationToken);
         if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
-            throw Conflict("EXCEPTIONAL_TENDER_APPROVAL_REQUIRED", "The tender document must be Approved before the restricted or single-source case is prepared.");
+            throw Conflict("EXCEPTIONAL_TENDER_APPROVAL_REQUIRED", "The tender document must be Approved before the controlled noncompetitive case is prepared.");
         if (!tender.SubmissionDeadline.HasValue || EnsureUtc(tender.SubmissionDeadline.Value) <= DateTime.UtcNow)
             throw Validation("EXCEPTIONAL_TENDER_DEADLINE_INVALID", "The approved tender requires a future supplier-submission deadline.");
         if (await Controls.ExistsAsync(item => item.TenantId == _currentUser.TenantId && item.TenderId == tenderId && !item.IsDeleted))
-            throw Conflict("EXCEPTIONAL_CONTROL_EXISTS", "The restricted or single-source statutory record already exists.");
-        Require(request.Justification, "EXCEPTIONAL_JUSTIFICATION_REQUIRED", "A detailed statutory justification is required.");
-        Require(request.JustificationEvidenceReference, "EXCEPTIONAL_JUSTIFICATION_EVIDENCE_REQUIRED", "Justification evidence is required.");
-        Require(request.SupplierSelectionEvidenceReference, "EXCEPTIONAL_SUPPLIER_EVIDENCE_REQUIRED", "Supplier-selection evidence is required.");
-
+            throw Conflict("EXCEPTIONAL_CONTROL_EXISTS", "The controlled noncompetitive sourcing record already exists.");
         var lineage = await RevalidateAsync(tender, null, correlation, cancellationToken);
+        if (lineage.ExceptionRule.JustificationRequired)
+        {
+            Require(request.Justification, "EXCEPTIONAL_JUSTIFICATION_REQUIRED", "The configured sourcing rule requires a detailed justification.");
+            Require(request.JustificationEvidenceReference, "EXCEPTIONAL_JUSTIFICATION_EVIDENCE_REQUIRED", "The configured sourcing rule requires justification evidence.");
+        }
+        Require(request.SupplierSelectionEvidenceReference, "EXCEPTIONAL_SUPPLIER_EVIDENCE_REQUIRED", "Controlled supplier-selection evidence is required.");
         var supplierIds = request.BusinessPartnerIds.Where(id => id != Guid.Empty).Distinct().ToList();
-        var minimum = lineage.Case.SelectedMethod == ProcurementMethodType.SingleSource
+        var minimum = lineage.Case.SelectedMethod is ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase
             ? 1
             : Math.Max(2, lineage.MethodRule.RequiresCompetition ? lineage.MethodRule.MinimumQuotationCount : 2);
         if (lineage.Case.SelectedMethod == ProcurementMethodType.SingleSource && supplierIds.Count != 1)
             throw Validation("SINGLE_SOURCE_SUPPLIER_COUNT", "Single-source procurement requires exactly one identified supplier.");
+        if (lineage.Case.SelectedMethod == ProcurementMethodType.PettyPurchase && supplierIds.Count != 1)
+            throw Validation("PETTY_PURCHASE_SUPPLIER_COUNT", "Petty-purchase procurement requires exactly one identified supplier.");
         if (lineage.Case.SelectedMethod == ProcurementMethodType.RestrictedTendering && supplierIds.Count < minimum)
             throw Validation("RESTRICTED_SUPPLIER_MINIMUM", $"Restricted tendering requires at least {minimum} eligible invited suppliers under the locked method rule.");
 
@@ -182,7 +189,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
                 item.EvidenceReference.Trim(), item.VerificationReference.Trim()));
         }
         if (supplied.Keys.Except(checklist.Select(item => item.RequirementKey), StringComparer.OrdinalIgnoreCase).Any())
-            throw Validation("EXCEPTIONAL_EVIDENCE_UNKNOWN", "The checklist contains evidence that is not part of the current DEC-006 policy.");
+            throw Validation("EXCEPTIONAL_EVIDENCE_UNKNOWN", $"The checklist contains evidence that is not part of the current {DecisionKey(lineage.Case.SelectedMethod)} policy.");
 
         var now = DateTime.UtcNow;
         var control = new ProcurementExceptionalSourcingControl
@@ -194,8 +201,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             ExceptionRuleCode = lineage.ExceptionRule.RuleCode,
             AuthorityRouteReference = lineage.Case.AuthorityRouteReference,
             Status = ProcurementExceptionalSourcingControlStatus.Prepared,
-            Justification = request.Justification.Trim(),
-            JustificationEvidenceReference = request.JustificationEvidenceReference.Trim(),
+            Justification = NullIfWhiteSpace(request.Justification) ?? "Not required by the locked sourcing rule.",
+            JustificationEvidenceReference = NullIfWhiteSpace(request.JustificationEvidenceReference) ?? "not-required-by-policy",
             SupplierSelectionEvidenceReference = request.SupplierSelectionEvidenceReference.Trim(),
             SupplierSnapshotJson = JsonSerializer.Serialize(suppliers.Select(item => new SupplierSnapshot(item.Id, item.PartnerName)).ToList(), JsonOptions),
             EvidenceChecklistJson = JsonSerializer.Serialize(checklist, JsonOptions),
@@ -655,7 +662,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw Validation("EXCEPTIONAL_SOURCING_CASE_NOT_FOUND", "The locked sourcing case is unavailable.");
         if (!IsExceptional(sourcingCase.SelectedMethod))
-            throw Validation("EXCEPTIONAL_METHOD_REQUIRED", "This control is available only for Restricted Tendering or Single Source sourcing cases.");
+            throw Validation("EXCEPTIONAL_METHOD_REQUIRED", "This control is available only for Restricted Tendering, Single Source, or Petty Purchase sourcing cases.");
         ProcurementSourcingCaseEntryGateDto gate;
         try
         {
@@ -675,6 +682,10 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             gate.EstimatedValue != tender.EstimatedValue || !string.Equals(gate.CurrencyCode, tender.Currency, StringComparison.OrdinalIgnoreCase))
             throw Validation("EXCEPTIONAL_SOURCE_LINEAGE_STALE", "The tender no longer matches its current exceptional method, value, currency, or rule lineage.");
 
+        var decisionKey = DecisionKey(sourcingCase.SelectedMethod);
+        var evidenceStage = sourcingCase.SelectedMethod == ProcurementMethodType.PettyPurchase
+            ? ProcurementEvidenceStage.Requisition
+            : ProcurementEvidenceStage.Sourcing;
         ProcurementPolicyExceptionRule exceptionRule;
         if (control is not null)
         {
@@ -692,27 +703,34 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         {
             var currentRules = await ExceptionRules.GetQueryable(item => item.PolicySetId == sourcingCase.PolicySetId &&
                     item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.IsEnabled &&
-                    item.SourceDecisionKey == "DEC-006" && item.Method == sourcingCase.SelectedMethod &&
+                    item.SourceDecisionKey == decisionKey && item.Method == sourcingCase.SelectedMethod &&
                     (!item.Category.HasValue || item.Category == sourcingCase.Category) && item.EffectiveFrom <= DateTime.UtcNow &&
                     (!item.EffectiveTo.HasValue || item.EffectiveTo >= DateTime.UtcNow))
                 .AsNoTracking().ToListAsync(cancellationToken);
             if (currentRules.Count == 0)
-                throw Validation("EXCEPTIONAL_RULE_NOT_FOUND", "No current DEC-006 exception rule covers the selected method.");
+                throw Validation("EXCEPTIONAL_RULE_NOT_FOUND", $"No current {decisionKey} exception rule covers the selected method.");
             if (currentRules.Count > 1)
-                throw Validation("EXCEPTIONAL_RULE_AMBIGUOUS", "More than one current DEC-006 exception rule covers the selected method.");
+                throw Validation("EXCEPTIONAL_RULE_AMBIGUOUS", $"More than one current {decisionKey} exception rule covers the selected method.");
             exceptionRule = currentRules[0];
         }
         var now = DateTime.UtcNow;
         if (exceptionRule.IsDeleted || !exceptionRule.IsEnabled || exceptionRule.PolicySetId != sourcingCase.PolicySetId ||
-            exceptionRule.Method != sourcingCase.SelectedMethod || exceptionRule.SourceDecisionKey != "DEC-006" ||
+            exceptionRule.Method != sourcingCase.SelectedMethod || exceptionRule.SourceDecisionKey != decisionKey ||
             exceptionRule.EffectiveFrom > now || (exceptionRule.EffectiveTo.HasValue && exceptionRule.EffectiveTo < now) ||
             exceptionRule.Disposition != ProcurementExceptionDisposition.ApprovalRequired)
-            throw Validation("EXCEPTIONAL_RULE_STALE", "The exact DEC-006 exception rule is missing, expired, prohibited, or no longer matches the sourcing case.");
-        if (!exceptionRule.JustificationRequired || !exceptionRule.EvidenceRequired || !exceptionRule.PostAwardFilingRequired)
+            throw Validation("EXCEPTIONAL_RULE_STALE", $"The exact {decisionKey} exception rule is missing, expired, prohibited, or no longer matches the sourcing case.");
+        if (sourcingCase.SelectedMethod == ProcurementMethodType.PettyPurchase)
+        {
+            if (exceptionRule.PostAwardFilingRequired)
+                throw Validation("PETTY_PURCHASE_POLICY_INVALID", "DEC-005 petty-purchase controls cannot require the DEC-006 post-award filing lifecycle.");
+        }
+        else if (!exceptionRule.JustificationRequired || !exceptionRule.EvidenceRequired || !exceptionRule.PostAwardFilingRequired)
+        {
             throw Validation("EXCEPTIONAL_POLICY_INCOMPLETE", "The DEC-006 exception rule must require justification, verified evidence, approval, and post-award filing.");
+        }
         var workflowDefinitionId = exceptionRule.WorkflowDefinitionId ?? methodRule.WorkflowDefinitionId;
         if (!workflowDefinitionId.HasValue)
-            throw Validation("EXCEPTIONAL_WORKFLOW_REQUIRED", "The exact DEC-006 or method rule must select a shared exceptional-sourcing approval workflow.");
+            throw Validation("EXCEPTIONAL_WORKFLOW_REQUIRED", $"The exact {decisionKey} or method rule must select a shared sourcing-approval workflow.");
         if (control is not null && (control.SourcingCaseId != sourcingCase.Id || control.MethodRuleId != methodRule.Id ||
                 control.ExceptionRuleId != exceptionRule.Id || control.WorkflowDefinitionId != workflowDefinitionId.Value ||
                 control.Method != sourcingCase.SelectedMethod))
@@ -720,19 +738,19 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
 
         var evidenceRules = await EvidenceRules.GetQueryable(item => item.PolicySetId == sourcingCase.PolicySetId &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted && item.IsEnabled && item.IsMandatory &&
-                item.SourceDecisionKey == "DEC-006" && item.Stage == ProcurementEvidenceStage.Sourcing &&
+                item.SourceDecisionKey == decisionKey && item.Stage == evidenceStage &&
                 (!item.Category.HasValue || item.Category == sourcingCase.Category) &&
                 (!item.Method.HasValue || item.Method == sourcingCase.SelectedMethod) && item.EffectiveFrom <= now &&
                 (!item.EffectiveTo.HasValue || item.EffectiveTo >= now))
             .OrderBy(item => item.RuleCode).AsNoTracking().ToListAsync(cancellationToken);
         if (evidenceRules.Count == 0)
-            throw Validation("EXCEPTIONAL_EVIDENCE_POLICY_INCOMPLETE", "The current DEC-006 policy has no mandatory sourcing evidence checklist.");
+            throw Validation("EXCEPTIONAL_EVIDENCE_POLICY_INCOMPLETE", $"The current {decisionKey} policy has no mandatory evidence checklist.");
         if (control is not null)
         {
             var captured = EvidenceFrom(control);
             if (evidenceRules.Any(rule => !captured.Any(item => item.EvidenceRuleId == rule.Id &&
                     !string.IsNullOrWhiteSpace(item.EvidenceReference) && !string.IsNullOrWhiteSpace(item.VerificationReference))))
-                throw Validation("EXCEPTIONAL_EVIDENCE_STALE", "The immutable exceptional-sourcing record does not cover every current mandatory DEC-006 evidence rule.");
+                throw Validation("EXCEPTIONAL_EVIDENCE_STALE", $"The immutable sourcing record does not cover every current mandatory {decisionKey} evidence rule.");
         }
         var authorityText = string.Join(" ", sourcingCase.AuthorityRoute.Steps.Select(item => $"{item.AuthorityName} {item.AuthorityRole}").Append(exceptionRule.ApproverRole));
         var boardRequired = authorityText.Contains("board", StringComparison.OrdinalIgnoreCase);
@@ -741,7 +759,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         var ppaRequired = authorityText.Contains("PPA", StringComparison.OrdinalIgnoreCase) ||
                           authorityText.Contains("public procurement", StringComparison.OrdinalIgnoreCase) ||
                           authorityText.Contains("central tender", StringComparison.OrdinalIgnoreCase);
-        if (!ppaRequired || (!boardRequired && !managingDirectorRequired))
+        if (sourcingCase.SelectedMethod != ProcurementMethodType.PettyPurchase &&
+            (!ppaRequired || (!boardRequired && !managingDirectorRequired)))
             throw Validation("EXCEPTIONAL_AUTHORITY_POLICY_INCOMPLETE", "The locked route must include PPA and at least Board or Managing Director authority for restricted/single-source procurement.");
         return new Lineage(sourcingCase, methodRule, exceptionRule, evidenceRules,
             workflowDefinitionId.Value, boardRequired, managingDirectorRequired, ppaRequired);
@@ -777,7 +796,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private static IEnumerable<ProcurementControlEventEvidenceReference> BuildPreparationEvidence(
         ProcurementExceptionalSourcingControl control, IEnumerable<EvidenceSnapshot> checklist)
     {
-        yield return External(control.JustificationEvidenceReference, "Statutory justification", "DEC-006");
+        if (!string.Equals(control.JustificationEvidenceReference, "not-required-by-policy", StringComparison.OrdinalIgnoreCase))
+            yield return External(control.JustificationEvidenceReference, "Controlled sourcing justification", DecisionKey(control.Method));
         yield return External(control.SupplierSelectionEvidenceReference, "Exceptional supplier selection", "E2E-005");
         foreach (var item in checklist)
             yield return External(item.EvidenceReference, item.EvidenceName, item.RequirementKey);
@@ -793,7 +813,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     {
         control.LifecycleSnapshotJson = JsonSerializer.Serialize(new
         {
-            schemaVersion = "tdc.restricted-single-source.v1", control.Id, control.TenderId,
+            schemaVersion = "tdc.noncompetitive-sourcing-control.v2", control.Id, control.TenderId,
             control.SourcingCaseId, control.MethodRuleId, control.ExceptionRuleId, control.AuthorityRouteId,
             control.Method, control.MethodRuleCode, control.ExceptionRuleCode, control.AuthorityRouteReference,
             control.Status, control.Justification, control.JustificationEvidenceReference,
@@ -861,13 +881,16 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
                 control.BoardApprovalRequired ? control.BoardApprovalReference : "Not required by locked route"),
             Milestone("DEC-007", "Managing Director authority outcome", control.ManagingDirectorApprovalRequired ? control.ApprovedAtUtc : control.PreparedAtUtc,
                 control.ManagingDirectorApprovalRequired ? control.ManagingDirectorApprovalReference : "Not required by locked route"),
-            Milestone("DEC-008", "PPA approval", control.ApprovedAtUtc, control.PpaApprovalReference),
+            Milestone("DEC-008", "PPA approval", control.PpaApprovalRequired ? control.ApprovedAtUtc : control.PreparedAtUtc,
+                control.PpaApprovalRequired ? control.PpaApprovalReference : "Not required by locked route"),
             Milestone("DEC-009", "Negotiation plan and minutes", control.NegotiatedAtUtc, control.NegotiationOutcomeReference),
             Milestone("DEC-010", "Negotiated recommendation", control.RecommendedAtUtc, control.RecommendedBidId?.ToString()),
             Milestone("DEC-011", "Award record", control.AwardedAtUtc, control.AwardReference),
             Milestone("DEC-012", "Executed contract", control.ContractedAtUtc, control.ContractReference),
             Milestone("DEC-013", "Supplier acceptance", control.AcceptedAtUtc, control.BidderAcceptanceReference),
-            Milestone("DEC-014", "Post-award filing and exception report", control.FiledAtUtc, control.PostAwardFilingReference)
+            Milestone("DEC-014", "Post-award filing and exception report",
+                control.ExceptionRule.PostAwardFilingRequired ? control.FiledAtUtc : control.AcceptedAtUtc,
+                control.ExceptionRule.PostAwardFilingRequired ? control.PostAwardFilingReference : "Not required by locked rule")
         ]
     };
 
@@ -911,9 +934,12 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
     private string ActorName() => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
     private static bool IsExceptional(ProcurementMethodType method) =>
-        method is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource;
+        method is ProcurementMethodType.RestrictedTendering or ProcurementMethodType.SingleSource or ProcurementMethodType.PettyPurchase;
     private static System.Linq.Expressions.Expression<Func<ProcurementMethodType, bool>> IsExceptionalExpression() =>
-        method => method == ProcurementMethodType.RestrictedTendering || method == ProcurementMethodType.SingleSource;
+        method => method == ProcurementMethodType.RestrictedTendering || method == ProcurementMethodType.SingleSource ||
+                  method == ProcurementMethodType.PettyPurchase;
+    private static string DecisionKey(ProcurementMethodType method) =>
+        method == ProcurementMethodType.PettyPurchase ? "DEC-005" : "DEC-006";
     private static DateTime EnsureUtc(DateTime value) => value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string NormalizeCorrelation(string? value) => string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : Truncate(value.Trim(), 100);

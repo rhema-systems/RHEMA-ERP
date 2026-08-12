@@ -54,6 +54,7 @@ public sealed class ProcurementPurchaseOrderSourceResolution
     public Guid SourcingReleaseId { get; init; }
     public Guid AwardReadinessDecisionId { get; init; }
     public Guid BusinessPartnerId { get; init; }
+    public ProcurementCategoryClass ProcurementCategory { get; init; }
     public string CurrencyCode { get; init; } = string.Empty;
     public decimal? ApprovedAmount { get; init; }
     public IReadOnlyList<ProcurementPurchaseOrderSourceLineDto> ApprovedLines { get; init; } = [];

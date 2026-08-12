@@ -655,10 +655,12 @@ export interface PurchaseOrderSummaryDto {
   promisedDate?: string;
   status: string;
   totalAmount: number;
+  currency: string;
   itemCount: number;
   requestedByName?: string;
   currentWorkflowStepName?: string;
   procurementSourceType?: ProcurementPurchaseOrderSourceType;
+  procurementCategory?: ProcurementCategoryClass;
   procurementSourceReference?: string;
 }
 

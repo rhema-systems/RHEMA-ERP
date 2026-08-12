@@ -31,17 +31,20 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly ICurrentUserService _currentUserService;
         private readonly ApplicationDbContext _dbContext;
         private readonly IVendorInvoiceMatchExceptionService? _matchExceptionService;
+        private readonly IProcurementAcceptedSupplyService? _acceptedSupplyService;
 
         public VendorInvoiceController(
             IVendorInvoiceService invoiceService,
             ICurrentUserService currentUserService,
             ApplicationDbContext dbContext,
-            IVendorInvoiceMatchExceptionService? matchExceptionService = null)
+            IVendorInvoiceMatchExceptionService? matchExceptionService = null,
+            IProcurementAcceptedSupplyService? acceptedSupplyService = null)
         {
             _invoiceService = invoiceService;
             _currentUserService = currentUserService;
             _dbContext = dbContext;
             _matchExceptionService = matchExceptionService;
+            _acceptedSupplyService = acceptedSupplyService;
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
@@ -79,6 +82,36 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             var invoice = await _invoiceService.GetByInvoiceNumberAsync(invoiceNumber);
             return invoice == null ? NotFound() : Ok(invoice);
+        }
+
+        /// <summary>
+        /// Returns only authoritative, tenant-scoped completion records that can
+        /// be selected for the chosen PO. Works is intentionally routed to QS.
+        /// </summary>
+        [HttpGet("accepted-supply-options")]
+        public async Task<ActionResult<ProcurementAcceptedSupplyOptionsDto>>
+            GetAcceptedSupplyOptions([FromQuery] Guid purchaseOrderId)
+        {
+            if (!await HasAnyPermissionAsync(
+                    "Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            if (_acceptedSupplyService == null)
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Accepted-supply control unavailable",
+                    detail: "The shared accepted-supply control is not registered.");
+            try
+            {
+                return Ok(await _acceptedSupplyService.GetOptionsAsync(
+                    purchaseOrderId, HttpContext.RequestAborted));
+            }
+            catch (ProcurementAcceptedSupplyValidationException exception)
+            {
+                return UnprocessableEntity(new
+                {
+                    code = exception.Code,
+                    message = exception.Message
+                });
+            }
         }
 
         /// <summary>Creates a new vendor invoice in Draft status with the supplied line items.</summary>

@@ -291,9 +291,11 @@ public class PurchaseOrdersController : ControllerBase
                 PromisedDate = po.PromisedDate,
                 Status = po.Status,
                 TotalAmount = po.TotalAmount,
+                Currency = po.Currency,
                 ItemCount = po.Items?.Count ?? 0,
                 RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName,
                 ProcurementSourceType = po.ProcurementSourceType,
+                ProcurementCategory = po.ProcurementCategory,
                 ProcurementSourceReference = po.ProcurementSourceReference
             }).ToList();
 
@@ -358,6 +360,7 @@ public class PurchaseOrdersController : ControllerBase
                 CostsAllocated = purchaseOrder.CostsAllocated,
                 DiscountAmount = purchaseOrder.DiscountAmount,
                 TotalAmount = purchaseOrder.TotalAmount,
+                Currency = purchaseOrder.Currency,
                 PaymentTerms = purchaseOrder.PaymentTerms,
                 ShippingTerms = purchaseOrder.ShippingTerms,
                 Terms = purchaseOrder.Terms,
@@ -373,6 +376,7 @@ public class PurchaseOrdersController : ControllerBase
                 SupplierEmail = purchaseOrder.BusinessPartner?.PrimaryEmail,
                 SupplierAddress = $"{purchaseOrder.BusinessPartner?.PhysicalAddress}, {purchaseOrder.BusinessPartner?.PhysicalCity}, {purchaseOrder.BusinessPartner?.PhysicalState} {purchaseOrder.BusinessPartner?.PhysicalPostalCode}",
                 ProcurementSourceType = purchaseOrder.ProcurementSourceType,
+                ProcurementCategory = purchaseOrder.ProcurementCategory,
                 ProcurementSourceId = purchaseOrder.ProcurementSourceId,
                 ProcurementSourceReference = purchaseOrder.ProcurementSourceReference,
                 SourceRequisitionId = purchaseOrder.SourceRequisitionId,
@@ -2040,9 +2044,11 @@ public class PurchaseOrdersController : ControllerBase
                 PromisedDate = po.PromisedDate,
                 Status = po.Status,
                 TotalAmount = po.TotalAmount,
+                Currency = po.Currency,
                 ItemCount = po.Items?.Count ?? 0,
                 RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName,
                 ProcurementSourceType = po.ProcurementSourceType,
+                ProcurementCategory = po.ProcurementCategory,
                 ProcurementSourceReference = po.ProcurementSourceReference
             }).ToList();
 
@@ -2077,9 +2083,11 @@ public class PurchaseOrdersController : ControllerBase
                 PromisedDate = po.PromisedDate,
                 Status = po.Status,
                 TotalAmount = po.TotalAmount,
+                Currency = po.Currency,
                 ItemCount = po.Items?.Count ?? 0,
                 RequestedByName = po.RequestedBy?.FirstName + " " + po.RequestedBy?.LastName,
                 ProcurementSourceType = po.ProcurementSourceType,
+                ProcurementCategory = po.ProcurementCategory,
                 ProcurementSourceReference = po.ProcurementSourceReference
             }).ToList();
 
@@ -2312,6 +2320,7 @@ public class PurchaseOrdersController : ControllerBase
             CostsAllocated = purchaseOrder.CostsAllocated,
             DiscountAmount = purchaseOrder.DiscountAmount,
             TotalAmount = purchaseOrder.TotalAmount,
+            Currency = purchaseOrder.Currency,
             PaymentTerms = purchaseOrder.PaymentTerms,
             ShippingTerms = purchaseOrder.ShippingTerms,
             Terms = purchaseOrder.Terms,
@@ -2327,6 +2336,7 @@ public class PurchaseOrdersController : ControllerBase
             SupplierEmail = purchaseOrder.BusinessPartner?.PrimaryEmail,
             SupplierAddress = $"{purchaseOrder.BusinessPartner?.PhysicalAddress}, {purchaseOrder.BusinessPartner?.PhysicalCity}, {purchaseOrder.BusinessPartner?.PhysicalState} {purchaseOrder.BusinessPartner?.PhysicalPostalCode}",
             ProcurementSourceType = purchaseOrder.ProcurementSourceType,
+            ProcurementCategory = purchaseOrder.ProcurementCategory,
             ProcurementSourceId = purchaseOrder.ProcurementSourceId,
             ProcurementSourceReference = purchaseOrder.ProcurementSourceReference,
             SourceRequisitionId = purchaseOrder.SourceRequisitionId,

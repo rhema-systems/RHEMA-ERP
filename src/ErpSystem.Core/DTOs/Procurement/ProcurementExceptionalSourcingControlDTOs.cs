@@ -17,6 +17,9 @@ public sealed class ProcurementExceptionalSourcingReadinessDto
     public bool BoardApprovalRequired { get; set; }
     public bool ManagingDirectorApprovalRequired { get; set; }
     public bool PpaApprovalRequired { get; set; }
+    public bool JustificationRequired { get; set; }
+    public bool EvidenceRequired { get; set; }
+    public bool PostAwardFilingRequired { get; set; }
     public List<ProcurementExceptionalEvidenceRequirementDto> EvidenceRequirements { get; set; } = new();
     public List<ProcurementExceptionalSupplierOptionDto> SupplierOptions { get; set; } = new();
 }
@@ -117,8 +120,8 @@ public sealed class ProcurementExceptionalSourcingMilestoneDto
 
 public sealed class PrepareProcurementExceptionalSourcingRequest
 {
-    [Required, StringLength(2000), MinLength(20)] public string Justification { get; set; } = string.Empty;
-    [Required, StringLength(500)] public string JustificationEvidenceReference { get; set; } = string.Empty;
+    [StringLength(2000)] public string Justification { get; set; } = string.Empty;
+    [StringLength(500)] public string JustificationEvidenceReference { get; set; } = string.Empty;
     [Required, StringLength(500)] public string SupplierSelectionEvidenceReference { get; set; } = string.Empty;
     [MinLength(1)] public List<Guid> BusinessPartnerIds { get; set; } = new();
     [MinLength(1)] public List<ProcurementExceptionalEvidenceRequest> EvidenceChecklist { get; set; } = new();

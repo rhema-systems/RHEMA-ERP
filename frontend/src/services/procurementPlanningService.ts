@@ -14,6 +14,16 @@ const getAuthHeaders = () => {
   };
 };
 
+const readProblemMessage = async (response: Response, fallback: string) => {
+  try {
+    const problem = await response.json() as { detail?: string; message?: string; code?: string };
+    const message = problem.detail || problem.message || fallback;
+    return problem.code ? `${message} (${problem.code})` : message;
+  } catch {
+    return fallback;
+  }
+};
+
 // ============================================================================
 // COMMON INTERFACES
 // ============================================================================
@@ -866,6 +876,21 @@ export interface EmergencyProcurementPlanDto {
   criticalItemCount: number;
   emergencySupplierCount: number;
   createdAt: string;
+  purchaseRequisitionId?: string;
+  purchaseRequisitionNumber?: string;
+  exceptionRuleId?: string;
+  exceptionRuleCode?: string;
+  exceptionRuleName?: string;
+  workflowInstanceId?: string;
+  centralDocumentVersionId?: string;
+  evidenceReference?: string;
+  approvalAuthority?: string;
+  approvalReference?: string;
+  internalAuditVouchedAtUtc?: string;
+  submittedForApprovalAtUtc?: string;
+  exceptionalSourcingTenderId?: string;
+  filedAtUtc?: string;
+  rowVersion: string;
 }
 
 export interface EmergencyProcurementPlanDetailDto extends EmergencyProcurementPlanDto {
@@ -873,8 +898,20 @@ export interface EmergencyProcurementPlanDetailDto extends EmergencyProcurementP
   rapidProcurementProcess?: string;
   escalationContacts?: string;
   notes?: string;
+  exceptionJustification?: string;
+  internalAuditVouchNote?: string;
+  postAwardJustification?: string;
+  postAwardCentralDocumentVersionId?: string;
+  postAwardEvidenceReference?: string;
   criticalItems: EmergencyProcurementItemDto[];
   emergencySuppliers: EmergencySupplierDto[];
+}
+
+export interface EmergencyPurchaseGovernanceOptionsDto {
+  requisitions: Array<{ id: string; requisitionNumber: string; status: string; category?: string; totalAmount: number; currency: string }>;
+  exceptionRules: Array<{ id: string; ruleCode: string; name: string; approverRole: string; workflowDefinitionId: string }>;
+  evidenceDocuments: Array<{ versionId: string; reference: string; title: string; versionNumber: string }>;
+  filedExceptionalSourcing: Array<{ tenderId: string; tenderNumber: string; filingReference: string }>;
 }
 
 export interface CreateEmergencyProcurementPlanDto {
@@ -1612,6 +1649,14 @@ export const supplierConsolidationService = {
 // ============================================================================
 
 export const emergencyProcurementPlanService = {
+  async getGovernanceOptions(): Promise<EmergencyPurchaseGovernanceOptionsDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/governance/options`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to load emergency-purchase options'));
+    return response.json();
+  },
+
   async getPlans(params?: {
     page?: number;
     pageSize?: number;
@@ -1695,6 +1740,50 @@ export const emergencyProcurementPlanService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error('Failed to trigger emergency procurement plan');
+    return response.json();
+  },
+
+  async prepareException(id: string, data: {
+    purchaseRequisitionId: string;
+    exceptionRuleId: string;
+    centralDocumentVersionId: string;
+    justification: string;
+    rowVersion: string;
+  }): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/prepare', data, 'Failed to prepare emergency exception');
+  },
+
+  async submitForAudit(id: string, rowVersion: string, comments?: string): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/audit/submit', { rowVersion, comments }, 'Failed to submit for Internal Audit');
+  },
+
+  async vouch(id: string, rowVersion: string, vouchNote: string): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/audit/vouch', { rowVersion, vouchNote }, 'Failed to vouch emergency exception');
+  },
+
+  async submitForApproval(id: string, rowVersion: string, comments?: string): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/approval/submit', { rowVersion, comments }, 'Failed to submit emergency exception for approval');
+  },
+
+  async decide(id: string, data: { rowVersion: string; action: 'Approve' | 'Reject'; approvalReference?: string; comments?: string }): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/approval/decision', data, 'Failed to record emergency exception decision');
+  },
+
+  async triggerGoverned(id: string, rowVersion: string, comments?: string): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/trigger', { rowVersion, comments }, 'Failed to trigger emergency purchase');
+  },
+
+  async filePostAward(id: string, data: { rowVersion: string; exceptionalSourcingTenderId: string; centralDocumentVersionId: string; justification: string }): Promise<EmergencyProcurementPlanDetailDto> {
+    return this.postLifecycle(id, 'exception/post-award', data, 'Failed to file post-award justification');
+  },
+
+  async postLifecycle(id: string, path: string, data: object, fallback: string): Promise<EmergencyProcurementPlanDetailDto> {
+    const response = await fetch(`${API_BASE_URL}/procurement/emergencyprocurementplans/${id}/${path}`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error(await readProblemMessage(response, fallback));
     return response.json();
   },
 
