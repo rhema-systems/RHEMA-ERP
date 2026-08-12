@@ -650,6 +650,27 @@ public class ProjectsController : ControllerBase
     {
         try { return Ok(await action()); }
         catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException exception) when (
+            exception.Message.StartsWith("Project with ID ", StringComparison.Ordinal) &&
+            exception.Message.EndsWith(" not found", StringComparison.Ordinal))
+        {
+            // Tenant query filters deliberately make a foreign project indistinguishable from a
+            // missing project. Preserve that non-disclosure contract with a bounded 404 rather
+            // than exposing the lookup failure as a validation error.
+            return NotFound(new ProblemDetails
+            {
+                Type = "https://tdc.gov.gh/problems/quantity-survey-project-not-found",
+                Title = "Quantity Survey project not found",
+                Status = StatusCodes.Status404NotFound,
+                Detail = "The requested project was not found or is outside your tenant scope.",
+                Instance = HttpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "QS_PROJECT_NOT_FOUND",
+                    ["correlationId"] = HttpContext.TraceIdentifier
+                }
+            });
+        }
         catch (InvalidOperationException exception)
         {
             return BadRequest(new ProblemDetails

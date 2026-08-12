@@ -11,6 +11,34 @@ public sealed class FinanceConcurrencyHardeningTests
 {
     [Fact]
     [Trait("Category", "Architecture")]
+    [Trait("Batch", "QuantitySurveyFinalAcceptance")]
+    public void ApPaymentReversal_ShouldStartSerializableTransactionInsideSqlServerExecutionStrategy()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "AP",
+            "VendorPaymentService.cs"));
+        var reversal = ExtractMember(
+            source,
+            "public Task<VendorPaymentDto> ReversePaymentAsync",
+            "public Task<VendorPaymentAllocationResultDto> AllocatePaymentAsync");
+
+        var strategyIndex = reversal.IndexOf("ExecuteInStrategyAsync", StringComparison.Ordinal);
+        var transactionIndex = reversal.IndexOf("BeginTransactionAsync", StringComparison.Ordinal);
+
+        strategyIndex.Should().BeGreaterThan(-1, "SQL Server retry handling must own the complete AP reversal unit");
+        transactionIndex.Should().BeGreaterThan(strategyIndex, "the serializable transaction must be created inside the execution strategy");
+        reversal.Should().Contain("IsolationLevel.Serializable", "invoice settlement and compensating GL writes must remain serialized");
+        reversal.Should().Contain("RollbackAsync", "a failed reversal attempt must release its transaction before retry or failure audit");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
     [Trait("Batch", "FinancePeriodCloseIssue32")]
     public void PeriodCloseTransactions_ShouldStartInsideSqlServerExecutionStrategy()
     {
