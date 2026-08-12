@@ -1102,7 +1102,7 @@ export interface CreateFixedAssetOpeningBalanceBatchDto {
     fiscalPeriodId: string;
     bookClassification: string;
     idempotencyKey?: string;
-    fixedAssetIds: string[];
+    fixedAssetBookValueIds: string[];
 }
 
 export interface FixedAssetOpeningBalanceCandidate {

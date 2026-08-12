@@ -51,7 +51,7 @@ Viewing readiness requires the ordinary Finance view permission. Preparing a fix
 ## Integrity And Security Controls
 
 - Every selected asset, book value, account, period, and book is revalidated in the current tenant.
-- The request must identify explicit asset IDs; there is no accidental "post every imported asset" action.
+- The request must identify exact fixed-asset book-value IDs; a selection cannot drift between parallel IFRS/Tax books and there is no accidental "post every imported asset" action.
 - Already-posted register records cannot be selected again.
 - Cost, depreciation, net book value, opening date, and category account mappings are rechecked before posting.
 - Generated fixed-asset lines cannot be edited through the generic batch editor.
