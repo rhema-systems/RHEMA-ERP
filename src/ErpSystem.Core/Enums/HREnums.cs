@@ -2316,7 +2316,14 @@ public enum OnboardingTaskStatus
     Completed = 3,
     Overdue = 4,
     Waived = 5,
-    Blocked = 6
+    Blocked = 6,
+
+    /// <summary>
+    /// Done by the assignee, awaiting the second-party sign-off that <c>RequiresVerification</c> asks
+    /// for. Deliberately distinct from <see cref="Completed"/>: a task nobody has verified is not
+    /// finished, and the plan's "completed tasks" roll-up must not count it.
+    /// </summary>
+    PendingVerification = 7
 }
 
 public enum OnboardingAssetType

@@ -1,14 +1,16 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>Catalogue taxonomy — an administrative lookup, HR only.</summary>
 [ApiController]
 [Route("api/orientation-categories")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OrientationCategoriesController : ControllerBase
 {
     private readonly IOrientationCategoryService _service;

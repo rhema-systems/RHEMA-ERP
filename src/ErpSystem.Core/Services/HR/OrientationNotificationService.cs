@@ -85,9 +85,14 @@ public class OrientationNotificationService : IOrientationNotificationService
         return entity.ToDto();
     }
 
-    public async Task<bool> MarkAsReadAsync(Guid notificationId, CancellationToken cancellationToken = default)
+    public async Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNotificationAsync(notificationId);
+
+        // Read state belongs to the recipient. Reported as not-found rather than forbidden so the
+        // endpoint does not confirm that someone else's notification id exists.
+        if (entity.RecipientEmployeeId != recipientEmployeeId)
+            throw new ArgumentException($"Orientation notification with ID '{notificationId}' not found.");
 
         if (!entity.IsRead)
         {

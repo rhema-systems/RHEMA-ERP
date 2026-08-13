@@ -1,14 +1,16 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>Onboarding checklist authoring — HR only.</summary>
 [ApiController]
 [Route("api/onboarding-plan-templates")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OnboardingPlanTemplateController : ControllerBase
 {
     private readonly IOnboardingPlanTemplateService _service;
@@ -37,9 +39,15 @@ public class OnboardingPlanTemplateController : ControllerBase
     public async Task<ActionResult<OnboardingPlanTemplateDetailDto>> GetWithTaskTemplates(Guid id)
         => Ok(await _service.GetWithTaskTemplatesAsync(id));
 
-    [HttpGet("position/{positionId:guid}")]
-    public async Task<ActionResult<IEnumerable<OnboardingPlanTemplateSummaryDto>>> GetByPosition(Guid positionId)
-        => Ok(await _service.GetByPositionIdAsync(positionId));
+    // ⚠ Removed: GET position/{positionId}. It took a position id and ignored it, returning every
+    // active template — OnboardingPlanTemplate has no link to a position, and the only position on the
+    // graph (OnboardingTaskTemplate.OwnerPositionId) says who *performs* a task, not who a template is
+    // *for*. Answering it properly needs template applicability rules, modelled on the
+    // OrientationAudienceRule shape this module already uses (TargetType / TargetEntityId /
+    // IsInclusive), so that onboarding can be scoped by grade, org unit and location too — not just
+    // position. That endpoint should arrive as GET /applicable?positionId=&orgUnitId=&gradeId=, so
+    // reinstating this one-dimensional route now would only bake in the wrong shape.
+    // Callers pick a template from `all`, or fall back to `default`.
 
     [HttpGet("default")]
     public async Task<ActionResult<OnboardingPlanTemplateDto?>> GetDefault()

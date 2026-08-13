@@ -20,8 +20,8 @@ public interface IOnboardingPlanTemplateRepository : IGenericRepository<Onboardi
     /// <summary>Returns a template with all its task templates loaded.</summary>
     Task<OnboardingPlanTemplate?> GetWithTaskTemplatesAsync(Guid id);
 
-    /// <summary>Returns templates associated with a specific employee position.</summary>
-    Task<IEnumerable<OnboardingPlanTemplate>> GetByPositionIdAsync(Guid positionId);
+    // GetByPositionIdAsync was removed — templates carry no position link, so it ignored its argument.
+    // See the note in OnboardingRepositories for the applicability-rule design that replaces it.
 }
 
 #endregion

@@ -1,16 +1,23 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Orientation notifications. The <c>mine</c> endpoints are every user's own inbox; anything that
+/// names another recipient, or sends, is HR.
+/// </summary>
 [ApiController]
 [Route("api/orientation-notifications")]
 [Authorize]
 public class OrientationNotificationsController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IOrientationNotificationService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -20,7 +27,9 @@ public class OrientationNotificationsController : ControllerBase
         _currentUser = currentUser;
     }
 
+    /// <summary>Anyone else's inbox — HR only. Your own is <c>mine</c>.</summary>
     [HttpGet("recipient/{recipientEmployeeId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<IEnumerable<OrientationNotificationDto>>> GetByRecipient(
         Guid recipientEmployeeId, [FromQuery] bool unreadOnly = false)
         => Ok(await _service.GetByRecipientAsync(recipientEmployeeId, unreadOnly));
@@ -43,10 +52,13 @@ public class OrientationNotificationsController : ControllerBase
     }
 
     [HttpGet("enrollment/{enrollmentId:guid}")]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<IEnumerable<OrientationNotificationDto>>> GetByEnrollment(Guid enrollmentId)
         => Ok(await _service.GetByEnrollmentIdAsync(enrollmentId));
 
+    /// <summary>Sending a notification to someone is an administrative act.</summary>
     [HttpPost]
+    [Authorize(Roles = HrRoles)]
     public async Task<ActionResult<OrientationNotificationDto>> Create([FromBody] CreateOrientationNotificationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -59,10 +71,18 @@ public class OrientationNotificationsController : ControllerBase
         return Ok(await _service.CreateAsync(dto, tenantId.Value, employeeId.Value));
     }
 
+    /// <summary>
+    /// Marks one of your own notifications read. The service refuses an id belonging to someone else
+    /// — read state is per-recipient, and letting anyone clear anyone's inbox would hide a compliance
+    /// reminder from the person who owes it.
+    /// </summary>
     [HttpPost("{id:guid}/read")]
     public async Task<IActionResult> MarkAsRead(Guid id)
     {
-        await _service.MarkAsReadAsync(id);
+        if (_currentUser.EmployeeId is not { } employeeId)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        await _service.MarkAsReadAsync(id, employeeId);
         return Ok(new { message = "Notification marked as read." });
     }
 

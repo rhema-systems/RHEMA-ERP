@@ -2,14 +2,24 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Onboarding plan administration — HR only. A plan names a new hire, their buddy and coordinator,
+/// and carries every task other departments owe them, so it is not a self-service surface.
+///
+/// ⚠ A new hire's own "my onboarding" view, and the task queues for the IT/facilities staff a task is
+/// assigned to, both need a self-scoped read this controller deliberately does not offer. They belong
+/// to the employee self-service portal (area 25); building a half-check here would only have to be
+/// unpicked. Until then those users reach their tasks through HR.
+/// </summary>
 [ApiController]
 [Route("api/onboarding-plans")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OnboardingPlanController : ControllerBase
 {
     private readonly IOnboardingPlanService _service;
@@ -163,14 +173,32 @@ public class OnboardingPlanController : ControllerBase
     }
 
     [HttpPost("tasks/{taskId:guid}/complete")]
-    public async Task<IActionResult> CompleteTask(Guid taskId)
+    public async Task<ActionResult<OnboardingTaskDto>> CompleteTask(
+        Guid taskId, [FromBody] CompleteOnboardingTaskDto dto)
     {
+        if (taskId != dto.TaskId) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        await _service.CompleteTaskAsync(taskId, employeeId.Value);
-        return Ok(new { message = "Task completed." });
+        return Ok(await _service.CompleteTaskAsync(dto, employeeId.Value));
+    }
+
+    /// <summary>Second-party sign-off for a task flagged as requiring verification.</summary>
+    [HttpPost("tasks/{taskId:guid}/verify")]
+    public async Task<ActionResult<OnboardingTaskDto>> VerifyTask(
+        Guid taskId, [FromBody] VerifyOnboardingTaskDto dto)
+    {
+        if (taskId != dto.TaskId) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.VerifyTaskAsync(dto, employeeId.Value));
     }
 
     // =========================================================================

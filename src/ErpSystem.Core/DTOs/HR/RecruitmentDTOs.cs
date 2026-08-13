@@ -3787,9 +3787,20 @@ public class OnboardingTaskDto : BaseDto
     public string? AssignedToName { get; set; }
     public Guid? AssignedOrganizationUnitId { get; set; }
     public string? AssignedOrganizationUnitName { get; set; }
+
+    /// <summary>The role that owes this task, carried over from the template at instantiation.</summary>
+    public Guid? OwnerPositionId { get; set; }
+    public string? OwnerPositionTitle { get; set; }
+
+    public Guid? CompletedById { get; set; }
+    public string? CompletedByName { get; set; }
     public string? CompletionNotes { get; set; }
     public string? EvidenceFilePath { get; set; }
     public bool RequiresVerification { get; set; }
+
+    /// <summary>True once the task is done and, where required, signed off by a second party.</summary>
+    public bool AwaitingVerification => Status == OnboardingTaskStatus.PendingVerification;
+
     public Guid? VerifiedById { get; set; }
     public string? VerifiedByName { get; set; }
     public DateTime? VerifiedDate { get; set; }
@@ -3863,8 +3874,9 @@ public class CompleteOnboardingTaskDto
     [Required]
     public Guid TaskId { get; set; }
 
-    [Required]
-    public Guid CompletedById { get; set; }
+    // The actor is taken from the authenticated user's employee record, not the payload — a [Required]
+    // attribute on a non-nullable Guid is satisfied by Guid.Empty, so an omitted id would reach the
+    // database as an unmatched FK and come back as a 500 with raw SQL in it.
 
     [MaxLength(2000)]
     public string? CompletionNotes { get; set; }
@@ -3878,8 +3890,7 @@ public class VerifyOnboardingTaskDto
     [Required]
     public Guid TaskId { get; set; }
 
-    [Required]
-    public Guid VerifiedById { get; set; }
+    // Verifier is taken from the authenticated user's employee record — see the note above.
 }
 
 #endregion

@@ -94,6 +94,12 @@ public class OrientationDashboardService : IOrientationDashboardService
         dto.OverdueList.FillNames(map);
         dto.ExpiringCertificateList.FillNames(map);
 
+        // Seat counts come from a grouped query for the same reason as the session list: the upcoming
+        // read does not include the enrollments collection, and an empty collection counts as 0.
+        var seats = await _sessionRepository.GetEnrolledCountsAsync(tenantId, dto.UpcomingSessionList.Select(s => s.Id));
+        foreach (var session in dto.UpcomingSessionList)
+            session.EnrolledCount = seats.TryGetValue(session.Id, out var c) ? c : 0;
+
         return dto;
     }
 }

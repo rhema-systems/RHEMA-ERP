@@ -186,7 +186,11 @@ public interface IOrientationNotificationService
     Task<int> GetUnreadCountAsync(Guid recipientEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationNotificationDto>> GetByEnrollmentIdAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
     Task<OrientationNotificationDto> CreateAsync(CreateOrientationNotificationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<bool> MarkAsReadAsync(Guid notificationId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Marks a notification read on behalf of its recipient. Refuses an id belonging to anyone else —
+    /// read state is per-recipient, so this is not an operation one user performs on another's inbox.
+    /// </summary>
+    Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default);
     Task<int> MarkAllAsReadAsync(Guid recipientEmployeeId, CancellationToken cancellationToken = default);
 }
 

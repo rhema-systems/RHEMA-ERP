@@ -3,14 +3,21 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The orientation catalogue — authoring surface, HR only. Participants never come here: they reach
+/// content through their own enrollment (<c>api/employee-orientations</c>), which is also where the
+/// assessment is served with the answer key stripped. Exposing this controller to participants would
+/// hand them <c>IsCorrect</c> on every option straight from the authoring DTO.
+/// </summary>
 [ApiController]
 [Route("api/orientation-programs")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OrientationProgramsController : ControllerBase
 {
     private readonly IOrientationProgramService _service;

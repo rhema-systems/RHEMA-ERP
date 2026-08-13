@@ -1,13 +1,18 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Tenant-wide roll-ups plus named overdue participants and certificate holders — an HR view of
+/// everyone, so HR only.
+/// </summary>
 [ApiController]
 [Route("api/orientation-dashboard")]
-[Authorize]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OrientationDashboardController : ControllerBase
 {
     private readonly IOrientationDashboardService _service;

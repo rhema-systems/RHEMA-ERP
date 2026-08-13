@@ -19,10 +19,35 @@ public class OrientationCategoryRepository : GenericRepository<OrientationCatego
 {
     public OrientationCategoryRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// The single include set every category read routes through. <see cref="OrientationCategoryDto"/>
+    /// renders ParentCategoryName, SubCategories and ProgramCount, so a read that omits any of the three
+    /// returns a confident wrong answer (an un-included collection is empty, not null, so ProgramCount
+    /// silently renders 0). Keeping one choke point stops the reads drifting apart again.
+    /// </summary>
+    private IQueryable<OrientationCategory> WithSummaryNavigations()
+        => _dbSet
+            .Include(c => c.ParentCategory)
+            .Include(c => c.SubCategories.Where(s => !s.IsDeleted))
+            .Include(c => c.Programs.Where(p => !p.IsDeleted));
+
+    public override async Task<OrientationCategory?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
+    }
+
+    public override async Task<IEnumerable<OrientationCategory>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .Where(c => !c.IsDeleted)
+            .OrderBy(c => c.DisplayOrder).ThenBy(c => c.Name)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<OrientationCategory>> GetRootCategoriesAsync()
     {
-        return await _dbSet
-            .Include(c => c.SubCategories)
+        return await WithSummaryNavigations()
             .Where(c => c.ParentCategoryId == null && !c.IsDeleted)
             .OrderBy(c => c.DisplayOrder).ThenBy(c => c.Name)
             .ToListAsync();
@@ -30,7 +55,7 @@ public class OrientationCategoryRepository : GenericRepository<OrientationCatego
 
     public async Task<IEnumerable<OrientationCategory>> GetByParentAsync(Guid? parentCategoryId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(c => c.ParentCategoryId == parentCategoryId && !c.IsDeleted)
             .OrderBy(c => c.DisplayOrder).ThenBy(c => c.Name)
             .ToListAsync();
@@ -38,7 +63,7 @@ public class OrientationCategoryRepository : GenericRepository<OrientationCatego
 
     public async Task<IEnumerable<OrientationCategory>> GetActiveAsync()
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(c => c.IsActive && !c.IsDeleted)
             .OrderBy(c => c.DisplayOrder).ThenBy(c => c.Name)
             .ToListAsync();
@@ -46,9 +71,7 @@ public class OrientationCategoryRepository : GenericRepository<OrientationCatego
 
     public async Task<OrientationCategory?> GetWithSubCategoriesAsync(Guid id)
     {
-        return await _dbSet
-            .Include(c => c.ParentCategory)
-            .Include(c => c.SubCategories)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 }
@@ -61,17 +84,40 @@ public class OrientationProgramRepository : GenericRepository<OrientationProgram
 {
     public OrientationProgramRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// The single include set every program list read routes through. The summary DTO renders
+    /// CategoryName, so a read without it leaves the Category column blank. The three count fields
+    /// (module / enrollment / completed) are filled from a batched count query in the service rather
+    /// than by including the collections — a program's enrollments run to thousands of rows and are
+    /// never needed by a list, only counted.
+    /// </summary>
+    private IQueryable<OrientationProgram> WithSummaryNavigations()
+        => _dbSet.Include(p => p.Category);
+
+    public override async Task<OrientationProgram?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+    }
+
+    public override async Task<IEnumerable<OrientationProgram>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .Where(p => !p.IsDeleted)
+            .OrderBy(p => p.Title)
+            .ToListAsync();
+    }
+
     public async Task<OrientationProgram?> GetByProgramCodeAsync(string programCode)
     {
-        return await _dbSet
-            .Include(p => p.Category)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(p => p.ProgramCode == programCode && !p.IsDeleted);
     }
 
-    public async Task<bool> ProgramCodeExistsAsync(string programCode, Guid? excludeId = null)
+    public async Task<bool> ProgramCodeExistsAsync(Guid tenantId, string programCode, Guid? excludeId = null)
     {
-        return await _dbSet.AnyAsync(p => p.ProgramCode == programCode && !p.IsDeleted
-                                          && (excludeId == null || p.Id != excludeId));
+        return await GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.ProgramCode == programCode)
+            .AnyAsync(p => excludeId == null || p.Id != excludeId);
     }
 
     public async Task<OrientationProgram?> GetWithFullDetailsAsync(Guid id)
@@ -88,8 +134,7 @@ public class OrientationProgramRepository : GenericRepository<OrientationProgram
 
     public async Task<IEnumerable<OrientationProgram>> GetByStatusAsync(OrientationProgramStatus status)
     {
-        return await _dbSet
-            .Include(p => p.Category)
+        return await WithSummaryNavigations()
             .Where(p => p.Status == status && !p.IsDeleted)
             .OrderBy(p => p.Title)
             .ToListAsync();
@@ -97,8 +142,7 @@ public class OrientationProgramRepository : GenericRepository<OrientationProgram
 
     public async Task<IEnumerable<OrientationProgram>> GetByCategoryAsync(Guid categoryId)
     {
-        return await _dbSet
-            .Include(p => p.Category)
+        return await WithSummaryNavigations()
             .Where(p => p.CategoryId == categoryId && !p.IsDeleted)
             .OrderBy(p => p.Title)
             .ToListAsync();
@@ -106,8 +150,7 @@ public class OrientationProgramRepository : GenericRepository<OrientationProgram
 
     public async Task<IEnumerable<OrientationProgram>> GetByTypeAsync(OrientationProgramType programType)
     {
-        return await _dbSet
-            .Include(p => p.Category)
+        return await WithSummaryNavigations()
             .Where(p => p.ProgramType == programType && !p.IsDeleted)
             .OrderBy(p => p.Title)
             .ToListAsync();
@@ -115,8 +158,7 @@ public class OrientationProgramRepository : GenericRepository<OrientationProgram
 
     public async Task<IEnumerable<OrientationProgram>> GetActiveProgramsAsync()
     {
-        return await _dbSet
-            .Include(p => p.Category)
+        return await WithSummaryNavigations()
             .Where(p => p.Status == OrientationProgramStatus.Active && !p.IsDeleted)
             .OrderBy(p => p.Title)
             .ToListAsync();
@@ -124,17 +166,21 @@ public class OrientationProgramRepository : GenericRepository<OrientationProgram
 
     public async Task<IEnumerable<OrientationProgram>> GetByOwnerOrganizationUnitAsync(Guid organizationUnitId)
     {
-        return await _dbSet
-            .Include(p => p.Category)
+        return await WithSummaryNavigations()
             .Where(p => p.OwnerOrganizationUnitId == organizationUnitId && !p.IsDeleted)
             .OrderBy(p => p.Title)
             .ToListAsync();
     }
 
-    public async Task<int> GetMaxProgramCodeSequenceAsync(string prefix)
+    /// <summary>
+    /// Scans soft-deleted rows as well as live ones. (TenantId, ProgramCode) is UNIQUE and a soft delete
+    /// does not release the value, so a generator that only saw live rows would hand back a code that is
+    /// still occupied — the next create would die on a duplicate key. A program code is an identifier,
+    /// not a slot: once issued it is spent.
+    /// </summary>
+    public async Task<int> GetMaxProgramCodeSequenceAsync(Guid tenantId, string prefix)
     {
-        var codes = await _dbSet
-            .Where(p => p.ProgramCode.StartsWith(prefix))
+        var codes = await GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.ProgramCode.StartsWith(prefix))
             .Select(p => p.ProgramCode)
             .ToListAsync();
 
@@ -285,49 +331,64 @@ public class OrientationSessionRepository : GenericRepository<OrientationSession
 {
     public OrientationSessionRepository(ApplicationDbContext context) : base(context) { }
 
-    private static readonly OrientationEnrollmentStatus[] ActiveEnrollmentStatuses =
+    /// <summary>
+    /// The single include set every session list read routes through — the summary DTO renders
+    /// ProgramTitle. EnrolledCount is filled from a batched count in the service so that the list,
+    /// the detail read and the capacity check all use the same "occupies a seat" rule.
+    /// </summary>
+    private IQueryable<OrientationSession> WithSummaryNavigations()
+        => _dbSet.Include(s => s.Program);
+
+    public override async Task<OrientationSession?> GetByIdAsync(Guid id)
     {
-        OrientationEnrollmentStatus.PendingConfirmation,
-        OrientationEnrollmentStatus.Confirmed,
-        OrientationEnrollmentStatus.Active,
-        OrientationEnrollmentStatus.Completed,
-    };
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
+    }
+
+    public override async Task<IEnumerable<OrientationSession>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .Where(s => !s.IsDeleted)
+            .OrderByDescending(s => s.ScheduledStartAt)
+            .ToListAsync();
+    }
 
     public async Task<OrientationSession?> GetBySessionCodeAsync(string sessionCode)
     {
-        return await _dbSet
-            .Include(s => s.Program)
+        return await GetWithDetailsQuery()
             .FirstOrDefaultAsync(s => s.SessionCode == sessionCode && !s.IsDeleted);
     }
 
-    public async Task<bool> SessionCodeExistsAsync(string sessionCode, Guid? excludeId = null)
+    public async Task<bool> SessionCodeExistsAsync(Guid tenantId, string sessionCode, Guid? excludeId = null)
     {
-        return await _dbSet.AnyAsync(s => s.SessionCode == sessionCode && !s.IsDeleted
-                                          && (excludeId == null || s.Id != excludeId));
+        return await GetQueryableIncludingDeleted(s => s.TenantId == tenantId && s.SessionCode == sessionCode)
+            .AnyAsync(s => excludeId == null || s.Id != excludeId);
     }
 
     public async Task<IEnumerable<OrientationSession>> GetByProgramIdAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(s => s.Program)
+        return await WithSummaryNavigations()
             .Where(s => s.ProgramId == programId && !s.IsDeleted)
             .OrderByDescending(s => s.ScheduledStartAt)
             .ToListAsync();
     }
 
+    /// <summary>Full session graph — the detail DTO renders the facilitator list and seat counts.</summary>
+    private IQueryable<OrientationSession> GetWithDetailsQuery()
+        => _dbSet
+            .Include(s => s.Program)
+            .Include(s => s.Facilitators.Where(f => !f.IsDeleted))
+            .Include(s => s.Enrollments.Where(e => !e.IsDeleted));
+
     public async Task<OrientationSession?> GetWithDetailsAsync(Guid id)
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .Include(s => s.Facilitators)
-            .Include(s => s.Enrollments)
+        return await GetWithDetailsQuery()
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
     }
 
     public async Task<IEnumerable<OrientationSession>> GetByStatusAsync(OrientationSessionStatus status)
     {
-        return await _dbSet
-            .Include(s => s.Program)
+        return await WithSummaryNavigations()
             .Where(s => s.Status == status && !s.IsDeleted)
             .OrderBy(s => s.ScheduledStartAt)
             .ToListAsync();
@@ -337,8 +398,7 @@ public class OrientationSessionRepository : GenericRepository<OrientationSession
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Include(s => s.Program)
+        return await WithSummaryNavigations()
             .Where(s => !s.IsDeleted
                         && s.Status != OrientationSessionStatus.Cancelled
                         && s.ScheduledStartAt != null
@@ -351,8 +411,7 @@ public class OrientationSessionRepository : GenericRepository<OrientationSession
     public async Task<IEnumerable<OrientationSession>> GetOpenForEnrollmentAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(s => s.Program)
+        return await WithSummaryNavigations()
             .Where(s => !s.IsDeleted
                         && s.Status == OrientationSessionStatus.EnrollmentOpen
                         && (s.EnrollmentDeadlineAt == null || s.EnrollmentDeadlineAt >= now))
@@ -365,7 +424,27 @@ public class OrientationSessionRepository : GenericRepository<OrientationSession
         return await _context.Set<EmployeeOrientation>()
             .CountAsync(e => e.SessionId == sessionId
                              && !e.IsDeleted
-                             && ActiveEnrollmentStatuses.Contains(e.EnrollmentStatus));
+                             && OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus));
+    }
+
+    /// <summary>
+    /// Seat counts for many sessions in one query, so a list screen does not fall back to 0 (an
+    /// un-included collection is empty, not null, so a missing count renders as a confident zero).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, int>> GetEnrolledCountsAsync(Guid tenantId, IEnumerable<Guid> sessionIds)
+    {
+        var ids = sessionIds.Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, int>();
+
+        return await _context.Set<EmployeeOrientation>()
+            .Where(e => e.TenantId == tenantId
+                        && e.SessionId != null
+                        && ids.Contains(e.SessionId!.Value)
+                        && !e.IsDeleted
+                        && OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus))
+            .GroupBy(e => e.SessionId!.Value)
+            .Select(g => new { SessionId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.SessionId, x => x.Count);
     }
 }
 
@@ -402,9 +481,22 @@ public class OrientationAttendanceRecordRepository : GenericRepository<Orientati
 {
     public OrientationAttendanceRecordRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Every attendance read must load Enrollment: the DTO's EmployeeId is read off it, and the
+    /// employee-name hydrator keys on that id — so a read without it blanks both the id and the name.
+    /// </summary>
+    private IQueryable<OrientationAttendanceRecord> WithSummaryNavigations()
+        => _dbSet.Include(a => a.Enrollment);
+
+    public override async Task<OrientationAttendanceRecord?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
+    }
+
     public async Task<IEnumerable<OrientationAttendanceRecord>> GetByEnrollmentIdAsync(Guid enrollmentId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(a => a.EnrollmentId == enrollmentId && !a.IsDeleted)
             .OrderBy(a => a.SessionDay)
             .ToListAsync();
@@ -412,8 +504,7 @@ public class OrientationAttendanceRecordRepository : GenericRepository<Orientati
 
     public async Task<IEnumerable<OrientationAttendanceRecord>> GetBySessionIdAsync(Guid sessionId)
     {
-        return await _dbSet
-            .Include(a => a.Enrollment)
+        return await WithSummaryNavigations()
             .Where(a => a.Enrollment.SessionId == sessionId && !a.IsDeleted)
             .OrderBy(a => a.SessionDay)
             .ToListAsync();
@@ -421,7 +512,7 @@ public class OrientationAttendanceRecordRepository : GenericRepository<Orientati
 
     public async Task<OrientationAttendanceRecord?> GetByEnrollmentAndDayAsync(Guid enrollmentId, int sessionDay)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(a => a.EnrollmentId == enrollmentId && a.SessionDay == sessionDay && !a.IsDeleted);
     }
 }
@@ -437,6 +528,56 @@ public class OrientationAttendanceRecordRepository : GenericRepository<Orientati
 public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientation>, IEmployeeOrientationRepository
 {
     public EmployeeOrientationRepository(ApplicationDbContext context) : base(context) { }
+
+    /// <summary>
+    /// The single include set every enrollment list read routes through. The summary DTO renders both
+    /// ProgramCode/ProgramTitle and SessionTitle; before this existed the by-program read included
+    /// Session but not Program and the by-session read included Program but not Session, so each screen
+    /// blanked a different column and the same record looked different depending on how you reached it.
+    /// </summary>
+    private IQueryable<EmployeeOrientation> WithSummaryNavigations()
+        => _dbSet
+            .Include(e => e.Program)
+            .Include(e => e.Session);
+
+    public override async Task<EmployeeOrientation?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
+    }
+
+    public override async Task<IEnumerable<EmployeeOrientation>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .Where(e => !e.IsDeleted)
+            .OrderByDescending(e => e.EnrolledAt)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Module / enrollment / completed counts for many programs in one query. List reads never include
+    /// the enrollment collection (thousands of rows for a count of one), so without this the program
+    /// list reports 0 enrollments for every program while the detail screen reports the truth.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, (int Enrolled, int Completed)>> GetProgramEnrollmentCountsAsync(
+        Guid tenantId, IEnumerable<Guid> programIds)
+    {
+        var ids = programIds.Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, (int, int)>();
+
+        var rows = await _dbSet
+            .Where(e => e.TenantId == tenantId && ids.Contains(e.ProgramId) && !e.IsDeleted)
+            .GroupBy(e => e.ProgramId)
+            .Select(g => new
+            {
+                ProgramId = g.Key,
+                Enrolled = g.Count(),
+                Completed = g.Count(e => e.CompletionStatus == OrientationCompletionStatus.Completed),
+            })
+            .ToListAsync();
+
+        return rows.ToDictionary(r => r.ProgramId, r => (r.Enrolled, r.Completed));
+    }
 
     public async Task<EmployeeOrientation?> GetWithFullDetailsAsync(Guid id)
     {
@@ -455,9 +596,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<IEnumerable<EmployeeOrientation>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(e => e.Program)
-            .Include(e => e.Session)
+        return await WithSummaryNavigations()
             .Where(e => e.EmployeeId == employeeId && !e.IsDeleted)
             .OrderByDescending(e => e.EnrolledAt)
             .ToListAsync();
@@ -465,8 +604,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<IEnumerable<EmployeeOrientation>> GetByProgramIdAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(e => e.Session)
+        return await WithSummaryNavigations()
             .Where(e => e.ProgramId == programId && !e.IsDeleted)
             .OrderByDescending(e => e.EnrolledAt)
             .ToListAsync();
@@ -474,8 +612,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<IEnumerable<EmployeeOrientation>> GetBySessionIdAsync(Guid sessionId)
     {
-        return await _dbSet
-            .Include(e => e.Program)
+        return await WithSummaryNavigations()
             .Where(e => e.SessionId == sessionId && !e.IsDeleted)
             .OrderByDescending(e => e.EnrolledAt)
             .ToListAsync();
@@ -483,9 +620,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<EmployeeOrientation?> GetByEmployeeAndProgramAsync(Guid employeeId, Guid programId)
     {
-        return await _dbSet
-            .Include(e => e.Program)
-            .Include(e => e.Session)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(e => e.EmployeeId == employeeId && e.ProgramId == programId && !e.IsDeleted);
     }
 
@@ -496,8 +631,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<IEnumerable<EmployeeOrientation>> GetByCompletionStatusAsync(OrientationCompletionStatus status)
     {
-        return await _dbSet
-            .Include(e => e.Program)
+        return await WithSummaryNavigations()
             .Where(e => e.CompletionStatus == status && !e.IsDeleted)
             .OrderByDescending(e => e.EnrolledAt)
             .ToListAsync();
@@ -505,8 +639,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<IEnumerable<EmployeeOrientation>> GetByEnrollmentStatusAsync(OrientationEnrollmentStatus status)
     {
-        return await _dbSet
-            .Include(e => e.Program)
+        return await WithSummaryNavigations()
             .Where(e => e.EnrollmentStatus == status && !e.IsDeleted)
             .OrderByDescending(e => e.EnrolledAt)
             .ToListAsync();
@@ -515,8 +648,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
     public async Task<IEnumerable<EmployeeOrientation>> GetOverdueAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(e => e.Program)
+        return await WithSummaryNavigations()
             .Where(e => !e.IsDeleted
                         && (e.CompletionStatus == OrientationCompletionStatus.Overdue
                             || (e.NextDueDate != null
@@ -531,8 +663,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Include(e => e.Program)
+        return await WithSummaryNavigations()
             .Where(e => !e.IsDeleted
                         && e.NextDueDate != null
                         && e.NextDueDate >= now
@@ -545,7 +676,7 @@ public class EmployeeOrientationRepository : GenericRepository<EmployeeOrientati
 
     public async Task<IEnumerable<EmployeeOrientation>> GetWaitlistedForSessionAsync(Guid sessionId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(e => e.SessionId == sessionId
                         && e.EnrollmentStatus == OrientationEnrollmentStatus.Waitlisted
                         && !e.IsDeleted)
@@ -569,9 +700,13 @@ public class OrientationContentProgressRepository : GenericRepository<Orientatio
 
     public async Task<IEnumerable<OrientationContentProgress>> GetByEnrollmentIdAsync(Guid employeeOrientationId)
     {
+        // Ordered by the curriculum sequence the author committed, not by whatever order the database
+        // returns — this list is the participant's "work through these in order" checklist.
         return await _dbSet
-            .Include(cp => cp.ContentItem)
+            .Include(cp => cp.ContentItem).ThenInclude(ci => ci.Module)
             .Where(cp => cp.EmployeeOrientationId == employeeOrientationId && !cp.IsDeleted)
+            .OrderBy(cp => cp.ContentItem.Module.SequenceOrder)
+            .ThenBy(cp => cp.ContentItem.SequenceOrder)
             .ToListAsync();
     }
 
@@ -676,6 +811,7 @@ public class OrientationAssessmentResponseRepository : GenericRepository<Orienta
             .Include(r => r.Question)
             .Include(r => r.SelectedOption)
             .Where(r => r.EmployeeOrientationId == employeeOrientationId && !r.IsDeleted)
+            .OrderBy(r => r.Question.SequenceOrder)
             .ToListAsync();
     }
 
@@ -770,19 +906,37 @@ public class OrientationCertificateRepository : GenericRepository<OrientationCer
 
     public async Task<OrientationCertificate?> GetByCertificateNumberAsync(string certificateNumber)
     {
-        return await _dbSet
-            .Include(c => c.EmployeeOrientation).ThenInclude(e => e.Program)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(c => c.CertificateNumber == certificateNumber && !c.IsDeleted);
     }
 
-    public async Task<bool> CertificateNumberExistsAsync(string certificateNumber)
+    /// <summary>
+    /// Counts soft-deleted certificates too. (TenantId, CertificateNumber) is UNIQUE and a soft delete
+    /// does not release the number, so a check that only saw live rows would clear a number the database
+    /// will still reject. A certificate serial is an audit identifier — once issued it is never reissued.
+    /// </summary>
+    public async Task<bool> CertificateNumberExistsAsync(Guid tenantId, string certificateNumber)
     {
-        return await _dbSet.AnyAsync(c => c.CertificateNumber == certificateNumber && !c.IsDeleted);
+        return await GetQueryableIncludingDeleted(c => c.TenantId == tenantId && c.CertificateNumber == certificateNumber)
+            .AnyAsync();
+    }
+
+    /// <summary>
+    /// The certificate DTO reads EmployeeId off the enrollment and ProgramTitle off the enrollment's
+    /// program, and the name hydrator keys on that EmployeeId — so every certificate read needs both.
+    /// </summary>
+    private IQueryable<OrientationCertificate> WithSummaryNavigations()
+        => _dbSet.Include(c => c.EmployeeOrientation).ThenInclude(e => e.Program);
+
+    public override async Task<OrientationCertificate?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 
     public async Task<IEnumerable<OrientationCertificate>> GetByEnrollmentIdAsync(Guid employeeOrientationId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(c => c.EmployeeOrientationId == employeeOrientationId && !c.IsDeleted)
             .OrderByDescending(c => c.IssuedAt)
             .ToListAsync();
@@ -821,9 +975,13 @@ public class OrientationNotificationRepository : GenericRepository<OrientationNo
 {
     public OrientationNotificationRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>The notification DTO renders ProgramTitle, so every read loads the program.</summary>
+    private IQueryable<OrientationNotification> WithSummaryNavigations()
+        => _dbSet.Include(n => n.Program);
+
     public async Task<IEnumerable<OrientationNotification>> GetByRecipientAsync(Guid recipientEmployeeId, bool unreadOnly = false)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(n => n.RecipientEmployeeId == recipientEmployeeId
                         && !n.IsDeleted
                         && (!unreadOnly || !n.IsRead))
@@ -838,7 +996,7 @@ public class OrientationNotificationRepository : GenericRepository<OrientationNo
 
     public async Task<IEnumerable<OrientationNotification>> GetByEnrollmentIdAsync(Guid employeeOrientationId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(n => n.EmployeeOrientationId == employeeOrientationId && !n.IsDeleted)
             .OrderByDescending(n => n.SentAt)
             .ToListAsync();
