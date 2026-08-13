@@ -43,6 +43,7 @@ public sealed class ProcurementReceiptInspectionService :
     private readonly INotificationTopicPublisher _notifications;
     private readonly IProcurementPurchaseOrderSodService _purchaseOrderSod;
     private readonly IProcurementReceiptSourceControlService _sourceControl;
+    private readonly IProcurementReceiptSourceEvidenceReadinessService _sourceEvidence;
     private readonly IProcurementReceiptInspectionStore _store;
     private readonly IInventoryValuationService _valuation;
     private readonly IInventoryReceiptFinancePostingService _receiptFinancePosting;
@@ -61,6 +62,7 @@ public sealed class ProcurementReceiptInspectionService :
         INotificationTopicPublisher notifications,
         IProcurementPurchaseOrderSodService purchaseOrderSod,
         IProcurementReceiptSourceControlService sourceControl,
+        IProcurementReceiptSourceEvidenceReadinessService sourceEvidence,
         IProcurementReceiptInspectionStore store,
         IInventoryValuationService valuation,
         IInventoryReceiptFinancePostingService receiptFinancePosting,
@@ -78,6 +80,7 @@ public sealed class ProcurementReceiptInspectionService :
         _notifications = notifications;
         _purchaseOrderSod = purchaseOrderSod;
         _sourceControl = sourceControl;
+        _sourceEvidence = sourceEvidence;
         _store = store;
         _valuation = valuation;
         _receiptFinancePosting = receiptFinancePosting;
@@ -571,6 +574,9 @@ public sealed class ProcurementReceiptInspectionService :
                 throw Validation("RCV_REJECTION_CONTROL_INCOMPLETE",
                     "Every rejected line requires a reason and quarantine location.");
 
+            await _sourceEvidence.EnsureWaybillReadyAsync(
+                inspection.PurchaseOrderReceiptId, cancellationToken);
+
             var before = Snapshot(inspection);
             var configuredEvidenceRequirements = await LoadEvidenceRequirementKeysAsync(
                 inspection.ConfigurationProfileId, cancellationToken);
@@ -714,6 +720,8 @@ public sealed class ProcurementReceiptInspectionService :
             await _sourceControl.RevalidatePurchaseOrderReceiptAsync(
                 inspection.PurchaseOrderReceiptId, "ApproveReceiptInspection", correlation,
                 cancellationToken);
+            await _sourceEvidence.EnsureWaybillReadyAsync(
+                inspection.PurchaseOrderReceiptId, cancellationToken);
             await RevalidateEvidenceAsync(inspection, cancellationToken);
             await _store.SetMutationContextAsync(inspection.Id, cancellationToken);
             try

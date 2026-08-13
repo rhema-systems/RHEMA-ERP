@@ -186,3 +186,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260810234912_AddQuantitySurveyVariationLifecycle")] partial class AddQuantitySurveyVariationLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260811010013_AddQuantitySurveyContractClaimLifecycle")] partial class AddQuantitySurveyContractClaimLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260811013838_AddQuantitySurveyDayworkLifecycle")] partial class AddQuantitySurveyDayworkLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260812195409_INVREQFU001GovernedReceiptSourceEvidence")] partial class INVREQFU001GovernedReceiptSourceEvidence { }

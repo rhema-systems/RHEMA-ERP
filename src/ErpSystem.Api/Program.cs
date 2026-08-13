@@ -393,6 +393,11 @@ builder.Services.AddScoped<ErpSystem.Api.Services.TransferDocumentService>();
 builder.Services.AddScoped<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>();
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptDocumentService>(provider =>
     provider.GetRequiredService<ErpSystem.Api.Services.PurchaseOrderReceiptDocumentService>());
+builder.Services.AddScoped<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>();
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceEvidenceService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
+builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IProcurementReceiptSourceEvidenceReadinessService>(provider =>
+    provider.GetRequiredService<ErpSystem.Api.Services.ProcurementReceiptSourceEvidenceService>());
 
 // Add Award Letter Service for PDF award letter generation
 builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterService, ErpSystem.Api.Services.AwardLetterService>();

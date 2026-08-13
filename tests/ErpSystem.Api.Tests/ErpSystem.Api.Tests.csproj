@@ -87,6 +87,7 @@
     <Compile Include="Controllers\Procurement\ProcurementWorksCloseoutControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrdersSodControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementReceiptDocumentsControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\ProcurementReceiptSourceEvidenceControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrderReceiptIdempotencyTests.cs" />
     <Compile Include="Controllers\Inventory\GoodsReceiptNotesSodControllerTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryTransferControllerSecurityTests.cs" />
@@ -210,6 +211,7 @@
     <Compile Include="Services\WorkflowDefinitionServiceAdapterCloneTests.cs" />
     <Compile Include="Services\Identity\HrIdentityReconciliationServiceTests.cs" />
     <Compile Include="Services\Procurement\ProcurementCentralDmsAdoptionTests.cs" />
+    <Compile Include="Services\Procurement\ProcurementReceiptSourceEvidenceServiceTests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">

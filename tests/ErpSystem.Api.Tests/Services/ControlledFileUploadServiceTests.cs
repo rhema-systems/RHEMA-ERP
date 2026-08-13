@@ -88,6 +88,7 @@ public sealed class ControlledFileUploadServiceTests
     [Theory]
     [InlineData(ControlledFileUploadCategories.DocumentManagement)]
     [InlineData(ControlledFileUploadCategories.SupplierRegistrationEvidence)]
+    [InlineData(ControlledFileUploadCategories.ProcurementReceiptSourceEvidence)]
     [InlineData(ControlledFileUploadCategories.QuantitySurveyBoqImport)]
     [InlineData(ControlledFileUploadCategories.QuantitySurveyTenderBoqSubmission)]
     [InlineData(ControlledFileUploadCategories.HrCandidateCv)]
