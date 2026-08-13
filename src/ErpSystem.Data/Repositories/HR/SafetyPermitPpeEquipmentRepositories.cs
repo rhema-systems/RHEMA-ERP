@@ -116,7 +116,8 @@ public class PpeIssuanceRepository : GenericRepository<PpeIssuance>, IPpeIssuanc
     public PpeIssuanceRepository(ApplicationDbContext context) : base(context) { }
 
     private IQueryable<PpeIssuance> WithNavigations() =>
-        _dbSet.Include(i => i.Employee).Include(i => i.PpeType).Include(i => i.IssuedBy);
+        _dbSet.Include(i => i.Employee).Include(i => i.PpeType).Include(i => i.IssuedBy)
+            .Include(i => i.ReturnedTo);
 
     public async Task<IEnumerable<PpeIssuance>> GetByEmployeeAsync(Guid employeeId) =>
         await WithNavigations().Where(i => i.EmployeeId == employeeId && !i.IsDeleted)

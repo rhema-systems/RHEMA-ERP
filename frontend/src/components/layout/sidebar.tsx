@@ -602,6 +602,10 @@ export const navigationItems: NavItem[] = [
           { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList },
           { title: 'Inspections', href: '/hr/safety/inspections', icon: ClipboardCheck },
           { title: 'Permits to Work', href: '/hr/safety/permits', icon: FileCheck },
+          // My PPE is the slice-6 self-service read: open to every employee, own record only.
+          { title: 'My PPE', href: '/hr/safety/my-ppe', icon: HardHat },
+          { title: 'PPE Stock', href: '/hr/safety/ppe', icon: Package },
+          { title: 'PPE Issuance', href: '/hr/safety/ppe/issuances', icon: Users },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },
@@ -1484,6 +1488,16 @@ export const navigationItems: NavItem[] = [
                 title: 'Regulatory Bodies',
                 href: '/administration/hr/safety/regulatory-bodies',
                 icon: Landmark,
+              },
+              {
+                title: 'PPE Types',
+                href: '/administration/hr/safety/ppe-types',
+                icon: HardHat,
+              },
+              {
+                title: 'PPE Requirements',
+                href: '/administration/hr/safety/ppe-requirements',
+                icon: ClipboardCheck,
               },
             ],
           },

@@ -7,6 +7,8 @@ import {
   ClipboardList,
   Landmark,
   ClipboardCheck,
+  HardHat,
+  Grid3x3,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -61,6 +63,19 @@ export default function SafetyAdminHomePage() {
             description: 'The reusable checklist templates inspections are conducted against.',
             href: '/administration/hr/safety/checklists',
             icon: ClipboardCheck,
+          },
+          {
+            title: 'PPE Types',
+            description:
+              'The protective-equipment catalogue — categories, standards, lifespans and tracking flags.',
+            href: '/administration/hr/safety/ppe-types',
+            icon: HardHat,
+          },
+          {
+            title: 'Job-Role PPE Requirements',
+            description: 'The matrix of what each job role must be issued, and how often.',
+            href: '/administration/hr/safety/ppe-requirements',
+            icon: Grid3x3,
           },
         ]}
       />

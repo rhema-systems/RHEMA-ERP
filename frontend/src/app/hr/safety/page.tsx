@@ -11,6 +11,9 @@ import {
   ClipboardList,
   ClipboardCheck,
   FileCheck,
+  HardHat,
+  Package,
+  Users,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -108,6 +111,34 @@ export default function SafetyHomePage() {
                 'Authorisation for hazardous work — approval gated on hazards, controls and gas testing.',
               href: '/hr/safety/permits',
               icon: FileCheck,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">PPE</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'My PPE',
+              description:
+                'Open to everyone — what has been issued to you, what you hold and what has expired.',
+              href: '/hr/safety/my-ppe',
+              icon: HardHat,
+            },
+            {
+              title: 'PPE Stock',
+              description:
+                'Inventory per PPE type — stock on hand, reorder levels and restocking.',
+              href: '/hr/safety/ppe',
+              icon: Package,
+            },
+            {
+              title: 'PPE Issuance',
+              description: 'Who holds what, what is due back and what has come back.',
+              href: '/hr/safety/ppe/issuances',
+              icon: Users,
             },
           ]}
         />

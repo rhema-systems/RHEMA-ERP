@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
@@ -423,7 +424,9 @@ public class PpeManagementService : IPpeManagementService
 
     private async Task<PpeInventory> GetOwnedInventoryAsync(Guid id)
     {
-        var entity = await _inventoryRepository.GetByIdAsync(id);
+        // Loaded with its navigations so single reads and write responses resolve the type and
+        // restocker names — the bare GetByIdAsync left them blank on the mapped DTO.
+        var entity = await _inventoryRepository.GetByIdAsync(id, i => i.PpeType, i => i.LastRestockedBy!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"PPE inventory item with ID '{id}' not found.");
         return entity;
@@ -439,10 +442,20 @@ public class PpeManagementService : IPpeManagementService
 
     private async Task<JobRolePpeRequirement> GetOwnedRequirementAsync(Guid id)
     {
-        var entity = await _requirementRepository.GetByIdAsync(id);
+        var entity = await _requirementRepository.GetByIdAsync(id, r => r.PpeType);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Job-role PPE requirement with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied Employee FKs (issued-to, issued-by, returned-to,
+    /// restocked-by) — without it a bad id surfaces as an SQL 547 / HTTP 500 instead of a 404.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
     }
 
     // ── Types ──
@@ -492,6 +505,15 @@ public class PpeManagementService : IPpeManagementService
     }
 
     // ── Inventory ──
+    public async Task<IEnumerable<PpeInventoryDto>> GetInventoryAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        return (await _inventoryRepository.GetAllAsync(i => i.PpeType, i => i.LastRestockedBy!))
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.ItemCode)
+            .Select(e => e.ToDto());
+    }
+
     public async Task<PpeInventoryDto> GetInventoryItemAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInventoryAsync(id);
@@ -542,6 +564,7 @@ public class PpeManagementService : IPpeManagementService
     public async Task<bool> RestockAsync(RestockPpeInventoryDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInventoryAsync(dto.PpeInventoryId);
+        await GetOwnedEmployeeAsync(dto.RestockedById);
 
         entity.QuantityInStock += dto.Quantity;
         entity.LastRestockDate = dto.RestockDate;
@@ -591,6 +614,10 @@ public class PpeManagementService : IPpeManagementService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedTypeAsync(dto.PpeTypeId);
+        // Guarded loads double as change-tracker fixup: with the employees tracked, the saved
+        // entity's navigations resolve and the write response carries the names, not blanks.
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        await GetOwnedEmployeeAsync(dto.IssuedById);
         var entity = dto.ToEntity(tenantId, userId);
         await _issuanceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -602,6 +629,7 @@ public class PpeManagementService : IPpeManagementService
         var entity = await GetOwnedIssuanceAsync(dto.IssuanceId);
         if (entity.IsReturned)
             throw new InvalidOperationException("This PPE issuance has already been returned.");
+        await GetOwnedEmployeeAsync(dto.ReturnedToId);
 
         entity.IsReturned = true;
         entity.ActualReturnDate = dto.ActualReturnDate;
@@ -617,6 +645,15 @@ public class PpeManagementService : IPpeManagementService
     }
 
     // ── Job-role requirements ──
+    public async Task<IEnumerable<JobRolePpeRequirementDto>> GetRequirementsAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        return (await _requirementRepository.GetAllAsync(r => r.PpeType))
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.JobRoleName).ThenBy(e => e.PpeType?.Name)
+            .Select(e => e.ToDto());
+    }
+
     public async Task<IEnumerable<JobRolePpeRequirementDto>> GetRequirementsByJobRoleAsync(string jobRoleCode, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -628,7 +665,14 @@ public class PpeManagementService : IPpeManagementService
     public async Task<JobRolePpeRequirementDto> AddRequirementAsync(CreateJobRolePpeRequirementDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedTypeAsync(dto.PpeTypeId);
+        var ppeType = await GetOwnedTypeAsync(dto.PpeTypeId);
+        var roleCode = dto.JobRoleCode.Trim();
+        // Deleted rows don't block: removing a requirement and re-adding it later is a normal flow.
+        var exists = await _requirementRepository.GetQueryable()
+            .AnyAsync(r => r.TenantId == tenantId && r.JobRoleCode == roleCode && r.PpeTypeId == dto.PpeTypeId && !r.IsDeleted, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"'{ppeType.Name}' is already required for job role '{roleCode}'.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _requirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
