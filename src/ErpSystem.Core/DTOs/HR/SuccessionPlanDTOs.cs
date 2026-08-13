@@ -1192,6 +1192,7 @@ public class CreateTalentPoolTypeDefinitionDto : CreateDtoBase
     public string? Description { get; set; }
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     public int SortOrder { get; set; }
@@ -1208,6 +1209,7 @@ public class UpdateTalentPoolTypeDefinitionDto : UpdateDtoBase
     public string? Description { get; set; }
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     public int SortOrder { get; set; }

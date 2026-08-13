@@ -84,6 +84,27 @@ public static class Constants
         public static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         public const string DefaultTenantCode = "DEFAULT";
     }
+
+    /// <summary>
+    /// Validation for user-chosen display colours stored as hex strings.
+    /// </summary>
+    public static class Colors
+    {
+        /// <summary>
+        /// A CSS hex colour: <c>#RGB</c>, <c>#RRGGBB</c> or <c>#RRGGBBAA</c>.
+        /// </summary>
+        /// <remarks>
+        /// Anchored, so <c>[RegularExpression]</c> cannot match a substring. These fields are all
+        /// nullable and optional — <c>[RegularExpression]</c> ignores null and empty, so an unset
+        /// colour still validates and only a non-empty malformed value is rejected.
+        /// ⚠ Applies only to fields that hold a *hex code*. Several HR entities have a
+        /// <c>Color</c> that is a plain description (an asset's physical colour, e.g. "Silver") —
+        /// those must not use this.
+        /// </remarks>
+        public const string HexPattern = @"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$";
+
+        public const string HexMessage = "Use a hex colour such as #4F46E5 (#RGB, #RRGGBB or #RRGGBBAA).";
+    }
 }
 
 public enum AuthenticationProvider

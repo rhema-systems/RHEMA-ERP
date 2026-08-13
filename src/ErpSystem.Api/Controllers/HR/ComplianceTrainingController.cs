@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/compliance-training")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class ComplianceTrainingController : ControllerBase
 {
     private readonly IComplianceTrainingService _service;
@@ -84,20 +86,36 @@ public class ComplianceTrainingController : ControllerBase
     // COMPLIANCE RECORDS — QUERIES
     // =========================================================================
 
+    /// <summary>The caller's own compliance record — "am I compliant?".</summary>
+    /// <remarks>
+    /// The module's /mine convention. Compliance is personal and the id-bearing route below is
+    /// org-wide, so without this a self-service screen would have to pass someone's employee id to
+    /// read their compliance status.
+    /// </remarks>
+    [HttpGet("records/mine")]
+    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordDto>>> GetMyRecords(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetRecordsForEmployeeAsync(employeeId.Value, ct));
+    }
+
     [HttpGet("records/employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordDto>>> GetRecordsForEmployee(Guid employeeId, CancellationToken ct)
         => Ok(await _service.GetRecordsForEmployeeAsync(employeeId, ct));
 
+    // Returns summaries, not full records — the declared type used to say EmployeeComplianceRecordDto,
+    // which is a contract any generated client would get wrong.
     [HttpGet("records/requirement/{requirementId:guid}")]
-    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordDto>>> GetRecordsForRequirement(Guid requirementId, CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordSummaryDto>>> GetRecordsForRequirement(Guid requirementId, CancellationToken ct)
         => Ok(await _service.GetRecordsForRequirementAsync(requirementId, ct));
 
     [HttpGet("records/overdue")]
-    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordDto>>> GetOverdueRecords(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordSummaryDto>>> GetOverdueRecords(CancellationToken ct)
         => Ok(await _service.GetOverdueRecordsAsync(ct));
 
     [HttpGet("records/non-compliant")]
-    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordDto>>> GetNonCompliantRecords(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<EmployeeComplianceRecordSummaryDto>>> GetNonCompliantRecords(CancellationToken ct)
         => Ok(await _service.GetNonCompliantRecordsAsync(ct));
 
     // =========================================================================
@@ -127,8 +145,9 @@ public class ComplianceTrainingController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         dto.RecordId = id;
-        await _service.ExemptEmployeeAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Employee exempted from compliance requirement." });
+        // Returns the updated record rather than a bare message: the service already builds the
+        // full DTO through its includes chain, and discarding it forced a refetch.
+        return Ok(await _service.ExemptEmployeeAsync(dto, employeeId.Value, ct));
     }
 
     [HttpPost("records/{id:guid}/fulfill")]
@@ -137,7 +156,8 @@ public class ComplianceTrainingController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        await _service.MarkFulfilledAsync(id, request.NominationId, employeeId.Value, ct);
-        return Ok(new { message = "Compliance training requirement marked as fulfilled." });
+        // Returns the updated record rather than a bare message: the service already builds the
+        // full DTO through its includes chain, and discarding it forced a refetch.
+        return Ok(await _service.MarkFulfilledAsync(id, request.NominationId, employeeId.Value, ct));
     }
 }

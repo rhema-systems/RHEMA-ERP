@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -17,9 +18,13 @@ public class LearningPathService : ILearningPathService
     private readonly IEmployeeLearningPathStepRepository _stepRepository;
     private readonly ITrainingScheduleService _scheduleService;
     private readonly ITrainingNominationService _nominationService;
+    private readonly ITrainingStatusHistoryService _statusHistoryService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<LearningPathService> _logger;
+
+    /// <summary>The <c>TrainingStatusHistory.EntityType</c> discriminator for step rows.</summary>
+    public const string StepHistoryEntityType = "EmployeeLearningPathStep";
 
     public LearningPathService(
         ILearningPathRepository pathRepository,
@@ -29,6 +34,7 @@ public class LearningPathService : ILearningPathService
         IEmployeeLearningPathStepRepository stepRepository,
         ITrainingScheduleService scheduleService,
         ITrainingNominationService nominationService,
+        ITrainingStatusHistoryService statusHistoryService,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<LearningPathService> logger)
@@ -40,6 +46,7 @@ public class LearningPathService : ILearningPathService
         _stepRepository = stepRepository;
         _scheduleService = scheduleService;
         _nominationService = nominationService;
+        _statusHistoryService = statusHistoryService;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -163,7 +170,9 @@ public class LearningPathService : ILearningPathService
 
         _logger.LogInformation("Learning path created: {PathName}", dto.Name);
 
-        return entity.ToDto();
+        // Freshly written: no scope navigations or Programs loaded, so the response would show a
+        // blank unit/position and "0 programmes".
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<LearningPathDto> UpdateAsync(UpdateLearningPathDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -177,7 +186,7 @@ public class LearningPathService : ILearningPathService
         await _pathRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -207,7 +216,8 @@ public class LearningPathService : ILearningPathService
         await _pathProgramRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var savedProgram = await _pathProgramRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (savedProgram ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<LearningPathProgramDto>> GetProgramsAsync(Guid learningPathId, CancellationToken cancellationToken = default)
@@ -228,7 +238,8 @@ public class LearningPathService : ILearningPathService
         await _pathProgramRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var savedProgram = await _pathProgramRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (savedProgram ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteProgramAsync(Guid id, CancellationToken cancellationToken = default)
@@ -256,7 +267,8 @@ public class LearningPathService : ILearningPathService
         await _pathSkillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var savedSkill = await _pathSkillRepository.GetByIdAsync(entity.Id);
+        return (savedSkill ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<LearningPathSkillDto>> GetSkillsAsync(Guid learningPathId, CancellationToken cancellationToken = default)
@@ -300,6 +312,13 @@ public class LearningPathService : ILearningPathService
         await GetOwnedPathWithDetailsAsync(dto.LearningPathId);
 
         var enrollment = dto.ToEntity(current, createdByUserId);
+
+        // AssignedById is optional on the DTO and the mapper copies it straight through, so an
+        // enrolment made from a screen recorded nobody as having assigned it. Default it to the
+        // caller — whoever enrols someone IS the assigner — while still honouring an explicit id,
+        // since HR can legitimately record an enrolment on a line manager's behalf.
+        enrollment.AssignedById ??= createdByUserId;
+
         enrollment.EnrolledDate = DateTime.UtcNow;
         enrollment.ProgressPercentage = 0;
         enrollment.IsCompleted = false;
@@ -332,7 +351,9 @@ public class LearningPathService : ILearningPathService
 
         _logger.LogInformation("Employee {EmployeeId} enrolled in learning path {LearningPathId}", dto.EmployeeId, dto.LearningPathId);
 
-        return enrollment.ToDto();
+        // Freshly written: no Employee/AssignedBy loaded, so the response named neither the learner
+        // nor who assigned it — on the one response a caller is most likely to render directly.
+        return await GetEnrollmentByIdAsync(enrollment.Id, cancellationToken);
     }
 
     public async Task<EmployeeLearningPathDto> RecalculateProgressAsync(Guid enrollmentId, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -373,21 +394,127 @@ public class LearningPathService : ILearningPathService
         return enrollment.ToDto();
     }
 
-    public async Task<EmployeeLearningPathStepDto> UpdateStepAsync(UpdateLearningPathStepDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Completing or reopening one step of an enrolment.
+    ///
+    /// Three rules apply, in this order:
+    ///   1. Only the learner or HR may touch the step at all. Tenant scope alone let any employee
+    ///      complete a colleague's step.
+    ///   2. A learner may only confirm a completion that evidence already supports.
+    ///   3. HR may complete without evidence, but must say why — and that override is recorded.
+    ///
+    /// The gate is deliberately not absolute: self-paced e-learning, prior or external learning,
+    /// migrated history and plain admin corrections are all legitimate completions with no
+    /// attendance row behind them. Blocking them outright does not stop people recording them, it
+    /// pushes them to fabricate an attendance record instead — which destroys the very evidence the
+    /// rule exists to protect. So the override is allowed, named, and written down.
+    /// </summary>
+    public async Task<EmployeeLearningPathStepDto> UpdateStepAsync(UpdateLearningPathStepDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedStepAsync(dto.Id);
+        var tenantId = GetTenantId();
 
-        entity.UpdateEntity(dto, updatedByUserId);
+        // The context load also gives us the nomination and completion record the evidence test needs.
+        var entity = await _stepRepository.GetStepWithContextAsync(dto.Id);
+        if (entity == null || entity.TenantId != tenantId)
+            throw new ArgumentException($"Learning path step with ID '{dto.Id}' not found.");
+
+        var learnerId = entity.EmployeeLearningPath.EmployeeId;
+        var isLearner = learnerId == actorEmployeeId;
+        var isHr      = _currentUserProvider.HasRole(Constants.Roles.Hr)
+                     || _currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
+                     || _currentUserProvider.HasRole(Constants.Roles.TenantAdmin);
+
+        // Rule 1 — ownership. TrainingBusinessRulesAttribute turns this into a 403 carrying the message.
+        if (!isLearner && !isHr)
+            throw new UnauthorizedAccessException(
+                "This step belongs to another employee. Only the learner or HR can update it.");
+
+        var wasCompleted = entity.IsCompleted;
+        var toStatus = LearningPathStepStatus.NotCompleted;
+        string? overrideReason = null;
+
+        if (dto.IsCompleted)
+        {
+            var hasEvidence = await HasCompletionEvidenceAsync(entity, learnerId, cancellationToken);
+
+            if (hasEvidence)
+            {
+                toStatus = LearningPathStepStatus.Completed;
+            }
+            else if (!isHr)
+            {
+                // Rule 2 — a learner cannot self-certify. 422 with this message, via the filter.
+                throw new InvalidOperationException(
+                    "This step has no attendance or completion record behind it yet, so it cannot be marked "
+                  + "complete here. Attend a scheduled run, or ask HR to record it with a reason.");
+            }
+            else
+            {
+                // Rule 3 — HR may override, but not silently.
+                if (string.IsNullOrWhiteSpace(dto.Reason))
+                    throw new InvalidOperationException(
+                        "There is no attendance or completion record behind this step. Give a reason for "
+                      + "recording it complete (for example prior learning, or self-paced study).");
+
+                toStatus = LearningPathStepStatus.CompletedByOverride;
+                overrideReason = dto.Reason.Trim();
+            }
+        }
+
+        entity.UpdateEntity(dto, actorEmployeeId);
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = updatedByUserId.ToString();
+        entity.UpdatedBy = actorEmployeeId.ToString();
 
         await _stepRepository.UpdateAsync(entity);
+
+        // Only a real transition is worth a row; re-saving an unchanged step should not pad the trail.
+        if (wasCompleted != dto.IsCompleted)
+        {
+            await _statusHistoryService.RecordAsync(
+                entityType:          StepHistoryEntityType,
+                entityId:            entity.Id,
+                entityReference:     entity.LearningPathProgram?.Program?.ProgramName,
+                fromStatus:          (int)(wasCompleted ? LearningPathStepStatus.Completed : LearningPathStepStatus.NotCompleted),
+                fromStatusName:      wasCompleted ? "Completed" : "Not completed",
+                toStatus:            (int)toStatus,
+                toStatusName:        toStatus switch
+                                     {
+                                         LearningPathStepStatus.Completed           => "Completed — evidenced",
+                                         LearningPathStepStatus.CompletedByOverride => "Completed — recorded by HR",
+                                         _                                          => "Reopened",
+                                     },
+                changedByEmployeeId: actorEmployeeId,
+                reason:              overrideReason,
+                cancellationToken:   cancellationToken);
+        }
+
+        // One SaveChanges commits the step and its audit row together.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         if (entity.IsCompleted)
-            await RecalculateProgressAsync(entity.EmployeeLearningPathId, updatedByUserId, cancellationToken);
+            await RecalculateProgressAsync(entity.EmployeeLearningPathId, actorEmployeeId, cancellationToken);
 
-        return entity.ToDto();
+        var savedStep = await _stepRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (savedStep ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// Whether anything on the record justifies calling this step complete: the learner was marked
+    /// present on the nominated run, or a completion record exists for it.
+    /// </summary>
+    private async Task<bool> HasCompletionEvidenceAsync(
+        EmployeeLearningPathStep step, Guid learnerId, CancellationToken cancellationToken)
+    {
+        if (step.Nomination?.CompletionRecord != null)
+            return true;
+
+        if (step.NominationId == null || step.Nomination == null)
+            return false;
+
+        var attendance = await _nominationService.GetAttendanceForScheduleAsync(
+            step.Nomination.ScheduleId, cancellationToken);
+
+        return attendance.Any(a => a.EmployeeId == learnerId && a.IsPresent);
     }
 
     public async Task<IEnumerable<EmployeeLearningPathSummaryDto>> GetEnrollmentsByPathIdAsync(Guid pathId, CancellationToken cancellationToken = default)
@@ -424,7 +551,7 @@ public class LearningPathService : ILearningPathService
 
         await _enrollmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await GetEnrollmentByIdAsync(entity.Id, cancellationToken);
     }
 
     // ── Step detail (employee self-service) ───────────────────────────────────
@@ -442,6 +569,11 @@ public class LearningPathService : ILearningPathService
         var lpp        = step.LearningPathProgram;
         var program    = lpp.Program;
         var enrollment = step.EmployeeLearningPath;
+
+        // The records below belong to whoever is enrolled, not to whoever is looking. HR opening
+        // someone else's step from the org-wide list would otherwise see its own attendance and
+        // feedback presented as the learner's — and, worse, have canMarkComplete decided by it.
+        var learnerId = enrollment.EmployeeId;
 
         // Sibling steps drive the displayed sequence and total, so foreign rows would not merely leak:
         // they would shift this step's position and inflate the step count.
@@ -495,7 +627,7 @@ public class LearningPathService : ILearningPathService
             // Attendance records for this employee on that schedule
             var allAtt = await _nominationService.GetAttendanceForScheduleAsync(nom.ScheduleId, cancellationToken);
             myAttendance = allAtt
-                .Where(a => a.EmployeeId == employeeId)
+                .Where(a => a.EmployeeId == learnerId)
                 .Select(a => new StepAttendanceDto
                 {
                     Id             = a.Id,
@@ -523,7 +655,7 @@ public class LearningPathService : ILearningPathService
 
             // Feedback for this employee on that schedule
             var allFb = await _nominationService.GetFeedbackForScheduleAsync(nom.ScheduleId, cancellationToken);
-            var myFb  = allFb.FirstOrDefault(f => f.EmployeeId == employeeId);
+            var myFb  = allFb.FirstOrDefault(f => f.EmployeeId == learnerId);
             if (myFb != null)
             {
                 myFeedback = new StepFeedbackDto
@@ -543,7 +675,9 @@ public class LearningPathService : ILearningPathService
             }
         }
 
-        bool canMarkComplete = myAttendance.Any(a => a.IsPresent) || myCompletion != null;
+        // Deliberately the same helper the write path enforces with, so the button's enabled state and
+        // the rule that rejects the request cannot drift apart.
+        bool canMarkComplete = await HasCompletionEvidenceAsync(step, learnerId, cancellationToken);
 
         return new StepDetailPageDto
         {
@@ -558,6 +692,9 @@ public class LearningPathService : ILearningPathService
             PrerequisiteProgramName = prereqName,
             IsMandatory             = lpp.IsMandatory,
             CanMarkComplete         = canMarkComplete,
+            LearnerId               = learnerId,
+            LearnerName             = enrollment.Employee?.FullName ?? string.Empty,
+            IsOwnStep               = learnerId == employeeId,
             ProgramId               = program.Id,
             ProgramCode             = program.ProgramCode,
             ProgramName             = program.ProgramName,

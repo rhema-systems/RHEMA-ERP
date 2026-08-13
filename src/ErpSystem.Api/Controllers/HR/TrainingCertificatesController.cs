@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/training-certificates")]
+[TrainingBusinessRulesAttribute]
 public class TrainingCertificatesController : ControllerBase
 {
     private readonly ICertificateVerificationService _verification;

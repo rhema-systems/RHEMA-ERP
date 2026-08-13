@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-completions")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingCompletionsController : ControllerBase
 {
     private readonly ITrainingCompletionService _service;
@@ -31,6 +33,15 @@ public class TrainingCompletionsController : ControllerBase
     [HttpGet("nomination/{nominationId:guid}")]
     public async Task<ActionResult<TrainingCompletionDto?>> GetByNominationId(Guid nominationId, CancellationToken ct)
         => Ok(await _service.GetByNominationIdAsync(nominationId, ct));
+
+    /// <summary>The caller's own completion records, taken from the token.</summary>
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<TrainingCompletionDto>>> GetMine(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId.Value, ct));
+    }
 
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<TrainingCompletionDto>>> GetByEmployeeId(Guid employeeId, CancellationToken ct)
@@ -93,8 +104,10 @@ public class TrainingCompletionsController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
         dto.CompletionId = id;
-        await _service.VerifyCompletionAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Training completion verified." });
+        // Returns the updated record rather than a bare message: the service already builds the
+        // full DTO (re-read through its includes chain) and discarding it forced every caller to
+        // refetch just to render the row it had just changed.
+        return Ok(await _service.VerifyCompletionAsync(dto, employeeId.Value, ct));
     }
 
     // =========================================================================
@@ -124,6 +137,15 @@ public class TrainingCompletionsController : ControllerBase
         dto.CertificateId = id;
         await _service.RevokeCertificateAsync(dto, employeeId.Value, ct);
         return Ok(new { message = "Certificate revoked." });
+    }
+
+    /// <summary>The caller's own training certificates, taken from the token.</summary>
+    [HttpGet("certificates/mine")]
+    public async Task<ActionResult<IEnumerable<TrainingCertificateSummaryDto>>> GetMyCertificates(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetCertificatesForEmployeeAsync(employeeId.Value, ct));
     }
 
     [HttpGet("certificates/employee/{employeeId:guid}")]

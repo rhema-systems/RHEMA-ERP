@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -10,6 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-nominations")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingNominationsController : ControllerBase
 {
     private readonly ITrainingNominationService _service;
@@ -61,6 +63,20 @@ public class TrainingNominationsController : ControllerBase
     [HttpGet("schedule/{scheduleId:guid}")]
     public async Task<ActionResult<IEnumerable<TrainingNominationSummaryDto>>> GetByScheduleId(Guid scheduleId, CancellationToken ct)
         => Ok(await _service.GetByScheduleIdAsync(scheduleId, ct));
+
+    /// <summary>The caller's own nominations, taken from the token.</summary>
+    /// <remarks>
+    /// The module's /mine convention: without it a self-service screen would have to fetch its own
+    /// employee id and pass it back through the id-bearing route below, which is the shape that
+    /// produced read-anyone's-record holes elsewhere in HR.
+    /// </remarks>
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<TrainingNominationSummaryDto>>> GetMine(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId.Value, ct));
+    }
 
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<TrainingNominationSummaryDto>>> GetByEmployeeId(Guid employeeId, CancellationToken ct)
@@ -259,8 +275,10 @@ public class TrainingNominationsController : ControllerBase
         dto.AssessmentId = id;
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-        await _service.SubmitManagerObservationAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Manager observation recorded." });
+        // Returns the updated record rather than a bare message: the service already builds the
+        // full DTO (re-read through its includes chain) and discarding it forced every caller to
+        // refetch just to render the row it had just changed.
+        return Ok(await _service.SubmitManagerObservationAsync(dto, employeeId.Value, ct));
     }
 
     [HttpGet("schedule/{scheduleId:guid}/follow-up")]

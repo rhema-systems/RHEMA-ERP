@@ -2919,6 +2919,25 @@ public enum LearningPathStatus
     Inactive = 2,
 }
 
+/// <summary>
+/// The status scale used for <c>EmployeeLearningPathStep</c> rows in <c>TrainingStatusHistory</c>.
+///
+/// The step entity itself only stores a boolean, so this is what preserves the distinction that
+/// matters at audit time: whether a completion rested on evidence or on someone's authority. A
+/// learning path can award a certificate that outside parties verify, so "who said so, and on what
+/// basis" has to survive on the record rather than in the boolean.
+/// </summary>
+public enum LearningPathStepStatus
+{
+    NotCompleted = 0,
+
+    /// <summary>Backed by attendance or a completion record.</summary>
+    Completed = 1,
+
+    /// <summary>Recorded by HR without evidence, against a mandatory reason.</summary>
+    CompletedByOverride = 2,
+}
+
 public enum MentoringStatus
 {
     Active = 1,

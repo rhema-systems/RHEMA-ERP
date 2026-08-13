@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/mentoring")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class MentoringController : ControllerBase
 {
     private readonly IMentoringService _service;
@@ -79,7 +81,22 @@ public class MentoringController : ControllerBase
 
     [HttpGet("pairs/{id:guid}")]
     public async Task<ActionResult<MentoringPairDto>> GetPairById(Guid id, CancellationToken ct)
-        => Ok(await _service.GetPairByIdAsync(id, ct));
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.GetPairByIdAsync(id, employeeId.Value, ct));
+    }
+
+    /// <summary>The caller's own mentoring, on both sides. Token-derived — no employee id crosses the wire.</summary>
+    [HttpGet("pairs/mine")]
+    public async Task<ActionResult<IEnumerable<MentoringPairSummaryDto>>> GetMyPairs(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.GetMyPairsAsync(employeeId.Value, ct));
+    }
 
     [HttpGet("programs/{programId:guid}/pairs")]
     public async Task<ActionResult<IEnumerable<MentoringPairSummaryDto>>> GetPairsForProgram(Guid programId, CancellationToken ct)
@@ -121,28 +138,41 @@ public class MentoringController : ControllerBase
     }
 
     [HttpPost("pairs/{id:guid}/close")]
-    public async Task<IActionResult> ClosePair(Guid id, [FromBody] ClosePairRequest request, CancellationToken ct)
+    public async Task<ActionResult<MentoringPairDto>> ClosePair(Guid id, [FromBody] ClosePairRequest request, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        await _service.ClosePairAsync(id, request.ClosureNotes, employeeId.Value, ct);
-        return Ok(new { message = "Mentoring pair closed." });
+        // Returns the closed pair rather than a message: the screen has to render the new status, the
+        // end date and the closure notes, and discarding the DTO forced it to refetch all three.
+        return Ok(await _service.ClosePairAsync(id, request.ClosureNotes, employeeId.Value, ct));
     }
 
     // =========================================================================
     // MENTORING SESSIONS
     // =========================================================================
 
+    // Sessions carry both parties' private notes, so these two reads take the actor from the token and
+    // the service refuses anyone outside the pair, its coordinator, or HR.
     [HttpGet("sessions/{id:guid}")]
     public async Task<ActionResult<MentoringSessionDto>> GetSessionById(Guid id, CancellationToken ct)
-        => Ok(await _service.GetSessionByIdAsync(id, ct));
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.GetSessionByIdAsync(id, employeeId.Value, ct));
+    }
 
     [HttpGet("pairs/{pairId:guid}/sessions")]
     public async Task<ActionResult<IEnumerable<MentoringSessionDto>>> GetSessionsForPair(Guid pairId, CancellationToken ct)
-        => Ok(await _service.GetSessionsForPairAsync(pairId, ct));
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.GetSessionsForPairAsync(pairId, employeeId.Value, ct));
+    }
 
     [HttpPost("sessions")]
     public async Task<ActionResult<MentoringSessionDto>> LogSession([FromBody] CreateMentoringSessionDto dto, CancellationToken ct)
@@ -174,7 +204,10 @@ public class MentoringController : ControllerBase
     [HttpDelete("sessions/{id:guid}")]
     public async Task<IActionResult> DeleteSession(Guid id, CancellationToken ct)
     {
-        await _service.DeleteSessionAsync(id, ct);
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _service.DeleteSessionAsync(id, employeeId.Value, ct);
         return NoContent();
     }
 }

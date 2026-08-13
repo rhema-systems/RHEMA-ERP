@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-budgets")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingBudgetsController : ControllerBase
 {
     private readonly ITrainingBudgetService _service;

@@ -1,5 +1,7 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,10 +10,19 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-status-history")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingStatusHistoryController : ControllerBase
 {
     private static readonly HashSet<string> AllowedEntityTypes =
-        new(StringComparer.OrdinalIgnoreCase) { "TrainingNomination", "TrainingSchedule", "TrainingCompletion" };
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "TrainingNomination",
+            "TrainingSchedule",
+            "TrainingCompletion",
+            // Learning-path steps record whether a completion was evidenced or overridden by HR, which
+            // is the trail the step page shows.
+            LearningPathService.StepHistoryEntityType,
+        };
 
     private readonly ITrainingStatusHistoryService _service;
 

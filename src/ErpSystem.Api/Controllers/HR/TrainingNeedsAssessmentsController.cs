@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -10,6 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-needs-assessments")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingNeedsAssessmentsController : ControllerBase
 {
     private readonly ITrainingNeedsAssessmentService _service;

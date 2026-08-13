@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -43,7 +44,12 @@ public class CreateLeaveTypeDto
     public int MaxDaysPerYear { get; set; }
     public int? MinDaysNotice { get; set; }
     public bool RequiresApproval { get; set; } = true;
+
+    // UpdateLeaveTypeDto inherits this class, so one annotation covers both write paths.
+    [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? CalendarColor { get; set; }
+
     public bool HasSubTypes { get; set; }
     public bool AllowCarryOver { get; set; }
     public int? MaxCarryOverDays { get; set; }

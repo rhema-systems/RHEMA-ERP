@@ -25,6 +25,9 @@ import {
   Globe,
   GraduationCap,
   IdCard,
+  Stamp,
+  ShieldAlert,
+  Route,
   Tags,
   CalendarDays,
   Globe2,
@@ -491,6 +494,28 @@ export const navigationItems: NavItem[] = [
             href: '/hr/performance/deadline-enforcement',
             icon: FastForward,
           },
+        ],
+      },
+      {
+        // Ordered along the training lifecycle: a schedule is planned, people are nominated onto it
+        // (or queued on its waitlist), those nominations are approved, and the run is closed off
+        // with a completion. Self-service sits at the top because most people only ever need that.
+        // The catalog, plans and budgets are setup and live under Administration → HR → Training.
+        title: 'Training',
+        href: '/hr/training',
+        icon: GraduationCap,
+        children: [
+          { title: 'My Training', href: '/hr/training/my-training', icon: GraduationCap },
+          { title: 'My Learning Paths', href: '/hr/training/my-learning', icon: Route },
+          { title: 'Mentoring', href: '/hr/training/mentoring', icon: Handshake },
+          { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp },
+          { title: 'Schedules', href: '/hr/training/schedules', icon: CalendarClock },
+          { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList },
+          { title: 'Nomination Approvals', href: '/hr/training/approvals', icon: UserCheck },
+          { title: 'Completions', href: '/hr/training/completions', icon: Award },
+          { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp },
+          { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard },
+          { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert },
         ],
       },
       {
@@ -1347,6 +1372,24 @@ export const navigationItems: NavItem[] = [
                 href: '/administration/hr/recruitment/check-templates',
                 icon: ClipboardCheck,
               },
+            ],
+          },
+          {
+            title: 'Training & Learning',
+            href: '/administration/hr/training',
+            icon: GraduationCap,
+            children: [
+              { title: 'Categories', href: '/administration/hr/training/categories', icon: Tag },
+              { title: 'Program Groups', href: '/administration/hr/training/program-groups', icon: Layers },
+              { title: 'Vendors', href: '/administration/hr/training/vendors', icon: Building2 },
+              { title: 'Trainers', href: '/administration/hr/training/trainers', icon: GraduationCap },
+              { title: 'Programs', href: '/administration/hr/training/programs', icon: BookOpen },
+              { title: 'Needs Assessments', href: '/administration/hr/training/needs-assessments', icon: ClipboardPen },
+              { title: 'Training Plans', href: '/administration/hr/training/plans', icon: CalendarRange },
+              { title: 'Training Budgets', href: '/administration/hr/training/budgets', icon: Coins },
+              { title: 'Compliance Requirements', href: '/administration/hr/training/compliance', icon: ShieldAlert },
+              { title: 'Learning Paths', href: '/administration/hr/training/learning-paths', icon: Route },
+              { title: 'Mentoring Programmes', href: '/administration/hr/training/mentoring', icon: Handshake },
             ],
           },
           // Employee Categories has no backing controller at all, so it stays dropped.

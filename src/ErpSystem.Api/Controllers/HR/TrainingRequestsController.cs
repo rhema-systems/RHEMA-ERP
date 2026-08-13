@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -10,6 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-requests")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingRequestsController : ControllerBase
 {
     private readonly ITrainingRequestService _service;
@@ -39,6 +41,15 @@ public class TrainingRequestsController : ControllerBase
     [HttpGet("number/{requestNumber}")]
     public async Task<ActionResult<TrainingRequestDto?>> GetByRequestNumber(string requestNumber, CancellationToken ct)
         => Ok(await _service.GetByRequestNumberAsync(requestNumber, ct));
+
+    /// <summary>The caller's own training requests, taken from the token.</summary>
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<TrainingRequestSummaryDto>>> GetMine(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId.Value, ct));
+    }
 
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<TrainingRequestSummaryDto>>> GetByEmployeeId(Guid employeeId, CancellationToken ct)
@@ -111,8 +122,9 @@ public class TrainingRequestsController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         dto.RequestId = id;
-        await _service.ApproveAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Training request approved." });
+        // Returns the updated record rather than a bare message — the service already builds the
+        // full DTO through its includes chain.
+        return Ok(await _service.ApproveAsync(dto, employeeId.Value, ct));
     }
 
     [HttpPost("{id:guid}/reject")]

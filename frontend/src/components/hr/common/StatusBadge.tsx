@@ -144,6 +144,11 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   settled: 'default',
   waived: 'outline',
 
+  // Training plans and budgets (Planning slice). A denied budget is a dead end, unlike a
+  // rejected item elsewhere that can be resubmitted, so it carries the same weight.
+  revised: 'secondary',
+  denied: 'destructive',
+
   // Recruitment. The live, work-in-hand states carry weight; the ones that mean "nothing is
   // happening here any more" (Filled, Expired, Withdrawn) read as neutral rather than as a
   // problem — a filled vacancy is a success, not an alert.

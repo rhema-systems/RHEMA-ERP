@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -121,9 +122,9 @@ public class TrainerService : ITrainerService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        if (createDto.VendorId != Guid.Empty)
+        if (createDto.VendorId.HasValue && createDto.VendorId != Guid.Empty)
         {
-            var vendor = await _vendorRepository.GetByIdAsync(createDto.VendorId);
+            var vendor = await _vendorRepository.GetByIdAsync(createDto.VendorId.Value);
             if (vendor == null || vendor.TenantId != current)
                 throw new ArgumentException($"Training vendor with ID '{createDto.VendorId}' not found.");
         }
@@ -135,7 +136,10 @@ public class TrainerService : ITrainerService
 
         _logger.LogInformation("Trainer profile created: {Name}", entity.Name);
 
-        return entity.ToDto();
+        // Employee/Vendor navs are unloaded on the just-created tracked instance, so a direct
+        // entity.ToDto() would blank EmployeeName/VendorName even though the FK ids are correct.
+        // Reload through GetByIdAsync (GetWithFullDetailsAsync) instead.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainerProfileDto> UpdateAsync(UpdateTrainerProfileDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -149,7 +153,7 @@ public class TrainerService : ITrainerService
 
         _logger.LogInformation("Trainer profile updated: {Name}", entity.Name);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -181,7 +185,9 @@ public class TrainerService : ITrainerService
 
         _logger.LogInformation("Skill added to trainer profile {TrainerProfileId}", createDto.TrainerProfileId);
 
-        return entity.ToDto();
+        // Skill nav is unloaded on the just-created tracked instance, so entity.ToDto() would blank
+        // SkillName. Reload with the include instead.
+        return await ReloadSkillDtoAsync(entity.Id, cancellationToken);
     }
 
     public async Task<IEnumerable<TrainerSkillDto>> GetSkillsAsync(Guid trainerProfileId, CancellationToken cancellationToken = default)
@@ -200,7 +206,15 @@ public class TrainerService : ITrainerService
         await _skillRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ReloadSkillDtoAsync(entity.Id, cancellationToken);
+    }
+
+    private async Task<TrainerSkillDto> ReloadSkillDtoAsync(Guid skillId, CancellationToken cancellationToken)
+    {
+        var reloaded = await _skillRepository.GetQueryable()
+            .Include(s => s.Skill)
+            .FirstAsync(s => s.Id == skillId, cancellationToken);
+        return reloaded.ToDto();
     }
 
     public async Task<bool> DeleteSkillAsync(Guid trainerSkillId, CancellationToken cancellationToken = default)

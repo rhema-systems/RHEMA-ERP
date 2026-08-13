@@ -142,7 +142,8 @@ public class TrainingRequestService : ITrainingRequestService
 
         _logger.LogInformation("Training request created: {RequestNumber}", entity.RequestNumber);
 
-        return entity.ToDto();
+        // Freshly written: no Employee/LinkedProgram loaded, so map from a re-read instead.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingRequestDto> UpdateAsync(UpdateTrainingRequestDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -159,7 +160,8 @@ public class TrainingRequestService : ITrainingRequestService
 
         _logger.LogInformation("Training request {RequestId} updated", updateDto.Id);
 
-        return entity.ToDto();
+        // A changed LinkedProgramId does not refresh the loaded navigation — re-read.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)

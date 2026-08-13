@@ -137,7 +137,8 @@ public class TrainingCompletionService : ITrainingCompletionService
 
         _logger.LogInformation("Training completion recorded for nomination {NominationId}", dto.NominationId);
 
-        return entity.ToDto();
+        // Freshly written: no Nomination/Employee loaded, so map from a re-read instead.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<BulkCompletionResultDto> BulkRecordCompletionAsync(BulkRecordCompletionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -301,7 +302,11 @@ public class TrainingCompletionService : ITrainingCompletionService
 
         _logger.LogInformation("Training certificate issued: {CertificateNumber} for employee {EmployeeId}", entity.CertificateNumber, dto.EmployeeId);
 
-        return entity.ToDto();
+        // A freshly written entity has no Employee/Program/Nomination loaded, so mapping it directly
+        // hands back a certificate with a blank holder and programme — on the one response the caller
+        // is most likely to render straight onto a screen.
+        var saved = await _certificateRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> RevokeCertificateAsync(RevokeCertificateDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)

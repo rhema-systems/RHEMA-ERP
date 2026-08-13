@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/employee-certificates")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class EmployeeCertificatesController : ControllerBase
 {
     private readonly IEmployeeCertificateService _service;
@@ -23,6 +25,20 @@ public class EmployeeCertificatesController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<EmployeeCertificateDto>> GetById(Guid id, CancellationToken ct)
         => Ok(await _service.GetByIdAsync(id, ct));
+
+    /// <summary>The caller's own externally-held certificates, taken from the token.</summary>
+    /// <remarks>
+    /// The module's /mine convention: without it a self-service screen has to fetch its own employee
+    /// id and pass it back through the id-bearing route below, which is the shape behind the
+    /// read-anyone's-record holes closed elsewhere in HR.
+    /// </remarks>
+    [HttpGet("mine")]
+    public async Task<ActionResult<IEnumerable<EmployeeCertificateDto>>> GetMine(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetByEmployeeIdAsync(employeeId.Value, ct));
+    }
 
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<EmployeeCertificateDto>>> GetByEmployeeId(Guid employeeId, CancellationToken ct)
@@ -79,7 +95,9 @@ public class EmployeeCertificatesController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         dto.CertificateId = id;
-        await _service.VerifyAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Certificate verified." });
+        // Returns the updated record rather than a bare message: the service already builds the full
+        // DTO (untracked re-read, so VerifiedByName resolves) and discarding it forced the caller to
+        // refetch just to render the row it had just verified.
+        return Ok(await _service.VerifyAsync(dto, employeeId.Value, ct));
     }
 }

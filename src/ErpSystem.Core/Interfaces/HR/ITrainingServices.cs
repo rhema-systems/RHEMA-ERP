@@ -205,7 +205,7 @@ public interface ITrainingScheduleService
     /// <summary>Approves a training schedule, making it visible for nomination.</summary>
     Task<bool> ApproveAsync(ApproveTrainingScheduleDto dto, Guid approvedById, CancellationToken cancellationToken = default);
     /// <summary>Cancels a training schedule with a stated reason.</summary>
-    Task<bool> CancelAsync(CancelTrainingScheduleDto dto, CancellationToken cancellationToken = default);
+    Task<bool> CancelAsync(CancelTrainingScheduleDto dto, Guid cancelledById, CancellationToken cancellationToken = default);
     /// <summary>Marks a training schedule as completed.</summary>
     Task<bool> CompleteAsync(CompleteTrainingScheduleDto dto, CancellationToken cancellationToken = default);
 
@@ -606,6 +606,13 @@ public interface ITrainingWaitlistService
     Task<TrainingWaitlistDto> OfferSlotAsync(OfferWaitlistPositionDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     /// <summary>Records the employee's response to a slot offer (accepted or declined).</summary>
     Task<TrainingWaitlistDto> RecordOfferResponseAsync(RespondToWaitlistOfferDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enrols an employee who accepted a waitlist offer: creates the nomination and stamps the audit
+    /// link onto the entry. Separate from acceptance because it commits a seat and budget and needs a
+    /// named HR actor. Idempotent — promoting an already-promoted entry returns it unchanged.
+    /// </summary>
+    Task<TrainingWaitlistDto> PromoteToNominationAsync(Guid waitlistId, Guid promotedByEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion
@@ -704,8 +711,18 @@ public interface ILearningPathService
     Task<IEnumerable<EmployeeLearningPathSummaryDto>> GetEnrollmentsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
     /// <summary>Gets the full enrollment record with all steps.</summary>
     Task<EmployeeLearningPathDto> GetEnrollmentByIdAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
-    /// <summary>Updates a learning path step when the employee completes a program.</summary>
-    Task<EmployeeLearningPathStepDto> UpdateStepAsync(UpdateLearningPathStepDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Updates a learning path step when the employee completes a program.
+    ///
+    /// Only the learner or HR may call this; a learner needs evidence (attendance or a completion
+    /// record), while HR may override without it against a mandatory <c>Reason</c>. Every transition
+    /// is written to <c>TrainingStatusHistory</c>.
+    ///
+    /// Refusals follow the module's idiom and reach the client through
+    /// <c>TrainingBusinessRulesAttribute</c>: not-found → 404, wrong actor → 403, rule rejection →
+    /// 422, each carrying its own message.
+    /// </summary>
+    Task<EmployeeLearningPathStepDto> UpdateStepAsync(UpdateLearningPathStepDto updateDto, Guid actorEmployeeId, CancellationToken cancellationToken = default);
     /// <summary>Recalculates and persists the progress percentage for a learning path enrollment.</summary>
     Task<EmployeeLearningPathDto> RecalculateProgressAsync(Guid enrollmentId, Guid updatedByUserId, CancellationToken cancellationToken = default);
     /// <summary>Gets all enrollments for a specific learning path (used on the path detail page).</summary>
@@ -747,32 +764,39 @@ public interface IMentoringService
     Task<bool> DeleteProgramAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Mentoring pair operations
-    /// <summary>Gets full mentoring pair details by ID, including all sessions.</summary>
-    Task<MentoringPairDto> GetPairByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Gets full mentoring pair details by ID, including all sessions.
+    ///
+    /// Visible only to the mentor, the mentee, the programme coordinator and HR — sessions carry both
+    /// parties' private notes, so this is not a tenant-wide read.
+    /// </summary>
+    Task<MentoringPairDto> GetPairByIdAsync(Guid id, Guid actorEmployeeId, CancellationToken cancellationToken = default);
     /// <summary>Gets all mentoring pairs in a program.</summary>
     Task<IEnumerable<MentoringPairSummaryDto>> GetPairsForProgramAsync(Guid programId, CancellationToken cancellationToken = default);
     /// <summary>Gets all pairs where the employee is mentor or mentee.</summary>
     Task<IEnumerable<MentoringPairSummaryDto>> GetPairsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    /// <summary>The caller's own pairs, on both sides — the token-derived self-service read.</summary>
+    Task<IEnumerable<MentoringPairSummaryDto>> GetMyPairsAsync(Guid actorEmployeeId, CancellationToken cancellationToken = default);
     /// <summary>Gets all active mentoring pairs.</summary>
     Task<IEnumerable<MentoringPairSummaryDto>> GetActivePairsAsync(CancellationToken cancellationToken = default);
     /// <summary>Creates a new mentoring pair within a program.</summary>
     Task<MentoringPairDto> CreatePairAsync(CreateMentoringPairDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     /// <summary>Updates a mentoring pair (status, goals, ratings, closure notes).</summary>
     Task<MentoringPairDto> UpdatePairAsync(UpdateMentoringPairDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    /// <summary>Closes a mentoring pair with closure notes.</summary>
-    Task<bool> ClosePairAsync(Guid pairId, string closureNotes, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>Closes a mentoring pair with closure notes, returning the closed pair.</summary>
+    Task<MentoringPairDto> ClosePairAsync(Guid pairId, string closureNotes, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     // Mentoring session operations
-    /// <summary>Gets a mentoring session by ID.</summary>
-    Task<MentoringSessionDto> GetSessionByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    /// <summary>Gets all sessions for a mentoring pair.</summary>
-    Task<IEnumerable<MentoringSessionDto>> GetSessionsForPairAsync(Guid pairId, CancellationToken cancellationToken = default);
+    /// <summary>Gets a mentoring session by ID. Subject to the same visibility rule as its pair.</summary>
+    Task<MentoringSessionDto> GetSessionByIdAsync(Guid id, Guid actorEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>Gets all sessions for a mentoring pair. Subject to the same visibility rule as its pair.</summary>
+    Task<IEnumerable<MentoringSessionDto>> GetSessionsForPairAsync(Guid pairId, Guid actorEmployeeId, CancellationToken cancellationToken = default);
     /// <summary>Records a new mentoring session.</summary>
     Task<MentoringSessionDto> LogSessionAsync(CreateMentoringSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     /// <summary>Updates a recorded mentoring session.</summary>
     Task<MentoringSessionDto> UpdateSessionAsync(UpdateMentoringSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    /// <summary>Deletes a mentoring session.</summary>
-    Task<bool> DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    /// <summary>Deletes a mentoring session. Subject to the same visibility rule as its pair.</summary>
+    Task<bool> DeleteSessionAsync(Guid sessionId, Guid actorEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion
@@ -792,6 +816,11 @@ public interface ITrainingDashboardService
     Task<TrainingAnalyticsDto> GetAnalyticsAsync(int? year = null, CancellationToken cancellationToken = default);
 
     /// <summary>Gets a comprehensive training summary for a single employee.</summary>
+    /// <summary>
+    /// One employee's whole training record: counts, hours, recent nominations, certificates and
+    /// compliance standing. Backs both the "My Training" hub (via the token) and HR's view of someone
+    /// else (role-gated at the controller).
+    /// </summary>
     Task<EmployeeTrainingSummaryDto> GetEmployeeSummaryAsync(Guid employeeId, CancellationToken cancellationToken = default);
 }
 

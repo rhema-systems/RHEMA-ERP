@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -10,6 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-schedules")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingSchedulesController : ControllerBase
 {
     private readonly ITrainingScheduleService _service;
@@ -134,8 +136,12 @@ public class TrainingSchedulesController : ControllerBase
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelTrainingScheduleDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.ScheduleId = id;
-        await _service.CancelAsync(dto, ct);
+        await _service.CancelAsync(dto, employeeId.Value, ct);
         return Ok(new { message = "Training schedule cancelled." });
     }
 

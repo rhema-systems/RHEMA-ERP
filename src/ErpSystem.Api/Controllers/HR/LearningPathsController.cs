@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -10,6 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/learning-paths")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class LearningPathsController : ControllerBase
 {
     private readonly ILearningPathService _service;
@@ -200,6 +202,19 @@ public class LearningPathsController : ControllerBase
         return Ok(await _service.EnrollEmployeeAsync(dto, tenantId.Value, employeeId.Value, ct));
     }
 
+    /// <summary>The caller's own enrolments — the "My Learning" read.</summary>
+    /// <remarks>
+    /// The module's /mine convention: without it a self-service screen has to pass its own employee
+    /// id back through the id-bearing route below.
+    /// </remarks>
+    [HttpGet("enrollments/mine")]
+    public async Task<ActionResult<IEnumerable<EmployeeLearningPathSummaryDto>>> GetMyEnrollments(CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return Forbid();
+        return Ok(await _service.GetEnrollmentsForEmployeeAsync(employeeId.Value, ct));
+    }
+
     [HttpGet("enrollments/employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<EmployeeLearningPathSummaryDto>>> GetEnrollmentsForEmployee(Guid employeeId, CancellationToken ct)
         => Ok(await _service.GetEnrollmentsForEmployeeAsync(employeeId, ct));
@@ -221,13 +236,15 @@ public class LearningPathsController : ControllerBase
     }
 
     [HttpPost("enrollments/{enrollmentId:guid}/recalculate-progress")]
-    public async Task<IActionResult> RecalculateProgress(Guid enrollmentId, CancellationToken ct)
+    public async Task<ActionResult<EmployeeLearningPathDto>> RecalculateProgress(Guid enrollmentId, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        await _service.RecalculateProgressAsync(enrollmentId, employeeId.Value, ct);
-        return Ok(new { message = "Learning path progress recalculated." });
+        // Returns the recalculated enrolment rather than a bare message — the whole point of this
+        // action is producing a new progress figure, and discarding it forced the caller to refetch
+        // to see the number it had just asked for.
+        return Ok(await _service.RecalculateProgressAsync(enrollmentId, employeeId.Value, ct));
     }
 
     [HttpGet("steps/{stepId:guid}/detail")]

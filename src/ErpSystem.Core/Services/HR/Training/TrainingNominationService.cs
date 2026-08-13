@@ -20,6 +20,7 @@ public class TrainingNominationService : ITrainingNominationService
     private readonly ITrainingFeedbackRepository _feedbackRepository;
     private readonly ITrainingFollowUpAssessmentRepository _followUpRepository;
     private readonly ITrainingScheduleRepository _scheduleRepository;
+    private readonly IGenericRepository<TrainerProfile> _trainerProfileRepository;
     private readonly ITrainingServiceBondService _bondService;
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _adapterRegistry;
@@ -35,6 +36,7 @@ public class TrainingNominationService : ITrainingNominationService
         ITrainingFeedbackRepository feedbackRepository,
         ITrainingFollowUpAssessmentRepository followUpRepository,
         ITrainingScheduleRepository scheduleRepository,
+        IGenericRepository<TrainerProfile> trainerProfileRepository,
         ITrainingServiceBondService bondService,
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry adapterRegistry,
@@ -49,6 +51,7 @@ public class TrainingNominationService : ITrainingNominationService
         _feedbackRepository = feedbackRepository;
         _followUpRepository = followUpRepository;
         _scheduleRepository = scheduleRepository;
+        _trainerProfileRepository = trainerProfileRepository;
         _bondService = bondService;
         _workflowIntegration = workflowIntegration;
         _adapterRegistry = adapterRegistry;
@@ -204,7 +207,9 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Training nomination created: {NominationNumber}", entity.NominationNumber);
 
-        return entity.ToDto();
+        // A freshly written entity has no Schedule/Employee loaded, so mapping it directly returns a
+        // blank programme and nominee on the create response. Re-read through the includes chain.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<BulkNominationResultDto> BulkCreateAsync(BulkCreateTrainingNominationDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -288,7 +293,8 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Training nomination updated: {NominationNumber}", entity.NominationNumber);
 
-        return entity.ToDto();
+        // A changed ScheduleId does not refresh the loaded Schedule navigation — re-read.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingNominationDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
@@ -315,7 +321,7 @@ public class TrainingNominationService : ITrainingNominationService
                 await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, _currentUser.EmployeeId.Value, cancellationToken);
 
             _logger.LogInformation("Training nomination {NominationNumber} submitted via configurable workflow", entity.NominationNumber);
-            return entity.ToDto();
+            return await GetByIdAsync(entity.Id, cancellationToken);
         }
 
         // Legacy fallback — no active workflow configured for this entity type.
@@ -327,7 +333,7 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Training nomination submitted (legacy chain): {NominationNumber}", entity.NominationNumber);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -539,7 +545,10 @@ public class TrainingNominationService : ITrainingNominationService
         await _attendanceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // The written entity has no Schedule/Employee/MarkedBy loaded, so mapping it directly returns
+        // a row with a blank programme, nominee and marker.
+        var saved = await _attendanceRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<TrainingAttendanceDto>> BulkMarkAttendanceAsync(BulkMarkAttendanceDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -602,11 +611,16 @@ public class TrainingNominationService : ITrainingNominationService
         var entity = dto.ToEntity(current, createdByUserId);
 
         await _feedbackRepository.AddAsync(entity);
+        await CreditTrainerRatingAsync(entity, cancellationToken);
+
+        // One SaveChanges so the rating credit is atomic with the feedback it came from — a partial
+        // write would leave the trainer's average counting a review that does not exist.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Training feedback submitted for schedule {ScheduleId} by employee {EmployeeId}", dto.ScheduleId, dto.EmployeeId);
 
-        return entity.ToDto();
+        var saved = await _feedbackRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<TrainingFeedbackDto>> GetFeedbackForScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default)
@@ -631,7 +645,8 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Follow-up assessment submitted for schedule {ScheduleId} by employee {EmployeeId}", dto.ScheduleId, dto.EmployeeId);
 
-        return entity.ToDto();
+        var saved = await _followUpRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<TrainingFollowUpAssessmentDto> SubmitManagerObservationAsync(SubmitManagerObservationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -649,7 +664,10 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Manager observation submitted for follow-up assessment {AssessmentId}", dto.AssessmentId);
 
-        return entity.ToDto();
+        // ManagerId was just set, so the tracked instance's Manager navigation is still null/stale —
+        // an untracked re-read is the only way to get ManagerName onto this response.
+        var saved = await _followUpRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<TrainingFollowUpAssessmentDto>> GetFollowUpAssessmentsAsync(Guid scheduleId, CancellationToken cancellationToken = default)
@@ -663,4 +681,38 @@ public class TrainingNominationService : ITrainingNominationService
 
     private Task<string> GenerateNominationNumberAsync(CancellationToken ct)
         => _numberSequence.GenerateAsync("NOM", ct);
+
+    /// <summary>
+    /// Folds a feedback form's trainer rating into the delivering trainer's running average.
+    /// <c>TrainerProfile.AverageRating</c> and <c>TotalRatingsCount</c> are read by the trainer list
+    /// and the dashboard leaderboard but nothing has ever written them.
+    /// </summary>
+    /// <remarks>
+    /// Uses <see cref="TrainingFeedback.TrainerKnowledgeRating"/> — the only rating on the form that
+    /// is about the trainer. Overall satisfaction covers venue, materials and content too, so folding
+    /// it into a *trainer's* score would blame them for a bad room. Ratings are kept as a running mean
+    /// (count + average) rather than recomputed, so this stays O(1) as feedback accumulates.
+    /// </remarks>
+    private async Task CreditTrainerRatingAsync(TrainingFeedback feedback, CancellationToken ct)
+    {
+        if (!feedback.TrainerKnowledgeRating.HasValue)
+            return;
+
+        var schedule = await _scheduleRepository.GetByIdAsync(feedback.ScheduleId);
+        if (schedule?.TrainerProfileId == null)
+            return;
+
+        var trainer = await _trainerProfileRepository.GetByIdAsync(schedule.TrainerProfileId.Value);
+        if (trainer == null || trainer.TenantId != feedback.TenantId)
+            return;
+
+        var previousTotal = (trainer.AverageRating ?? 0m) * trainer.TotalRatingsCount;
+        trainer.TotalRatingsCount += 1;
+        trainer.AverageRating = Math.Round(
+            (previousTotal + feedback.TrainerKnowledgeRating.Value) / trainer.TotalRatingsCount, 2);
+        trainer.UpdatedAt = DateTime.UtcNow;
+
+        await _trainerProfileRepository.UpdateAsync(trainer);
+    }
+
 }

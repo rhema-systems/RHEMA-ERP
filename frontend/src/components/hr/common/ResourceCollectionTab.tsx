@@ -90,8 +90,12 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
   emptyForm: TForm;
   /** Map an existing row back into form values when editing. */
   toForm: (item: TItem) => TForm;
-  /** Render the dialog body. Receives the live react-hook-form instance. */
-  renderFields: (form: UseFormReturn<TForm>) => ReactNode;
+  /**
+   * Render the dialog body. Receives the live react-hook-form instance and whether an
+   * existing row is being edited — needed when a field is create-only (present on the
+   * create DTO but absent from update), so it can be hidden or disabled once editing.
+   */
+  renderFields: (form: UseFormReturn<TForm>, editing: boolean) => ReactNode;
 
   getId: (item: TItem) => string;
   dialogClassName?: string;
@@ -353,7 +357,9 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4">{renderFields(form)}</div>
+            <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4">
+              {renderFields(form, editing !== null)}
+            </div>
 
             <DialogFooter>
               <Button

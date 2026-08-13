@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [ApiController]
 [Route("api/training-waitlist")]
 [Authorize]
+[TrainingBusinessRulesAttribute]
 public class TrainingWaitlistController : ControllerBase
 {
     private readonly ITrainingWaitlistService _service;
@@ -65,8 +67,10 @@ public class TrainingWaitlistController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
         dto.WaitlistId = id;
-        await _service.OfferSlotAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Slot offered to waitlisted candidate." });
+        // Returns the updated record rather than a bare message: the service already builds the
+        // full DTO (re-read through its includes chain) and discarding it forced every caller to
+        // refetch just to render the row it had just changed.
+        return Ok(await _service.OfferSlotAsync(dto, employeeId.Value, ct));
     }
 
     [HttpPost("{id:guid}/respond")]
@@ -76,7 +80,26 @@ public class TrainingWaitlistController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
         dto.WaitlistId = id;
-        await _service.RecordOfferResponseAsync(dto, employeeId.Value, ct);
-        return Ok(new { message = "Waitlist offer response recorded." });
+        // Returns the updated record rather than a bare message: the service already builds the
+        // full DTO (re-read through its includes chain) and discarding it forced every caller to
+        // refetch just to render the row it had just changed.
+        return Ok(await _service.RecordOfferResponseAsync(dto, employeeId.Value, ct));
+    }
+
+    /// <summary>
+    /// Enrols an employee who accepted their waitlist offer, creating the nomination.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <c>respond</c> on purpose: acceptance is the employee's action, enrolment is HR's.
+    /// Returns the updated entry (carrying createdNominationNumber) rather than a bare message, since
+    /// the caller needs the nomination it produced.
+    /// </remarks>
+    [HttpPost("{id:guid}/promote")]
+    public async Task<ActionResult<TrainingWaitlistDto>> PromoteToNomination(Guid id, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.PromoteToNominationAsync(id, employeeId.Value, ct));
     }
 }
