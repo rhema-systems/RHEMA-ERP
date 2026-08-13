@@ -3298,7 +3298,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<AssetDisposal>(entity =>
         {
-            entity.ToTable("AssetDisposals");
+            entity.ToTable("AssetDisposals", table =>
+            {
+                // These constraints mirror the service invariants at the persistence boundary so
+                // future import jobs or direct SQL cannot create ambiguous receipt destinations or
+                // claim that a disposal was invoiced without retaining its canonical AR document.
+                table.HasCheckConstraint(
+                    "CK_AssetDisposals_SettlementDestination",
+                    "[SettlementBankAccountId] IS NULL OR [SettlementLiquidityAccountId] IS NULL");
+                table.HasCheckConstraint(
+                    "CK_AssetDisposals_SettlementDocumentState",
+                    "([SettlementStatus] IN (0,1,4)) OR ([SettlementStatus] IN (2,3) AND [CustomerInvoiceId] IS NOT NULL)");
+            });
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.BookClassification });
             entity.HasIndex(e => new { e.TenantId, e.IdempotencyKey })
                 .IsUnique()
@@ -3311,6 +3322,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.ProceedsExchangeRateId });
             entity.HasIndex(e => new { e.TenantId, e.RevaluationSurplusAccountId });
             entity.HasIndex(e => new { e.TenantId, e.RetainedEarningsAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.BuyerBusinessPartnerId });
+            entity.HasIndex(e => new { e.TenantId, e.CustomerInvoiceId })
+                .IsUnique()
+                .HasFilter("[CustomerInvoiceId] IS NOT NULL");
+            entity.HasIndex(e => new { e.TenantId, e.CustomerPaymentId })
+                .IsUnique()
+                .HasFilter("[CustomerPaymentId] IS NOT NULL");
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.ProceedsCurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.ProceedsFunctionalAmount).HasColumnType("decimal(18,2)");
@@ -3351,6 +3369,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.NetProceeds).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetBookValueAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.GainOrLoss).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SettlementReference).HasMaxLength(100);
+            entity.Property(e => e.SettlementInvoiceAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SettlementTaxAmount).HasColumnType("decimal(18,2)");
             entity.HasOne(e => e.FixedAsset)
                 .WithMany()
                 .HasForeignKey(e => e.FixedAssetId)
@@ -3381,6 +3402,38 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.RetainedEarningsAccount)
                 .WithMany()
                 .HasForeignKey(e => e.RetainedEarningsAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BuyerBusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BuyerBusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SaleTaxGroup)
+                .WithMany()
+                .HasForeignKey(e => e.SaleTaxGroupId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementPaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementPaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementPaymentMethod)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementPaymentMethodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementBankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementBankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementLiquidityAccount)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementLiquidityAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CustomerInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CustomerPayment)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerPaymentId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()

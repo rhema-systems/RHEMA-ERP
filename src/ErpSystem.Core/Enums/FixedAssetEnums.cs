@@ -109,6 +109,36 @@ namespace ErpSystem.Core.Enums
         Component = 3
     }
 
+    /// <summary>
+    /// Determines how an approved fixed-asset sale is handed off to the Finance receivables and
+    /// collection subledgers. The disposal service remains the orchestrator, while AR continues
+    /// to own the statutory invoice and receipt lifecycles.
+    /// </summary>
+    public enum AssetDisposalSettlementMode
+    {
+        [Display(Name = "Not Applicable")]
+        NotApplicable = 0,
+
+        [Display(Name = "Credit Sale")]
+        CreditSale = 1,
+
+        [Display(Name = "Immediate Receipt")]
+        ImmediateReceipt = 2
+    }
+
+    /// <summary>
+    /// Durable hand-off state retained on the disposal so Finance can reconcile the fixed-asset
+    /// derecognition to its AR invoice and, where applicable, its posted receipt.
+    /// </summary>
+    public enum AssetDisposalSettlementStatus
+    {
+        NotApplicable = 0,
+        Pending = 1,
+        Invoiced = 2,
+        Settled = 3,
+        Failed = 4
+    }
+
     public enum AssetTransferStatus
     {
         [Display(Name = "Draft")]

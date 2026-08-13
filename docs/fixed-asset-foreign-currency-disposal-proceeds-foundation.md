@@ -22,7 +22,7 @@ TDC may dispose of an asset for proceeds denominated in a currency other than it
 
 `Disposal gain or loss = functional proceeds − functional NBV derecognised`.
 
-The proceeds-clearing line carries the native transaction amount and currency, but the journal and fixed-asset transaction register use functional currency. This is translation at disposal recognition, not a later realized-FX settlement. Any subsequent AR/cash settlement and sale-tax workflow remains `FIN-LIM-0040`.
+The proceeds-clearing line carries the native transaction amount and currency, but the journal and fixed-asset transaction register use functional currency. This is translation at disposal recognition, not a later realized-FX settlement. The subsequent AR/cash settlement and sale-tax workflow is now resolved under `FIN-LIM-0040`; see `docs/fixed-asset-sale-settlement-foundation.md`.
 
 ## Controls and audit evidence
 

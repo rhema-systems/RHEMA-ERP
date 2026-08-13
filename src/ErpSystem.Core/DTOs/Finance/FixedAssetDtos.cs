@@ -571,6 +571,21 @@ public class AssetDisposalDto
     public decimal RemainingAccumulatedDepreciationAfterDisposal { get; set; }
     public decimal RemainingNetBookValueAfterDisposal { get; set; }
     public string? BuyerName { get; set; }
+    public Guid? BuyerBusinessPartnerId { get; set; }
+    public AssetDisposalSettlementMode SettlementMode { get; set; }
+    public AssetDisposalSettlementStatus SettlementStatus { get; set; }
+    public Guid? SaleTaxGroupId { get; set; }
+    public TaxTreatment SaleTaxTreatment { get; set; }
+    public Guid? SettlementPaymentTermId { get; set; }
+    public Guid? SettlementPaymentMethodId { get; set; }
+    public Guid? SettlementBankAccountId { get; set; }
+    public Guid? SettlementLiquidityAccountId { get; set; }
+    public string? SettlementReference { get; set; }
+    public Guid? CustomerInvoiceId { get; set; }
+    public Guid? CustomerPaymentId { get; set; }
+    public decimal SettlementInvoiceAmount { get; set; }
+    public decimal SettlementTaxAmount { get; set; }
+    public DateTime? SettlementCompletedAt { get; set; }
     public string? ReferenceNumber { get; set; }
     public Guid? RequestedById { get; set; }
     public string? RequestedByName { get; set; }
@@ -611,6 +626,19 @@ public class RequestAssetDisposalDto
     public Guid? ProceedsExchangeRateId { get; set; }
     public Guid? ProceedsAccountId { get; set; }
     public string? BuyerName { get; set; }
+    /// <summary>
+    /// Canonical customer/business-partner identity used to create the linked AR invoice.
+    /// Required for every sale with positive proceeds.
+    /// </summary>
+    public Guid? BuyerBusinessPartnerId { get; set; }
+    public AssetDisposalSettlementMode SettlementMode { get; set; } = AssetDisposalSettlementMode.NotApplicable;
+    public Guid? SaleTaxGroupId { get; set; }
+    public TaxTreatment SaleTaxTreatment { get; set; } = TaxTreatment.Standard;
+    public Guid? SettlementPaymentTermId { get; set; }
+    public Guid? SettlementPaymentMethodId { get; set; }
+    public Guid? SettlementBankAccountId { get; set; }
+    public Guid? SettlementLiquidityAccountId { get; set; }
+    public string? SettlementReference { get; set; }
     public string? IdempotencyKey { get; set; }
 
     /// <summary>
