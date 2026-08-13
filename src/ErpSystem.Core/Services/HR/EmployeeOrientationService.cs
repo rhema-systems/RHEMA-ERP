@@ -17,6 +17,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     private readonly IOrientationProgramRepository _programRepository;
     private readonly IOrientationSessionRepository _sessionRepository;
     private readonly IOrientationContentItemRepository _contentItemRepository;
+    private readonly IOrientationModuleRepository _moduleRepository;
     private readonly IOrientationContentProgressRepository _contentProgressRepository;
     private readonly IOrientationAssessmentQuestionRepository _questionRepository;
     private readonly IOrientationAssessmentResponseRepository _responseRepository;
@@ -33,6 +34,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         IOrientationProgramRepository programRepository,
         IOrientationSessionRepository sessionRepository,
         IOrientationContentItemRepository contentItemRepository,
+        IOrientationModuleRepository moduleRepository,
         IOrientationContentProgressRepository contentProgressRepository,
         IOrientationAssessmentQuestionRepository questionRepository,
         IOrientationAssessmentResponseRepository responseRepository,
@@ -48,6 +50,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         _programRepository = programRepository;
         _sessionRepository = sessionRepository;
         _contentItemRepository = contentItemRepository;
+        _moduleRepository = moduleRepository;
         _contentProgressRepository = contentProgressRepository;
         _questionRepository = questionRepository;
         _responseRepository = responseRepository;
@@ -458,6 +461,44 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         return (await _contentProgressRepository.GetByEnrollmentIdAsync(enrollmentId))
             .Where(p => p.TenantId == tenantId)
             .Select(p => p.ToDto());
+    }
+
+    /// <summary>
+    /// The program's live structure, for the participant working through it.
+    ///
+    /// Reached through the enrollment rather than the program so the ownership gate applies: the
+    /// catalogue reads are HR-only, and a participant needs the content item ids to be able to track
+    /// progress against them at all.
+    /// </summary>
+    public async Task<IEnumerable<OrientationModuleDto>> GetProgramContentAsync(Guid enrollmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var enrollment = await GetOwnedEnrollmentAsync(enrollmentId);
+
+        var modules = (await _moduleRepository.GetByProgramIdAsync(enrollment.ProgramId))
+            .Where(m => m.TenantId == tenantId && m.IsActive)
+            .OrderBy(m => m.SequenceOrder);
+
+        var result = new List<OrientationModuleDto>();
+        foreach (var module in modules)
+        {
+            // The repository's Include pulls every content item on the module, soft-deleted and
+            // retired alike. A participant is only ever shown what is live, so the collection is
+            // rebuilt here rather than taken from the mapper — and the count with it, otherwise the
+            // player would advertise more items than it lists.
+            var live = module.ContentItems
+                .Where(c => !c.IsDeleted && c.IsActive)
+                .OrderBy(c => c.SequenceOrder)
+                .Select(c => c.ToDto())
+                .ToList();
+
+            var dto = module.ToDto();
+            dto.ContentItems = live;
+            dto.ContentItemCount = live.Count;
+            result.Add(dto);
+        }
+
+        return result;
     }
 
     // ====================================================================
@@ -876,11 +917,26 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             entity.NextDueDate = entity.EnrolledAt.AddDays(program.CompletionDeadlineDays.Value);
     }
 
+    /// <summary>
+    /// The content items an enrollment is actually measured against: live items on live modules.
+    ///
+    /// The repository filter is <c>!IsDeleted</c> only, so it also returns retired content and content
+    /// sitting on a retired module — neither of which the participant is shown by
+    /// <see cref="GetProgramContentAsync"/>, and neither of which they can therefore ever complete.
+    /// Counting them makes the completion gate unsatisfiable: retiring a single slide deck strands
+    /// everyone already enrolled below 100% forever, in exactly the way the ProgressPercentage defect
+    /// did. The definition lives here so the progress denominator and the gate cannot drift apart.
+    /// </summary>
+    private async Task<int> CountLiveContentItemsAsync(Guid programId, Guid tenantId)
+    {
+        return (await _contentItemRepository.GetByProgramIdAsync(programId))
+            .Count(c => c.TenantId == tenantId && c.IsActive && c.Module.IsActive);
+    }
+
     private async Task RecomputeProgressPercentageAsync(EmployeeOrientation enrollment, CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
-        var totalContent = (await _contentItemRepository.GetByProgramIdAsync(enrollment.ProgramId))
-            .Count(c => c.TenantId == tenantId);
+        var totalContent = await CountLiveContentItemsAsync(enrollment.ProgramId, tenantId);
         var completed = await _contentProgressRepository.CountCompletedForEnrollmentAsync(enrollment.Id);
 
         enrollment.ProgressPercentage = totalContent == 0
@@ -920,9 +976,12 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         // wrong twice over: the percentage is only recomputed when content progress is tracked, and
         // it is deliberately 0 when there is no content — so an assessment-only program sat at 0%
         // forever and passing the assessment could never complete it.
+        //
+        // Counted as live content only — see CountLiveContentItemsAsync. A retired item, or one on a
+        // retired module, is invisible to the participant, so including it here would reintroduce the
+        // unsatisfiable gate by a different route.
         var tenantId = GetTenantId();
-        var contentCount = (await _contentItemRepository.GetByProgramIdAsync(enrollment.ProgramId))
-            .Count(c => c.TenantId == tenantId);
+        var contentCount = await CountLiveContentItemsAsync(enrollment.ProgramId, tenantId);
         var contentDone = contentCount == 0 || enrollment.ProgressPercentage >= 100;
 
         var assessmentDone = !program.RequiresAssessment || (enrollment.AttemptCount > 0 && enrollment.IsPassed);

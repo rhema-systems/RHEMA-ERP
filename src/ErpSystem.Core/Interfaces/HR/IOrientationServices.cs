@@ -144,6 +144,17 @@ public interface IEmployeeOrientationService
     Task<OrientationContentProgressDto> TrackContentProgressAsync(TrackOrientationContentProgressDto trackDto, Guid tenantId, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationContentProgressDto>> GetContentProgressAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The live module and content-item structure of the program behind an enrollment, for the person
+    /// working through it.
+    ///
+    /// The catalogue reads on <c>IOrientationProgramService</c> are HR-only, and content progress rows
+    /// only exist once an item has been tracked — so without this a participant had no way to discover
+    /// what they were meant to work through, nor the content item ids that
+    /// <see cref="TrackContentProgressAsync"/> requires.
+    /// </summary>
+    Task<IEnumerable<OrientationModuleDto>> GetProgramContentAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
+
     // Assessment
     Task<IEnumerable<OrientationAssessmentQuestionDto>> GetAssessmentForEnrollmentAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
     Task<OrientationAssessmentResultDto> SubmitAssessmentAsync(SubmitOrientationAssessmentDto submitDto, Guid tenantId, Guid submittedByUserId, CancellationToken cancellationToken = default);

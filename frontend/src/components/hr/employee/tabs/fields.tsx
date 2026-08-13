@@ -201,6 +201,40 @@ export function DateField<T extends FieldValues>({ form, name, label, required }
 }
 
 /**
+ * Native datetime-local input for the API's `DateTime` fields.
+ *
+ * ⚠ The form holds the browser's `YYYY-MM-DDTHH:mm` local string, NOT an ISO instant — the control
+ * cannot represent a zone, and writing an ISO string straight into it silently drops the time. Use
+ * {@link toIsoInstant} on submit and {@link fromIsoInstant} when seeding, so the conversion happens
+ * once at the edge rather than being half-applied across a form.
+ */
+export function DateTimeField<T extends FieldValues>({ form, name, label, required }: BaseProps<T>) {
+  return (
+    <div className="space-y-2">
+      <FieldLabel htmlFor={name} label={label} required={required} />
+      <Input id={name} type="datetime-local" {...form.register(name)} />
+      <FieldError form={form} name={name} />
+    </div>
+  );
+}
+
+/** ISO instant → the `YYYY-MM-DDTHH:mm` local string `DateTimeField` expects. Empty for null. */
+export function fromIsoInstant(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** `DateTimeField`'s local string → an ISO instant. Null for empty, so an optional field stays unset. */
+export function toIsoInstant(local?: string | null): string | null {
+  if (!local) return null;
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
  * Native time input for the API's `TimeSpan` / `TimeOnly` fields.
  *
  * The wire format is `HH:mm:ss` but `<input type="time">` reads and writes `HH:mm`, so the

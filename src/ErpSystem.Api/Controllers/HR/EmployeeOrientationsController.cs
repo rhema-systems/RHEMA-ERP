@@ -154,6 +154,20 @@ public class EmployeeOrientationsController : ControllerBase
     // CONTENT PROGRESS
     // =========================================================================
 
+    /// <summary>
+    /// The modules and content items of the program behind this enrollment.
+    /// </summary>
+    /// <remarks>
+    /// Participant-safe by design: the equivalent catalogue reads on
+    /// <c>orientation-programs</c> are HR-only, so this is how the person actually working through a
+    /// program discovers what is in it — and the content item ids that
+    /// <c>POST {id}/content-progress</c> needs. Entitlement is enforced on the enrollment, so a
+    /// non-HR caller can only reach their own.
+    /// </remarks>
+    [HttpGet("{id:guid}/content")]
+    public async Task<ActionResult<IEnumerable<OrientationModuleDto>>> GetProgramContent(Guid id)
+        => Ok(await _service.GetProgramContentAsync(id));
+
     [HttpGet("{id:guid}/content-progress")]
     public async Task<ActionResult<IEnumerable<OrientationContentProgressDto>>> GetContentProgress(Guid id)
         => Ok(await _service.GetContentProgressAsync(id));

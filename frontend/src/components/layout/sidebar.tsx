@@ -98,6 +98,7 @@ import {
   ScanLine,
   WalletCards,
   Layers,
+  FileStack,
   Library,
   Gauge,
   Lightbulb,
@@ -516,6 +517,29 @@ export const navigationItems: NavItem[] = [
           { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp },
           { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard },
           { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert },
+        ],
+      },
+      {
+        // Ordered along the induction lifecycle rather than alphabetically: the dashboard says what
+        // needs chasing, sessions are the scheduled runs, enrollments are who is on them, and My
+        // Orientation is the participant's own view. Onboarding sits below because it is a different
+        // artifact — a new hire's task checklist rather than a programme — and the queues answer the
+        // cross-plan question ("what is overdue anywhere?") no single plan can.
+        //
+        // The catalogue, categories and onboarding templates are setup and live under
+        // Administration → HR → Orientation & Onboarding.
+        title: 'Orientation & Onboarding',
+        href: '/hr/orientation',
+        icon: GraduationCap,
+        children: [
+          { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard },
+          { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock },
+          { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users },
+          // The one orientation screen a non-HR employee can use: their own enrollments. Everything
+          // above answers 403 for them, so without this they have no way in.
+          { title: 'My Orientation', href: '/hr/orientation/mine', icon: GraduationCap },
+          { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks },
+          { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck },
         ],
       },
       {
@@ -1390,6 +1414,20 @@ export const navigationItems: NavItem[] = [
               { title: 'Compliance Requirements', href: '/administration/hr/training/compliance', icon: ShieldAlert },
               { title: 'Learning Paths', href: '/administration/hr/training/learning-paths', icon: Route },
               { title: 'Mentoring Programmes', href: '/administration/hr/training/mentoring', icon: Handshake },
+            ],
+          },
+          {
+            title: 'Orientation & Onboarding',
+            href: '/administration/hr/orientation',
+            icon: GraduationCap,
+            children: [
+              { title: 'Programmes', href: '/administration/hr/orientation/programs', icon: BookOpen },
+              { title: 'Categories', href: '/administration/hr/orientation/categories', icon: Tags },
+              {
+                title: 'Onboarding Templates',
+                href: '/administration/hr/orientation/onboarding-templates',
+                icon: FileStack,
+              },
             ],
           },
           // Employee Categories has no backing controller at all, so it stays dropped.

@@ -196,6 +196,23 @@ export default function HrAdministrationPage() {
       </div>
 
       <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+          Orientation &amp; onboarding
+        </h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Orientation & Onboarding Setup',
+              description:
+                'The induction catalogue with its modules, assessments and audience rules, plus the reusable onboarding checklists.',
+              href: '/administration/hr/orientation',
+              icon: GraduationCap,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Payroll</h2>
         <NavCardGrid
           items={[

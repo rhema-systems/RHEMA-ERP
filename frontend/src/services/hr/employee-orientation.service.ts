@@ -7,6 +7,7 @@ import type {
   BulkEnrollOrientationRequest,
   WithdrawOrientationRequest,
   OrientationCompletionStatus,
+  OrientationModule,
   OrientationContentProgress,
   TrackOrientationContentProgressRequest,
   OrientationAssessmentQuestion,
@@ -112,6 +113,17 @@ class EmployeeOrientationService {
   }
 
   // ── Content progress (participant) ────────────────────────────────────────
+
+  /**
+   * The programme's live modules and content items, as the participant may see them.
+   *
+   * This is the participant's only route to the catalogue: `orientationProgramService` is HR-only, and
+   * a progress row does not exist until its item has been tracked — so the player builds its list from
+   * here and layers `getContentProgress` on top, rather than the other way round.
+   */
+  getProgramContent(enrollmentId: string): Promise<OrientationModule[]> {
+    return apiService.get<OrientationModule[]>(`${this.baseUrl}/${enrollmentId}/content`);
+  }
 
   getContentProgress(enrollmentId: string): Promise<OrientationContentProgress[]> {
     return apiService.get<OrientationContentProgress[]>(

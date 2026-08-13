@@ -2,11 +2,21 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { CalendarClock, Search } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarClock, Plus, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/use-toast';
 import {
   Table,
   TableBody,
@@ -19,7 +29,14 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import {
+  OrientationSessionForm,
+  emptyOrientationSession,
+  toSessionRequest,
+  type OrientationSessionFormValues,
+} from '@/components/hr/orientation/OrientationSessionForm';
 import { orientationSessionService } from '@/services/hr/orientation-session.service';
+import { orientationProgramService } from '@/services/hr/orientation-program.service';
 import { ORIENTATION_DELIVERY_MODE_OPTIONS } from '@/types/hr/orientation';
 import type { OrientationSessionSummary } from '@/types/hr/orientation';
 
@@ -48,8 +65,13 @@ function seatsLeft(s: OrientationSessionSummary): number | null {
 }
 
 export default function OrientationSessionsPage() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [scope, setScope] = useState<Scope>('upcoming');
   const [search, setSearch] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['hr', 'orientation-sessions', scope],
@@ -59,6 +81,44 @@ export default function OrientationSessionsPage() {
       return orientationSessionService.getByStatus('Published');
     },
   });
+
+  // Sessions can only be scheduled against a live programme, so a draft or retired one is not
+  // offered — the server would refuse it anyway.
+  const { data: programs = [] } = useQuery({
+    queryKey: ['hr', 'orientation-programs', 'active'],
+    queryFn: () => orientationProgramService.getActive(),
+    enabled: createOpen,
+  });
+
+  const handleCreate = async (values: OrientationSessionFormValues) => {
+    if (!values.programId) {
+      toast({ title: 'Choose a programme', variant: 'destructive' });
+      return;
+    }
+    setCreating(true);
+    try {
+      // sessionCode is omitted deliberately — the server generates OSN-{year}-NNNN.
+      const created = await orientationSessionService.create({
+        programId: values.programId,
+        ...toSessionRequest(values),
+      } as any);
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'orientation-sessions'] });
+      toast({
+        title: 'Session created',
+        description: `${created.sessionCode} — it starts as a draft.`,
+      });
+      setCreateOpen(false);
+      router.push(`/hr/orientation/sessions/${created.id}`);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to create the session.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const term = search.trim().toLowerCase();
   const filtered = term
@@ -76,6 +136,12 @@ export default function OrientationSessionsPage() {
         title="Orientation Sessions"
         description="Scheduled runs of an induction programme — dates, venue, facilitators and the attendance register."
         backHref="/hr/orientation"
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New session
+          </Button>
+        }
       />
 
       <Card>
@@ -175,6 +241,27 @@ export default function OrientationSessionsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-[680px]">
+          <DialogHeader>
+            <DialogTitle>Schedule a session</DialogTitle>
+            <DialogDescription>
+              A new session starts as a draft. Publish it from its own page once the facilitators and
+              joining details are settled.
+            </DialogDescription>
+          </DialogHeader>
+          <OrientationSessionForm
+            compact
+            programs={programs}
+            defaultValues={emptyOrientationSession}
+            onSubmit={handleCreate}
+            submitting={creating}
+            submitLabel="Create session"
+            onCancel={() => setCreateOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
