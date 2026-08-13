@@ -170,6 +170,12 @@
     <Compile Include="Services\Finance\FixedAssetRevaluationImpairmentFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetTransferFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDisposalFoundationTests.cs" />
+    <!-- The project intentionally disables implicit compile items. Keep the code-backed integration
+         catalogue, shared producer assertion, disposal reference contract and its schema contract in
+         the default Finance suite so CI cannot report a false pass after a file is added or renamed. -->
+    <Compile Include="Services\Finance\FinanceConsumerContractAssertions.cs" />
+    <Compile Include="Services\Finance\FinanceIntegrationContractFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetDisposalSettlementMigrationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetReportingReconciliationFoundationTests.cs" />
     <Compile Include="Services\Finance\SubledgerSettlementReadModelFoundationTests.cs" />
     <Compile Include="Services\Finance\BackendReportingExportFoundationTests.cs" />
