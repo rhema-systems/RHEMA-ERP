@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Procurement;
 
 namespace ErpSystem.Core.Entities.Finance.FixedAssets
 {
@@ -187,6 +188,50 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         [MaxLength(100)]
         public string? BuyerName { get; set; }
+
+        // FIN-LIM-0040: a sale must identify the canonical customer/business partner used by AR.
+        // BuyerName remains a frozen display snapshot; this foreign key supplies durable master-
+        // data identity and prevents a free-text buyer from becoming an untraceable receivable.
+        public Guid? BuyerBusinessPartnerId { get; set; }
+        public virtual BusinessPartner? BuyerBusinessPartner { get; set; }
+
+        public AssetDisposalSettlementMode SettlementMode { get; set; } = AssetDisposalSettlementMode.NotApplicable;
+        public AssetDisposalSettlementStatus SettlementStatus { get; set; } = AssetDisposalSettlementStatus.NotApplicable;
+
+        // Tax configuration and treatment are frozen with the maker-checker request. Rates are
+        // still resolved by the AR tax engine at completion so withdrawn or ineffective tax
+        // configuration invalidates stale approval instead of silently using an old percentage.
+        public Guid? SaleTaxGroupId { get; set; }
+        public virtual TaxGroup? SaleTaxGroup { get; set; }
+        public TaxTreatment SaleTaxTreatment { get; set; } = TaxTreatment.Standard;
+
+        public Guid? SettlementPaymentTermId { get; set; }
+        public virtual PaymentTerm? SettlementPaymentTerm { get; set; }
+        public Guid? SettlementPaymentMethodId { get; set; }
+        public virtual PaymentMethod? SettlementPaymentMethod { get; set; }
+        public Guid? SettlementBankAccountId { get; set; }
+        public virtual BankAccount? SettlementBankAccount { get; set; }
+        public Guid? SettlementLiquidityAccountId { get; set; }
+        public virtual LiquidityAccount? SettlementLiquidityAccount { get; set; }
+
+        [MaxLength(100)]
+        public string? SettlementReference { get; set; }
+
+        // The linked AR documents are the statutory/customer-facing evidence. Their own journals
+        // remain authoritative; these references let a reviewer traverse the complete asset-sale
+        // chain without copying AR or Cash/Bank state into Fixed Assets.
+        public Guid? CustomerInvoiceId { get; set; }
+        public virtual Invoice? CustomerInvoice { get; set; }
+        public Guid? CustomerPaymentId { get; set; }
+        public virtual CustomerPayment? CustomerPayment { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal SettlementInvoiceAmount { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal SettlementTaxAmount { get; set; }
+
+        public DateTime? SettlementCompletedAt { get; set; }
 
         [MaxLength(100)]
         public string? ReferenceNumber { get; set; }

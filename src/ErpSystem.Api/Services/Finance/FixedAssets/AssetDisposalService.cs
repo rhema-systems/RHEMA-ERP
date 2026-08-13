@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Finance;
@@ -10,6 +11,8 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
@@ -25,6 +28,8 @@ public class AssetDisposalService : IAssetDisposalService
     private readonly IWorkflowService _workflowService;
     private readonly IFinancePostingEngine? _financePostingEngine;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IInvoiceService? _invoiceService;
+    private readonly IPaymentService? _paymentService;
 
     public AssetDisposalService(
         ApplicationDbContext context,
@@ -32,7 +37,9 @@ public class AssetDisposalService : IAssetDisposalService
         IDocumentNumberingService documentNumberingService,
         IWorkflowService workflowService,
         IFinancePostingEngine? financePostingEngine = null,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IInvoiceService? invoiceService = null,
+        IPaymentService? paymentService = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -40,6 +47,8 @@ public class AssetDisposalService : IAssetDisposalService
         _workflowService = workflowService;
         _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
+        _invoiceService = invoiceService;
+        _paymentService = paymentService;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -191,6 +200,27 @@ public class AssetDisposalService : IAssetDisposalService
             RemainingAccumulatedDepreciationAfterDisposal = snapshot.RemainingAccumulatedDepreciation,
             RemainingNetBookValueAfterDisposal = snapshot.RemainingNetBookValue,
             BuyerName = dto.BuyerName?.Trim(),
+            BuyerBusinessPartnerId = dto.BuyerBusinessPartnerId,
+            SettlementMode = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m
+                ? dto.SettlementMode
+                : AssetDisposalSettlementMode.NotApplicable,
+            SettlementStatus = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m
+                ? AssetDisposalSettlementStatus.Pending
+                : AssetDisposalSettlementStatus.NotApplicable,
+            // Normalize non-sale requests at the entity boundary as well as validating the DTO.
+            // This prevents harmless API defaults (for example Standard tax treatment) from
+            // becoming misleading dormant settlement evidence on write-offs or donations.
+            SaleTaxGroupId = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m ? dto.SaleTaxGroupId : null,
+            SaleTaxTreatment = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m
+                ? dto.SaleTaxTreatment
+                : TaxTreatment.OutOfScope,
+            SettlementPaymentTermId = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m ? dto.SettlementPaymentTermId : null,
+            SettlementPaymentMethodId = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m ? dto.SettlementPaymentMethodId : null,
+            SettlementBankAccountId = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m ? dto.SettlementBankAccountId : null,
+            SettlementLiquidityAccountId = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m ? dto.SettlementLiquidityAccountId : null,
+            SettlementReference = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m
+                ? NormalizeOptionalText(dto.SettlementReference)
+                : null,
             RequestedById = requestedById == Guid.Empty ? null : requestedById,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = UserName,
@@ -268,7 +298,7 @@ public class AssetDisposalService : IAssetDisposalService
 
     public async Task<AssetDisposalDto> ApproveDisposalAsync(Guid disposalId, Guid approvedById, ApproveAssetDisposalDto dto)
     {
-        var disposal = await LoadDisposalForMutationAsync(disposalId);
+        AssetDisposal disposal = await LoadDisposalForMutationAsync(disposalId);
 
         if (disposal.Status == AssetDisposalStatus.Completed)
         {
@@ -320,12 +350,32 @@ public class AssetDisposalService : IAssetDisposalService
 
     public async Task<AssetDisposalDto> CompleteDisposalAsync(Guid disposalId)
     {
+        // SQL Server is configured with retry-on-failure, so EF requires the execution strategy
+        // to own every user transaction. Keeping failure evidence outside the retry delegate also
+        // prevents a transient first attempt from leaving a misleading permanent failure audit
+        // when EF subsequently retries and completes the disposal successfully.
+        var strategy = _context.Database.CreateExecutionStrategy();
+        try
+        {
+            return _context.Database.CurrentTransaction != null
+                ? await CompleteDisposalAttemptAsync(disposalId)
+                : await strategy.ExecuteAsync(() => CompleteDisposalAttemptAsync(disposalId));
+        }
+        catch (Exception ex)
+        {
+            await RecordDisposalFailureAsync(disposalId, ex);
+            throw;
+        }
+    }
+
+    private async Task<AssetDisposalDto> CompleteDisposalAttemptAsync(Guid disposalId)
+    {
         if (_financePostingEngine == null)
         {
             throw new InvalidOperationException("Central finance posting engine is not configured for fixed asset disposal.");
         }
 
-        var disposal = await LoadDisposalForMutationAsync(disposalId);
+        AssetDisposal disposal = await LoadDisposalForMutationAsync(disposalId);
 
         if (disposal.Status == AssetDisposalStatus.Completed)
         {
@@ -344,8 +394,19 @@ public class AssetDisposalService : IAssetDisposalService
             ?? throw new InvalidOperationException("No fiscal period covers the disposal accounting date.");
         var functionalCurrency = await GetFunctionalCurrencyAsync();
 
+        IDbContextTransaction? transaction = null;
         try
         {
+            // The derecognition, AR statutory invoice, optional receipt allocation, and every GL
+            // posting form one accounting command. FinancePostingEngine and UnitOfWork both join
+            // an existing DbContext transaction, so none of these durable records can survive if
+            // a later hand-off step fails. Focused tests verify composition and the UAT/dry-run
+            // release scenario verifies the real SQL Server rollback boundary.
+            if (_context.Database.IsRelational() && _context.Database.CurrentTransaction == null)
+            {
+                transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            }
+
             var finalDepreciation = await CalculateFinalDepreciationAsync(
                 asset,
                 bookValue,
@@ -416,6 +477,12 @@ public class AssetDisposalService : IAssetDisposalService
             ApplyPostedDisposal(disposal, asset, bookValue, postingResult, snapshot);
 
             await _context.SaveChangesAsync();
+
+            if (RequiresSaleSettlement(disposal))
+            {
+                await CreateSaleSettlementDocumentsAsync(disposal);
+                await _context.SaveChangesAsync();
+            }
 
             await RecordDisposalAuditAsync(
                 disposal.DisposalType == DisposalType.Sale
@@ -504,36 +571,182 @@ public class AssetDisposalService : IAssetDisposalService
                     comment: "Asset-specific revaluation surplus transferred directly within equity on derecognition.");
             }
 
+            if (transaction != null)
+            {
+                await transaction.CommitAsync();
+                await transaction.DisposeAsync();
+                transaction = null;
+            }
+
             return await GetByIdAsync(disposal.Id) ?? throw new InvalidOperationException("Failed to complete disposal.");
         }
-        catch (Exception ex)
+        catch
         {
-            // Evidence or account-policy drift invalidates the checker decision and must permit a
-            // fresh request. Operational failures retain Approved status for idempotent retry.
-            disposal.Status = ex is StaleDisposalApprovalException
-                ? AssetDisposalStatus.Cancelled
-                : AssetDisposalStatus.Approved;
-            disposal.FailedAt = DateTime.UtcNow;
-            disposal.FailureReason = ex.Message;
-            disposal.UpdatedAt = DateTime.UtcNow;
-            disposal.UpdatedBy = UserName;
-            await _context.SaveChangesAsync();
-
-            var eventType = ex.Message.Contains("period", StringComparison.OrdinalIgnoreCase)
-                || ex.Message.Contains("locked", StringComparison.OrdinalIgnoreCase)
-                    ? FinanceAuditEvents.FixedAssetDisposalBlockedClosedPeriod
-                    : ex.Message.Contains("depreciation", StringComparison.OrdinalIgnoreCase)
-                        ? FinanceAuditEvents.FixedAssetDisposalBlockedMissingDepreciation
-                        : FinanceAuditEvents.FixedAssetDisposalPostingFailed;
-
-            await RecordDisposalAuditAsync(
-                eventType,
-                disposal,
-                afterValues: new { error = ex.Message },
-                reason: ex.Message,
-                comment: "Fixed asset disposal posting failed.");
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync();
+                await transaction.DisposeAsync();
+                transaction = null;
+                _context.ChangeTracker.Clear();
+            }
             throw;
         }
+        finally
+        {
+            if (transaction != null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task RecordDisposalFailureAsync(Guid disposalId, Exception exception)
+    {
+        _context.ChangeTracker.Clear();
+
+        // Reload after rollback before recording durable failure evidence. Reusing the rolled-back
+        // graph could accidentally reinsert invoice, receipt or posting artifacts. This method is
+        // called only after EF's retry strategy has exhausted transient retries.
+        var disposal = await LoadDisposalForMutationAsync(disposalId);
+        disposal.Status = exception is StaleDisposalApprovalException
+            ? AssetDisposalStatus.Cancelled
+            : AssetDisposalStatus.Approved;
+        if (RequiresSaleSettlement(disposal))
+        {
+            disposal.SettlementStatus = AssetDisposalSettlementStatus.Failed;
+        }
+        disposal.FailedAt = DateTime.UtcNow;
+        disposal.FailureReason = exception.Message;
+        disposal.UpdatedAt = DateTime.UtcNow;
+        disposal.UpdatedBy = UserName;
+        await _context.SaveChangesAsync();
+
+        var eventType = exception.Message.Contains("period", StringComparison.OrdinalIgnoreCase)
+            || exception.Message.Contains("locked", StringComparison.OrdinalIgnoreCase)
+                ? FinanceAuditEvents.FixedAssetDisposalBlockedClosedPeriod
+                : exception.Message.Contains("depreciation", StringComparison.OrdinalIgnoreCase)
+                    ? FinanceAuditEvents.FixedAssetDisposalBlockedMissingDepreciation
+                    : FinanceAuditEvents.FixedAssetDisposalPostingFailed;
+
+        await RecordDisposalAuditAsync(
+            eventType,
+            disposal,
+            afterValues: new { error = exception.Message },
+            reason: exception.Message,
+            comment: "Fixed asset disposal posting failed.");
+    }
+
+    private static bool RequiresSaleSettlement(AssetDisposal disposal)
+        => disposal.DisposalType == DisposalType.Sale
+            && disposal.SaleProceeds > 0m
+            && disposal.SettlementMode is AssetDisposalSettlementMode.CreditSale or AssetDisposalSettlementMode.ImmediateReceipt;
+
+    private async Task CreateSaleSettlementDocumentsAsync(AssetDisposal disposal)
+    {
+        if (_invoiceService == null)
+        {
+            throw new InvalidOperationException("AR invoice service is not configured for fixed-asset sale settlement.");
+        }
+        if (!disposal.BuyerBusinessPartnerId.HasValue || !disposal.ProceedsAccountId.HasValue)
+        {
+            throw new InvalidOperationException("Approved disposal buyer and proceeds-clearing account evidence is incomplete.");
+        }
+
+        // The positive line is the statutory sale consideration and therefore owns the selected
+        // tax treatment. DisposalCost represents a buyer/auctioneer deduction from remitted
+        // proceeds: it is a separate out-of-scope contra line so tax remains calculated on gross
+        // consideration while the AR journal clears exactly the net amount debited by disposal.
+        var invoiceLines = new List<InvoiceLineItemCreateDto>
+        {
+            new()
+            {
+                LineItemType = nameof(LineItemType.FixedAssetDisposal),
+                GLAccountId = disposal.ProceedsAccountId,
+                Description = $"Fixed asset sale - {disposal.FixedAsset.AssetCode} - {disposal.FixedAsset.Name}",
+                Quantity = 1m,
+                UnitPrice = disposal.SaleProceeds,
+                TaxGroupId = disposal.SaleTaxTreatment == TaxTreatment.Standard ? disposal.SaleTaxGroupId : null,
+                TaxTreatment = disposal.SaleTaxTreatment,
+                Unit = "Disposal"
+            }
+        };
+        if (disposal.DisposalCost > 0m)
+        {
+            invoiceLines.Add(new InvoiceLineItemCreateDto
+            {
+                LineItemType = nameof(LineItemType.FixedAssetDisposalAdjustment),
+                GLAccountId = disposal.ProceedsAccountId,
+                Description = "Buyer/auctioneer deduction from remitted disposal proceeds",
+                Quantity = 1m,
+                UnitPrice = -disposal.DisposalCost,
+                TaxTreatment = TaxTreatment.OutOfScope,
+                Unit = "Deduction"
+            });
+        }
+
+        var invoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            InvoiceDate = disposal.DisposalDate.Date,
+            DueDate = disposal.SettlementMode == AssetDisposalSettlementMode.ImmediateReceipt
+                ? disposal.DisposalDate.Date
+                : null,
+            Reference = $"FA-DISPOSAL:{disposal.ReferenceNumber ?? disposal.Id.ToString("N")}",
+            Notes = "System-created statutory invoice for an approved fixed-asset disposal. Amend or reverse through the linked disposal workflow; do not edit the posted invoice directly.",
+            CurrencyCode = disposal.ProceedsCurrencyCode,
+            ExchangeRate = disposal.ProceedsExchangeRateValue,
+            PaymentTermId = disposal.SettlementPaymentTermId,
+            TaxGroupId = disposal.SaleTaxTreatment == TaxTreatment.Standard ? disposal.SaleTaxGroupId : null,
+            LineItems = invoiceLines
+        });
+        invoice = await _invoiceService.SendInvoiceAsync(invoice.Id);
+
+        disposal.CustomerInvoiceId = invoice.Id;
+        disposal.SettlementInvoiceAmount = RoundMoney(invoice.TotalAmount);
+        disposal.SettlementTaxAmount = RoundMoney(invoice.TaxAmount);
+        disposal.SettlementStatus = AssetDisposalSettlementStatus.Invoiced;
+
+        if (disposal.SettlementMode == AssetDisposalSettlementMode.CreditSale)
+        {
+            disposal.SettlementCompletedAt = DateTime.UtcNow;
+            return;
+        }
+
+        if (_paymentService == null)
+        {
+            throw new InvalidOperationException("AR receipt service is not configured for immediate fixed-asset sale settlement.");
+        }
+
+        var receipt = await _paymentService.CreateAsync(new PaymentCreateDto
+        {
+            CustomerId = disposal.BuyerBusinessPartnerId.Value,
+            PaymentDate = disposal.DisposalDate.Date,
+            TotalAmount = invoice.TotalAmount,
+            PaymentMethod = "Configured",
+            PaymentMethodId = disposal.SettlementPaymentMethodId,
+            CurrencyCode = disposal.ProceedsCurrencyCode,
+            ExchangeRate = disposal.ProceedsExchangeRateValue,
+            ExchangeRateId = disposal.ProceedsExchangeRateId,
+            BankAccountId = disposal.SettlementBankAccountId,
+            LiquidityAccountId = disposal.SettlementLiquidityAccountId,
+            TransactionReference = disposal.SettlementReference ?? disposal.ReferenceNumber,
+            Notes = $"Immediate receipt for fixed-asset disposal {disposal.ReferenceNumber} and AR invoice {invoice.InvoiceNumber}.",
+            Allocations = new List<InvoiceAllocationDto>
+            {
+                new()
+                {
+                    InvoiceId = invoice.Id,
+                    AllocatedAmount = invoice.TotalAmount,
+                    PaymentCurrencyAmount = invoice.TotalAmount,
+                    Notes = $"Automatic settlement of fixed-asset disposal {disposal.ReferenceNumber}."
+                }
+            }
+        });
+        receipt = await _paymentService.PostAsync(receipt.Id);
+
+        disposal.CustomerPaymentId = receipt.Id;
+        disposal.SettlementStatus = AssetDisposalSettlementStatus.Settled;
+        disposal.SettlementCompletedAt = DateTime.UtcNow;
     }
 
     public async Task<AssetDisposalDto> RejectDisposalAsync(Guid disposalId, Guid rejectedById, string comments)
@@ -586,6 +799,17 @@ public class AssetDisposalService : IAssetDisposalService
         RequestBulkAssetDisposalDto dto,
         Guid requestedById)
     {
+        // A sale is a legal customer transaction: each asset needs its own buyer, tax decision,
+        // invoice and (where applicable) receipt allocation. The legacy bulk DTO contains only a
+        // shared proceeds figure, so accepting it would either duplicate that amount per asset or
+        // bypass the FIN-LIM-0040 settlement controls. Keep non-sale mass retirements available and
+        // direct users to the controlled single-disposal workspace for sales.
+        if (dto.DisposalType == DisposalType.Sale)
+        {
+            throw new InvalidOperationException(
+                "Bulk asset sales are not supported. Request each sale separately so buyer, statutory tax, AR invoice and receipt evidence are controlled per asset.");
+        }
+
         var result = new BulkOperationResultDto<AssetDisposalDto>
         {
             TotalCount = dto.FixedAssetIds.Count
@@ -626,6 +850,10 @@ public class AssetDisposalService : IAssetDisposalService
             .Include(d => d.RequestedBy)
             .Include(d => d.ApprovedBy)
             .Include(d => d.ProceedsAccount)
+            .Include(d => d.BuyerBusinessPartner)
+            .Include(d => d.SaleTaxGroup)
+            .Include(d => d.CustomerInvoice)
+            .Include(d => d.CustomerPayment)
             .Include(d => d.FiscalPeriod)
             .Include(d => d.AccountingBook)
             .Include(d => d.JournalEntry)
@@ -682,6 +910,8 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Write-off, scrap, donation, and loss disposals must have zero proceeds in this foundation batch.");
         }
 
+        await ValidateSettlementRequestAsync(dto);
+
         var functionalCurrency = await GetFunctionalCurrencyAsync();
         var proceedsCurrency = NormalizeCurrency(dto.ProceedsCurrencyCode, functionalCurrency);
         if (string.Equals(proceedsCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
@@ -689,6 +919,175 @@ public class AssetDisposalService : IAssetDisposalService
         {
             throw new InvalidOperationException("An exchange rate must not be supplied for functional-currency disposal proceeds.");
         }
+    }
+
+    private async Task ValidateSettlementRequestAsync(RequestAssetDisposalDto dto)
+    {
+        var hasSaleProceeds = dto.DisposalType == DisposalType.Sale && dto.SaleProceeds > 0m;
+        if (!hasSaleProceeds)
+        {
+            // Non-sale disposals must not retain dormant customer, tax, or collection fields.
+            // Failing closed here prevents a later UI change from accidentally producing an AR
+            // document for a write-off, donation, scrap, or loss event.
+            if (dto.BuyerBusinessPartnerId.HasValue || dto.SaleTaxGroupId.HasValue ||
+                dto.SettlementPaymentTermId.HasValue || dto.SettlementPaymentMethodId.HasValue ||
+                dto.SettlementBankAccountId.HasValue || dto.SettlementLiquidityAccountId.HasValue ||
+                !string.IsNullOrWhiteSpace(dto.SettlementReference) ||
+                dto.SettlementMode != AssetDisposalSettlementMode.NotApplicable)
+            {
+                throw new InvalidOperationException("AR, tax, and collection details are only valid for a fixed-asset sale with positive proceeds.");
+            }
+
+            return;
+        }
+
+        if (dto.SettlementMode is not (AssetDisposalSettlementMode.CreditSale or AssetDisposalSettlementMode.ImmediateReceipt))
+        {
+            throw new InvalidOperationException("Choose either Credit Sale or Immediate Receipt for fixed-asset sale proceeds.");
+        }
+        if (!dto.BuyerBusinessPartnerId.HasValue)
+        {
+            throw new InvalidOperationException("A canonical customer/business partner is required for a fixed-asset sale.");
+        }
+
+        var buyer = await _context.BusinessPartners
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == TenantId
+                && item.Id == dto.BuyerBusinessPartnerId.Value
+                && !item.IsDeleted
+                && item.IsActive
+                && (item.PartnerType == "Customer" || item.PartnerType == "Both"));
+        if (buyer == null)
+        {
+            throw new InvalidOperationException("The selected disposal buyer must be an active same-tenant customer/business partner.");
+        }
+
+        // Freeze the master-data display value used by the checker. The canonical ID remains the
+        // source of truth, so a caller cannot substitute a different free-text buyer name.
+        dto.BuyerName = buyer.PartnerName;
+
+        if (!Enum.IsDefined(dto.SaleTaxTreatment))
+        {
+            throw new InvalidOperationException("A valid statutory tax treatment is required for the fixed-asset sale.");
+        }
+
+        if (dto.SaleTaxTreatment == TaxTreatment.Standard)
+        {
+            if (!dto.SaleTaxGroupId.HasValue)
+            {
+                throw new InvalidOperationException("A sales tax group is required for a standard-rated fixed-asset sale.");
+            }
+
+            var taxGroupExists = await _context.TaxGroups.AsNoTracking().AnyAsync(group =>
+                group.TenantId == TenantId && group.Id == dto.SaleTaxGroupId.Value && !group.IsDeleted &&
+                group.IsActive && (group.Applicability == TaxApplicability.Sales || group.Applicability == TaxApplicability.Both));
+            if (!taxGroupExists)
+            {
+                throw new InvalidOperationException("The selected tax group is not an active same-tenant sales tax group.");
+            }
+        }
+        else if (dto.SaleTaxGroupId.HasValue)
+        {
+            throw new InvalidOperationException("Exempt, zero-rated, and out-of-scope asset sales must not carry a standard tax group.");
+        }
+
+        if (dto.SettlementPaymentTermId.HasValue)
+        {
+            var validTerm = await _context.PaymentTerms.AsNoTracking().AnyAsync(term =>
+                term.TenantId == TenantId && term.Id == dto.SettlementPaymentTermId.Value && !term.IsDeleted && term.IsActive);
+            if (!validTerm)
+            {
+                throw new InvalidOperationException("The selected payment term is not active for this tenant.");
+            }
+        }
+
+        if (dto.SettlementMode == AssetDisposalSettlementMode.CreditSale)
+        {
+            if (dto.SettlementPaymentMethodId.HasValue || dto.SettlementBankAccountId.HasValue || dto.SettlementLiquidityAccountId.HasValue)
+            {
+                throw new InvalidOperationException("Credit-sale disposal requests must not include receipt destination details.");
+            }
+            return;
+        }
+
+        if (!dto.SettlementPaymentMethodId.HasValue)
+        {
+            throw new InvalidOperationException("Immediate asset-sale settlement requires a configured Finance payment method.");
+        }
+        if (dto.SettlementBankAccountId.HasValue == dto.SettlementLiquidityAccountId.HasValue)
+        {
+            throw new InvalidOperationException("Immediate asset-sale settlement requires exactly one bank or liquidity destination.");
+        }
+
+        var method = await _context.PaymentMethods.AsNoTracking().FirstOrDefaultAsync(item =>
+            item.TenantId == TenantId && item.Id == dto.SettlementPaymentMethodId.Value && !item.IsDeleted && item.IsActive);
+        if (method == null)
+        {
+            throw new InvalidOperationException("The selected receipt payment method is not active for this tenant.");
+        }
+        if (method.RequiresReference && string.IsNullOrWhiteSpace(dto.SettlementReference))
+        {
+            throw new InvalidOperationException("The selected receipt payment method requires a settlement reference.");
+        }
+
+        var proceedsCurrency = NormalizeCurrency(dto.ProceedsCurrencyCode, await GetFunctionalCurrencyAsync());
+        var isDirectBankMethod = method.Type is PaymentMethodType.EFT
+            or PaymentMethodType.DirectDebit
+            or PaymentMethodType.StandingOrder
+            or PaymentMethodType.BankTransfer;
+        if (isDirectBankMethod != dto.SettlementBankAccountId.HasValue)
+        {
+            throw new InvalidOperationException(isDirectBankMethod
+                ? "The selected direct-bank receipt method requires a bank-account destination."
+                : "The selected cash, cheque, card or mobile-money method requires a matching liquidity holding account.");
+        }
+
+        if (dto.SettlementBankAccountId.HasValue)
+        {
+            var validBank = await _context.BankAccounts.AsNoTracking().AnyAsync(item =>
+                item.TenantId == TenantId && item.Id == dto.SettlementBankAccountId.Value && !item.IsDeleted && item.IsActive);
+            if (!validBank)
+            {
+                throw new InvalidOperationException("The selected settlement bank account is not active for this tenant.");
+            }
+
+            var currencyMatches = await _context.BankAccounts.AsNoTracking().AnyAsync(item =>
+                item.TenantId == TenantId && item.Id == dto.SettlementBankAccountId.Value && item.Currency == proceedsCurrency);
+            if (!currencyMatches)
+            {
+                throw new InvalidOperationException("Disposal proceeds and receiving bank-account currencies must match.");
+            }
+        }
+        else
+        {
+            var liquidity = await _context.LiquidityAccounts.AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == TenantId && item.Id == dto.SettlementLiquidityAccountId!.Value && !item.IsDeleted && item.IsActive);
+            if (liquidity == null)
+            {
+                throw new InvalidOperationException("The selected settlement liquidity account is not active for this tenant.");
+            }
+            if (!liquidity.Currency.Equals(proceedsCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Disposal proceeds and receipt holding-account currencies must match.");
+            }
+
+            var expectedLiquidityType = method.Type switch
+            {
+                PaymentMethodType.Cheque => LiquidityAccountType.ChequesAwaitingDeposit,
+                PaymentMethodType.Card => LiquidityAccountType.CardSettlementClearing,
+                PaymentMethodType.MobileMoney => LiquidityAccountType.MobileMoneyClearing,
+                _ => LiquidityAccountType.UndepositedCash
+            };
+            if (liquidity.AccountType != expectedLiquidityType &&
+                liquidity.AccountType != LiquidityAccountType.OtherSettlementClearing &&
+                !(method.Type == PaymentMethodType.Cash && liquidity.AccountType == LiquidityAccountType.CashTill))
+            {
+                throw new InvalidOperationException(
+                    $"The selected holding account is not suitable for the {method.Name} receipt method.");
+            }
+        }
+
+        ValidateTextLength(dto.SettlementReference, 100, "Settlement reference");
     }
 
     private static void ValidateDisposalScope(RequestAssetDisposalDto dto)
@@ -1958,6 +2357,25 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.RemainingAcquisitionCostAfterDisposal,
             disposal.RemainingAccumulatedDepreciationAfterDisposal,
             disposal.RemainingNetBookValueAfterDisposal,
+            // Preserve the complete statutory and settlement chain in the disposal audit event.
+            // Reviewers can therefore prove which customer, tax decision, invoice and receipt
+            // were approved without reconstructing mutable master-data labels after the fact.
+            disposal.BuyerBusinessPartnerId,
+            disposal.BuyerName,
+            disposal.SettlementMode,
+            disposal.SettlementStatus,
+            disposal.SaleTaxGroupId,
+            disposal.SaleTaxTreatment,
+            disposal.SettlementPaymentTermId,
+            disposal.SettlementPaymentMethodId,
+            disposal.SettlementBankAccountId,
+            disposal.SettlementLiquidityAccountId,
+            disposal.SettlementReference,
+            disposal.CustomerInvoiceId,
+            disposal.CustomerPaymentId,
+            disposal.SettlementInvoiceAmount,
+            disposal.SettlementTaxAmount,
+            disposal.SettlementCompletedAt,
             disposal.JournalEntryId,
             disposal.PostingEventId
         };
@@ -2088,6 +2506,21 @@ public class AssetDisposalService : IAssetDisposalService
             RemainingAccumulatedDepreciationAfterDisposal = d.RemainingAccumulatedDepreciationAfterDisposal,
             RemainingNetBookValueAfterDisposal = d.RemainingNetBookValueAfterDisposal,
             BuyerName = d.BuyerName,
+            BuyerBusinessPartnerId = d.BuyerBusinessPartnerId,
+            SettlementMode = d.SettlementMode,
+            SettlementStatus = d.SettlementStatus,
+            SaleTaxGroupId = d.SaleTaxGroupId,
+            SaleTaxTreatment = d.SaleTaxTreatment,
+            SettlementPaymentTermId = d.SettlementPaymentTermId,
+            SettlementPaymentMethodId = d.SettlementPaymentMethodId,
+            SettlementBankAccountId = d.SettlementBankAccountId,
+            SettlementLiquidityAccountId = d.SettlementLiquidityAccountId,
+            SettlementReference = d.SettlementReference,
+            CustomerInvoiceId = d.CustomerInvoiceId,
+            CustomerPaymentId = d.CustomerPaymentId,
+            SettlementInvoiceAmount = d.SettlementInvoiceAmount,
+            SettlementTaxAmount = d.SettlementTaxAmount,
+            SettlementCompletedAt = d.SettlementCompletedAt,
             ReferenceNumber = d.ReferenceNumber,
             RequestedById = d.RequestedById,
             RequestedByName = d.RequestedBy != null ? $"{d.RequestedBy.FirstName} {d.RequestedBy.LastName}" : null,
