@@ -102,7 +102,9 @@ public class SheHazardService : ISheHazardService
     public async Task<IEnumerable<SheHazardSummaryDto>> GetAllAsync(bool activeOnly = false, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = activeOnly ? await _hazardRepository.GetActiveAsync() : await _hazardRepository.GetAllAsync();
+        // GetAllListAsync, not the generic GetAllAsync: the summary rows carry location and owner
+        // names, and the generic read loads no navigations, so they came back blank.
+        var entities = activeOnly ? await _hazardRepository.GetActiveAsync() : await _hazardRepository.GetAllListAsync();
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
@@ -178,7 +180,9 @@ public class SheHazardService : ISheHazardService
         var entity = dto.ToEntity(tenantId, userId);
         await _hazardRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Write responses re-read through the include-bearing path — the tracked entity's navs
+        // (location, owner) are unloaded and would map blank.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SheHazardDto> UpdateAsync(UpdateSheHazardDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -187,7 +191,7 @@ public class SheHazardService : ISheHazardService
         entity.UpdateEntity(dto, userId);
         await _hazardRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -206,7 +210,10 @@ public class SheHazardService : ISheHazardService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheHazardControl>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Child write responses re-read through the parent's include-bearing path — the tracked
+        // entity's responsible-person nav is unloaded and would map blank.
+        var full = await GetByIdAsync(dto.HazardId, cancellationToken);
+        return full.Controls.First(c => c.Id == entity.Id);
     }
 
     public async Task<SheHazardControlDto> UpdateControlAsync(UpdateSheHazardControlDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -215,7 +222,8 @@ public class SheHazardService : ISheHazardService
         entity.UpdateEntity(dto, userId);
         await _unitOfWork.Repository<SheHazardControl>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(entity.HazardId, cancellationToken);
+        return full.Controls.First(c => c.Id == entity.Id);
     }
 
     public async Task<bool> DeleteControlAsync(Guid controlId, CancellationToken cancellationToken = default)
@@ -234,7 +242,9 @@ public class SheHazardService : ISheHazardService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheHazardCorrectiveAction>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Re-read for the template title — the tracked entity's template nav is unloaded.
+        var full = await GetByIdAsync(dto.HazardId, cancellationToken);
+        return full.CorrectiveActions.First(a => a.Id == entity.Id);
     }
 
     public async Task<bool> DeleteCorrectiveActionAsync(Guid correctiveActionId, CancellationToken cancellationToken = default)
@@ -394,7 +404,9 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
         await _assessmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Risk assessment created: {AssessmentNumber}", entity.AssessmentNumber);
-        return entity.ToDto();
+        // Write responses re-read through the include-bearing path — the tracked entity's navs
+        // (location, org unit, preparer) are unloaded and would map blank.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SheRiskAssessmentDto> UpdateAsync(UpdateSheRiskAssessmentDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -403,7 +415,7 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
         entity.UpdateEntity(dto, userId);
         await _assessmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -420,6 +432,9 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
 
         if (entity.Status is SheRiskAssessmentStatus.Approved or SheRiskAssessmentStatus.Active)
             throw new InvalidOperationException("Risk assessment has already been approved.");
+        // A retired assessment cannot be quietly revived through approval — it needs a new version.
+        if (entity.Status is SheRiskAssessmentStatus.Expired or SheRiskAssessmentStatus.Superseded or SheRiskAssessmentStatus.Withdrawn)
+            throw new InvalidOperationException($"A {entity.Status} risk assessment cannot be approved. Prepare a new version instead.");
 
         entity.ApprovedById = dto.ApprovedById;
         entity.ApprovedDate = dto.ApprovedDate;
@@ -467,7 +482,12 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
     public async Task<SheRiskAssessmentAcknowledgementDto> AddAcknowledgementAsync(CreateSheRiskAssessmentAcknowledgementDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedAssessmentAsync(dto.RiskAssessmentId);
+        var assessment = await GetOwnedAssessmentAsync(dto.RiskAssessmentId);
+
+        // Signing proves the worker read the APPROVED document — a draft or retired assessment
+        // has nothing valid to acknowledge, and the endpoint is open to every employee.
+        if (assessment.Status is not (SheRiskAssessmentStatus.Approved or SheRiskAssessmentStatus.Active))
+            throw new InvalidOperationException("Only an approved or active risk assessment can be acknowledged.");
 
         // The endpoint is open to every employee; without this guard a repeat sign quietly stacks duplicate rows.
         var alreadySigned = await _unitOfWork.Repository<SheRiskAssessmentAcknowledgement>().GetQueryable()
@@ -478,7 +498,10 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheRiskAssessmentAcknowledgement>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Re-read for the employee name — the signature is confirmation UI, and a blank name on
+        // it reads as "someone else signed".
+        var full = await GetByIdAsync(dto.RiskAssessmentId, cancellationToken);
+        return full.Acknowledgements.First(a => a.Id == entity.Id);
     }
 
     public async Task<IEnumerable<MyRiskAcknowledgementDto>> GetForEmployeeAcknowledgementAsync(Guid employeeId, CancellationToken cancellationToken = default)

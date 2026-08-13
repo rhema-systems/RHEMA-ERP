@@ -16,6 +16,8 @@ public interface ISheHazardRepository : IGenericRepository<SheHazard>
     Task<SheHazard?> GetByCodeAsync(string code);
     /// <summary>Returns the hazard with its controls and corrective actions loaded.</summary>
     Task<SheHazard?> GetWithControlsAsync(Guid id);
+    /// <summary>All hazards with the list navigations (location, owner) loaded — the register read.</summary>
+    Task<IEnumerable<SheHazard>> GetAllListAsync();
     Task<IEnumerable<SheHazard>> GetActiveAsync();
     Task<IEnumerable<SheHazard>> GetByStatusAsync(SheHazardStatus status);
     Task<IEnumerable<SheHazard>> GetByCategoryAsync(SheHazardCategory category);

@@ -27,6 +27,7 @@ import {
   IdCard,
   Stamp,
   ShieldAlert,
+  FileWarning,
   Route,
   Tags,
   CalendarDays,
@@ -592,10 +593,13 @@ export const navigationItems: NavItem[] = [
         icon: HardHat,
         children: [
           { title: 'Dashboard', href: '/hr/safety/dashboard', icon: LayoutDashboard },
-          // The one safety screen every employee can use: reporting. The register and the rest
-          // answer 403 for non-HR, so without this they have no way in.
+          // The safety screens every employee can use: reporting. The registers and the rest
+          // answer 403 for non-HR, so without these they have no way in.
           { title: 'Report an Incident', href: '/hr/safety/report-incident', icon: Megaphone },
+          { title: 'Report a Hazard', href: '/hr/safety/report-hazard', icon: FileWarning },
           { title: 'Incidents', href: '/hr/safety/incidents', icon: AlertTriangle },
+          { title: 'Hazards', href: '/hr/safety/hazards', icon: ShieldAlert },
+          { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

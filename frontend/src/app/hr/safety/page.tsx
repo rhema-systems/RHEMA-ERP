@@ -1,6 +1,15 @@
 'use client';
 
-import { LayoutDashboard, Gauge, ListChecks, AlertTriangle, Megaphone } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Gauge,
+  ListChecks,
+  AlertTriangle,
+  Megaphone,
+  ShieldAlert,
+  FileWarning,
+  ClipboardList,
+} from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -54,6 +63,35 @@ export default function SafetyHomePage() {
                 'Every reported incident: triage, investigation, corrective actions and closure.',
               href: '/hr/safety/incidents',
               icon: AlertTriangle,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Prevention</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Report a Hazard',
+              description:
+                'Open to everyone — flag anything that could hurt someone before it does. No SHE role needed.',
+              href: '/hr/safety/report-hazard',
+              icon: FileWarning,
+            },
+            {
+              title: 'Hazard Register',
+              description:
+                'Every identified hazard with its risk scoring, hierarchy of controls and review cycle.',
+              href: '/hr/safety/hazards',
+              icon: ShieldAlert,
+            },
+            {
+              title: 'Risk Assessments',
+              description:
+                'Formal HIRA/JHA/pre-task assessments — hazard lines, approval and workforce sign-off.',
+              href: '/hr/safety/risk-assessments',
+              icon: ClipboardList,
             },
           ]}
         />
