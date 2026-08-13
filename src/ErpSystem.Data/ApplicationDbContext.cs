@@ -670,6 +670,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; }
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
+    public DbSet<ProcurementReceiptSourceEvidence> ProcurementReceiptSourceEvidence { get; set; }
     public DbSet<PurchaseOrderLandedCostPlan> PurchaseOrderLandedCostPlans { get; set; }
     public DbSet<PurchaseOrderLandedCostPlanItem> PurchaseOrderLandedCostPlanItems { get; set; }
     public DbSet<ProcurementPurchaseOrderAmendment> ProcurementPurchaseOrderAmendments { get; set; }
@@ -4251,6 +4252,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProcurementReceiptDocumentConfiguration());
         builder.ApplyConfiguration(new ProcurementReceiptDocumentSignatureConfiguration());
         builder.ApplyConfiguration(new ProcurementReceiptDocumentActionConfiguration());
+        builder.ApplyConfiguration(new ProcurementReceiptSourceEvidenceConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceMatchExceptionConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceMatchExceptionVarianceConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceMatchExceptionEvidenceConfiguration());
@@ -9109,15 +9111,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // EmergencyProcurementPlan entity
         builder.Entity<EmergencyProcurementPlan>(entity =>
         {
-            entity.HasIndex(e => new { e.TenantId, e.PlanCode }).IsUnique();
             entity.HasIndex(e => e.EmergencyType);
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.CriticalityLevel);
-            entity.HasIndex(e => new { e.TenantId, e.PurchaseRequisitionId })
-                .IsUnique().HasFilter("[PurchaseRequisitionId] IS NOT NULL AND [IsDeleted] = 0");
-            entity.HasIndex(e => new { e.TenantId, e.ExceptionRuleId });
-            entity.HasIndex(e => new { e.TenantId, e.WorkflowInstanceId });
-            entity.HasIndex(e => new { e.TenantId, e.ExceptionalSourcingTenderId });
             entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.ToTable("EmergencyProcurementPlans", table =>
             {
@@ -9173,6 +9169,25 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(s => s.EmergencyProcurementPlan)
                 .HasForeignKey(s => s.EmergencyProcurementPlanId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Keep the tenant-leading control indexes alongside EF's conventional
+            // single-column FK indexes, but retire the legacy tenant-only index.
+            entity.HasIndex(e => new { e.TenantId, e.PlanCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PurchaseRequisitionId })
+                .IsUnique().HasFilter("[PurchaseRequisitionId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.ExceptionRuleId });
+            entity.HasIndex(e => new { e.TenantId, e.WorkflowInstanceId });
+            entity.HasIndex(e => new { e.TenantId, e.ExceptionalSourcingTenderId });
+
+            var legacyTenantIndex = entity.Metadata.GetIndexes()
+                .SingleOrDefault(index =>
+                    index.Properties.Count == 1 &&
+                    index.Properties[0].Name == nameof(EmergencyProcurementPlan.TenantId));
+
+            if (legacyTenantIndex != null)
+            {
+                entity.Metadata.RemoveIndex(legacyTenantIndex);
+            }
         });
 
         // EmergencyProcurementItem entity

@@ -315,6 +315,9 @@ function Invoke-Preflight {
     # cannot collide. Added governance lineage is nullable/defaulted for Draft
     # rows, and all THROW statements execute only in the post-migration trigger.
     Write-Output 'GUARD_COVERAGE|20260812140000_GovernEmergencyPurchaseExceptions'
+    # Creates an empty governed receipt-evidence register and trigger-only hard stops;
+    # no existing receipt row is updated while applying this migration.
+    Write-Output 'GUARD_COVERAGE|20260812195409_INVREQFU001GovernedReceiptSourceEvidence'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"

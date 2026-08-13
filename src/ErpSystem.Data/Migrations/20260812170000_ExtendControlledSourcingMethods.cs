@@ -44,7 +44,10 @@ public sealed class ExtendControlledSourcingMethods : Migration
             SET @definition = REPLACE(@definition,
                 N'sc.[SelectedMethod] NOT IN (1, 2)',
                 N'sc.[SelectedMethod] NOT IN (1, 2, 7, 8)');
-            SET @definition = REPLACE(@definition, N'CREATE TRIGGER', N'CREATE OR ALTER TRIGGER');
+            DECLARE @triggerOffset int = CHARINDEX(N'TRIGGER', UPPER(@definition));
+            IF @triggerOffset = 0
+                THROW 51109, 'The controlled-tender lifecycle trigger definition is invalid.', 1;
+            SET @definition = N'CREATE OR ALTER ' + SUBSTRING(@definition, @triggerOffset, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """, suppressTransaction: true);
     }
@@ -85,7 +88,10 @@ public sealed class ExtendControlledSourcingMethods : Migration
             SET @definition = REPLACE(@definition,
                 N'sc.[SelectedMethod] NOT IN (1, 2, 7, 8)',
                 N'sc.[SelectedMethod] NOT IN (1, 2)');
-            SET @definition = REPLACE(@definition, N'CREATE TRIGGER', N'CREATE OR ALTER TRIGGER');
+            DECLARE @triggerOffset int = CHARINDEX(N'TRIGGER', UPPER(@definition));
+            IF @triggerOffset = 0
+                THROW 51107, 'The controlled-tender lifecycle trigger definition is invalid.', 1;
+            SET @definition = N'CREATE OR ALTER ' + SUBSTRING(@definition, @triggerOffset, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """, suppressTransaction: true);
     }
