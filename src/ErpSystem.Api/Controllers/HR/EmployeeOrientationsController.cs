@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
@@ -18,6 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// reach their own enrollment — so an open action is not an open record.
 /// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/employee-orientations")]
 [Authorize]
 public class EmployeeOrientationsController : ControllerBase

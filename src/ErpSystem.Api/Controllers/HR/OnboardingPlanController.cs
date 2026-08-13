@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -18,6 +19,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// unpicked. Until then those users reach their tasks through HR.
 /// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/onboarding-plans")]
 [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OnboardingPlanController : ControllerBase

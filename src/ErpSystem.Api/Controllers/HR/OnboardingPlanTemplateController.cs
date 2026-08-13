@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>Onboarding checklist authoring — HR only.</summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/onboarding-plan-templates")]
 [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OnboardingPlanTemplateController : ControllerBase

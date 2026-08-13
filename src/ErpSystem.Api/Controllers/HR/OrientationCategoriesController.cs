@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -9,6 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>Catalogue taxonomy — an administrative lookup, HR only.</summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-categories")]
 [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OrientationCategoriesController : ControllerBase

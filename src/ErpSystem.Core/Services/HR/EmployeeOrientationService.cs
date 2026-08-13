@@ -440,7 +440,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         // Working through the last content item is what finishes a program that has no assessment, so
         // completion has to be re-evaluated here and not only on the assessment path.
         var program = await GetOwnedProgramAsync(enrollment.ProgramId);
-        EvaluateCompletion(enrollment, program, now);
+        await EvaluateCompletionAsync(enrollment, program, now, cancellationToken);
         await _enrollmentRepository.UpdateAsync(enrollment);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -592,7 +592,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
         enrollment.IsPassed = passed;
         enrollment.LastActivityAt = now;
 
-        EvaluateCompletion(enrollment, program, now);
+        await EvaluateCompletionAsync(enrollment, program, now, cancellationToken);
 
         await _enrollmentRepository.UpdateAsync(enrollment);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -672,7 +672,7 @@ public class EmployeeOrientationService : IEmployeeOrientationService
                 // PendingAcknowledgement — for an acknowledgement-only program nothing ever put the
                 // enrollment into that state, so signing used to change nothing at all.
                 var program = await GetOwnedProgramAsync(enrollment.ProgramId);
-                EvaluateCompletion(enrollment, program, now);
+                await EvaluateCompletionAsync(enrollment, program, now, cancellationToken);
 
                 await _enrollmentRepository.UpdateAsync(enrollment);
             }
@@ -902,7 +902,8 @@ public class EmployeeOrientationService : IEmployeeOrientationService
     /// most of them — could never be completed by any route: it sat at <c>InProgress</c> at 100%
     /// progress forever, no certificate, and permanently in the overdue queue.
     /// </summary>
-    private void EvaluateCompletion(EmployeeOrientation enrollment, OrientationProgram program, DateTime now)
+    private async Task EvaluateCompletionAsync(
+        EmployeeOrientation enrollment, OrientationProgram program, DateTime now, CancellationToken cancellationToken)
     {
         if (enrollment.CompletionStatus == OrientationCompletionStatus.Exempted)
             return;
@@ -914,7 +915,16 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             return;
         }
 
-        var contentDone = enrollment.ProgressPercentage >= 100;
+        // A program with no content items has nothing to work through, so the content gate is
+        // satisfied rather than unsatisfiable. Reading this off ProgressPercentage alone got it
+        // wrong twice over: the percentage is only recomputed when content progress is tracked, and
+        // it is deliberately 0 when there is no content — so an assessment-only program sat at 0%
+        // forever and passing the assessment could never complete it.
+        var tenantId = GetTenantId();
+        var contentCount = (await _contentItemRepository.GetByProgramIdAsync(enrollment.ProgramId))
+            .Count(c => c.TenantId == tenantId);
+        var contentDone = contentCount == 0 || enrollment.ProgressPercentage >= 100;
+
         var assessmentDone = !program.RequiresAssessment || (enrollment.AttemptCount > 0 && enrollment.IsPassed);
         var acknowledgementDone = !program.RequiresAcknowledgement || enrollment.AcknowledgementSigned;
 
@@ -934,9 +944,12 @@ public class EmployeeOrientationService : IEmployeeOrientationService
             return;
         }
 
+        // Failed is included so a retake that is under way moves back out of it. Without that the
+        // first failed attempt is terminal and no later pass can clear it.
         if (enrollment.CompletionStatus is OrientationCompletionStatus.NotStarted
             or OrientationCompletionStatus.Completed
-            or OrientationCompletionStatus.PendingAcknowledgement)
+            or OrientationCompletionStatus.PendingAcknowledgement
+            or OrientationCompletionStatus.Failed)
         {
             enrollment.CompletionStatus = OrientationCompletionStatus.InProgress;
         }

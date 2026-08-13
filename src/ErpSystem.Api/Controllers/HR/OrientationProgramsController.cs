@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
@@ -16,6 +17,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// hand them <c>IsCorrect</c> on every option straight from the authoring DTO.
 /// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-programs")]
 [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OrientationProgramsController : ControllerBase

@@ -979,6 +979,12 @@ public class OrientationNotificationRepository : GenericRepository<OrientationNo
     private IQueryable<OrientationNotification> WithSummaryNavigations()
         => _dbSet.Include(n => n.Program);
 
+    public override async Task<OrientationNotification?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
+    }
+
     public async Task<IEnumerable<OrientationNotification>> GetByRecipientAsync(Guid recipientEmployeeId, bool unreadOnly = false)
     {
         return await WithSummaryNavigations()

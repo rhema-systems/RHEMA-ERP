@@ -82,7 +82,11 @@ public class OrientationNotificationService : IOrientationNotificationService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _notificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read for ProgramTitle. The list reads were given the include, but the entity built here
+        // has only the FK, so the notification came back unable to name the programme it is about —
+        // which is most of what an inbox row shows.
+        return (await _notificationRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     public async Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default)

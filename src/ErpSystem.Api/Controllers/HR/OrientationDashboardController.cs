@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
@@ -11,6 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// everyone, so HR only.
 /// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-dashboard")]
 [Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class OrientationDashboardController : ControllerBase

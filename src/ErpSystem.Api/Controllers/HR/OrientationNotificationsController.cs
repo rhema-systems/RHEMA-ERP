@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -12,6 +13,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// names another recipient, or sends, is HR.
 /// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-notifications")]
 [Authorize]
 public class OrientationNotificationsController : ControllerBase

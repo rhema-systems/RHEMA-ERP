@@ -1,3 +1,4 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -15,6 +16,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// and the enrollment lists are gated.
 /// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-sessions")]
 [Authorize]
 public class OrientationSessionsController : ControllerBase
