@@ -15,6 +15,11 @@ function getAuthHeaders(): HeadersInit {
   };
 }
 
+function getMultipartAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function getFriendlyErrorMessage(response: Response): Promise<string> {
   // Try to extract a meaningful error message from the API.
   // Some endpoints return plain text; others return JSON.
@@ -882,6 +887,37 @@ export interface PurchaseOrderReceiptDto {
   purchaseOrderNumber: string;
   supplierName: string; // Maps to BusinessPartner.PartnerName
   items?: PurchaseOrderReceiptItemDto[];
+}
+
+export type ProcurementReceiptSourceEvidenceKind = 1 | 2;
+
+export interface ProcurementReceiptSourceEvidenceDto {
+  id: string;
+  evidenceKind: ProcurementReceiptSourceEvidenceKind;
+  referenceNumber: string;
+  documentDate: string;
+  originalFileName: string;
+  contentType: string;
+  fileSize: number;
+  checksumSha256: string;
+  centralDocumentRecordId: string;
+  centralDocumentVersionId: string;
+  uploadedAtUtc: string;
+  uploadedBy: string;
+  isCurrent: boolean;
+}
+
+export interface ProcurementReceiptSourceEvidenceOverviewDto {
+  receiptId: string;
+  receiptNumber: string;
+  purchaseOrderNumber: string;
+  supplierName: string;
+  waybillRequired: boolean;
+  waybillReady: boolean;
+  inspectionEvidenceLocked: boolean;
+  canUpload: boolean;
+  financeOwnershipNotice: string;
+  evidence: ProcurementReceiptSourceEvidenceDto[];
 }
 
 export interface PurchaseOrderReceiptItemDto {
@@ -2066,6 +2102,45 @@ export const purchasingService = {
     const response = await fetch(`${API_BASE_URL}/ProcurementReceiptDocuments/receipt/${receiptId}`, { headers: getAuthHeaders() });
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
     return response.json();
+  },
+
+  async getReceiptSourceEvidence(receiptId: string): Promise<ProcurementReceiptSourceEvidenceOverviewDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/purchase-order-receipts/${receiptId}/source-evidence`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async uploadReceiptSourceEvidence(receiptId: string, values: {
+    evidenceKind: ProcurementReceiptSourceEvidenceKind;
+    referenceNumber: string;
+    documentDate: string;
+    clientRequestId: string;
+    file: File;
+  }): Promise<ProcurementReceiptSourceEvidenceDto> {
+    const form = new FormData();
+    form.append('evidenceKind', String(values.evidenceKind));
+    form.append('referenceNumber', values.referenceNumber);
+    form.append('documentDate', values.documentDate);
+    form.append('clientRequestId', values.clientRequestId);
+    form.append('file', values.file, values.file.name);
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/purchase-order-receipts/${receiptId}/source-evidence`,
+      { method: 'POST', headers: getMultipartAuthHeaders(), body: form }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.json();
+  },
+
+  async downloadReceiptSourceEvidence(receiptId: string, evidenceId: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/purchase-order-receipts/${receiptId}/source-evidence/${evidenceId}/download`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
+    return response.blob();
   },
 
   async ensureReceiptDocuments(receiptId: string): Promise<ProcurementReceiptDocumentOverviewDto> {

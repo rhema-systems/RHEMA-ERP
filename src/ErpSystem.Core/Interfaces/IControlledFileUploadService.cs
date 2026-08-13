@@ -18,6 +18,9 @@ public static class ControlledFileUploadCategories
     public const string FinanceCloseEvidence =
         "finance-close-evidence";
 
+    public const string ProcurementReceiptSourceEvidence =
+        "procurement-receipt-source-evidence";
+
     public const string QuantitySurveyBoqImport =
         "quantity-survey-boq-import";
 
@@ -82,6 +85,7 @@ public static class ControlledFileUploadCategories
                 SupplierRegistrationEvidence,
                 DocumentManagement,
                 FinanceCloseEvidence,
+                ProcurementReceiptSourceEvidence,
                 QuantitySurveyBoqImport,
                 QuantitySurveyTenderBoqSubmission,
                 QuantitySurveyPriceIndexImport,
