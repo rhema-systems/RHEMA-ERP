@@ -592,6 +592,10 @@ export const navigationItems: NavItem[] = [
         icon: HardHat,
         children: [
           { title: 'Dashboard', href: '/hr/safety/dashboard', icon: LayoutDashboard },
+          // The one safety screen every employee can use: reporting. The register and the rest
+          // answer 403 for non-HR, so without this they have no way in.
+          { title: 'Report an Incident', href: '/hr/safety/report-incident', icon: Megaphone },
+          { title: 'Incidents', href: '/hr/safety/incidents', icon: AlertTriangle },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

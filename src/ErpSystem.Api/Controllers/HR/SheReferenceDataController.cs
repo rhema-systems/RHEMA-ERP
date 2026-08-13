@@ -50,6 +50,28 @@ public class SheReferenceDataController : SheApiControllerBase
         return NoContent();
     }
 
+    // ── Default corrective actions on an incident type (auto-populate onto new incidents) ──
+    [HttpPost("incident-types/{id:guid}/corrective-actions")]
+    public async Task<ActionResult<SheIncidentTypeCorrectiveActionDto>> AddIncidentTypeCorrectiveAction(Guid id, [FromBody] CreateSheIncidentTypeCorrectiveActionDto dto)
+    {
+        dto.IncidentTypeId = id;
+        return Ok(await _service.AddIncidentTypeCorrectiveActionAsync(dto, TenantId, UserId));
+    }
+
+    [HttpPut("incident-types/corrective-actions/{linkId:guid}")]
+    public async Task<ActionResult<SheIncidentTypeCorrectiveActionDto>> UpdateIncidentTypeCorrectiveAction(Guid linkId, [FromBody] UpdateSheIncidentTypeCorrectiveActionDto dto)
+    {
+        if (linkId != dto.Id) return BadRequest("ID mismatch.");
+        return Ok(await _service.UpdateIncidentTypeCorrectiveActionAsync(dto, UserId));
+    }
+
+    [HttpDelete("incident-types/corrective-actions/{linkId:guid}")]
+    public async Task<IActionResult> RemoveIncidentTypeCorrectiveAction(Guid linkId)
+    {
+        await _service.RemoveIncidentTypeCorrectiveActionAsync(linkId);
+        return NoContent();
+    }
+
     // ── Injury types ──
     [HttpGet("injury-types")]
     public async Task<ActionResult<IEnumerable<SheInjuryTypeDto>>> GetInjuryTypes([FromQuery] bool activeOnly = false)

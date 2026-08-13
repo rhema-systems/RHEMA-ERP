@@ -1,6 +1,6 @@
 'use client';
 
-import { LayoutDashboard, Gauge, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Gauge, ListChecks, AlertTriangle, Megaphone } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -32,6 +32,28 @@ export default function SafetyHomePage() {
               description: 'Hand-reported KPI figures per period, with management review.',
               href: '/hr/safety/performance',
               icon: Gauge,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Incidents</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Report an Incident',
+              description:
+                'Open to everyone — accidents, near misses and environmental incidents. No SHE role needed.',
+              href: '/hr/safety/report-incident',
+              icon: Megaphone,
+            },
+            {
+              title: 'Incident Register',
+              description:
+                'Every reported incident: triage, investigation, corrective actions and closure.',
+              href: '/hr/safety/incidents',
+              icon: AlertTriangle,
             },
           ]}
         />

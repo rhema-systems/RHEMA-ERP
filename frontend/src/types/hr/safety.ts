@@ -111,6 +111,21 @@ export interface SheIncidentType extends AuditFields {
   defaultCorrectiveActions: SheIncidentTypeCorrectiveAction[];
 }
 
+export interface SheIncidentTypeCorrectiveActionCreateRequest {
+  incidentTypeId: string;
+  correctiveActionTemplateId: string;
+  displayOrder: number;
+  deadlineDays?: number | null;
+  isMandatory: boolean;
+}
+
+export interface SheIncidentTypeCorrectiveActionUpdateRequest {
+  id: string;
+  displayOrder: number;
+  deadlineDays?: number | null;
+  isMandatory: boolean;
+}
+
 export interface SheIncidentTypeCreateRequest {
   code: string;
   name: string;

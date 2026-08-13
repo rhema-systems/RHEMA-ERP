@@ -3,6 +3,9 @@ import type {
   SheIncidentType,
   SheIncidentTypeCreateRequest,
   SheIncidentTypeUpdateRequest,
+  SheIncidentTypeCorrectiveAction,
+  SheIncidentTypeCorrectiveActionCreateRequest,
+  SheIncidentTypeCorrectiveActionUpdateRequest,
   SheInjuryType,
   SheInjuryTypeCreateRequest,
   SheInjuryTypeUpdateRequest,
@@ -49,6 +52,32 @@ class SafetyReferenceService {
 
   removeIncidentType(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/incident-types/${id}`);
+  }
+
+  /** Attaches a template as a default action — it auto-populates onto every new incident of the
+   * type. Refused with 422 if the template is already attached. */
+  addIncidentTypeCorrectiveAction(
+    incidentTypeId: string,
+    data: SheIncidentTypeCorrectiveActionCreateRequest,
+  ): Promise<SheIncidentTypeCorrectiveAction> {
+    return apiService.post<SheIncidentTypeCorrectiveAction>(
+      `${this.baseUrl}/incident-types/${incidentTypeId}/corrective-actions`,
+      data,
+    );
+  }
+
+  updateIncidentTypeCorrectiveAction(
+    linkId: string,
+    data: SheIncidentTypeCorrectiveActionUpdateRequest,
+  ): Promise<SheIncidentTypeCorrectiveAction> {
+    return apiService.put<SheIncidentTypeCorrectiveAction>(
+      `${this.baseUrl}/incident-types/corrective-actions/${linkId}`,
+      data,
+    );
+  }
+
+  removeIncidentTypeCorrectiveAction(linkId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/incident-types/corrective-actions/${linkId}`);
   }
 
   // ── Injury types ───────────────────────────────────────────────────────────

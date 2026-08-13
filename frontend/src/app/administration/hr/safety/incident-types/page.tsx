@@ -1,8 +1,30 @@
 'use client';
 
+import { useState } from 'react';
 import { z } from 'zod';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceListPanel } from '@/components/hr/common/ResourceListPanel';
@@ -57,6 +79,165 @@ const emptyIncidentType: IncidentTypeForm = {
 };
 
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
+
+/**
+ * Manager for an incident type's default corrective actions — the templates attached here
+ * auto-populate as corrective actions on every new incident of the type (FR-INC-004).
+ */
+function DefaultActionsCard() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [typeId, setTypeId] = useState('');
+  const [templateId, setTemplateId] = useState('');
+  const [deadlineDays, setDeadlineDays] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const { data: types = [] } = useQuery({
+    queryKey: ['hr', 'safety-reference', 'incident-types'],
+    queryFn: () => safetyReferenceService.getIncidentTypes(),
+  });
+  const { data: templates = [] } = useQuery({
+    queryKey: ['hr', 'safety-reference', 'corrective-action-templates', 'active'],
+    queryFn: () => safetyReferenceService.getCorrectiveActionTemplates(true),
+  });
+  const { data: selectedType } = useQuery({
+    queryKey: ['hr', 'safety-reference', 'incident-types', 'detail', typeId],
+    queryFn: () => safetyReferenceService.getIncidentType(typeId),
+    enabled: !!typeId,
+  });
+
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: ['hr', 'safety-reference', 'incident-types'] });
+
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await fn();
+      await refresh();
+      toast({ title: label });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error?.message || `${label} failed.`, variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Default corrective actions</CardTitle>
+        <CardDescription>
+          Templates attached to an incident type auto-populate as corrective actions on every new
+          incident of that type. The deadline runs in days from the incident date.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-56 space-y-2">
+            <Label>Incident type</Label>
+            <Select value={typeId} onValueChange={setTypeId}>
+              <SelectTrigger><SelectValue placeholder="Choose a type" /></SelectTrigger>
+              <SelectContent>
+                {types.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-56 space-y-2">
+            <Label>Template</Label>
+            <Select value={templateId} onValueChange={setTemplateId}>
+              <SelectTrigger><SelectValue placeholder="Choose a template" /></SelectTrigger>
+              <SelectContent>
+                {templates.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{`${t.code} — ${t.title}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-40 space-y-2">
+            <Label htmlFor="deadline-days">Deadline (days)</Label>
+            <Input
+              id="deadline-days"
+              type="number"
+              min={1}
+              value={deadlineDays}
+              onChange={(e) => setDeadlineDays(e.target.value)}
+              placeholder="Template default"
+            />
+          </div>
+          <Button
+            disabled={busy || !typeId || !templateId}
+            onClick={() =>
+              run('Default action attached', async () => {
+                await safetyReferenceService.addIncidentTypeCorrectiveAction(typeId, {
+                  incidentTypeId: typeId,
+                  correctiveActionTemplateId: templateId,
+                  displayOrder: (selectedType?.defaultCorrectiveActions.length ?? 0) + 1,
+                  deadlineDays: deadlineDays ? Number(deadlineDays) : null,
+                  isMandatory: true,
+                });
+                setTemplateId('');
+                setDeadlineDays('');
+              })
+            }
+          >
+            Attach
+          </Button>
+        </div>
+
+        {typeId && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>Template</TableHead>
+                <TableHead>Deadline</TableHead>
+                <TableHead className="w-16" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(selectedType?.defaultCorrectiveActions ?? []).length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-muted-foreground text-center text-sm">
+                    No default actions on this type yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                selectedType?.defaultCorrectiveActions.map((l) => (
+                  <TableRow key={l.id}>
+                    <TableCell>{l.displayOrder}</TableCell>
+                    <TableCell>
+                      <span className="font-mono">{l.correctiveActionTemplateCode}</span>{' '}
+                      {l.correctiveActionTemplateTitle}
+                    </TableCell>
+                    <TableCell>
+                      {l.deadlineDays ? `${l.deadlineDays} days from incident` : 'Template default'}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        disabled={busy}
+                        onClick={() =>
+                          run('Default action removed', () =>
+                            safetyReferenceService.removeIncidentTypeCorrectiveAction(l.id),
+                          )
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SafetyIncidentTypesPage() {
   const { data: regulatoryBodies = [] } = useQuery({
@@ -211,6 +392,8 @@ export default function SafetyIncidentTypesPage() {
           );
         }}
       />
+
+      <DefaultActionsCard />
     </div>
   );
 }
