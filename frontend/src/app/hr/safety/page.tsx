@@ -10,6 +10,7 @@ import {
   FileWarning,
   ClipboardList,
   ClipboardCheck,
+  FileCheck,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -100,6 +101,13 @@ export default function SafetyHomePage() {
                 'Scheduled and completed inspections — findings, discovered hazards and guarded close-out.',
               href: '/hr/safety/inspections',
               icon: ClipboardCheck,
+            },
+            {
+              title: 'Permits to Work',
+              description:
+                'Authorisation for hazardous work — approval gated on hazards, controls and gas testing.',
+              href: '/hr/safety/permits',
+              icon: FileCheck,
             },
           ]}
         />

@@ -26,7 +26,6 @@ public interface IShePermitToWorkRepository : IGenericRepository<ShePermitToWork
     Task<IEnumerable<ShePermitToWork>> GetExpiringAsync(int daysAhead = 1);
 
     Task<IEnumerable<ShePermitToWork>> GetSuspendedAsync();
-    Task<string> GetNextPermitNumberAsync();
 }
 
 // ============================================================================

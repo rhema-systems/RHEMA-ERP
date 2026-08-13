@@ -601,6 +601,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Hazards', href: '/hr/safety/hazards', icon: ShieldAlert },
           { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList },
           { title: 'Inspections', href: '/hr/safety/inspections', icon: ClipboardCheck },
+          { title: 'Permits to Work', href: '/hr/safety/permits', icon: FileCheck },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

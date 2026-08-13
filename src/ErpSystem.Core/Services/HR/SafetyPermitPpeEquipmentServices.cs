@@ -81,16 +81,22 @@ public class ShePermitToWorkService : IShePermitToWorkService
     {
         var year = DateTime.UtcNow.Year;
         var prefix = $"PTW-{year}-";
-        var last = await _permitRepository.GetQueryable()
-            .Where(p => p.TenantId == tenantId && p.PermitNumber.StartsWith(prefix))
-            .OrderByDescending(p => p.PermitNumber)
-            .Select(p => p.PermitNumber)
-            .FirstOrDefaultAsync(cancellationToken);
 
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
+        // Numeric max, not string ordering: the seeder wrote 3-digit suffixes while this generator
+        // emits 4-digit ones, and across mixed widths string ordering picks the wrong "latest"
+        // ("002" sorts above "0003"), silently re-issuing taken numbers. Soft-deleted permits keep
+        // their number, so they count toward the max too.
+        var numbers = await _permitRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.PermitNumber.StartsWith(prefix))
+            .Select(p => p.PermitNumber)
+            .ToListAsync(cancellationToken);
+
+        var max = numbers
+            .Select(n => int.TryParse(n[prefix.Length..], out var v) ? v : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{max + 1:D4}";
     }
 
     public async Task<ShePermitToWorkDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -165,7 +171,9 @@ public class ShePermitToWorkService : IShePermitToWorkService
         await _permitRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Permit-to-work created: {PermitNumber}", entity.PermitNumber);
-        return entity.ToDto();
+        // Write responses re-read through the include-bearing path — the tracked entity's navs
+        // (location, requestor, contractor) are unloaded and would map blank.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<ShePermitToWorkDto> UpdateAsync(UpdateShePermitToWorkDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -177,7 +185,7 @@ public class ShePermitToWorkService : IShePermitToWorkService
         entity.UpdateEntity(dto, userId);
         await _permitRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -193,6 +201,17 @@ public class ShePermitToWorkService : IShePermitToWorkService
         var entity = await GetOwnedPermitAsync(dto.PermitId);
         if (entity.Status is not (ShePermitStatus.Draft or ShePermitStatus.PendingApproval))
             throw new InvalidOperationException("Only draft or pending permits can be approved.");
+
+        // FR-PTW-002 — approval is blocked until the mandatory safety sections are complete. Gas
+        // testing is mandatory only where an atmosphere can kill: hot work and confined spaces.
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(entity.HazardsIdentified)) missing.Add("hazards identified");
+        if (string.IsNullOrWhiteSpace(entity.ControlMeasures)) missing.Add("control measures");
+        if (entity.PermitType is ShePermitType.HotWork or ShePermitType.ConfinedSpaceEntry
+            && string.IsNullOrWhiteSpace(entity.GasTestResults))
+            missing.Add("gas test results");
+        if (missing.Count > 0)
+            throw new InvalidOperationException($"Permit cannot be approved until mandatory fields are completed: {string.Join(", ", missing)}.");
 
         entity.ApprovedById = dto.ApprovedById;
         entity.ApprovedDate = dto.ApprovedDate;
@@ -243,6 +262,11 @@ public class ShePermitToWorkService : IShePermitToWorkService
     {
         var entity = await GetOwnedPermitAsync(dto.PermitId);
 
+        // Only work that was authorised to start can be closed out — a draft is deleted, not
+        // closed, and a completed/cancelled permit does not close twice.
+        if (entity.Status is not (ShePermitStatus.Active or ShePermitStatus.Suspended))
+            throw new InvalidOperationException("Only an active or suspended permit can be closed.");
+
         entity.Status = ShePermitStatus.Completed;
         entity.ClosedById = dto.ClosedById;
         entity.ClosedDate = dto.ClosedDate;
@@ -290,7 +314,15 @@ public class ShePermitToWorkService : IShePermitToWorkService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var permit = await GetOwnedPermitAsync(dto.PermitToWorkId);
+
+        // An extension prolongs live authorisation — nothing else has a window to extend.
+        if (permit.Status != ShePermitStatus.Active)
+            throw new InvalidOperationException("Only an active permit can be extended.");
+
         var entity = dto.ToEntity(tenantId, userId);
+        // Numbered server-side in sequence; the client does not control it.
+        entity.ExtensionNumber = await _unitOfWork.Repository<ShePermitToWorkExtension>().GetQueryable()
+            .CountAsync(x => x.PermitToWorkId == permit.Id && !x.IsDeleted, cancellationToken) + 1;
         await _unitOfWork.Repository<ShePermitToWorkExtension>().AddAsync(entity);
 
         permit.PlannedEndDate = dto.NewEndDate;
@@ -298,7 +330,9 @@ public class ShePermitToWorkService : IShePermitToWorkService
         await _permitRepository.UpdateAsync(permit);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Re-read for the approver name — the tracked entity's nav is unloaded and maps blank.
+        var full = await GetByIdAsync(permit.Id, cancellationToken);
+        return full.Extensions.First(x => x.Id == entity.Id);
     }
 
     public async Task<ShePermitToWorkDocumentDto> AddDocumentAsync(CreateShePermitToWorkDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -308,7 +342,9 @@ public class ShePermitToWorkService : IShePermitToWorkService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<ShePermitToWorkDocument>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Re-read for the uploader name — the tracked entity's nav is unloaded and maps blank.
+        var full = await GetByIdAsync(dto.PermitToWorkId, cancellationToken);
+        return full.Documents.First(d => d.Id == entity.Id);
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)

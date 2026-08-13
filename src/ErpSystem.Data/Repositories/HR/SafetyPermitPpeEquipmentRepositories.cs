@@ -34,6 +34,7 @@ public class ShePermitToWorkRepository : GenericRepository<ShePermitToWork>, ISh
             .Include(p => p.AuthorisedWorkers).ThenInclude(w => w.Employee)
             .Include(p => p.Extensions).ThenInclude(x => x.ApprovedBy)
             .Include(p => p.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<ShePermitToWork>> GetAllSummaryAsync() =>
@@ -73,22 +74,6 @@ public class ShePermitToWorkRepository : GenericRepository<ShePermitToWork>, ISh
     public async Task<IEnumerable<ShePermitToWork>> GetSuspendedAsync() =>
         await WithListNavigations().Where(p => p.IsSuspended && !p.IsDeleted)
             .OrderByDescending(p => p.SuspendedDate).ToListAsync();
-
-    public async Task<string> GetNextPermitNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"PTW-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(p => p.PermitNumber.StartsWith(prefix))
-            .OrderByDescending(p => p.PermitNumber)
-            .Select(p => p.PermitNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 #endregion

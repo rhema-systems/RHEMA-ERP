@@ -281,7 +281,8 @@ public enum ShePermitType
     ChemicalHandling = 6,
     CriticalLift = 7,
     Demolition = 8,
-    General = 9
+    General = 9,
+    RoadClosure = 10 // FRD §6.2 — the one spec permit type the port lacked
 }
 
 public enum ShePermitStatus
