@@ -1,6 +1,13 @@
 'use client';
 
-import { AlertTriangle, Bandage, PersonStanding, ClipboardList, Landmark } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bandage,
+  PersonStanding,
+  ClipboardList,
+  Landmark,
+  ClipboardCheck,
+} from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -48,6 +55,12 @@ export default function SafetyAdminHomePage() {
             description: 'EPA, GNFS, Labour Department and the rest — who reportable incidents go to.',
             href: '/administration/hr/safety/regulatory-bodies',
             icon: Landmark,
+          },
+          {
+            title: 'Inspection Checklists',
+            description: 'The reusable checklist templates inspections are conducted against.',
+            href: '/administration/hr/safety/checklists',
+            icon: ClipboardCheck,
           },
         ]}
       />

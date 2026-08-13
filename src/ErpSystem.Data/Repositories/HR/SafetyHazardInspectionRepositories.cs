@@ -147,22 +147,6 @@ public class SheRiskAssessmentRepository : GenericRepository<SheRiskAssessment>,
             .Where(r => !r.IsDeleted
                      && (r.Status == SheRiskAssessmentStatus.Approved || r.Status == SheRiskAssessmentStatus.Active))
             .OrderByDescending(r => r.PreparedDate).ToListAsync();
-
-    public async Task<string> GetNextAssessmentNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"RA-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(r => r.AssessmentNumber.StartsWith(prefix))
-            .OrderByDescending(r => r.AssessmentNumber)
-            .Select(r => r.AssessmentNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 #endregion
@@ -196,8 +180,13 @@ public class SafetyInspectionRepository : GenericRepository<SafetyInspection>, I
 {
     public SafetyInspectionRepository(ApplicationDbContext context) : base(context) { }
 
+    // Items ride along because every summary row reports an OpenItemCount — without the include
+    // (and no lazy loading anywhere in this app) the count reads 0 on every list. Split query
+    // keeps the wide finding text columns out of a single cartesian row.
     private IQueryable<SafetyInspection> WithListNavigations() =>
-        _dbSet.Include(i => i.Location).Include(i => i.OrganizationUnit).Include(i => i.Inspector);
+        _dbSet.Include(i => i.Location).Include(i => i.OrganizationUnit).Include(i => i.Inspector)
+            .Include(i => i.Items)
+            .AsSplitQuery();
 
     public async Task<SafetyInspection?> GetByNumberAsync(string inspectionNumber) =>
         await WithListNavigations().FirstOrDefaultAsync(i => i.InspectionNumber == inspectionNumber && !i.IsDeleted);
@@ -210,8 +199,12 @@ public class SafetyInspectionRepository : GenericRepository<SafetyInspection>, I
             .Include(i => i.Inspector)
             .Include(i => i.ClosedBy)
             .Include(i => i.Items).ThenInclude(t => t.ResponsiblePerson)
+            .Include(i => i.Items).ThenInclude(t => t.ResolvedBy)
+            .Include(i => i.Hazards).ThenInclude(h => h.Owner)
             .Include(i => i.Hazards).ThenInclude(h => h.Actions).ThenInclude(a => a.CorrectiveActionTemplate)
+            .Include(i => i.Hazards).ThenInclude(h => h.Actions).ThenInclude(a => a.AssignedTo)
             .Include(i => i.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
 
     public async Task<IEnumerable<SafetyInspection>> GetAllSummaryAsync() =>

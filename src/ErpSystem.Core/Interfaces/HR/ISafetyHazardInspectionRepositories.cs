@@ -49,8 +49,6 @@ public interface ISheRiskAssessmentRepository : IGenericRepository<SheRiskAssess
 
     /// <summary>Returns approved/active assessments (with their acknowledgements loaded) for employee sign-off.</summary>
     Task<IEnumerable<SheRiskAssessment>> GetActiveForAcknowledgementAsync();
-
-    Task<string> GetNextAssessmentNumberAsync();
 }
 
 // ============================================================================
@@ -83,6 +81,4 @@ public interface ISafetyInspectionRepository : IGenericRepository<SafetyInspecti
 
     /// <summary>Returns inspections that are still open and have unresolved items.</summary>
     Task<IEnumerable<SafetyInspection>> GetOpenWithFindingsAsync();
-
-    Task<string> GetNextInspectionNumberAsync();
 }

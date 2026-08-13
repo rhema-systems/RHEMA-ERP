@@ -9,6 +9,7 @@ import {
   ShieldAlert,
   FileWarning,
   ClipboardList,
+  ClipboardCheck,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -92,6 +93,13 @@ export default function SafetyHomePage() {
                 'Formal HIRA/JHA/pre-task assessments — hazard lines, approval and workforce sign-off.',
               href: '/hr/safety/risk-assessments',
               icon: ClipboardList,
+            },
+            {
+              title: 'Inspections',
+              description:
+                'Scheduled and completed inspections — findings, discovered hazards and guarded close-out.',
+              href: '/hr/safety/inspections',
+              icon: ClipboardCheck,
             },
           ]}
         />
