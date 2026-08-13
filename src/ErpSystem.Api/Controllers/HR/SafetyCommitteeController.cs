@@ -1,6 +1,8 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,7 +10,8 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/safety/committees")]
-[Authorize]
+[SafetyBusinessRules]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
 public class SafetyCommitteeController : SheApiControllerBase
 {
     private readonly ISafetyCommitteeService _service;

@@ -469,6 +469,12 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedAssessmentAsync(dto.RiskAssessmentId);
 
+        // The endpoint is open to every employee; without this guard a repeat sign quietly stacks duplicate rows.
+        var alreadySigned = await _unitOfWork.Repository<SheRiskAssessmentAcknowledgement>().GetQueryable()
+            .AnyAsync(a => a.RiskAssessmentId == dto.RiskAssessmentId && a.EmployeeId == dto.EmployeeId && !a.IsDeleted, cancellationToken);
+        if (alreadySigned)
+            throw new InvalidOperationException("This risk assessment has already been acknowledged by this employee.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheRiskAssessmentAcknowledgement>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
