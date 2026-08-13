@@ -78,6 +78,9 @@ import {
   Swords,
   BookTemplate,
   Landmark,
+  HardHat,
+  Bandage,
+  PersonStanding,
   GitBranch,
   Search,
   ArrowRightLeft,
@@ -579,6 +582,18 @@ export const navigationItems: NavItem[] = [
         title: 'Service Bonds',
         href: '/hr/service-bonds',
         icon: HandCoins,
+      },
+      {
+        // Slice 1 of area 10: the live dashboard and the hand-reported KPI snapshots. Each later
+        // slice adds its register here in lifecycle order (incidents, hazards, inspections,
+        // permits, PPE, …). Reference data lives under Administration → HR → Safety.
+        title: 'Safety (SHE)',
+        href: '/hr/safety',
+        icon: HardHat,
+        children: [
+          { title: 'Dashboard', href: '/hr/safety/dashboard', icon: LayoutDashboard },
+          { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
+        ],
       },
     ],
   },
@@ -1427,6 +1442,38 @@ export const navigationItems: NavItem[] = [
                 title: 'Onboarding Templates',
                 href: '/administration/hr/orientation/onboarding-templates',
                 icon: FileStack,
+              },
+            ],
+          },
+          {
+            title: 'Safety (SHE)',
+            href: '/administration/hr/safety',
+            icon: HardHat,
+            children: [
+              {
+                title: 'Incident Types',
+                href: '/administration/hr/safety/incident-types',
+                icon: AlertTriangle,
+              },
+              {
+                title: 'Injury Types',
+                href: '/administration/hr/safety/injury-types',
+                icon: Bandage,
+              },
+              {
+                title: 'Body Parts',
+                href: '/administration/hr/safety/body-parts',
+                icon: PersonStanding,
+              },
+              {
+                title: 'CA Templates',
+                href: '/administration/hr/safety/corrective-action-templates',
+                icon: ClipboardList,
+              },
+              {
+                title: 'Regulatory Bodies',
+                href: '/administration/hr/safety/regulatory-bodies',
+                icon: Landmark,
               },
             ],
           },

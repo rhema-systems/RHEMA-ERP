@@ -714,19 +714,52 @@ public class ShePerformanceService : IShePerformanceService
     public async Task<ShePerformanceSnapshotDto?> GetLatestAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _snapshotRepository.GetLatestAsync();
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
+        var entity = await _snapshotRepository.GetLatestAsync(tenantId);
+        return entity?.ToDto();
     }
 
     public async Task<ShePerformanceSnapshotDto> CreateAsync(CreateShePerformanceSnapshotDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Snapshot numbers are user-entered, and GetByNumberAsync resolves by number — a duplicate
+        // would make that lookup (and the screens built on it) answer with an arbitrary row.
+        var sameNumber = await _snapshotRepository.GetByNumberAsync(dto.SnapshotNumber);
+        if (sameNumber != null && sameNumber.TenantId == tenantId)
+            throw new InvalidOperationException($"A performance snapshot with number '{dto.SnapshotNumber}' already exists.");
+
+        // One snapshot per period+location: a second row for the same period would silently fork the
+        // reported figures (these are hand-reported, not computed — see slice 14).
+        var samePeriod = await _snapshotRepository.GetByPeriodAsync(dto.PeriodType, dto.Year, dto.PeriodNumber, dto.LocationId);
+        if (samePeriod != null && samePeriod.TenantId == tenantId)
+            throw new InvalidOperationException(
+                $"A performance snapshot for {dto.PeriodType} {dto.Year}{(dto.PeriodNumber is int p ? $" period {p}" : "")} already exists ('{samePeriod.SnapshotNumber}').");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _snapshotRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the include-bearing path: the tracked entity's PreparedBy/Location navs
+        // are unloaded here, and mapping them straight to the DTO returns blank names.
+        return await GetByIdAsync(entity.Id, cancellationToken);
+    }
+
+    public async Task<ShePerformanceSnapshotDto> UpdateAsync(UpdateShePerformanceSnapshotDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedSnapshotAsync(dto.Id);
+
+        // A reviewed snapshot is the record management signed off on — corrections after that
+        // point would silently invalidate the review.
+        if (entity.ReviewedById != null)
+            throw new InvalidOperationException(
+                $"Snapshot '{entity.SnapshotNumber}' has already been reviewed and is locked. Delete and re-enter it if the figures are wrong.");
+
+        entity.UpdateEntity(dto, userId);
+        await _snapshotRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Same nav-loading reasoning as CreateAsync.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> ReviewAsync(ReviewShePerformanceSnapshotDto dto, Guid userId, CancellationToken cancellationToken = default)

@@ -46,6 +46,14 @@ public class ShePerformanceController : SheApiControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    /// <summary>Corrects the reported figures. Refused with 422 once the snapshot is reviewed.</summary>
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<ShePerformanceSnapshotDto>> Update(Guid id, [FromBody] UpdateShePerformanceSnapshotDto dto)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        return Ok(await _service.UpdateAsync(dto, UserId));
+    }
+
     [HttpPost("{id:guid}/review")]
     public async Task<IActionResult> Review(Guid id, [FromBody] ReviewShePerformanceSnapshotDto dto)
     {

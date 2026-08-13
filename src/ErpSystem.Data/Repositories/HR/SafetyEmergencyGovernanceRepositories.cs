@@ -220,9 +220,9 @@ public class ShePerformanceSnapshotRepository : GenericRepository<ShePerformance
             .Where(s => s.LocationId == locationId && !s.IsDeleted)
             .OrderByDescending(s => s.Year).ThenByDescending(s => s.PeriodNumber).ToListAsync();
 
-    public async Task<ShePerformanceSnapshot?> GetLatestAsync() =>
+    public async Task<ShePerformanceSnapshot?> GetLatestAsync(Guid tenantId) =>
         await _dbSet.Include(s => s.Location).Include(s => s.PreparedBy)
-            .Where(s => !s.IsDeleted)
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted)
             .OrderByDescending(s => s.PreparedDate).FirstOrDefaultAsync();
 }
 
