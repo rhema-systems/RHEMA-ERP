@@ -20,6 +20,9 @@ public class EmergencyPlanRepository : GenericRepository<EmergencyPlan>, IEmerge
         await _dbSet.Include(p => p.Location).Include(p => p.PlanOwner)
             .FirstOrDefaultAsync(p => p.PlanNumber == planNumber && !p.IsDeleted);
 
+    // AsSplitQuery: four collection includes is the 8060-byte single-query shape that 500'd
+    // incident detail reads once children existed. Drill Location/Department are included
+    // because the drill mapper reads them — blank names otherwise.
     public async Task<EmergencyPlan?> GetWithFullDetailsAsync(Guid id) =>
         await _dbSet
             .Include(p => p.Location)
@@ -27,7 +30,10 @@ public class EmergencyPlanRepository : GenericRepository<EmergencyPlan>, IEmerge
             .Include(p => p.AssemblyPoints).ThenInclude(a => a.Location)
             .Include(p => p.EmergencyContacts)
             .Include(p => p.Drills).ThenInclude(d => d.Coordinator)
+            .Include(p => p.Drills).ThenInclude(d => d.Location)
+            .Include(p => p.Drills).ThenInclude(d => d.Department)
             .Include(p => p.TeamMembers).ThenInclude(t => t.Employee)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<EmergencyPlan>> GetAllSummaryAsync() =>
@@ -55,17 +61,22 @@ public class EmergencyDrillRepository : GenericRepository<EmergencyDrill>, IEmer
 {
     public EmergencyDrillRepository(ApplicationDbContext context) : base(context) { }
 
+    // Location and Department are included because the drill mapper reads them — without
+    // them every list read mapped blank location/department names.
+    private IQueryable<EmergencyDrill> WithNavigations() =>
+        _dbSet.Include(d => d.Coordinator).Include(d => d.Location).Include(d => d.Department);
+
     public async Task<EmergencyDrill?> GetByNumberAsync(string drillNumber) =>
-        await _dbSet.Include(d => d.Coordinator)
+        await WithNavigations()
             .FirstOrDefaultAsync(d => d.DrillNumber == drillNumber && !d.IsDeleted);
 
     public async Task<IEnumerable<EmergencyDrill>> GetByPlanIdAsync(Guid planId) =>
-        await _dbSet.Include(d => d.Coordinator)
+        await WithNavigations()
             .Where(d => d.EmergencyPlanId == planId && !d.IsDeleted)
             .OrderByDescending(d => d.DrillDate).ToListAsync();
 
     public async Task<IEnumerable<EmergencyDrill>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate) =>
-        await _dbSet.Include(d => d.Coordinator)
+        await WithNavigations()
             .Where(d => d.DrillDate >= fromDate && d.DrillDate <= toDate && !d.IsDeleted)
             .OrderByDescending(d => d.DrillDate).ToListAsync();
 
@@ -73,7 +84,7 @@ public class EmergencyDrillRepository : GenericRepository<EmergencyDrill>, IEmer
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet.Include(d => d.Coordinator)
+        return await WithNavigations()
             .Where(d => !d.IsDeleted && d.NextDrillScheduledDate != null
                      && d.NextDrillScheduledDate >= now && d.NextDrillScheduledDate <= cutoff)
             .OrderBy(d => d.NextDrillScheduledDate).ToListAsync();

@@ -92,7 +92,6 @@ public interface ISafetyEquipmentRepository : IGenericRepository<SafetyEquipment
     Task<IEnumerable<SafetyEquipment>> GetExpiringCertificationAsync(int daysAhead = 30);
 
     Task<IEnumerable<SafetyEquipment>> GetOutOfServiceAsync();
-    Task<string> GetNextEquipmentNumberAsync();
 }
 
 public interface ISafetyEquipmentInspectionRepository : IGenericRepository<SafetyEquipmentInspection>

@@ -1,9 +1,11 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -59,9 +61,11 @@ public class SheEmergencyService : ISheEmergencyService
         return current;
     }
 
+    // Owned-loads carry the navigations the mappers read, so single reads and write responses
+    // resolve names instead of mapping blanks.
     private async Task<EmergencyPlan> GetOwnedPlanAsync(Guid id)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
+        var entity = await _planRepository.GetByIdAsync(id, p => p.PlanOwner, p => p.Location!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Emergency plan with ID '{id}' not found.");
         return entity;
@@ -69,7 +73,7 @@ public class SheEmergencyService : ISheEmergencyService
 
     private async Task<SheAssemblyPoint> GetOwnedAssemblyPointAsync(Guid id)
     {
-        var entity = await _unitOfWork.Repository<SheAssemblyPoint>().GetByIdAsync(id);
+        var entity = await _unitOfWork.Repository<SheAssemblyPoint>().GetByIdAsync(id, a => a.Location!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Assembly point with ID '{id}' not found.");
         return entity;
@@ -85,7 +89,7 @@ public class SheEmergencyService : ISheEmergencyService
 
     private async Task<EmergencyDrill> GetOwnedDrillAsync(Guid id)
     {
-        var entity = await _drillRepository.GetByIdAsync(id);
+        var entity = await _drillRepository.GetByIdAsync(id, d => d.Coordinator, d => d.Location!, d => d.Department!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Emergency drill with ID '{id}' not found.");
         return entity;
@@ -93,10 +97,37 @@ public class SheEmergencyService : ISheEmergencyService
 
     private async Task<EmergencyResponseTeam> GetOwnedTeamMemberAsync(Guid id)
     {
-        var entity = await _teamRepository.GetByIdAsync(id);
+        var entity = await _teamRepository.GetByIdAsync(id, t => t.Employee, t => t.EmergencyPlan);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Emergency response team member with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>Guards the body-supplied FKs — without these a bad id surfaces as an SQL 547 /
+    /// HTTP 500 instead of a 404, and a child could be attached to another tenant's plan. The
+    /// guarded loads double as change-tracker fixup, so write responses resolve names.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task GuardOptionalReferencesAsync(Guid? locationId, Guid? departmentId = null)
+    {
+        if (locationId.HasValue)
+        {
+            var location = await _unitOfWork.Repository<Location>().GetByIdAsync(locationId.Value);
+            if (location == null || location.TenantId != GetTenantId())
+                throw new ArgumentException($"Location with ID '{locationId.Value}' not found.");
+        }
+        if (departmentId.HasValue)
+        {
+            var department = await _unitOfWork.Repository<Department>().GetByIdAsync(departmentId.Value);
+            if (department == null || department.TenantId != GetTenantId())
+                throw new ArgumentException($"Department with ID '{departmentId.Value}' not found.");
+        }
     }
 
     public async Task<EmergencyPlanDto> GetPlanAsync(Guid id, CancellationToken cancellationToken = default)
@@ -152,6 +183,14 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyPlanDto> CreatePlanAsync(CreateEmergencyPlanDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        var planNumber = dto.PlanNumber.Trim();
+        var exists = await _planRepository.GetQueryable()
+            .AnyAsync(p => p.TenantId == tenantId && p.PlanNumber == planNumber, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"An emergency plan with number '{planNumber}' already exists for this tenant.");
+        await GetOwnedEmployeeAsync(dto.PlanOwnerId);
+        await GuardOptionalReferencesAsync(dto.LocationId);
+
         var entity = dto.ToEntity(tenantId, userId);
         await _planRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -161,6 +200,8 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyPlanDto> UpdatePlanAsync(UpdateEmergencyPlanDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(dto.Id);
+        await GetOwnedEmployeeAsync(dto.PlanOwnerId);
+        await GuardOptionalReferencesAsync(dto.LocationId);
         entity.UpdateEntity(dto, userId);
         await _planRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -179,6 +220,8 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<SheAssemblyPointDto> AddAssemblyPointAsync(CreateSheAssemblyPointDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        await GuardOptionalReferencesAsync(dto.LocationId);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheAssemblyPoint>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -188,6 +231,7 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<SheAssemblyPointDto> UpdateAssemblyPointAsync(UpdateSheAssemblyPointDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAssemblyPointAsync(dto.Id);
+        await GuardOptionalReferencesAsync(dto.LocationId);
         entity.UpdateEntity(dto, userId);
         await _unitOfWork.Repository<SheAssemblyPoint>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -206,6 +250,7 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyContactDto> AddContactAsync(CreateEmergencyContactDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<EmergencyContact>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -249,6 +294,15 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyDrillDto> AddDrillAsync(CreateEmergencyDrillDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        var drillNumber = dto.DrillNumber.Trim();
+        var exists = await _drillRepository.GetQueryable()
+            .AnyAsync(d => d.TenantId == tenantId && d.DrillNumber == drillNumber, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"A drill with number '{drillNumber}' already exists for this tenant.");
+        await GetOwnedEmployeeAsync(dto.CoordinatorId);
+        await GuardOptionalReferencesAsync(dto.LocationId, dto.DepartmentId);
+
         var entity = dto.ToEntity(tenantId, userId);
         await _drillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -258,6 +312,8 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyDrillDto> UpdateDrillAsync(UpdateEmergencyDrillDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedDrillAsync(dto.Id);
+        await GetOwnedEmployeeAsync(dto.CoordinatorId);
+        await GuardOptionalReferencesAsync(dto.LocationId, dto.DepartmentId);
         entity.UpdateEntity(dto, userId);
         await _drillRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -276,6 +332,15 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyResponseTeamDto> AddTeamMemberAsync(CreateEmergencyResponseTeamDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        // Deleted rows don't block: removing someone from the team and re-adding them is normal.
+        var exists = await _teamRepository.GetQueryable()
+            .AnyAsync(t => t.TenantId == tenantId && t.EmergencyPlanId == dto.EmergencyPlanId
+                        && t.EmployeeId == dto.EmployeeId && !t.IsDeleted, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException("This employee is already on the response team for this plan.");
+
         var entity = dto.ToEntity(tenantId, userId);
         await _teamRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

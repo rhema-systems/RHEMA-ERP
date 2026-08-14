@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Building2,
+  FireExtinguisher,
+  Siren,
   LayoutDashboard,
   Users,
   ShoppingCart,
@@ -606,6 +608,8 @@ export const navigationItems: NavItem[] = [
           { title: 'My PPE', href: '/hr/safety/my-ppe', icon: HardHat },
           { title: 'PPE Stock', href: '/hr/safety/ppe', icon: Package },
           { title: 'PPE Issuance', href: '/hr/safety/ppe/issuances', icon: Users },
+          { title: 'Safety Equipment', href: '/hr/safety/equipment', icon: FireExtinguisher },
+          { title: 'Emergency Plans', href: '/hr/safety/emergency', icon: Siren },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

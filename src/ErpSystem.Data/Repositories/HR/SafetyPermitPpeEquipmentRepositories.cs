@@ -175,6 +175,9 @@ public class SafetyEquipmentRepository : GenericRepository<SafetyEquipment>, ISa
     public async Task<SafetyEquipment?> GetByNumberAsync(string equipmentNumber) =>
         await WithListNavigations().FirstOrDefaultAsync(e => e.EquipmentNumber == equipmentNumber && !e.IsDeleted);
 
+    // AsSplitQuery: the multi-collection include set is the 8060-byte single-query shape that
+    // 500'd incident detail reads once children existed. AssignedTo is included because the
+    // action mapper reads it — without it every action's assignee name is blank on detail reads.
     public async Task<SafetyEquipment?> GetWithFullDetailsAsync(Guid id) =>
         await _dbSet
             .Include(e => e.Location)
@@ -182,7 +185,9 @@ public class SafetyEquipmentRepository : GenericRepository<SafetyEquipment>, ISa
             .Include(e => e.ResponsiblePerson)
             .Include(e => e.Inspections).ThenInclude(i => i.InspectedBy)
             .Include(e => e.Inspections).ThenInclude(i => i.InspectionActions).ThenInclude(a => a.CorrectiveActionTemplate)
+            .Include(e => e.Inspections).ThenInclude(i => i.InspectionActions).ThenInclude(a => a.AssignedTo)
             .Include(e => e.MaintenanceRecords)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
 
     public async Task<IEnumerable<SafetyEquipment>> GetAllSummaryAsync() =>
@@ -232,21 +237,6 @@ public class SafetyEquipmentRepository : GenericRepository<SafetyEquipment>, ISa
             .Where(e => !e.IsDeleted && e.Status == SheSafetyEquipmentStatus.OutOfService)
             .OrderBy(e => e.Name).ToListAsync();
 
-    public async Task<string> GetNextEquipmentNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"SEQ-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(e => e.EquipmentNumber.StartsWith(prefix))
-            .OrderByDescending(e => e.EquipmentNumber)
-            .Select(e => e.EquipmentNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 public class SafetyEquipmentInspectionRepository : GenericRepository<SafetyEquipmentInspection>, ISafetyEquipmentInspectionRepository

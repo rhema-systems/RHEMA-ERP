@@ -14,6 +14,8 @@ import {
   HardHat,
   Package,
   Users,
+  FireExtinguisher,
+  Siren,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -139,6 +141,30 @@ export default function SafetyHomePage() {
               description: 'Who holds what, what is due back and what has come back.',
               href: '/hr/safety/ppe/issuances',
               icon: Users,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+          Fire Safety &amp; Emergency
+        </h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Safety Equipment',
+              description:
+                'Extinguishers, AEDs, detectors and more — inspections, maintenance and certification tracking.',
+              href: '/hr/safety/equipment',
+              icon: FireExtinguisher,
+            },
+            {
+              title: 'Emergency Plans',
+              description:
+                'Plans with assembly points, contact trees, drills and response teams — plus the review chase.',
+              href: '/hr/safety/emergency',
+              icon: Siren,
             },
           ]}
         />
