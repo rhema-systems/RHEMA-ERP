@@ -206,6 +206,37 @@ IF OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS
            OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.category'')) <> i.RegistrationCategory
            OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.version'')) <> p.Version');
 IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260812113000_AddCategoryAwareAcceptedSupply')
+   AND OBJECT_ID(N'dbo.PurchaseOrders',N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.PurchaseRequisitions',N'U') IS NOT NULL
+    INSERT @R EXEC(N'
+        SELECT ''Category-aware accepted supply missing PO category source'', COUNT_BIG(*)
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.PurchaseRequisitions pr
+          ON pr.Id = po.SourceRequisitionId
+         AND pr.TenantId = po.TenantId
+         AND pr.IsDeleted = 0
+        WHERE po.ProcurementSourceType IS NOT NULL
+          AND po.ProcurementSourceType <> 5
+          AND (pr.Id IS NULL OR pr.ProcurementCategory IS NULL)');
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260812170000_ExtendControlledSourcingMethods')
+BEGIN
+    IF OBJECT_ID(N'dbo.ProcurementTenderControls',N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementExceptionalSourcingControls',N'U') IS NULL
+       OR OBJECT_ID(N'dbo.CK_ProcurementTenderControls_State',N'C') IS NULL
+       OR OBJECT_ID(N'dbo.CK_ProcurementExceptionalSourcingControls_Core',N'C') IS NULL
+        INSERT @R VALUES(N'Controlled sourcing method constraint prerequisites', 1);
+    DECLARE @tenderControlTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementTenderControls_Lifecycle', N'TR'));
+    IF @tenderControlTrigger IS NULL
+       OR (CHARINDEX(N'sc.[SelectedMethod] NOT IN (1, 2)', @tenderControlTrigger) = 0
+           AND CHARINDEX(N'sc.[SelectedMethod] NOT IN (1, 2, 7, 8)', @tenderControlTrigger) = 0)
+        INSERT @R VALUES(N'Controlled sourcing method trigger baseline', 1);
+END;
+IF NOT EXISTS (
     SELECT 1 FROM dbo.__EFMigrationsHistory
     WHERE MigrationId = N'20260813063001_INVREQFU002MaintenanceReservationLifecycle')
 BEGIN
@@ -420,6 +451,13 @@ function Invoke-Preflight {
     # Creates an empty governed receipt-evidence register and trigger-only hard stops;
     # no existing receipt row is updated while applying this migration.
     Write-Output 'GUARD_COVERAGE|20260812195409_INVREQFU001GovernedReceiptSourceEvidence'
+    # The commitment migration only installs trigger bodies. Category-aware supply
+    # backfills from the authoritative requisition and preflight rejects any governed
+    # PO whose category cannot be derived before constraints are installed. The
+    # sourcing-method migration has explicit old-or-new constraint/trigger probes.
+    Write-Output 'GUARD_COVERAGE|20260812100000_HardenProcurementCommitmentLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260812113000_AddCategoryAwareAcceptedSupply'
+    Write-Output 'GUARD_COVERAGE|20260812170000_ExtendControlledSourcingMethods'
     # INV-FU-002 creates an empty action register and otherwise installs constraints,
     # indexes and trigger hard stops. Preflight above validates its only legacy-row
     # quantity and uniqueness prerequisites before the migration is allowed to run.
