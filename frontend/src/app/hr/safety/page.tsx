@@ -21,6 +21,8 @@ import {
   HeartPulse,
   Leaf,
   Recycle,
+  Scale,
+  Signpost,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -229,6 +231,35 @@ export default function SafetyHomePage() {
                 'Disposal records and the waste-type catalogue. Manifest-requiring types are gated on their certificate.',
               href: '/hr/safety/waste',
               icon: Recycle,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Governance</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Safety Committees',
+              description:
+                'Committees with their rosters, meeting minutes and the action-item queues raised in meetings.',
+              href: '/hr/safety/committees',
+              icon: Users,
+            },
+            {
+              title: 'Regulatory Compliance',
+              description:
+                'Statutory obligations with their bodies, owners and evidence — GNFS certifications, EPA duties and reviews.',
+              href: '/hr/safety/regulatory',
+              icon: Scale,
+            },
+            {
+              title: 'Safety Signage',
+              description:
+                'The signage register — location, condition and inspection cycle per sign.',
+              href: '/hr/safety/signs',
+              icon: Signpost,
             },
           ]}
         />

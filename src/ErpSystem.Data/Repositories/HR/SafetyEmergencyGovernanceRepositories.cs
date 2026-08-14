@@ -177,7 +177,8 @@ public class SafetySignRepository : GenericRepository<SafetySign>, ISafetySignRe
         await _dbSet.Include(s => s.Location).FirstOrDefaultAsync(s => s.SignCode == signCode && !s.IsDeleted);
 
     public async Task<IEnumerable<SafetySign>> GetByLocationAsync(Guid locationId) =>
-        await _dbSet.Where(s => s.LocationId == locationId && !s.IsDeleted).OrderBy(s => s.SignCode).ToListAsync();
+        await _dbSet.Include(s => s.Location)
+            .Where(s => s.LocationId == locationId && !s.IsDeleted).OrderBy(s => s.SignCode).ToListAsync();
 
     public async Task<IEnumerable<SafetySign>> GetByTypeAsync(SheSafetySignType type) =>
         await _dbSet.Include(s => s.Location).Where(s => s.SignType == type && !s.IsDeleted)
@@ -285,6 +286,8 @@ public class SafetyMeetingRepository : GenericRepository<SafetyMeeting>, ISafety
         await _dbSet.Include(m => m.Committee)
             .FirstOrDefaultAsync(m => m.MeetingNumber == meetingNumber && !m.IsDeleted);
 
+    // Split query: three collection includes in one query multiply rows (and the joined width is
+    // the 8060-byte worktable shape that 500'd the incident detail read).
     public async Task<SafetyMeeting?> GetWithFullDetailsAsync(Guid id) =>
         await _dbSet
             .Include(m => m.Committee)
@@ -292,18 +295,23 @@ public class SafetyMeetingRepository : GenericRepository<SafetyMeeting>, ISafety
             .Include(m => m.Attendees).ThenInclude(a => a.Employee)
             .Include(m => m.ActionItems).ThenInclude(a => a.AssignedTo)
             .Include(m => m.Documents)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
 
+    // List reads carry Committee (the mapper's CommitteeName) and ActionItems (the summary's
+    // OpenActionItemCount — without the include it maps 0 on every row).
     public async Task<IEnumerable<SafetyMeeting>> GetByCommitteeIdAsync(Guid committeeId) =>
-        await _dbSet.Where(m => m.CommitteeId == committeeId && !m.IsDeleted)
+        await _dbSet.Include(m => m.Committee).Include(m => m.ActionItems)
+            .Where(m => m.CommitteeId == committeeId && !m.IsDeleted)
             .OrderByDescending(m => m.MeetingDate).ToListAsync();
 
     public async Task<IEnumerable<SafetyMeeting>> GetByTypeAsync(SheSafetyMeetingType type) =>
-        await _dbSet.Include(m => m.Committee).Where(m => m.Type == type && !m.IsDeleted)
+        await _dbSet.Include(m => m.Committee).Include(m => m.ActionItems)
+            .Where(m => m.Type == type && !m.IsDeleted)
             .OrderByDescending(m => m.MeetingDate).ToListAsync();
 
     public async Task<IEnumerable<SafetyMeeting>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate) =>
-        await _dbSet.Include(m => m.Committee)
+        await _dbSet.Include(m => m.Committee).Include(m => m.ActionItems)
             .Where(m => m.MeetingDate >= fromDate && m.MeetingDate <= toDate && !m.IsDeleted)
             .OrderByDescending(m => m.MeetingDate).ToListAsync();
 }
