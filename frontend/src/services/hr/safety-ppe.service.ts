@@ -23,7 +23,8 @@ import type {
  *
  * A duplicate type code, inventory item code or job-role requirement pair is refused (422);
  * returning an already-returned issuance is refused (422). No reorder/expiry alerts fire yet —
- * `getBelowReorderLevel` is a query the screens poll, not a job (slice-13 engine).
+ * `getBelowReorderLevel` backs the screens; the reminder engine also raises a weekly
+ * below-reorder notification per item.
  */
 class SafetyPpeService {
   private readonly baseUrl = '/safety/ppe';

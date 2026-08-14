@@ -10,7 +10,8 @@
 //
 // Plan numbers and program codes are USER-entered, unique per tenant (duplicate → 422),
 // and immutable. Employee attendance rows carry the employee's real name (server-derived).
-// Renewal notices have no job yet — the expiring-certificates view is the manual queue.
+// Certificate renewal notices fire automatically (slice-13 reminder engine, 90/60/30/14/7
+// ladder); the expiring-certificates view remains the work queue.
 
 import type { AuditFields } from './common';
 

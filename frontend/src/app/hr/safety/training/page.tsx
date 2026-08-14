@@ -52,8 +52,8 @@ import type { SheTrainingPlan } from '@/types/hr/safety-training';
 
 /**
  * SHE training workspace: the annual/quarterly plans, the 30-day upcoming-program strip
- * and the expiring-certificates queue (the manual substitute for renewal notices until the
- * reminder engine lands). This is the SHE record — separate from corporate Training (area 7).
+ * and the expiring-certificates queue (renewal notices also fire automatically via the
+ * reminder engine). This is the SHE record — separate from corporate Training (area 7).
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
@@ -142,7 +142,7 @@ export default function SafetyTrainingPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Safety Training"
-        description="SHE training plans, delivery programs and attendance — including contractor and visitor sign-ins. This is the SHE record, separate from corporate Training. Certificate renewal chasing is manual; no reminder job exists yet."
+        description="SHE training plans, delivery programs and attendance — including contractor and visitor sign-ins. This is the SHE record, separate from corporate Training. Certificate renewals are chased automatically — expiring certificates raise reminders on a 90/60/30/14/7 ladder."
         backHref="/hr/safety"
         actions={
           <Button onClick={openCreate}>

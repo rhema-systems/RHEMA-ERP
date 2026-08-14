@@ -3,9 +3,10 @@
 // Mirrors ErpSystem.Core.DTOs.HR.SafetyPermitPpeEquipmentDTOs (region F).
 // Backend route: api/safety/ppe.
 //
-// ⚠ Nothing here is automatic yet: no reorder or expiry ALERTS fire (that is the slice-13 job
-// engine) — `below-reorder` is a query the screens poll, not a notification. The PPE-compliance %
-// on performance snapshots is hand-reported, not computed from this data (slice 14).
+// Reorder and issuance-expiry alerts fire automatically via the SHE reminder engine (slice 13):
+// below-reorder items raise a weekly notification, expiring issuances ride a 30/14/7 ladder —
+// `below-reorder` remains the query the screens poll. The PPE-compliance % on performance
+// snapshots is still hand-reported, not computed from this data (slice 14).
 
 import type { AuditFields } from './common';
 

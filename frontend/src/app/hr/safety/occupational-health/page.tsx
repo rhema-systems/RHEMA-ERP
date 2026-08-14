@@ -55,8 +55,8 @@ import type {
 /**
  * Occupational health (FR-SHE-140–143): health surveillance, first-aid stations and wellness
  * programs. Access rides the HR.Medical.* policies — surveillance results and restrictions
- * are medical-grade data. Due queues here are polled; nothing reminds anyone automatically
- * until the slice-13 job engine, so this screen IS the recall list.
+ * are medical-grade data. Due recalls raise automatic reminders on a RESTRICTED topic that
+ * never widens with escalation (slice-13 engine); this screen stays the recall work list.
  *
  * Surveillance rows in the table are the summary shape; editing re-reads the full record.
  */
@@ -216,7 +216,7 @@ export default function OccupationalHealthPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Occupational Health"
-        description="Health surveillance, first-aid stations and wellness programs. Access requires medical permissions — results and restrictions are medical-grade data. Recall dates are checked here manually; no automatic reminders fire yet."
+        description="Health surveillance, first-aid stations and wellness programs. Access requires medical permissions — results and restrictions are medical-grade data. Due recalls raise automatic reminders on a restricted notification topic; this screen stays the recall work view."
         backHref="/hr/safety"
       />
 

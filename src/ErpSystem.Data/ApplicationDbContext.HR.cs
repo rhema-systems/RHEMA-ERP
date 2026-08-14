@@ -402,6 +402,8 @@ public partial class ApplicationDbContext
     public DbSet<SheReturnToWorkPlan> SheReturnToWorkPlans { get; set; } = null!;
     public DbSet<SheReturnToWorkPhase> SheReturnToWorkPhases { get; set; } = null!;
     public DbSet<SheReturnToWorkReview> SheReturnToWorkReviews { get; set; } = null!;
+    public DbSet<SheReminderRun> SheReminderRuns { get; set; } = null!;
+    public DbSet<SheReminderDispatchLog> SheReminderDispatchLogs { get; set; } = null!;
     public DbSet<SuccessionPlan> SuccessionPlans { get; set; } = null!;
     public DbSet<SuccessionCompetencyRequirement> SuccessionCompetencyRequirements { get; set; } = null!;
     public DbSet<SuccessionCandidate> SuccessionCandidates { get; set; } = null!;
@@ -8638,6 +8640,15 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             e.HasIndex(x => new { x.TenantId, x.PlanNumber }).IsUnique();
             e.HasIndex(x => x.Status);
+        });
+
+        // S. SHE reminder engine ──────────────────────────────────────
+        builder.Entity<SheReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<SheReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — sweeps claim a key before publishing.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
         });
 
         // ── Force every relationship declared on a HR.Safety entity to Restrict ──

@@ -58,7 +58,7 @@ import type { SheCorrectiveActionStatus } from '@/types/hr/safety-incidents';
  * Equipment detail: identity + schedule dates, an edit dialog (the only place status changes,
  * including out-of-service with its reason), the inspection history with corrective actions
  * (flattened across inspections, the slice-4 shape), and maintenance records. Due dates shown
- * here are checked manually — no reminder fires until the slice-13 job engine.
+ * here are chased automatically by the slice-13 reminder engine.
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const blank = (v?: string) => (v && v.length > 0 ? v : null);

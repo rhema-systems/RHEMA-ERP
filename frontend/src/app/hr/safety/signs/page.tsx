@@ -59,8 +59,8 @@ import type {
 
 /**
  * Safety signage register (SoW 15.0): every sign with its location, condition and
- * inspection dates. Inspection due dates are hand-kept — the due-for-inspection view
- * is the manual queue until the reminder engine lands.
+ * inspection dates. Inspection due dates are hand-kept; the reminder engine chases them
+ * automatically and the due-for-inspection view stays the work queue.
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
@@ -288,7 +288,7 @@ export default function SafetySignsPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Safety Signage"
-        description="The signage register — location, condition and inspection cycle per sign. Inspection chasing is manual; no reminder job exists yet."
+        description="The signage register — location, condition and inspection cycle per sign. Due inspections raise automatic reminders; this register stays the work view."
         backHref="/hr/safety"
         actions={
           <Button onClick={openCreate}>

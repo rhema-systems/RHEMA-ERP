@@ -32,9 +32,9 @@ import type { PpeInventory } from '@/types/hr/safety-ppe';
 
 /**
  * The PPE stock register (FR-SHE-131) — inventory items per type with stock, reorder levels and
- * restocking. Items at or below their reorder level are flagged here and counted on the SHE
- * dashboard; no automated reorder alert fires yet (slice-13 job engine), so this screen IS the
- * alert. Item codes are immutable; stock arrives through Restock, not by editing the quantity.
+ * restocking. Items at or below their reorder level are flagged here, counted on the SHE
+ * dashboard, and raise a weekly automatic reminder (slice-13 engine). Item codes are
+ * immutable; stock arrives through Restock, not by editing the quantity.
  */
 const inventorySchema = z.object({
   ppeTypeId: z.string().min(1, 'A PPE type is required'),
@@ -174,7 +174,7 @@ function BelowReorderCard() {
           Below reorder level ({below.length})
         </CardTitle>
         <CardDescription>
-          No automated reorder alert fires yet — this list is the alert. Restock these items.
+          These items also raise a weekly automatic reminder until restocked. Restock them here.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">

@@ -185,7 +185,8 @@ export default function NewPermitPage() {
           <CardHeader>
             <CardTitle className="text-base">Validity window</CardTitle>
             <CardDescription>
-              Expiry is not automated yet — the SHE team reviews the expiring queue manually.
+              Expiry is automatic — once approved, a permit past this window is expired by the
+              hourly reminder engine, with warnings at 3 and 1 day(s) out.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

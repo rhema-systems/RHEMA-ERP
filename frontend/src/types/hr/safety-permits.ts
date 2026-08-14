@@ -3,9 +3,9 @@
 // and documents. Mirrors ErpSystem.Core.DTOs.HR.SafetyPermitPpeEquipmentDTOs (region E).
 // Backend route: api/safety/permits.
 //
-// ⚠ Nothing here is automatic yet: permit expiry is NOT auto-detected and no reminders fire —
-// that is the slice-13 job engine. Screens show the validity window and the expiring query,
-// and must not promise otherwise.
+// Permit expiry IS automatic (slice-13 reminder engine): an hourly sweep expires live permits
+// past their planned end (date + time) and warns at 3/1 days out; the notification says the
+// engine did it. The expiring query remains the screens' queue view.
 
 import type { AuditFields } from './common';
 

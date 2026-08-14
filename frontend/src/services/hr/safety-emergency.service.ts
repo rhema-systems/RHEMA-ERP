@@ -25,7 +25,8 @@ import type {
  *
  * Plan and drill numbers are user-assigned codes — a duplicate is refused (422), as is adding
  * an employee twice to the same plan's response team. Due-for-review and expiring-certificates
- * are queries the screens poll — no reminder fires until the slice-13 job engine.
+ * are queries the screens poll; the reminder engine chases plan reviews, response-team
+ * certificates and upcoming drills automatically.
  */
 class SafetyEmergencyService {
   private readonly baseUrl = '/safety/emergency';

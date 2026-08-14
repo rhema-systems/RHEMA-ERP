@@ -29,7 +29,8 @@ import type {
  * Duplicate contractor codes, inspection numbers and notice numbers are refused (422).
  * Closed notices cannot be edited or re-closed; closing goes through the close endpoint only.
  * Repeat-violation flags are computed server-side. Expiring pre-qualifications/documents are
- * polled queries — no automatic alerts until the slice-13 job engine.
+ * polled queries; the reminder engine also alerts on document, induction and
+ * pre-qualification expiry.
  */
 class SafetyContractorService {
   private readonly baseUrl = '/safety/contractors';

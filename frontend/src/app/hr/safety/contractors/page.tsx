@@ -26,8 +26,8 @@ import type { SheContractorSummary } from '@/types/hr/safety-contractors';
 /**
  * Contractor SHE register (FRD §7): every contractor with their pre-qualification standing and
  * open non-compliance count, plus the standing strips for overdue notices and unverified /
- * expiring documents. Expiries are polled queries — nothing alerts automatically until the
- * slice-13 job engine, so this screen IS the chase list.
+ * expiring documents. Document, induction and pre-qualification expiries also raise
+ * automatic reminders (slice-13 engine); these strips stay the work queues.
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -152,7 +152,7 @@ export default function ContractorsPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Contractor SHE Management"
-        description="Contractor register with pre-qualification, inductions, SHE inspections, non-compliance notices and documents. Scores are hand-entered — no computed ranking yet. Expiries are checked here manually; no automatic reminders fire."
+        description="Contractor register with pre-qualification, inductions, SHE inspections, non-compliance notices and documents. Scores are hand-entered — no computed ranking yet. Document, induction and pre-qualification expiries raise automatic reminders; these views stay the work queues."
         backHref="/hr/safety"
         actions={
           <Button asChild>

@@ -12,8 +12,8 @@ import type {
  * Backend route: api/safety/signs.
  *
  * Sign codes are user-entered, unique per tenant (duplicate → 422), and immutable.
- * Inspection due dates are hand-kept — no reminder job exists yet (slice 13); the
- * due-for-inspection view is the manual queue.
+ * Inspection due dates are hand-kept; the reminder engine chases them automatically
+ * and the due-for-inspection view is the work queue.
  */
 class SafetySignageService {
   private readonly baseUrl = '/safety/signs';

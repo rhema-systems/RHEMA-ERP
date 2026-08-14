@@ -25,9 +25,9 @@ import type { EmergencyPlanSummary } from '@/types/hr/safety-equipment';
 
 /**
  * Emergency preparedness (FRD §10): the plan register with review tracking, plus the standing
- * strips for upcoming drills and expiring response-team certificates. Review due dates and
- * certificate expiries are polled queries — nothing reminds anyone automatically until the
- * slice-13 job engine, so this screen IS the reminder.
+ * strips for upcoming drills and expiring response-team certificates. Review due dates,
+ * certificate expiries and drill dates also raise automatic reminders (slice-13 engine);
+ * these strips stay the work queues.
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -114,7 +114,7 @@ export default function EmergencyPlansPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Emergency Preparedness"
-        description="Emergency plans with assembly points, contact trees, drills and response teams. Review dates are checked here manually; no automatic reminders fire yet."
+        description="Emergency plans with assembly points, contact trees, drills and response teams. Plan reviews, team certificates and upcoming drills raise automatic reminders; these views stay the work queues."
         backHref="/hr/safety"
         actions={
           <Button asChild>

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  AlarmClock,
   Building2,
   FireExtinguisher,
   Siren,
@@ -1518,6 +1519,11 @@ export const navigationItems: NavItem[] = [
                 title: 'PPE Requirements',
                 href: '/administration/hr/safety/ppe-requirements',
                 icon: ClipboardCheck,
+              },
+              {
+                title: 'Reminder Engine',
+                href: '/administration/hr/safety/reminders',
+                icon: AlarmClock,
               },
             ],
           },

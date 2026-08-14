@@ -7,7 +7,9 @@
 // a duplicate is refused (422). There is no server-side number generator for these three.
 // GNFS liaison (FR-SHE-084) is modelled through this register: GNFS is a regulatory body,
 // statutory fire inspections/certifications are FireSafety-domain obligations with evidence.
-// Due-date alerting (FR-SHE-181) has no job yet — the due-for-review view is the manual queue.
+// Due-date alerting (FR-SHE-181) rides the reminder engine's statutory 180/90/60/30/14/7
+// ladder on obligation reviews; sign inspections get a 30/14/7 ladder. Committee action items
+// are NOT swept — corrective-action chasing is the slice-14 unified CA tracker.
 
 import type { AuditFields } from './common';
 import type { SheRegulatoryDomain } from './safety';

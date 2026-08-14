@@ -46,8 +46,8 @@ import type { PpeIssuance, ShePpeCondition } from '@/types/hr/safety-ppe';
 /**
  * The PPE issuance register (FR-SHE-132) — who holds what, what is due back and what has come
  * back. Issue and return both name their acting employees explicitly (issuer / receiver); a
- * return on an already-returned issuance is refused. Expiry is visible here but nothing alerts
- * on it yet (slice-13 job engine).
+ * return on an already-returned issuance is refused. Expiring issuances also raise automatic
+ * reminders (slice-13 engine, 30/14/7 ladder).
  */
 const issueSchema = z.object({
   ppeTypeId: z.string().min(1, 'A PPE type is required'),

@@ -23,6 +23,7 @@ using ErpSystem.Core.Enums.Safety;
 //  P. SHE Performance Metrics / KPIs
 //  Q. Safety Committee & Meetings
 //  R. Return-to-Work Plans
+//  S. SHE Reminder Engine
 // ============================================================
 
 namespace ErpSystem.Core.Entities.HR.Safety;
@@ -2983,4 +2984,72 @@ public class SheReturnToWorkReview : TenantEntity
     public virtual Employee ReviewedBy { get; set; } = null!;
 
     public DateTime? NextReviewDate { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  S. SHE REMINDER ENGINE  (slice 13; FRD §17)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One execution of the SHE reminder sweep for one tenant — scheduled (background
+/// service) or manual (the run-now endpoint). Carries the outcome counts the admin
+/// screen shows; the per-item detail hangs off <see cref="SheReminderDispatchLog"/>.
+/// </summary>
+public class SheReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [Required, MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+    public int PermitsExpired { get; set; }
+    public int RiskAssessmentsExpired { get; set; }
+
+    public virtual ICollection<SheReminderDispatchLog> DispatchLogs { get; set; } = new List<SheReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a sweep. The unique (TenantId, DedupeKey)
+/// index is the engine's send-once guarantee: a key encodes the item, the reminder
+/// kind, its due date and the ladder threshold (or escalation tier) hit, so each
+/// rung fires exactly once — and a rescheduled due date re-arms the ladder because
+/// it produces new keys.
+/// </summary>
+public class SheReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual SheReminderRun Run { get; set; } = null!;
+
+    /// <summary>Machine kind, e.g. "PermitExpiringSoon", "RegulatoryReviewDue".</summary>
+    [Required, MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item type, e.g. "Permit to work".</summary>
+    [Required, MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept SHE record (no FK — the target table varies by kind).</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>What the notification shows: number/code plus a short name.</summary>
+    [Required, MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time (negative when overdue).</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 = due-soon ladder rung; 1–3 = overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required, MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
 }

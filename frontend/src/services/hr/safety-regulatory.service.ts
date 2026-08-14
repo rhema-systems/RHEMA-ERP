@@ -17,7 +17,8 @@ import type {
  * FireSafety-domain obligations + evidence rows per inspection/certificate.
  *
  * Obligation codes are user-entered, unique per tenant (duplicate → 422), and
- * immutable. Due-date alerts have no job yet — due-for-review is the manual queue.
+ * immutable. Due-date alerts ride the reminder engine's statutory 180/90/60/30/14/7 ladder;
+ * due-for-review is the work queue.
  */
 class SafetyRegulatoryService {
   private readonly baseUrl = '/safety/regulatory';

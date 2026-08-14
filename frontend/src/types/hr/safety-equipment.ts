@@ -5,9 +5,9 @@
 // SafetyEmergencyGovernanceDTOs (region M).
 // Backend routes: api/safety/equipment, api/safety/emergency.
 //
-// ⚠ Nothing here is automatic yet: due-for-inspection / due-for-maintenance /
-// expiring-certification / due-for-review / expiring-certificates are QUERIES the screens poll,
-// not alerts — the reminder job is the slice-13 engine. Screens must not promise otherwise.
+// The slice-13 reminder engine chases these dates automatically (equipment inspection /
+// maintenance / certification, emergency-plan reviews, response-team certificates, drills);
+// due-for-* / expiring-* remain the QUERIES the screens poll as work views.
 
 import type { AuditFields } from './common';
 import type { SheInspectionType } from './safety-inspections';

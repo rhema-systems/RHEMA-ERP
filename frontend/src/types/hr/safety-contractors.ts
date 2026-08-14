@@ -8,8 +8,8 @@
 // and the per-inspection compliance score (0–100) are REPORTED, NOT COMPUTED. No contractor
 // ranking or aggregate compliance score exists anywhere yet (slice-14 KPI computation).
 // Repeat-violation flags on notices ARE computed server-side from the contractor's prior notices.
-// Expiring pre-qualifications and documents are polled queries — nothing alerts automatically
-// until the slice-13 job engine.
+// Expiring pre-qualifications, documents and inductions alert automatically via the slice-13
+// reminder engine; the polled queries remain the screens' work views.
 
 import type { AuditFields } from './common';
 

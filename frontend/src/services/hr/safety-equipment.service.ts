@@ -23,7 +23,8 @@ import type {
  * Backend route: api/safety/equipment. HR-gated throughout.
  *
  * The equipment number is assigned server-side (SEQ-YYYY-NNNN). Due/expiring reads are queries
- * the screens poll — no reminder fires until the slice-13 job engine.
+ * the screens poll; the reminder engine chases inspection, maintenance and
+ * certification dates automatically.
  */
 class SafetyEquipmentService {
   private readonly baseUrl = '/safety/equipment';

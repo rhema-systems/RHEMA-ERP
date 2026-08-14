@@ -27,8 +27,8 @@ import type { SafetyEquipmentSummary } from '@/types/hr/safety-equipment';
 
 /**
  * The safety-equipment register (FRD §10) — extinguishers, AEDs, detectors and the rest. The
- * due/expiring tabs are polled queries, not alerts: nothing reminds anyone automatically until
- * the slice-13 job engine, so these views ARE the reminder.
+ * due/expiring tabs are polled queries; the slice-13 reminder engine also chases inspection,
+ * maintenance and certification dates automatically, so these views are the work queues.
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -128,7 +128,7 @@ export default function SafetyEquipmentRegisterPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Safety Equipment"
-        description="The fire-safety and emergency equipment register — inspections, maintenance and certification. Due dates are checked here manually; no automatic reminders fire yet."
+        description="The fire-safety and emergency equipment register — inspections, maintenance and certification. Inspection, maintenance and certification due dates raise automatic reminders; these views stay the work queues."
         backHref="/hr/safety"
         actions={
           <Button asChild>

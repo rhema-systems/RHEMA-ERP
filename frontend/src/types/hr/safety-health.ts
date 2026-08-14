@@ -11,7 +11,8 @@
 // Surveillance may reference the Medical module's healthcare-facility register by id (the
 // agreed bridge); the examining physician stays free text for now.
 // Phase and review numbers are SERVER-ASSIGNED sequences — never sent by the client.
-// Due/expiry queues are polled — no automatic reminders until the slice-13 job engine.
+// Recall reminders fire automatically via the SHE reminder engine on a RESTRICTED topic that
+// never escalates to a wider audience (medical-adjacent); the due queues remain the work views.
 
 import type { AuditFields } from './common';
 

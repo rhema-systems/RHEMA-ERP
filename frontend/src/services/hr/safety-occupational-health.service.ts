@@ -23,7 +23,8 @@ import type {
  * ⚠ Gated on the HR.Medical.* policies, not the SHE HR-role gate — surveillance carries
  * examination results and work restrictions. A 403 here means the user lacks medical
  * permissions, not HR ones. Duplicate surveillance numbers / station codes / program codes
- * are refused (422). Due queues are polled — nothing alerts until the slice-13 job engine.
+ * are refused (422). The reminder engine raises recall notifications on a restricted
+ * topic; the due queues remain the work views.
  */
 class SafetyOccupationalHealthService {
   private readonly baseUrl = '/safety/occupational-health';

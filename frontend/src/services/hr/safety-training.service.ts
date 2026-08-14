@@ -24,7 +24,7 @@ import type {
  * Backend route: api/safety/training.
  *
  * Plan numbers / program codes are user-entered, unique (422 on duplicate), immutable.
- * Certificate renewal notices have no job yet — expiring-certificates is the manual queue.
+ * Certificate renewal notices fire automatically (reminder engine); expiring-certificates is the work queue.
  */
 class SafetyTrainingService {
   private readonly baseUrl = '/safety/training';

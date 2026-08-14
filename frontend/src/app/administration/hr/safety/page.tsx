@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   HardHat,
   Grid3x3,
+  AlarmClock,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -76,6 +77,13 @@ export default function SafetyAdminHomePage() {
             description: 'The matrix of what each job role must be issued, and how often.',
             href: '/administration/hr/safety/ppe-requirements',
             icon: Grid3x3,
+          },
+          {
+            title: 'Reminder Engine',
+            description:
+              'The hourly SHE sweep — permit auto-expiry, due-date reminder ladders and overdue escalation. Run it now, or read the dispatch history.',
+            href: '/administration/hr/safety/reminders',
+            icon: AlarmClock,
           },
         ]}
       />

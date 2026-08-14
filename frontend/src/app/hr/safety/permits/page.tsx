@@ -41,8 +41,9 @@ type QuickView = 'all' | 'expiring' | 'suspended';
 
 /**
  * The permit register, newest planned start first. Approval, suspension, extension and close-out
- * run from the permit itself. "Expiring" is a query over the validity window — expiry is not yet
- * automatic (that is the slice-13 job engine), so nothing here flips to Expired on its own.
+ * run from the permit itself. Expiry IS automatic (slice-13 engine): live permits past their
+ * planned end flip to Expired hourly, with 3/1-day warnings beforehand; "Expiring" stays the
+ * queue view.
  */
 export default function PermitRegisterPage() {
   const [view, setView] = useState<QuickView>('all');

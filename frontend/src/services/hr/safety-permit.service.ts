@@ -25,7 +25,8 @@ import type {
  * Approval is refused (422) unless Draft/PendingApproval AND the mandatory safety sections are
  * complete (FR-PTW-002); suspension needs Active; resumption needs Suspended; closing needs
  * Active/Suspended; extensions need Active; a Completed/Cancelled permit refuses edits.
- * Expiry is NOT automatic yet — `getExpiring` is a query, not a job (slice-13 engine).
+ * Expiry IS automatic — the reminder engine expires permits past their window (hourly)
+ * and warns as the end approaches; `getExpiring` remains the queue view.
  */
 class SafetyPermitService {
   private readonly baseUrl = '/safety/permits';

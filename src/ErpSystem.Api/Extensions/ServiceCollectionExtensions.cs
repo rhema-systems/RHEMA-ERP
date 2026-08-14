@@ -1709,6 +1709,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Reclaims public CV uploads that were never attached to an application.
             services.AddHostedService<ErpSystem.Api.Services.HR.PublicCvUploadTicketSweeper>();
 
+            // SHE reminder engine (area 10 slice 13): hourly sweep — permit auto-expiry,
+            // due-date reminder ladders, tiered escalation. Sweep logic is scoped
+            // (ISheReminderService) so the run-now endpoint shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.SheReminderBackgroundService>();
+
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,
                 ErpSystem.Api.Services.TransactionalEmailQueue>();

@@ -53,7 +53,8 @@ import type {
  * Regulatory obligations register (FR-SHE-180–182): every statutory duty with its body,
  * owner, compliance status and review date. GNFS liaison (FR-SHE-084) lives here — GNFS is
  * a regulatory body; its statutory inspections/certifications are FireSafety obligations
- * with evidence records. Due-date chasing is manual until the slice-13 job engine.
+ * with evidence records. Due-date chasing is automatic — the reminder engine walks the
+ * statutory 180/90/60/30/14/7 ladder on every active obligation's review date.
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
@@ -223,7 +224,7 @@ export default function RegulatoryCompliancePage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Regulatory Compliance"
-        description="Statutory obligations with their regulatory body, owner and evidence trail — including GNFS fire certifications and EPA duties. Review chasing is manual; no reminder job exists yet."
+        description="Statutory obligations with their regulatory body, owner and evidence trail — including GNFS fire certifications and EPA duties. Reviews are chased automatically on the statutory 180/90/60/30/14/7 reminder ladder, with tiered escalation once overdue."
         backHref="/hr/safety"
         actions={
           <Button onClick={openCreate}>
@@ -264,8 +265,8 @@ export default function RegulatoryCompliancePage() {
 
         <TabsContent value="due" className="mt-4 space-y-3">
           <p className="text-muted-foreground text-sm">
-            Reviews falling due in the next 30 days (or already past). This queue is the manual
-            substitute for due-date alerts until the reminder engine lands.
+            Reviews falling due in the next 30 days (or already past). The reminder engine
+            chases these automatically on the statutory ladder; this queue stays the work view.
           </p>
           <ObligationsTable rows={dueForReview} highlightReview />
         </TabsContent>

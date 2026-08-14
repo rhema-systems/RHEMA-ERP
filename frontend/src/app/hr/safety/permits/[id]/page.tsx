@@ -170,7 +170,8 @@ const emptyDocument: DocumentForm = { fileName: '', filePath: '', description: '
 /**
  * One permit, end to end: the safety sections that gate approval (FR-PTW-002), the
  * approve → active → suspend/resume → close lifecycle, authorised workers, extensions and
- * documents. Expiry is not automated — the window is what the SHE team works from.
+ * documents. Expiry is automated — the reminder engine expires live permits past their
+ * planned end (date + time) and warns as the window closes.
  */
 export default function PermitDetailPage() {
   const params = useParams<{ id: string }>();
@@ -415,8 +416,9 @@ export default function PermitDetailPage() {
             <InfoRow label="Issued by" value={permit.issuedByName} />
             <InfoRow label="Issued" value={fmtDate(permit.issuedDate)} />
             <p className="text-muted-foreground mt-3 text-xs">
-              Expiry is not automated — permits past their window stay visible in the expiring
-              queue until closed.
+              Expiry is automatic — a live permit past its planned end is expired by the hourly
+              reminder engine, with warnings at 3 and 1 day(s) out. Extend before the window
+              closes if the work is still running.
             </p>
           </CardContent>
         </Card>
