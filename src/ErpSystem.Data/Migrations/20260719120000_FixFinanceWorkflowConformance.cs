@@ -30,7 +30,17 @@ public partial class FixFinanceWorkflowConformance : Migration
                     ALTER TABLE [dbo].[FinancePurchaseOrderReceipts] ADD [RejectedById] uniqueidentifier NULL;
                 IF COL_LENGTH(N'dbo.FinancePurchaseOrderReceipts', N'RejectionReason') IS NULL
                     ALTER TABLE [dbo].[FinancePurchaseOrderReceipts] ADD [RejectionReason] nvarchar(1000) NULL;
+            END;
+            """);
 
+        // Keep data updates in a separate command so SQL Server compiles them only
+        // after the conditional column additions above have completed.
+        migrationBuilder.Sql(
+            """
+            IF OBJECT_ID(N'[dbo].[FinancePurchaseOrderReceipts]', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.FinancePurchaseOrderReceipts', N'Status') IS NOT NULL
+               AND COL_LENGTH(N'dbo.FinancePurchaseOrderReceipts', N'ApprovedAt') IS NOT NULL
+            BEGIN
                 UPDATE [dbo].[FinancePurchaseOrderReceipts]
                 SET [Status] = 3,
                     [ApprovedAt] = COALESCE([ApprovedAt], [UpdatedAt], [CreatedAt])
@@ -45,15 +55,28 @@ public partial class FixFinanceWorkflowConformance : Migration
                AND COL_LENGTH(N'dbo.UnitAccountBudgets', N'Status') IS NULL
             BEGIN
                 ALTER TABLE [dbo].[UnitAccountBudgets] ADD [Status] nvarchar(30) NOT NULL CONSTRAINT [DF_UnitAccountBudgets_Status] DEFAULT N'Draft';
-                UPDATE [dbo].[UnitAccountBudgets]
-                SET [Status] = CASE WHEN [IsActive] = 1 THEN N'Approved' ELSE N'Draft' END
-                WHERE [IsDeleted] = 0;
             END;
 
             IF OBJECT_ID(N'[dbo].[AllocationRules]', N'U') IS NOT NULL
                AND COL_LENGTH(N'dbo.AllocationRules', N'ApprovalStatus') IS NULL
             BEGIN
                 ALTER TABLE [dbo].[AllocationRules] ADD [ApprovalStatus] nvarchar(30) NOT NULL CONSTRAINT [DF_AllocationRules_ApprovalStatus] DEFAULT N'Draft';
+            END;
+            """);
+
+        migrationBuilder.Sql(
+            """
+            IF OBJECT_ID(N'[dbo].[UnitAccountBudgets]', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.UnitAccountBudgets', N'Status') IS NOT NULL
+            BEGIN
+                UPDATE [dbo].[UnitAccountBudgets]
+                SET [Status] = CASE WHEN [IsActive] = 1 THEN N'Approved' ELSE N'Draft' END
+                WHERE [IsDeleted] = 0;
+            END;
+
+            IF OBJECT_ID(N'[dbo].[AllocationRules]', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.AllocationRules', N'ApprovalStatus') IS NOT NULL
+            BEGIN
                 UPDATE [dbo].[AllocationRules]
                 SET [ApprovalStatus] = CASE WHEN [IsActive] = 1 THEN N'Approved' ELSE N'Draft' END
                 WHERE [IsDeleted] = 0;
@@ -80,7 +103,15 @@ public partial class FixFinanceWorkflowConformance : Migration
                     ALTER TABLE [dbo].[AssetDepreciationSchedules] ADD [RejectedById] uniqueidentifier NULL;
                 IF COL_LENGTH(N'dbo.AssetDepreciationSchedules', N'RejectionReason') IS NULL
                     ALTER TABLE [dbo].[AssetDepreciationSchedules] ADD [RejectionReason] nvarchar(1000) NULL;
+            END;
+            """);
 
+        migrationBuilder.Sql(
+            """
+            IF OBJECT_ID(N'[dbo].[AssetDepreciationSchedules]', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.AssetDepreciationSchedules', N'ApprovalStatus') IS NOT NULL
+               AND COL_LENGTH(N'dbo.AssetDepreciationSchedules', N'ApprovedAt') IS NOT NULL
+            BEGIN
                 UPDATE [dbo].[AssetDepreciationSchedules]
                 SET [ApprovalStatus] = CASE WHEN [IsPosted] = 1 THEN N'Approved' ELSE [ApprovalStatus] END,
                     [ApprovedAt] = CASE WHEN [IsPosted] = 1 THEN COALESCE([ApprovedAt], [PostedDate], [UpdatedAt], [CreatedAt]) ELSE [ApprovedAt] END
