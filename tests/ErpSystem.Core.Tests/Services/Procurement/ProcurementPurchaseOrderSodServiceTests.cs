@@ -135,6 +135,10 @@ public sealed class ProcurementPurchaseOrderSodServiceTests
         exception.Which.Code.Should().Be("PO_SOD_RECEIPT_BLOCKED");
         exception.Which.Readiness.ReceiptActionCoverage.Should()
             .Equal(ProcurementPurchaseOrderSodRules.ReceiptActionCoverage);
+        fixture.AccessRequests.Should().ContainSingle(request =>
+            request.PermissionCode == "procurement.purchase-order.approve" &&
+            request.WarehouseId ==
+            fixture.PurchaseOrder.DeliveryWarehouseId);
         fixture.ControlEvents.Should().ContainSingle(item =>
             item.Action ==
                 ProcurementPurchaseOrderSodRules.ApproveReceiptInspection &&
@@ -158,6 +162,10 @@ public sealed class ProcurementPurchaseOrderSodServiceTests
 
         readiness.CanReceive.Should().BeTrue();
         readiness.ReceiptActionCoverage.Should().HaveCount(9);
+        fixture.AccessRequests.Should().ContainSingle(request =>
+            request.PermissionCode == "procurement.inventory.receive" &&
+            request.WarehouseId ==
+            fixture.PurchaseOrder.DeliveryWarehouseId);
         fixture.ControlEvents.Should().ContainSingle(item =>
             item.Action ==
                 ProcurementPurchaseOrderSodRules.ConfirmReplacementReceipt &&

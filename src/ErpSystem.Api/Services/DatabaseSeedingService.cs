@@ -363,6 +363,8 @@ namespace ErpSystem.Web.Services
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
             await EnsureBusinessPartnerWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring procurement receipt workflows are seeded...");
+            await EnsureProcurementWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring project workflows are seeded...");
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
@@ -860,6 +862,31 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed business partner workflows");
+            }
+        }
+
+        private async Task EnsureProcurementWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants
+                    .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                    .ToListAsync();
+                foreach (var tenant in tenants)
+                {
+                    await EnsureWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode: "PROCUREMENT_RECEIPT_INSPECTION",
+                        entityName: "PROCUREMENT_RECEIPT_INSPECTION",
+                        entityClassName: typeof(ProcurementReceiptInspectionCase).FullName,
+                        definitionName: "Procurement Receipt Inspection Approval",
+                        description: "Independent receipt-inspection approval before accepted stock and Finance posting.",
+                        approvalRoleNames: new[] { "TDC_HEAD_OF_PROCUREMENT" });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed procurement receipt workflows");
             }
         }
 

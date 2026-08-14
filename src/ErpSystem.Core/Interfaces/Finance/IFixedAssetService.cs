@@ -51,6 +51,20 @@ public interface IFixedAssetService
         string reason,
         CancellationToken cancellationToken = default);
 
+    // Governed Inventory issue/return integration. The central Finance engine owns the
+    // journal; Fixed Assets owns registration, custody and register compensation.
+    Task<FixedAssetDto> RegisterInventoryIssueAssetAsync(
+        RegisterInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+    Task ReverseInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReverseInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+    Task ReinstateInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReinstateInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+
     // Dashboard
     Task<FixedAssetDashboardDto> GetDashboardAsync();
 

@@ -1131,10 +1131,16 @@ public class InventoryTransferService : IInventoryTransferService
                 }
             }
 
+            // SQL validates HasOpenDiscrepancy against the durable discrepancy register on every
+            // transfer UPDATE. Persist the register first (inside this same serializable transaction)
+            // so the subsequent transfer-state statement cannot observe a transient mismatch caused
+            // by EF command ordering.
+            if (evidenceByLine.Count > 0) await _unitOfWork.SaveChangesAsync();
+
             var result = await ReceiveCoreAsync(transfer, userId, normalizedLines, action, correlationId);
             await AddAuditAsync("Receive", transfer, new { action.Id, action.Sequence, payloadHash });
-            await RecordControlEventAsync(transfer, "Receive", correlationId, action.Id, payloadHash);
             await _unitOfWork.SaveChangesAsync();
+            await RecordControlEventAsync(transfer, "Receive", correlationId, action.Id, payloadHash);
             if (ownsTransaction) await _unitOfWork.CommitAsync();
             return result;
         }
@@ -1238,7 +1244,6 @@ public class InventoryTransferService : IInventoryTransferService
                 destQty.CurrentStock += receivedQty;
                 destQty.AvailableStock += receivedQty;
                 destQty.LastMovementDate = DateTime.UtcNow;
-                await _warehouseQuantityRepository.UpdateAsync(destQty);
             }
 
             // Bin-level tracking: if a destination location is specified, add stock there.
@@ -1259,14 +1264,12 @@ public class InventoryTransferService : IInventoryTransferService
                 sourceQty.AllocatedStock -= accountedQty;
                 if (sourceQty.AllocatedStock < 0)
                     throw new InvalidOperationException("Transfer in-transit allocation would become negative.");
-                await _warehouseQuantityRepository.UpdateAsync(sourceQty);
             }
 
             item.ReceivedQuantity += receivedQty;
             item.DamagedQuantity += damagedQty;
             item.ShortageQuantity += shortageQty;
             item.TrackingSequence = trackingSequence;
-            await _transferItemRepository.UpdateAsync(item);
 
             if (receivedQty > 0)
             {
@@ -1306,7 +1309,6 @@ public class InventoryTransferService : IInventoryTransferService
         if (fullyAccounted) transfer.ReceivedDate = DateTime.UtcNow;
         transfer.ReceivedById ??= userId;
         transfer.UpdatedAt = DateTime.UtcNow;
-        await _transferRepository.UpdateAsync(transfer);
         _logger.LogInformation("Transfer {TransferNumber} receipt {Sequence} recorded (fully accounted: {FullyAccounted})", transfer.TransferNumber, action.Sequence, fullyAccounted);
         return true;
     }
@@ -1427,7 +1429,6 @@ public class InventoryTransferService : IInventoryTransferService
                     quantityRecord.CurrentStock += quantity;
                     quantityRecord.AvailableStock += quantity;
                     quantityRecord.LastMovementDate = DateTime.UtcNow;
-                    await _warehouseQuantityRepository.UpdateAsync(quantityRecord);
                     if (locationId.HasValue) await AdjustInventoryLocationQuantityAsync(locationId.Value, item.InventoryItemId, quantity);
 
                     if (!toSource)
@@ -1435,7 +1436,6 @@ public class InventoryTransferService : IInventoryTransferService
                         item.ReceivedQuantity += quantity;
                         item.DamagedQuantity -= discrepancy.DamagedQuantity;
                         item.ShortageQuantity -= discrepancy.ShortageQuantity;
-                        await _transferItemRepository.UpdateAsync(item);
                     }
                     await _stockMovementRepository.AddAsync(new StockMovement
                     {
@@ -1461,7 +1461,6 @@ public class InventoryTransferService : IInventoryTransferService
                         RunningBalance = quantityRecord.CurrentStock
                     });
                     item.TrackingSequence = trackingSequence;
-                    await _transferItemRepository.UpdateAsync(item);
                 }
 
                 discrepancy.Status = InventoryTransferDiscrepancyStatus.Resolved;
@@ -1487,13 +1486,17 @@ public class InventoryTransferService : IInventoryTransferService
                 }
             }
 
+            // Persist each governed resolution before clearing the parent summary flag. The SQL
+            // trigger intentionally rejects a transfer claiming there are no open discrepancies
+            // while its durable discrepancy row is still Open.
+            await _unitOfWork.SaveChangesAsync();
+
             transfer.HasOpenDiscrepancy = await _unitOfWork.Repository<InventoryTransferDiscrepancy>().GetQueryable().AsNoTracking()
                 .AnyAsync(value => value.InventoryTransferId == transfer.Id && value.Status == InventoryTransferDiscrepancyStatus.Open && !request.DiscrepancyIds.Contains(value.Id));
             transfer.UpdatedAt = DateTime.UtcNow;
-            await _transferRepository.UpdateAsync(transfer);
             await AddAuditAsync("ResolveDiscrepancy", transfer, new { action.Id, action.Sequence, payloadHash, resolutionCode });
-            await RecordControlEventAsync(transfer, "ResolveDiscrepancy", correlationId, action.Id, payloadHash);
             await _unitOfWork.SaveChangesAsync();
+            await RecordControlEventAsync(transfer, "ResolveDiscrepancy", correlationId, action.Id, payloadHash);
             if (ownsTransaction) await _unitOfWork.CommitAsync();
             return true;
         }
@@ -1961,6 +1964,12 @@ public class InventoryTransferService : IInventoryTransferService
                     item.Status == CentralDocumentEvidenceRules.PublishedVersionStatus && item.PublishedAt.HasValue && item.FileUploadRecordId.HasValue);
             if (version is null)
                 throw new InvalidOperationException("Linked central-DMS evidence must be the current published version in this tenant.");
+            var cleanUpload = await _unitOfWork.Repository<FileUploadRecord>().GetQueryable().AsNoTracking()
+                .AnyAsync(upload => upload.Id == version.FileUploadRecordId.Value &&
+                    upload.TenantId == _currentUserProvider.TenantId && !upload.IsDeleted &&
+                    upload.VirusScanStatus == FileVirusScanStatus.Clean);
+            if (!cleanUpload)
+                throw new InvalidOperationException("Linked central-DMS evidence must have a successful clean malware scan.");
             var reference = Normalize(value.EvidenceReference, 500)
                 ?? throw new ArgumentException("An evidence reference is required.");
             result.Add(new ValidatedTransferEvidence(version.Id, version.FileUploadRecordId!.Value, reference));

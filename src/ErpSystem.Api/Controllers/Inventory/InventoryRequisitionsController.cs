@@ -381,6 +381,14 @@ public class InventoryRequisitionsController : ControllerBase
                 : StatusCodes.Status422UnprocessableEntity;
             return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
+        catch (InventoryIssueAccountingControlException ex)
+        {
+            var status = ex.Code.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Code.Contains("LINEAGE", StringComparison.OrdinalIgnoreCase)
+                ? StatusCodes.Status409Conflict
+                : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
@@ -400,7 +408,8 @@ public class InventoryRequisitionsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error issuing items for requisition {Id}", id);
-            return StatusCode(500, "An error occurred while issuing items");
+            return Unexpected(ex, "Inventory issue failed",
+                "The inventory issue could not be completed. Use the correlation ID when contacting support.");
         }
     }
 
@@ -538,6 +547,14 @@ public class InventoryRequisitionsController : ControllerBase
                     ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity;
             return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
+        catch (InventoryIssueAccountingControlException ex)
+        {
+            var status = ex.Code.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Code.Contains("LINEAGE", StringComparison.OrdinalIgnoreCase)
+                ? StatusCodes.Status409Conflict
+                : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -545,7 +562,8 @@ public class InventoryRequisitionsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error returning items for requisition {Id}", id);
-            return StatusCode(500, "An error occurred while returning items");
+            return Unexpected(ex, "Inventory return failed",
+                "The inventory return could not be completed. Use the correlation ID when contacting support.");
         }
     }
 
@@ -620,6 +638,14 @@ public class InventoryRequisitionsController : ControllerBase
             var status = ex.Code.Contains("NOT_FOUND", StringComparison.Ordinal) ? StatusCodes.Status404NotFound
                 : ex.Code.Contains("STALE", StringComparison.Ordinal) || ex.Code.Contains("CONFLICT", StringComparison.Ordinal) || ex.Code.Contains("STATE", StringComparison.Ordinal)
                     ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity;
+            return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryIssueAccountingControlException ex)
+        {
+            var status = ex.Code.Contains("CONFLICT", StringComparison.OrdinalIgnoreCase) ||
+                         ex.Code.Contains("LINEAGE", StringComparison.OrdinalIgnoreCase)
+                ? StatusCodes.Status409Conflict
+                : StatusCodes.Status422UnprocessableEntity;
             return StatusCode(status, new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
     }
@@ -752,6 +778,24 @@ public class InventoryRequisitionsController : ControllerBase
             _logger.LogError(ex, "Error removing item {ItemId} from requisition {Id}", itemId, id);
             return StatusCode(500, "An error occurred while removing the item");
         }
+    }
+
+    private ObjectResult Unexpected(Exception exception, string title, string detail)
+    {
+        HttpContext.Items[ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter.HandledExceptionItemKey] = exception;
+        return new ObjectResult(new ProblemDetails
+        {
+            Type = "https://tdc.gov.gh/problems/inventory-unexpected",
+            Title = title,
+            Status = StatusCodes.Status500InternalServerError,
+            Detail = detail,
+            Instance = HttpContext.Request.Path,
+            Extensions = new Dictionary<string, object?>
+            {
+                ["code"] = "INVENTORY_UNEXPECTED",
+                ["correlationId"] = HttpContext.TraceIdentifier
+            }
+        }) { StatusCode = StatusCodes.Status500InternalServerError };
     }
 }
 

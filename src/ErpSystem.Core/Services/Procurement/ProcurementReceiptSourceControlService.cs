@@ -143,8 +143,12 @@ public sealed class ProcurementReceiptSourceControlService :
         var purchaseOrder = await LoadPurchaseOrderAsync(
             receipt.PurchaseOrderId, tracking: false, cancellationToken);
         var correlation = NormalizeCorrelation(correlationId);
+        var normalizedAction = NormalizeAction(action);
+        var permission = ProcurementPurchaseOrderSodRules.IsReceiptAction(normalizedAction)
+            ? ProcurementPurchaseOrderSodRules.RequiredPermissionForReceiptAction(normalizedAction)
+            : "procurement.inventory.receive";
         await EnsureCapabilityAsync(
-            "procurement.inventory.receive",
+            permission,
             purchaseOrder,
             correlation,
             cancellationToken);
@@ -170,7 +174,7 @@ public sealed class ProcurementReceiptSourceControlService :
         EnsureAllowed(readiness);
         var snapshot = BuildSnapshot(
             readiness,
-            NormalizeAction(action),
+            normalizedAction,
             receipt.Id,
             correlation);
         await RecordAllowedAsync(
@@ -272,6 +276,7 @@ public sealed class ProcurementReceiptSourceControlService :
         Guid inventoryItemId,
         decimal quantity,
         string correlationId,
+        string authorizationAction = "AuthorizeInventoryPosting",
         CancellationToken cancellationToken = default)
     {
         EnsureTenant();
@@ -305,7 +310,7 @@ public sealed class ProcurementReceiptSourceControlService :
         {
             await RevalidatePurchaseOrderReceiptAsync(
                 receipt.Id,
-                "AuthorizeInventoryPosting",
+                authorizationAction,
                 correlation,
                 cancellationToken);
             var receiptLines = await (

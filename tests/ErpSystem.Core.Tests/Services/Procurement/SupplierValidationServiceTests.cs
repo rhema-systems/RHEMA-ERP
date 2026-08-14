@@ -74,6 +74,76 @@ public sealed class SupplierValidationServiceTests
     }
 
     [Fact]
+    public async Task FirstAwardBaselineDoesNotDeadlockAnEligibleSupplierWithoutPoHistory()
+    {
+        await using var fixture = new Fixture();
+        var supplier = fixture.AddSupplier();
+        var policy = fixture.AddDec011Policy();
+        fixture.AddDueDiligenceReview(supplier.Id, policy);
+        fixture.AddRiskAssessment(supplier.Id, policy);
+        var scorecard = fixture.AddPerformanceScorecard(supplier.Id, policy);
+        scorecard.DataStatus =
+            ProcurementSupplierPerformanceDataStatus.InsufficientCoverage;
+        scorecard.DataCoveragePercent = 40;
+        scorecard.OverallScore = null;
+        scorecard.DeliveryTimelinessScore = null;
+        scorecard.GrnQualityScore = null;
+        scorecard.RejectionRateScore = null;
+        scorecard.PriceCompetitivenessScore = null;
+        scorecard.ResponsivenessScore = 100;
+        scorecard.ComplaintResolutionScore = 100;
+        scorecard.ContractCompletionScore = 100;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateEligibilityAsync(
+            new SupplierEligibilityEvaluationRequest
+            {
+                BusinessPartnerId = supplier.Id,
+                Boundary = SupplierEligibilityBoundary.Award,
+                SkipFormalAvlMembership = true
+            });
+
+        result.IsValid.Should().BeTrue(string.Join("; ",
+            result.Findings.Select(item => $"{item.Code}: {item.Message}")));
+        result.PerformanceScorecardCurrent.Should().BeFalse();
+        result.PerformanceAwardBlocked.Should().BeFalse();
+        result.Findings.Should().Contain(item =>
+            item.Code == "SUPPLIER_PERFORMANCE_FIRST_AWARD_BASELINE" &&
+            !item.Blocking);
+    }
+
+    [Fact]
+    public async Task InsufficientPerformanceCoverageStillBlocksAfterFirstPurchaseOrder()
+    {
+        await using var fixture = new Fixture();
+        var supplier = fixture.AddSupplier();
+        var policy = fixture.AddDec011Policy();
+        fixture.AddDueDiligenceReview(supplier.Id, policy);
+        fixture.AddRiskAssessment(supplier.Id, policy);
+        var scorecard = fixture.AddPerformanceScorecard(supplier.Id, policy);
+        scorecard.DataStatus =
+            ProcurementSupplierPerformanceDataStatus.InsufficientCoverage;
+        scorecard.DataCoveragePercent = 40;
+        scorecard.OverallScore = null;
+        scorecard.PurchaseOrderCount = 1;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateEligibilityAsync(
+            new SupplierEligibilityEvaluationRequest
+            {
+                BusinessPartnerId = supplier.Id,
+                Boundary = SupplierEligibilityBoundary.Award,
+                SkipFormalAvlMembership = true
+            });
+
+        result.IsValid.Should().BeFalse();
+        result.PerformanceAwardBlocked.Should().BeTrue();
+        result.Findings.Should().Contain(item =>
+            item.Code == "SUPPLIER_PERFORMANCE_COVERAGE_INSUFFICIENT" &&
+            item.Blocking);
+    }
+
+    [Fact]
     public async Task LinkedRegistrationWithIncompleteEvidenceFailsClosed()
     {
         await using var fixture = new Fixture();

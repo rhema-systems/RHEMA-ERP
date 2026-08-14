@@ -482,7 +482,8 @@ public sealed class ProcurementComplianceDecisionService : IProcurementComplianc
         var suppliedEvidence = NormalizeSet(request.EvidenceReferenceKeys);
         var evidenceMatches = rules.Evidence
             .Where(item => (!item.Rule.Category.HasValue || item.Rule.Category == request.Category) &&
-                           (!item.Rule.Method.HasValue || item.Rule.Method == selectedMethod))
+                           (!item.Rule.Method.HasValue || item.Rule.Method == selectedMethod) &&
+                           (!request.EvidenceStage.HasValue || item.Rule.Stage == request.EvidenceStage.Value))
             .OrderBy(item => item.Rule.Stage)
             .ThenByDescending(item => item.Rule.Priority)
             .ThenBy(item => item.Rule.RuleCode)

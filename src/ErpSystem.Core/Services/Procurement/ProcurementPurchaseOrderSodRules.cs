@@ -44,6 +44,14 @@ public static class ProcurementPurchaseOrderSodRules
         value is not null &&
         ReceiptActionCoverage.Contains(value, StringComparer.Ordinal);
 
+    public static string RequiredPermissionForReceiptAction(string receiptAction) =>
+        NormalizeReceiptAction(receiptAction) switch
+        {
+            ApproveReceiptInspection or CloseReceiptInspection =>
+                "procurement.purchase-order.approve",
+            _ => "procurement.inventory.receive"
+        };
+
     public static IReadOnlyList<Guid> Participants(params Guid?[] values) =>
         values
             .Where(value => value.HasValue && value.Value != Guid.Empty)

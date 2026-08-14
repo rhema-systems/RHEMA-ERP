@@ -590,6 +590,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
     public DbSet<WarehouseQuantity> WarehouseQuantities { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
+    public DbSet<InventoryWorkOrderReservationAction> InventoryWorkOrderReservationActions { get; set; }
 
     // Enhanced Inventory entities
     public DbSet<UnitOfMeasure> UnitsOfMeasure { get; set; }
@@ -638,6 +639,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<InventoryIssueVoucher> InventoryIssueVouchers { get; set; }
     public DbSet<InventoryIssueVoucherLine> InventoryIssueVoucherLines { get; set; }
     public DbSet<InventoryIssueVoucherAction> InventoryIssueVoucherActions { get; set; }
+    public DbSet<InventoryIssueAccountingRule> InventoryIssueAccountingRules { get; set; }
+    public DbSet<InventoryIssueFinanceLineage> InventoryIssueFinanceLineages { get; set; }
+    public DbSet<InventoryIssueReturnAllocation> InventoryIssueReturnAllocations { get; set; }
     public DbSet<InventoryReturnVoucher> InventoryReturnVouchers { get; set; }
     public DbSet<InventoryReturnVoucherLine> InventoryReturnVoucherLines { get; set; }
     public DbSet<InventoryReturnVoucherEvidence> InventoryReturnVoucherEvidence { get; set; }
@@ -1130,6 +1134,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryNegativeStockOverrideConfiguration());
         builder.ApplyConfiguration(new InventoryNegativeStockWarehouseQuantityConfiguration());
         builder.ApplyConfiguration(new InventoryNegativeStockItemConfiguration());
+        builder.ApplyConfiguration(new InventoryLocationNegativeStockTriggerConfiguration());
+        builder.ApplyConfiguration(new InventoryWorkOrderAllocationConfiguration());
+        builder.ApplyConfiguration(new InventoryWorkOrderReservationActionConfiguration());
         builder.ApplyConfiguration(new InventoryProjectReservationConfiguration());
         builder.ApplyConfiguration(new InventoryProjectReservationActionConfiguration());
         builder.ApplyConfiguration(new InventoryReplenishmentRecommendationConfiguration());
@@ -1146,6 +1153,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryIssueVoucherConfiguration());
         builder.ApplyConfiguration(new InventoryIssueVoucherLineConfiguration());
         builder.ApplyConfiguration(new InventoryIssueVoucherActionConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueAccountingRuleConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueFinanceLineageConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueReturnAllocationConfiguration());
         builder.ApplyConfiguration(new InventoryReturnVoucherConfiguration());
         builder.ApplyConfiguration(new InventoryReturnVoucherLineConfiguration());
         builder.ApplyConfiguration(new InventoryReturnVoucherEvidenceConfiguration());
@@ -5909,15 +5919,24 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure WorkOrderPart entity
         builder.Entity<WorkOrderPart>(entity =>
         {
+            entity.ToTable("WorkOrderParts", table =>
+                table.HasTrigger("TR_WorkOrderParts_ReservationLineageGuard"));
             entity.HasIndex(wop => wop.WorkOrderId);
             entity.HasIndex(wop => wop.ItemCode);
             entity.HasIndex(wop => wop.Status);
             entity.HasIndex(wop => wop.InventoryItemId);
+            entity.HasIndex(wop => new { wop.TenantId, wop.AllocationId }).IsUnique()
+                .HasFilter("[AllocationId] IS NOT NULL AND [IsDeleted] = 0");
 
             entity.HasOne(wop => wop.WorkOrder)
                 .WithMany(wo => wo.Parts)
                 .HasForeignKey(wop => wop.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wop => wop.Allocation)
+                .WithMany()
+                .HasForeignKey(wop => wop.AllocationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Configure WorkOrderLabor entity
@@ -8849,13 +8868,50 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         UpdateAuditableEntities();
+        NormalizeProcurementAwardReadinessAuditEnvelopes();
+        NormalizeProcurementBidderCommunicationAuditEnvelopes();
         return await base.SaveChangesAsync(cancellationToken);
     }
 
     public override int SaveChanges()
     {
         UpdateAuditableEntities();
+        NormalizeProcurementAwardReadinessAuditEnvelopes();
+        NormalizeProcurementBidderCommunicationAuditEnvelopes();
         return base.SaveChanges();
+    }
+
+    private void NormalizeProcurementAwardReadinessAuditEnvelopes()
+    {
+        foreach (var entry in ChangeTracker
+                     .Entries<ProcurementAwardReadinessDecision>()
+                     .Where(item => item.State == EntityState.Added))
+        {
+            // SQL treats the evaluation time as the immutable creation time.
+            // Apply this after the generic audit pass so no convention or
+            // interceptor can leave the two persisted values out of sync.
+            entry.Entity.CreatedAt = entry.Entity.EvaluatedAtUtc;
+            entry.Entity.UpdatedAt = null;
+            entry.Entity.UpdatedBy = null;
+            entry.Entity.LastModifiedById = null;
+        }
+    }
+
+    private void NormalizeProcurementBidderCommunicationAuditEnvelopes()
+    {
+        foreach (var entry in ChangeTracker
+                     .Entries<ProcurementBidderCommunicationRegister>()
+                     .Where(item => item.State == EntityState.Added))
+        {
+            // The append-only register trigger binds creation to the service's
+            // immutable initialization timestamp. Apply this after the generic
+            // audit convention so the persisted envelope cannot drift by a few
+            // milliseconds during SaveChanges.
+            entry.Entity.CreatedAt = entry.Entity.InitializedAtUtc;
+            entry.Entity.UpdatedAt = null;
+            entry.Entity.UpdatedBy = null;
+            entry.Entity.LastModifiedById = null;
+        }
     }
 
     private void UpdateAuditableEntities()
@@ -8869,8 +8925,23 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             switch (entry.State)
             {
                 case EntityState.Added:
-                    entry.Entity.CreatedAt = DateTime.UtcNow;
-                    entry.Entity.UpdatedAt = DateTime.UtcNow;
+                    if (entry.Entity is ProcurementAwardReadinessDecision readinessDecision)
+                    {
+                        // The append-only SQL envelope requires the service's
+                        // single evaluation timestamp and forbids update metadata.
+                        // Preserve that exact timestamp instead of applying the
+                        // generic mutable-entity audit defaults.
+                        if (readinessDecision.CreatedAt == default)
+                            readinessDecision.CreatedAt = readinessDecision.EvaluatedAtUtc;
+                        readinessDecision.UpdatedAt = null;
+                        readinessDecision.UpdatedBy = null;
+                        readinessDecision.LastModifiedById = null;
+                    }
+                    else
+                    {
+                        entry.Entity.CreatedAt = DateTime.UtcNow;
+                        entry.Entity.UpdatedAt = DateTime.UtcNow;
+                    }
                     
                     // Set TenantId for TenantEntity objects if not already set
                     if (entry.Entity is TenantEntity tenantEntity && tenantEntity.TenantId == Guid.Empty)
@@ -10667,6 +10738,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // InventoryBalance entity - Performance cache (denormalized view)
         builder.Entity<InventoryBalance>(entity =>
         {
+            entity.ToTable("InventoryBalances", table =>
+                table.HasTrigger("TR_InventoryBalances_ExactBinNegativeStockGuard"));
+
             // Unique composite key on Item + Warehouse + Location per tenant
             entity.HasIndex(ib => new { ib.TenantId, ib.InventoryItemId, ib.WarehouseId, ib.LocationId })
                 .IsUnique()

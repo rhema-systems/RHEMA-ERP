@@ -12,6 +12,7 @@ public sealed class ProcurementComplianceDecisionRequest
     [Range(typeof(decimal), "0", "9999999999999999")] public decimal Amount { get; set; }
     [Required, StringLength(3), RegularExpression("^[A-Za-z]{3}$")] public string CurrencyCode { get; set; } = "GHS";
     public ProcurementMethodType? RequestedMethod { get; set; }
+    public ProcurementEvidenceStage? EvidenceStage { get; set; }
     [Required, StringLength(100)] public string SourceType { get; set; } = string.Empty;
     [Required, StringLength(200)] public string SourceReference { get; set; } = string.Empty;
     public DateTime? AtUtc { get; set; }

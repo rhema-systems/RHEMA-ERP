@@ -14,6 +14,7 @@ namespace ErpSystem.Core.Services.Procurement;
 public sealed class ProcurementRfqControlService : IProcurementRfqControlService
 {
     private const string SourceType = "RequestForQuotation";
+    private const string WorkflowEntityType = "TENDER_EVALUATION";
     private const string ManagePermission = "procurement.sourcing.manage";
     private const string AdministerPermission = "procurement.tender.administer";
     private const string EvaluatePermission = "procurement.tender.evaluate";
@@ -383,7 +384,11 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         {
             var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
             {
-                ControlCode = "SOD-RFQ-EVALUATOR-CONFLICT",
+                // The policy profile exposes the six mandatory TDC SOD controls.
+                // RFQ initiation-versus-evaluation independence is enforced through
+                // the configured initiator/decision-maker hard stop rather than an
+                // unregistered ad-hoc control code that the guard must reject.
+                ControlCode = "SOD-INITIATOR-APPROVER",
                 SourceType = SourceType,
                 SourceReference = rfq.RfqNumber,
                 ProhibitedActorUserIds = evaluatorConflicts
@@ -519,7 +524,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             try
             {
                 var cancelledWorkflow = await _workflowService.CancelWorkflowAsync(
-                    SourceType,
+                    WorkflowEntityType,
                     rfq.Id,
                     $"Controlled evaluation score recall replacement. Evidence: {request.EvidenceReference.Trim()}");
                 if (!cancelledWorkflow.Success ||
@@ -530,7 +535,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
                         "The exact recalled RFQ approval workflow could not be cancelled.");
 
                 var replacementWorkflow = await _workflowService.StartApprovalWorkflowAsync(
-                    SourceType,
+                    WorkflowEntityType,
                     rfq.Id,
                     evaluation.WorkflowDefinitionId
                     ?? throw Conflict(
@@ -544,9 +549,9 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
                         replacementWorkflow.Message ??
                         "A fresh exact RFQ approval workflow could not be started for the recalled replacement.");
                 newWorkflowInstanceId = replacementWorkflow.WorkflowInstanceId;
-                var replacementActorsJson = JsonSerializer.Serialize(
-                    new[] { _currentUser.UserId },
-                    JsonOptions);
+                // ApprovalActorsJson records only actors who process approval
+                // steps. The evaluator is retained separately as SubmittedByUserId.
+                var replacementActorsJson = JsonSerializer.Serialize(Array.Empty<Guid>(), JsonOptions);
                 var replacementSnapshot = JsonSerializer.Serialize(new
                 {
                     schemaVersion = "tdc.rfq-evaluation.v1",
@@ -661,6 +666,30 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         {
             if (evaluation.Status == ProcurementRfqEvaluationStatus.Submitted &&
                 evaluation.WorkflowInstanceId.HasValue &&
+                !string.IsNullOrWhiteSpace(evaluation.SnapshotJson))
+            {
+                EnsureRowVersion(evaluation.RowVersion, request.RowVersion,
+                    "RFQ_EVALUATION_VERSION_CONFLICT");
+                await LockCommitteeScoreSheetAsync(
+                    rfq.Id,
+                    ProcurementEvaluationPhase.Combined,
+                    "ProcurementRfqEvaluation",
+                    evaluation.Id,
+                    evaluation.SnapshotJson,
+                    evaluation.EvidenceReference,
+                    normalizedCorrelation,
+                    cancellationToken);
+                await RecordAsync(rfq, rule, "EvaluationScoreSheetLocked",
+                    ProcurementControlEventResult.Succeeded,
+                    new { evaluation.Id, EvaluatorUserId = _currentUser.UserId },
+                    new { evaluation.WorkflowDefinitionId, evaluation.WorkflowInstanceId },
+                    normalizedCorrelation, cancellationToken,
+                    External(evaluation.EvidenceReference,
+                        "Independent RFQ score sheet", "SRC-005"));
+                return MapEvaluation(evaluation);
+            }
+            if (evaluation.Status == ProcurementRfqEvaluationStatus.Submitted &&
+                evaluation.WorkflowInstanceId.HasValue &&
                 await HasCurrentRecalledReplacementAsync(rfq.Id, evaluation.Id, cancellationToken))
                 return MapEvaluation(evaluation);
             throw Conflict("RFQ_EVALUATION_NOT_DRAFT", "Only a Draft evaluation or an approved recalled replacement can be submitted.");
@@ -678,13 +707,15 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             {
                 var now = DateTime.UtcNow;
                 var workflow = await _workflowService.StartApprovalWorkflowAsync(
-                    SourceType,
+                    WorkflowEntityType,
                     rfq.Id,
                     evaluation.WorkflowDefinitionId.Value);
                 if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
                     throw Conflict("RFQ_WORKFLOW_START_FAILED", workflow.Message ?? "The exact RFQ approval workflow could not be started.");
 
-                var approvalActorsJson = JsonSerializer.Serialize(new[] { _currentUser.UserId }, JsonOptions);
+                // ApprovalActorsJson records only actors who process approval
+                // steps. The evaluator is retained separately as SubmittedByUserId.
+                var approvalActorsJson = JsonSerializer.Serialize(Array.Empty<Guid>(), JsonOptions);
                 var submittedSnapshot = JsonSerializer.Serialize(new
                 {
                     schemaVersion = "tdc.rfq-evaluation.v1",
@@ -786,7 +817,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             throw Validation("RFQ_APPROVAL_ACTION_INVALID", "Action must be Approve or Reject.");
         if (string.IsNullOrWhiteSpace(request.ApprovalReference))
             throw Validation("RFQ_APPROVAL_REFERENCE_REQUIRED", "An approval reference is required.");
-        if (!await _workflowService.CanUserApproveAsync(SourceType, rfq.Id, _currentUser.UserId))
+        if (!await _workflowService.CanUserApproveAsync(WorkflowEntityType, rfq.Id, _currentUser.UserId))
             throw new ProcurementRfqControlAuthorizationException("The current user is not assigned to the active RFQ workflow step.");
 
         var prohibited = new[] { evaluation.SubmittedByUserId, rfq.CreatedById, rfq.SourcePurchaseRequisition?.RequestedById }
@@ -807,7 +838,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
                 throw new ProcurementRfqControlAuthorizationException(sod.Message);
         }
 
-        var workflow = await _workflowService.ProcessApprovalStepAsync(SourceType, rfq.Id, _currentUser.UserId, action, request.Comments);
+        var workflow = await _workflowService.ProcessApprovalStepAsync(WorkflowEntityType, rfq.Id, _currentUser.UserId, action, request.Comments);
         if (!workflow.Success)
             throw Conflict("RFQ_WORKFLOW_DECISION_FAILED", workflow.Message ?? "The shared workflow decision failed.");
         var now = DateTime.UtcNow;
@@ -932,7 +963,8 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             .Include(item => item.OpeningRegister).ThenInclude(item => item!.Participants)
             .Include(item => item.OpeningRegister).ThenInclude(item => item!.Entries).ThenInclude(item => item.BusinessPartner)
             .Include(item => item.Evaluation).ThenInclude(item => item!.Lines).ThenInclude(item => item.RfqItem)
-            .Include(item => item.Evaluation).ThenInclude(item => item!.Lines).ThenInclude(item => item.BusinessPartner);
+            .Include(item => item.Evaluation).ThenInclude(item => item!.Lines).ThenInclude(item => item.BusinessPartner)
+            .AsSplitQuery();
         if (!tracked) query = query.AsNoTracking();
         return await query.SingleOrDefaultAsync(cancellationToken)
             ?? throw NotFound("RFQ_NOT_FOUND", "The RFQ was not found in the current tenant.");

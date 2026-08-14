@@ -168,6 +168,52 @@ public sealed class ProcurementReceiptSourceControlServiceTests
         fixture.Access.Invocations.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSodRules.ApproveReceiptInspection,
+        "procurement.purchase-order.approve")]
+    [InlineData("PostPurchaseOrderReceiptToInventory",
+        "procurement.inventory.receive")]
+    public async Task ReceiptRevalidationUsesPermissionForTheRequestedAction(
+        string action,
+        string expectedPermission)
+    {
+        await using var fixture = new Fixture();
+        var receipt = fixture.AddReceipt();
+
+        await fixture.Service.RevalidatePurchaseOrderReceiptAsync(
+            receipt.Id,
+            action,
+            "tdc0501-action-permission");
+
+        fixture.Access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == expectedPermission &&
+                request.WarehouseId == fixture.PurchaseOrder.DeliveryWarehouseId),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ApprovalDrivenInventoryPostingRetainsApprovalAuthorizationContext()
+    {
+        await using var fixture = new Fixture();
+        var receipt = fixture.AddReceipt();
+
+        await fixture.Service.EnforceInventoryPostingAsync(
+            ReferenceType.PO,
+            receipt.Id,
+            fixture.PurchaseOrderItem.InventoryItemId!.Value,
+            1m,
+            "tdc0501-approved-posting",
+            ProcurementPurchaseOrderSodRules.ApproveReceiptInspection);
+
+        fixture.Access.Verify(item => item.EnforceCapabilityAsync(
+            It.Is<ProcurementAccessCapabilityRequest>(request =>
+                request.PermissionCode == "procurement.purchase-order.approve"),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly ApplicationDbContext _context;
@@ -205,6 +251,7 @@ public sealed class ProcurementReceiptSourceControlServiceTests
                 TenantId = TenantId,
                 PurchaseOrderId = PurchaseOrder.Id,
                 ItemDescription = "Governed test item",
+                InventoryItemId = Guid.NewGuid(),
                 OrderedQuantity = 10m,
                 RemainingQuantity = 10m,
                 UnitOfMeasure = "EA",
@@ -311,6 +358,31 @@ public sealed class ProcurementReceiptSourceControlServiceTests
         public ProcurementReceiptSourceControlService Service { get; }
         public List<ProcurementControlEventWriteRequest> ControlEvents { get; } = [];
         public List<NotificationTopicEvent> Notifications { get; } = [];
+
+        public PurchaseOrderReceipt AddReceipt()
+        {
+            var receipt = new PurchaseOrderReceipt
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                PurchaseOrderId = PurchaseOrder.Id,
+                ReceiptNumber = $"POR-{Guid.NewGuid():N}",
+                Status = "Pending Inspection"
+            };
+            _context.PurchaseOrderReceipts.Add(receipt);
+            _context.PurchaseOrderReceiptItems.Add(new PurchaseOrderReceiptItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ReceiptId = receipt.Id,
+                PurchaseOrderItemId = PurchaseOrderItem.Id,
+                ReceivedQuantity = 1m,
+                AcceptedQuantity = 1m,
+                UnitOfMeasure = "EA"
+            });
+            _context.SaveChanges();
+            return receipt;
+        }
 
         public async ValueTask DisposeAsync()
         {

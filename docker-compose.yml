@@ -60,6 +60,10 @@ services:
     image: clamav/clamav:stable
     environment:
       - CLAMAV_NO_MILTERD=true
+    ports:
+      # The locally hosted API connects to clamd on 127.0.0.1:3310. Keep the
+      # unauthenticated clamd protocol bound to loopback only.
+      - "127.0.0.1:3310:3310"
     volumes:
       - clamav-data:/var/lib/clamav
     networks:

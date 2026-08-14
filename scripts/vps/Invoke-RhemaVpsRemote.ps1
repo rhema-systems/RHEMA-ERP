@@ -205,6 +205,139 @@ IF OBJECT_ID(N'dbo.ProcurementSupplierRegistrationEvidencePackBindings',N'U') IS
            OR JSON_VALUE(i.PackSnapshotJson, ''$.packCode'') <> p.PackCode
            OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.category'')) <> i.RegistrationCategory
            OR TRY_CONVERT(int, JSON_VALUE(i.PackSnapshotJson, ''$.version'')) <> p.Version');
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260812113000_AddCategoryAwareAcceptedSupply')
+   AND OBJECT_ID(N'dbo.PurchaseOrders',N'U') IS NOT NULL
+   AND OBJECT_ID(N'dbo.PurchaseRequisitions',N'U') IS NOT NULL
+    INSERT @R EXEC(N'
+        SELECT ''Category-aware accepted supply missing PO category source'', COUNT_BIG(*)
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.PurchaseRequisitions pr
+          ON pr.Id = po.SourceRequisitionId
+         AND pr.TenantId = po.TenantId
+         AND pr.IsDeleted = 0
+        WHERE po.ProcurementSourceType IS NOT NULL
+          AND po.ProcurementSourceType <> 5
+          AND (pr.Id IS NULL OR pr.ProcurementCategory IS NULL)');
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260812170000_ExtendControlledSourcingMethods')
+BEGIN
+    IF OBJECT_ID(N'dbo.ProcurementTenderControls',N'U') IS NULL
+       OR OBJECT_ID(N'dbo.ProcurementExceptionalSourcingControls',N'U') IS NULL
+       OR OBJECT_ID(N'dbo.CK_ProcurementTenderControls_State',N'C') IS NULL
+       OR OBJECT_ID(N'dbo.CK_ProcurementExceptionalSourcingControls_Core',N'C') IS NULL
+        INSERT @R VALUES(N'Controlled sourcing method constraint prerequisites', 1);
+    DECLARE @tenderControlTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementTenderControls_Lifecycle', N'TR'));
+    IF @tenderControlTrigger IS NULL
+       OR (CHARINDEX(N'sc.[SelectedMethod] NOT IN (1, 2)', @tenderControlTrigger) = 0
+           AND CHARINDEX(N'sc.[SelectedMethod] NOT IN (1, 2, 7, 8)', @tenderControlTrigger) = 0)
+        INSERT @R VALUES(N'Controlled sourcing method trigger baseline', 1);
+END;
+IF NOT EXISTS (
+    SELECT 1 FROM dbo.__EFMigrationsHistory
+    WHERE MigrationId = N'20260813063001_INVREQFU002MaintenanceReservationLifecycle')
+BEGIN
+    IF OBJECT_ID(N'dbo.WorkOrderParts',N'U') IS NULL
+       OR OBJECT_ID(N'dbo.InventoryAllocations',N'U') IS NULL
+       OR NOT EXISTS (
+            SELECT 1 FROM sys.foreign_keys
+            WHERE name = N'FK_WorkOrderParts_InventoryAllocations_AllocationId')
+       OR NOT EXISTS (
+            SELECT 1 FROM sys.indexes
+            WHERE object_id = OBJECT_ID(N'dbo.WorkOrderParts')
+              AND name = N'IX_WorkOrderParts_TenantId')
+        INSERT @R VALUES(N'INV-FU-002 reservation migration prerequisites', 1);
+    IF OBJECT_ID(N'dbo.WorkOrderParts',N'U') IS NOT NULL
+        INSERT @R EXEC(N'
+            SELECT ''INV-FU-002 duplicate work-order allocation bindings'', COUNT_BIG(*)
+            FROM (
+                SELECT TenantId, AllocationId
+                FROM dbo.WorkOrderParts
+                WHERE AllocationId IS NOT NULL AND IsDeleted = 0
+                GROUP BY TenantId, AllocationId
+                HAVING COUNT_BIG(*) > 1
+            ) duplicate');
+    IF OBJECT_ID(N'dbo.InventoryAllocations',N'U') IS NOT NULL
+    BEGIN
+        INSERT @R EXEC(N'
+            SELECT ''INV-FU-002 duplicate reservation replay keys'', COUNT_BIG(*)
+            FROM (
+                SELECT TenantId, IdempotencyKey
+                FROM dbo.InventoryAllocations
+                WHERE AllocationType = N''WorkOrder'' AND IdempotencyKey IS NOT NULL
+                GROUP BY TenantId, IdempotencyKey
+                HAVING COUNT_BIG(*) > 1
+            ) duplicate');
+        INSERT @R EXEC(N'
+            SELECT ''INV-FU-002 invalid legacy reservation quantities'', COUNT_BIG(*)
+            FROM dbo.InventoryAllocations
+            WHERE AllocationType = N''WorkOrder''
+              AND (AllocatedQuantity <= 0 OR ConsumedQuantity < 0 OR RemainingQuantity < 0
+                   OR ConsumedQuantity + RemainingQuantity > AllocatedQuantity)');
+    END;
+END;
+IF EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260813103157_INVREQFU003IssueFinanceAssetLifecycle')
+   AND NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260813143000_INVREQFU003ReturnReversalAllocationGate')
+   AND OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryIssueReturnAllocations_Immutable', N'TR')) IS NULL
+    INSERT @R VALUES(N'INV-FU-003 return allocation trigger prerequisite', 1);
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260813150000_INVREQFU003AllowPostedFullReturnReversal')
+BEGIN
+    DECLARE @returnTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVouchers_ControlledLifecycle', N'TR'));
+    IF @returnTrigger IS NULL
+       OR (CHARINDEX(N'r.Status NOT IN (5,6,7)', @returnTrigger) = 0
+           AND CHARINDEX(N'(r.Status NOT IN (5,6,7) AND NOT (r.Status = 3 AND i.Status IN (4,5)))', @returnTrigger) = 0)
+        INSERT @R VALUES(N'INV-FU-003 Store Return Voucher trigger baseline', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260813171000_INVREQFU004RequireCleanTransferEvidence')
+BEGIN
+    DECLARE @transferTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransferDiscrepancyEvidence_AppendOnly', N'TR'));
+    IF @transferTrigger IS NULL
+       OR (CHARINDEX(N'OR dv.FileUploadRecordId <> i.FileUploadRecordId OR dv.Status <> N''Published'' OR dv.PublishedAt IS NULL', @transferTrigger) = 0
+           AND CHARINDEX(N'OR dv.FileUploadRecordId <> i.FileUploadRecordId OR f.VirusScanStatus <> 2 OR dv.Status <> N''Published'' OR dv.PublishedAt IS NULL', @transferTrigger) = 0)
+        INSERT @R VALUES(N'INV-FU-004 transfer evidence trigger baseline', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse')
+BEGIN
+    DECLARE @dueDiligenceTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementSupplierDueDiligenceReviews_Lifecycle', N'TR'));
+    IF @dueDiligenceTrigger IS NULL
+       OR (CHARINDEX(N'(d.Status = 1 AND i.Status IN (2, 3))', @dueDiligenceTrigger) = 0
+           AND CHARINDEX(N'(d.Status = 1 AND i.Status IN (2, 3, 5))', @dueDiligenceTrigger) = 0)
+        INSERT @R VALUES(N'INV-FU-004 supplier due-diligence trigger baseline', 1);
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.ProcurementGhanepsExchangeEvents')
+          AND name IN (
+              N'IX_ProcurementGhanepsExchangeEvents_TenantId_SourceType_SourceId_EventFamily_Direction_MappingKey_EventReference',
+              N'UX_ProcGhanepsEvent_Source_MappingHash'))
+        INSERT @R VALUES(N'INV-FU-004 GHANEPS mapping index prerequisite', 1);
+END;
+IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind')
+BEGIN
+    DECLARE @inspectionTrigger nvarchar(max) =
+        OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementReceiptInspectionCases_TDC0502Protected', N'TR'));
+    IF @inspectionTrigger IS NULL
+       OR (CHARINDEX(N'OR i.WorkflowDefinitionId <> d.WorkflowDefinitionId', @inspectionTrigger) = 0
+           AND CHARINDEX(N'TDC0502_RECEIPT_INSPECTION_WORKFLOW_ID', @inspectionTrigger) = 0)
+        INSERT @R VALUES(N'INV-FU-004 receipt-inspection trigger baseline', 1);
+END;
 SELECT CheckName,AffectedRows FROM @R WHERE AffectedRows > 0 ORDER BY CheckName;
 "@
 }
@@ -318,6 +451,28 @@ function Invoke-Preflight {
     # Creates an empty governed receipt-evidence register and trigger-only hard stops;
     # no existing receipt row is updated while applying this migration.
     Write-Output 'GUARD_COVERAGE|20260812195409_INVREQFU001GovernedReceiptSourceEvidence'
+    # The commitment migration only installs trigger bodies. Category-aware supply
+    # backfills from the authoritative requisition and preflight rejects any governed
+    # PO whose category cannot be derived before constraints are installed. The
+    # sourcing-method migration has explicit old-or-new constraint/trigger probes.
+    Write-Output 'GUARD_COVERAGE|20260812100000_HardenProcurementCommitmentLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260812113000_AddCategoryAwareAcceptedSupply'
+    Write-Output 'GUARD_COVERAGE|20260812170000_ExtendControlledSourcingMethods'
+    # INV-FU-002 creates an empty action register and otherwise installs constraints,
+    # indexes and trigger hard stops. Preflight above validates its only legacy-row
+    # quantity and uniqueness prerequisites before the migration is allowed to run.
+    Write-Output 'GUARD_COVERAGE|20260813063001_INVREQFU002MaintenanceReservationLifecycle'
+    # INV-FU-003 adds nullable/defaulted voucher lineage plus empty governed registers.
+    # Its later migrations only replace or validate trigger bodies; preflight validates
+    # the required installed baselines whenever the predecessor migration already exists.
+    Write-Output 'GUARD_COVERAGE|20260813103157_INVREQFU003IssueFinanceAssetLifecycle'
+    Write-Output 'GUARD_COVERAGE|20260813143000_INVREQFU003ReturnReversalAllocationGate'
+    Write-Output 'GUARD_COVERAGE|20260813150000_INVREQFU003AllowPostedFullReturnReversal'
+    # INV-FU-004 trigger/index replacements are guarded by explicit old-or-new
+    # definition probes above, making fresh apply and idempotent revalidation safe.
+    Write-Output 'GUARD_COVERAGE|20260813171000_INVREQFU004RequireCleanTransferEvidence'
+    Write-Output 'GUARD_COVERAGE|20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse'
+    Write-Output 'GUARD_COVERAGE|20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind'
     $guards = @(Get-MigrationGuardResults)
     foreach ($guard in $guards) {
         Write-Output "MIGRATION_GUARD|$($guard.CheckName)|$($guard.AffectedRows)"

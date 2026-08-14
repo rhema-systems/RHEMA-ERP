@@ -37,6 +37,7 @@ public interface IProcurementReceiptSourceControlService
         Guid inventoryItemId,
         decimal quantity,
         string correlationId,
+        string authorizationAction = "AuthorizeInventoryPosting",
         CancellationToken cancellationToken = default);
 
     void ResetInventoryPostingAttempt();

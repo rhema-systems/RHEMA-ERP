@@ -250,11 +250,65 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
 
         if (request.Status == ProcurementConfigurationDecisionStatus.Approved)
         {
+            var evidence = await EvidenceLinks.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.ProfileId == profile.Id &&
+                    item.DecisionId == decision.Id)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            if (definition.RequiresEvidence && evidence.Count == 0)
+                throw ValidationException(decision.DecisionKey,
+                    new[] { "Retained evidence is required before approving this decision." });
+
+            var uploadIds = evidence.Where(item => item.FileUploadRecordId.HasValue)
+                .Select(item => item.FileUploadRecordId!.Value)
+                .Distinct()
+                .ToList();
+            var uploads = uploadIds.Count == 0
+                ? new List<FileUploadRecord>()
+                : await FileUploads.GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId && uploadIds.Contains(item.Id))
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+            foreach (var link in evidence)
+            {
+                if (link.FileUploadRecordId.HasValue)
+                {
+                    var upload = uploads.SingleOrDefault(item =>
+                        item.Id == link.FileUploadRecordId.Value);
+                    if (upload is null || upload.VirusScanStatus is
+                        FileVirusScanStatus.Pending or FileVirusScanStatus.Infected or
+                        FileVirusScanStatus.Error)
+                        throw ValidationException(decision.DecisionKey,
+                            new[] { "Retained evidence must pass the shared malware/file policy before approval." });
+                }
+                else if (string.IsNullOrWhiteSpace(link.ExternalReference))
+                {
+                    throw ValidationException(decision.DecisionKey,
+                        new[] { "Retained evidence must contain a shared upload or external reference before approval." });
+                }
+            }
+
+            decision.EvidenceStatus = evidence.Count == 0
+                ? ProcurementConfigurationEvidenceStatus.Missing
+                : ProcurementConfigurationEvidenceStatus.Verified;
             decision.ApprovedById = _currentUser.UserId;
             decision.ApprovedAt = DateTime.UtcNow;
         }
         else
         {
+            if (returnToProposed)
+            {
+                var evidenceExists = await EvidenceLinks.GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.ProfileId == profile.Id &&
+                        item.DecisionId == decision.Id)
+                    .AsNoTracking()
+                    .AnyAsync(cancellationToken);
+                decision.EvidenceStatus = evidenceExists
+                    ? ProcurementConfigurationEvidenceStatus.Attached
+                    : ProcurementConfigurationEvidenceStatus.Missing;
+            }
             decision.ApprovedById = null;
             decision.ApprovedAt = null;
         }

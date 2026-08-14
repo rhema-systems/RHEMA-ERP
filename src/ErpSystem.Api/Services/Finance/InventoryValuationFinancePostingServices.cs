@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
@@ -73,7 +74,7 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "ProcurementPurchaseOrderReceipt",
             SourceDocumentId = receipt.Id,
             SourceDocumentTenantId = receipt.TenantId,
@@ -177,7 +178,7 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "InventoryLandedCost",
             SourceDocumentId = landedCost.Id,
             SourceDocumentTenantId = landedCost.TenantId,

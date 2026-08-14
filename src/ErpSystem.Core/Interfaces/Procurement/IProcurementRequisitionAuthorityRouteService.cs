@@ -8,6 +8,9 @@ public interface IProcurementRequisitionAuthorityRouteService
     Task<PurchaseRequisitionAuthorityReadinessDto> GetReadinessAsync(
         Guid requisitionId,
         CancellationToken cancellationToken = default);
+    Task<PurchaseRequisitionAuthorityReadinessDto> GetLinkedControlReadinessAsync(
+        Guid requisitionId,
+        CancellationToken cancellationToken = default);
 
     Task<ProcurementAuthorityRouteDecisionDto> EnforceSubmissionAsync(
         PurchaseRequisition requisition,

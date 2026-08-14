@@ -834,13 +834,26 @@ public class SupplierValidationService : ISupplierValidationService
             ProcurementSupplierPerformanceDataStatus.Complete &&
             scorecard.OverallScore.HasValue &&
             scorecard.IntegrityHash.Length == 64;
+        var observedScores = new decimal?[]
+        {
+            scorecard.DeliveryTimelinessScore, scorecard.GrnQualityScore,
+            scorecard.RejectionRateScore, scorecard.PriceCompetitivenessScore,
+            scorecard.ResponsivenessScore, scorecard.ComplaintResolutionScore,
+            scorecard.ContractCompletionScore
+        };
+        var firstAwardBaseline = policyMatches && scorecard.NextReviewDueAtUtc > now &&
+            scorecard.PurchaseOrderCount == 0 && scorecard.ReceiptCount == 0 &&
+            observedScores.Any(score => score.HasValue) &&
+            observedScores.Where(score => score.HasValue)
+                .All(score => score!.Value >= scorecard.MinimumScore) &&
+            scorecard.IntegrityHash.Length == 64;
         result.PerformanceScorecardCurrent = current;
         var actionBlocks = scorecard.MinimumScoreBreached &&
             scorecard.EligibilityAction !=
             ProcurementSupplierRiskEligibilityAction.AlertOnly;
         result.PerformanceAwardBlocked =
             result.Boundary == SupplierEligibilityBoundary.Award &&
-            (!current || actionBlocks);
+            ((!current && !firstAwardBaseline) || actionBlocks);
 
         if (!policyMatches)
             AddPerformanceFinding(result, "SUPPLIER_PERFORMANCE_POLICY_STALE",
@@ -850,9 +863,15 @@ public class SupplierValidationService : ISupplierValidationService
                 "The latest scorecard has reached its policy-derived review date.");
         else if (scorecard.DataStatus !=
                  ProcurementSupplierPerformanceDataStatus.Complete)
-            AddPerformanceFinding(result,
-                "SUPPLIER_PERFORMANCE_COVERAGE_INSUFFICIENT",
-                "The latest scorecard does not meet the approved minimum data coverage.");
+        {
+            if (firstAwardBaseline)
+                result.Warn("SUPPLIER_PERFORMANCE_FIRST_AWARD_BASELINE",
+                    "The supplier has no prior purchase-order or receipt history; the governed baseline remains visible and performance hard-stop enforcement begins after the first award.");
+            else
+                AddPerformanceFinding(result,
+                    "SUPPLIER_PERFORMANCE_COVERAGE_INSUFFICIENT",
+                    "The latest scorecard does not meet the approved minimum data coverage.");
+        }
 
         if (scorecard.MinimumScoreBreached &&
             scorecard.EligibilityAction ==

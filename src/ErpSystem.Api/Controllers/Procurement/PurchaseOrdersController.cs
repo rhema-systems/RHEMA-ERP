@@ -1305,7 +1305,12 @@ public class PurchaseOrdersController : ControllerBase
     /// Submits a purchase order for approval
     /// </summary>
     [HttpPost("{id}/submit")]
-    public async Task<IActionResult> SubmitPurchaseOrder(Guid id)
+    public Task<IActionResult> SubmitPurchaseOrder(Guid id)
+        => _unitOfWork.ExecuteInStrategyAsync(
+            () => SubmitPurchaseOrderCore(id),
+            HttpContext.RequestAborted);
+
+    private async Task<IActionResult> SubmitPurchaseOrderCore(Guid id)
     {
         var ownsWorkflowTransaction = false;
         var correlationId = CorrelationId();
@@ -1438,7 +1443,7 @@ public class PurchaseOrdersController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error submitting purchase order {PurchaseOrderId}", id);
-            return StatusCode(500, "An error occurred while submitting the purchase order");
+            throw;
         }
         finally
         {

@@ -113,7 +113,7 @@ public sealed class ProcurementPurchaseOrderSodService :
             receiptAction);
         var correlation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(
-            "procurement.inventory.receive",
+            ProcurementPurchaseOrderSodRules.RequiredPermissionForReceiptAction(action),
             purchaseOrder.OrderNumber,
             correlation,
             cancellationToken,

@@ -1293,26 +1293,9 @@ public class WorkflowEngine : IWorkflowEngine
             return;
         }
 
-        if (stepDefinition.IsEndStep)
-        {
-            stepInstance.Status = WorkflowStepInstanceStatus.Completed;
-            stepInstance.CompletedDate = DateTime.UtcNow;
-            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
-            await _workflowStepInstanceRepository.SaveChangesAsync();
-
-            await _activityService.LogActivityAsync(
-                instance.Id,
-                WorkflowActivityType.StepCompleted,
-                "End step completed",
-                stepDefinition.Name,
-                userId,
-                stepInstance.Id,
-                dataContext);
-
-            await CompleteWorkflowIfPossibleAsync(instance, userId);
-            return;
-        }
-
+        // Approval semantics take precedence over end-step completion. A valid
+        // one-step approval workflow is necessarily both the start and end step;
+        // it must create and process its approval before the workflow completes.
         if (stepDefinition.StepType == WorkflowStepType.Approval)
         {
             if (config?.ApprovalConfig?.AutoApprovalCondition != null &&
@@ -1337,6 +1320,26 @@ public class WorkflowEngine : IWorkflowEngine
             }
 
             await CreateApprovalsAsync(instance, stepInstance, stepDefinition, config, context);
+            return;
+        }
+
+        if (stepDefinition.IsEndStep)
+        {
+            stepInstance.Status = WorkflowStepInstanceStatus.Completed;
+            stepInstance.CompletedDate = DateTime.UtcNow;
+            await _workflowStepInstanceRepository.UpdateAsync(stepInstance);
+            await _workflowStepInstanceRepository.SaveChangesAsync();
+
+            await _activityService.LogActivityAsync(
+                instance.Id,
+                WorkflowActivityType.StepCompleted,
+                "End step completed",
+                stepDefinition.Name,
+                userId,
+                stepInstance.Id,
+                dataContext);
+
+            await CompleteWorkflowIfPossibleAsync(instance, userId);
             return;
         }
 
