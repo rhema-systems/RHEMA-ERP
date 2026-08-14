@@ -52,6 +52,8 @@ import {
   CalendarRange,
   ClipboardCheck,
   ListChecks,
+  OctagonX,
+  FileSearch,
   Medal,
   SlidersHorizontal,
   AlertTriangle,
@@ -605,6 +607,8 @@ export const navigationItems: NavItem[] = [
           // answer 403 for non-HR, so without these they have no way in.
           { title: 'Report an Incident', href: '/hr/safety/report-incident', icon: Megaphone },
           { title: 'Report a Hazard', href: '/hr/safety/report-hazard', icon: FileWarning },
+          // Slice 15: stop-work authority — raising is the area's fourth open employee action.
+          { title: 'Raise Stop-Work', href: '/hr/safety/raise-stop-work', icon: OctagonX },
           { title: 'Incidents', href: '/hr/safety/incidents', icon: AlertTriangle },
           { title: 'Hazards', href: '/hr/safety/hazards', icon: ShieldAlert },
           { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList },
@@ -627,7 +631,10 @@ export const navigationItems: NavItem[] = [
           { title: 'Safety Committees', href: '/hr/safety/committees', icon: Users },
           { title: 'Regulatory Compliance', href: '/hr/safety/regulatory', icon: Scale },
           { title: 'Safety Signage', href: '/hr/safety/signs', icon: Signpost },
-          // Slice 14: the unified CA tracker (one queue over all four action stores) and the
+          // Slice 15: audits + the stop-work register (raise lives in the open block above).
+          { title: 'SHE Audits', href: '/hr/safety/audits', icon: FileSearch },
+          { title: 'Stop-Work Orders', href: '/hr/safety/stop-work', icon: OctagonX },
+          // Slice 14: the unified CA tracker (one queue over all five action stores) and the
           // computed-KPI layer (snapshot compute + the analytics screen).
           { title: 'Corrective Actions', href: '/hr/safety/corrective-actions', icon: ListChecks },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },

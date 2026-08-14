@@ -1,4 +1,9 @@
 import { apiService } from '../api.service';
+import type {
+  SheStatutoryIncidentSubmission,
+  SheStatutoryIncidentSubmissionCreateRequest,
+  SheStatutoryIncidentSubmissionUpdateRequest,
+} from '@/types/hr/safety-incidents';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   SafetyIncident,
@@ -288,6 +293,28 @@ class SafetyIncidentService {
 
   removeDocument(documentId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
+  }
+
+  // ── Statutory submissions (slice 15, FR-SHE-103) ───────────────────────────
+  // Refused (422) unless the incident is flagged reportable. Permanent records — no delete.
+
+  addStatutorySubmission(
+    incidentId: string,
+    data: SheStatutoryIncidentSubmissionCreateRequest,
+  ): Promise<SheStatutoryIncidentSubmission> {
+    return apiService.post<SheStatutoryIncidentSubmission>(
+      `${this.baseUrl}/${incidentId}/statutory-submissions`,
+      data,
+    );
+  }
+
+  updateStatutorySubmission(
+    data: SheStatutoryIncidentSubmissionUpdateRequest,
+  ): Promise<SheStatutoryIncidentSubmission> {
+    return apiService.put<SheStatutoryIncidentSubmission>(
+      `${this.baseUrl}/statutory-submissions/${data.id}`,
+      data,
+    );
   }
 }
 

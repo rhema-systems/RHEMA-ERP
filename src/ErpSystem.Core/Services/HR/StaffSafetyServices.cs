@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
@@ -778,12 +779,114 @@ public class SafetyIncidentService : ISafetyIncidentService
         entity.ClosedById = dto.ClosedById;
         entity.ClosedDate = dto.ClosedDate;
         entity.ClosureNotes = dto.ClosureNotes;
+        // FR-ENV-027 — lessons are typically recorded at close-out; an omitted value
+        // keeps whatever was captured earlier via the update path.
+        if (!string.IsNullOrWhiteSpace(dto.LessonsLearned))
+            entity.LessonsLearned = dto.LessonsLearned;
         Touch(entity, userId);
 
         await _incidentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Safety incident closed: {IncidentNumber}", entity.IncidentNumber);
         return true;
+    }
+
+    // ── Statutory submissions (slice 15, FR-SHE-103) ──
+
+    /// <summary>The submission artefact is only meaningful for a reportable incident — flag first.</summary>
+    public async Task<SheStatutoryIncidentSubmissionDto> AddStatutorySubmissionAsync(CreateSheStatutoryIncidentSubmissionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        var incident = await GetOwnedIncidentAsync(dto.IncidentId);
+
+        if (!incident.ReportableToAuthority)
+            throw new InvalidOperationException(
+                $"Incident '{incident.IncidentNumber}' is not flagged as reportable to an authority. Flag it (or use the notify-authority action) before recording a statutory submission.");
+
+        var body = await _unitOfWork.Repository<SheRegulatoryBody>().GetByIdAsync(dto.RegulatoryBodyId);
+        if (body == null || body.TenantId != tenantId || body.IsDeleted)
+            throw new ArgumentException($"Regulatory body with ID '{dto.RegulatoryBodyId}' not found.");
+
+        var submitter = await _unitOfWork.Repository<Employee>().GetByIdAsync(dto.SubmittedById);
+        if (submitter == null || submitter.TenantId != tenantId || submitter.IsDeleted)
+            throw new ArgumentException($"Employee with ID '{dto.SubmittedById}' not found.");
+
+        var entity = new SheStatutoryIncidentSubmission
+        {
+            TenantId = tenantId,
+            IncidentId = incident.Id,
+            RegulatoryBodyId = body.Id,
+            Type = dto.Type,
+            Method = dto.Method,
+            SubmissionDate = dto.SubmissionDate,
+            ReferenceNumber = dto.ReferenceNumber,
+            SubmittedById = submitter.Id,
+            DocumentPath = dto.DocumentPath,
+            Notes = dto.Notes,
+            CreatedBy = userId.ToString(),
+        };
+        await _unitOfWork.Repository<SheStatutoryIncidentSubmission>().AddAsync(entity);
+
+        // The first submission stamps the incident's denormalised notification fields —
+        // the statutory-pending queue empties on the artefact, not on a manual flag.
+        if (incident.AuthorityNotificationDate == null)
+        {
+            incident.ReportedToBodyId = body.Id;
+            incident.AuthorityNotificationDate = dto.SubmissionDate;
+            incident.AuthorityReferenceNumber = dto.ReferenceNumber;
+            incident.AuthorityNotifiedById = submitter.Id;
+            Touch(incident, userId);
+            await _incidentRepository.UpdateAsync(incident);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Statutory submission recorded for incident {IncidentNumber} to {Body}", incident.IncidentNumber, body.Name);
+
+        // Guard-doubles-as-fixup: the validated navs are tracked, so the DTO resolves names.
+        entity.Incident = incident;
+        entity.RegulatoryBody = body;
+        entity.SubmittedBy = submitter;
+        return entity.ToDto();
+    }
+
+    public async Task<SheStatutoryIncidentSubmissionDto> UpdateStatutorySubmissionAsync(UpdateSheStatutoryIncidentSubmissionDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<SheStatutoryIncidentSubmission>()
+            .GetQueryable(s => s.Id == dto.Id && s.TenantId == tenantId && !s.IsDeleted)
+            .Include(s => s.Incident)
+            .Include(s => s.RegulatoryBody)
+            .Include(s => s.SubmittedBy)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (entity == null)
+            throw new ArgumentException($"Statutory submission with ID '{dto.Id}' not found.");
+
+        entity.ReferenceNumber = dto.ReferenceNumber;
+        entity.DocumentPath = dto.DocumentPath;
+        entity.AcknowledgementReceived = dto.AcknowledgementReceived;
+        entity.AcknowledgementDate = dto.AcknowledgementDate;
+        entity.AcknowledgementReference = dto.AcknowledgementReference;
+        entity.Notes = dto.Notes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
+        await _unitOfWork.Repository<SheStatutoryIncidentSubmission>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<SheStatutoryIncidentSubmissionDto>> GetStatutorySubmissionsAsync(Guid incidentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await GetOwnedIncidentAsync(incidentId);
+        var rows = await _unitOfWork.Repository<SheStatutoryIncidentSubmission>()
+            .GetQueryable(s => s.IncidentId == incidentId && s.TenantId == tenantId && !s.IsDeleted)
+            .Include(s => s.Incident)
+            .Include(s => s.RegulatoryBody)
+            .Include(s => s.SubmittedBy)
+            .OrderBy(s => s.SubmissionDate)
+            .ToListAsync(cancellationToken);
+        return rows.Select(s => s.ToDto()).ToList();
     }
 
     // ── Involved persons ──

@@ -20,6 +20,14 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -65,6 +73,13 @@ import {
   SHE_CORRECTIVE_ACTION_STATUS_OPTIONS,
   SHE_INCIDENT_DOCUMENT_TYPE_OPTIONS,
   SHE_BODY_SIDE_OPTIONS,
+  SHE_STATUTORY_SUBMISSION_TYPE_OPTIONS,
+  SHE_STATUTORY_SUBMISSION_METHOD_OPTIONS,
+} from '@/types/hr/safety-incidents';
+import type {
+  SheStatutoryIncidentSubmission,
+  SheStatutorySubmissionMethod,
+  SheStatutorySubmissionType,
 } from '@/types/hr/safety-incidents';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -224,7 +239,7 @@ export default function IncidentDetailPage() {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<
-    'investigate' | 'findings' | 'notify' | 'claim' | 'review' | 'close' | null
+    'investigate' | 'findings' | 'notify' | 'claim' | 'review' | 'close' | 'submission' | null
   >(null);
 
   // Dialog fields (deliberately plain state — each dialog is 3-6 fields).
@@ -245,6 +260,17 @@ export default function IncidentDetailPage() {
   const [newStatus, setNewStatus] = useState('');
   const [closerId, setCloserId] = useState<string | null>(null);
   const [closureNotes, setClosureNotes] = useState('');
+  const [lessonsLearned, setLessonsLearned] = useState('');
+  // Statutory submissions (slice 15)
+  const [subBodyId, setSubBodyId] = useState('');
+  const [subType, setSubType] = useState<SheStatutorySubmissionType>('InitialNotification');
+  const [subMethod, setSubMethod] = useState<SheStatutorySubmissionMethod>('OnlinePortal');
+  const [subRef, setSubRef] = useState('');
+  const [subDocPath, setSubDocPath] = useState('');
+  const [subNotes, setSubNotes] = useState('');
+  const [submitterId, setSubmitterId] = useState<string | null>(null);
+  const [ackTarget, setAckTarget] = useState<SheStatutoryIncidentSubmission | null>(null);
+  const [ackRef, setAckRef] = useState('');
   const [verifyCa, setVerifyCa] = useState<SafetyIncidentCorrectiveAction | null>(null);
   const [verifierId, setVerifierId] = useState<string | null>(null);
   const [verifyNotes, setVerifyNotes] = useState('');
@@ -464,6 +490,7 @@ export default function IncidentDetailPage() {
                 value={`${inc.closedByName ?? '—'}, ${fmtDate(inc.closedDate)}${inc.closureNotes ? ` — ${inc.closureNotes}` : ''}`}
               />
             )}
+            <InfoRow label="Lessons learned" value={inc.lessonsLearned} />
           </CardContent>
         </Card>
       </div>
@@ -479,7 +506,92 @@ export default function IncidentDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="followups">Follow-ups ({inc.followUps.length})</TabsTrigger>
           <TabsTrigger value="documents">Documents ({inc.documents.length})</TabsTrigger>
+          <TabsTrigger value="statutory">Statutory ({inc.statutorySubmissions.length})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="statutory" className="space-y-4">
+          {inc.reportableToAuthority ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSubBodyId('');
+                setSubRef('');
+                setSubDocPath('');
+                setSubNotes('');
+                setSubmitterId(null);
+                setDialog('submission');
+              }}
+            >
+              Record statutory submission
+            </Button>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              This incident is not flagged as reportable to an authority — submissions are recorded
+              only for reportable incidents (flag it via edit, or use Notify authority).
+            </p>
+          )}
+          {inc.statutorySubmissions.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              No submissions recorded{inc.reportableToAuthority ? ' — the statutory duty is still pending.' : '.'}
+            </p>
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Authority</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Method</TableHead>
+                      <TableHead>Submitted</TableHead>
+                      <TableHead>Reference</TableHead>
+                      <TableHead>Acknowledged</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {inc.statutorySubmissions.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell className="font-medium">{s.regulatoryBodyName}</TableCell>
+                        <TableCell>{s.typeName}</TableCell>
+                        <TableCell>{s.methodName}</TableCell>
+                        <TableCell className="tabular-nums">
+                          {fmtDate(s.submissionDate)}
+                          <span className="text-muted-foreground ml-1 text-xs">by {s.submittedByName}</span>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{s.referenceNumber ?? '—'}</TableCell>
+                        <TableCell>
+                          {s.acknowledgementReceived ? (
+                            <Badge variant="secondary">
+                              {fmtDate(s.acknowledgementDate)}
+                              {s.acknowledgementReference ? ` · ${s.acknowledgementReference}` : ''}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline">Pending</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {!s.acknowledgementReceived && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setAckTarget(s);
+                                setAckRef('');
+                              }}
+                            >
+                              Record acknowledgement
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
 
         <TabsContent value="persons" className="space-y-4">
           <ResourceCollectionTab<SafetyIncidentInvolvedPerson, PersonForm>
@@ -1379,6 +1491,16 @@ export default function IncidentDetailPage() {
                 placeholder="What was concluded, and anything the register should remember."
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="lessons-learned">Lessons learned</Label>
+              <Textarea
+                id="lessons-learned"
+                rows={3}
+                value={lessonsLearned}
+                onChange={(e) => setLessonsLearned(e.target.value)}
+                placeholder="What the organisation takes away — what changes so this does not recur."
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>Cancel</Button>
@@ -1391,12 +1513,143 @@ export default function IncidentDetailPage() {
                     incidentId: inc.id,
                     closedById: closerId,
                     closureNotes: blank(closureNotes),
+                    lessonsLearned: blank(lessonsLearned),
                   }),
                 );
               }}
             >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dialog === 'submission'} onOpenChange={(o) => !o && setDialog(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Record statutory submission</DialogTitle>
+            <DialogDescription>
+              The permanent record of a report to the authority (FR-SHE-103). The first submission
+              stamps the incident&apos;s notification fields.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Regulatory body</Label>
+                <Select value={subBodyId} onValueChange={setSubBodyId}>
+                  <SelectTrigger><SelectValue placeholder="Pick the authority" /></SelectTrigger>
+                  <SelectContent>
+                    {regulatoryBodies.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Submitted by</Label>
+                <EmployeePicker value={submitterId} onChange={setSubmitterId} />
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Submission type</Label>
+                <Select value={subType} onValueChange={(v) => setSubType(v as SheStatutorySubmissionType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SHE_STATUTORY_SUBMISSION_TYPE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Method</Label>
+                <Select value={subMethod} onValueChange={(v) => setSubMethod(v as SheStatutorySubmissionMethod)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SHE_STATUTORY_SUBMISSION_METHOD_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Authority reference</Label>
+                <Input value={subRef} onChange={(e) => setSubRef(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Submitted document path</Label>
+                <Input value={subDocPath} onChange={(e) => setSubDocPath(e.target.value)} placeholder="/uploads/statutory/…" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea rows={2} value={subNotes} onChange={(e) => setSubNotes(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>Cancel</Button>
+            <Button
+              disabled={busy || !subBodyId || !submitterId}
+              onClick={() =>
+                void act('Statutory submission recorded', () =>
+                  safetyIncidentService.addStatutorySubmission(inc.id, {
+                    incidentId: inc.id,
+                    regulatoryBodyId: subBodyId,
+                    type: subType,
+                    method: subMethod,
+                    referenceNumber: blank(subRef),
+                    submittedById: submitterId!,
+                    documentPath: blank(subDocPath),
+                    notes: blank(subNotes),
+                  }),
+                )
+              }
+            >
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Record submission
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!ackTarget} onOpenChange={(o) => !o && setAckTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record acknowledgement</DialogTitle>
+            <DialogDescription>
+              {ackTarget?.regulatoryBodyName} — submitted {fmtDate(ackTarget?.submissionDate)}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Acknowledgement reference</Label>
+            <Input value={ackRef} onChange={(e) => setAckRef(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAckTarget(null)} disabled={busy}>Cancel</Button>
+            <Button
+              disabled={busy || !ackTarget}
+              onClick={() => {
+                const target = ackTarget!;
+                void act('Acknowledgement recorded', async () => {
+                  await safetyIncidentService.updateStatutorySubmission({
+                    id: target.id,
+                    referenceNumber: target.referenceNumber,
+                    documentPath: target.documentPath,
+                    acknowledgementReceived: true,
+                    acknowledgementDate: new Date().toISOString(),
+                    acknowledgementReference: blank(ackRef),
+                    notes: target.notes,
+                  });
+                  setAckTarget(null);
+                });
+              }}
+            >
+              Record
             </Button>
           </DialogFooter>
         </DialogContent>

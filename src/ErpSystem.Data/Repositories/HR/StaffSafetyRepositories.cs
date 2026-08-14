@@ -125,6 +125,8 @@ public class SafetyIncidentRepository : GenericRepository<SafetyIncident>, ISafe
             .Include(i => i.CorrectiveActions).ThenInclude(c => c.ResponsiblePerson)
             .Include(i => i.FollowUps).ThenInclude(f => f.ConductedBy)
             .Include(i => i.Documents).ThenInclude(d => d.UploadedBy)
+            .Include(i => i.StatutorySubmissions).ThenInclude(s => s.RegulatoryBody)
+            .Include(i => i.StatutorySubmissions).ThenInclude(s => s.SubmittedBy)
             .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
 
     public async Task<IEnumerable<SafetyIncident>> GetByStatusAsync(SheIncidentStatus status) =>

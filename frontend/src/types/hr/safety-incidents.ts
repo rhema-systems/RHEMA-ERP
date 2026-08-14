@@ -343,12 +343,85 @@ export interface SafetyIncident extends AuditFields {
   closedById?: string | null;
   closedByName?: string | null;
   closureNotes?: string | null;
+  /** What the organisation takes away from this incident (slice 15, FR-ENV-027). */
+  lessonsLearned?: string | null;
   involvedPersons: SafetyIncidentInvolvedPerson[];
   witnesses: SafetyIncidentWitness[];
   investigationTeam: SafetyIncidentInvestigationTeamMember[];
   correctiveActions: SafetyIncidentCorrectiveAction[];
   followUps: SafetyIncidentFollowUp[];
   documents: SafetyIncidentDocument[];
+  statutorySubmissions: SheStatutoryIncidentSubmission[];
+}
+
+// ── Statutory submissions (slice 15, FR-SHE-103) ─────────────────────────────
+
+export type SheStatutorySubmissionType =
+  | 'InitialNotification'
+  | 'FollowUpReport'
+  | 'FinalReport'
+  | 'AdditionalInformation';
+
+export const SHE_STATUTORY_SUBMISSION_TYPE_OPTIONS = opts<SheStatutorySubmissionType>([
+  ['InitialNotification', 'Initial Notification'],
+  ['FollowUpReport', 'Follow-up Report'],
+  ['FinalReport', 'Final Report'],
+  ['AdditionalInformation', 'Additional Information'],
+]);
+
+export type SheStatutorySubmissionMethod = 'OnlinePortal' | 'Email' | 'Letter' | 'InPerson' | 'Phone';
+
+export const SHE_STATUTORY_SUBMISSION_METHOD_OPTIONS = opts<SheStatutorySubmissionMethod>([
+  ['OnlinePortal', 'Online Portal'],
+  ['Email', 'Email'],
+  ['Letter', 'Letter'],
+  ['InPerson', 'In Person'],
+  ['Phone', 'Phone'],
+]);
+
+/** One submission of a reportable incident to a regulatory body. Permanent record — no delete. */
+export interface SheStatutoryIncidentSubmission extends AuditFields {
+  incidentId: string;
+  incidentNumber?: string | null;
+  regulatoryBodyId: string;
+  regulatoryBodyName: string;
+  type: SheStatutorySubmissionType;
+  typeName: string;
+  method: SheStatutorySubmissionMethod;
+  methodName: string;
+  submissionDate: string;
+  referenceNumber?: string | null;
+  submittedById: string;
+  submittedByName: string;
+  documentPath?: string | null;
+  acknowledgementReceived: boolean;
+  acknowledgementDate?: string | null;
+  acknowledgementReference?: string | null;
+  notes?: string | null;
+}
+
+/** Refused (422) unless the incident is flagged reportable. The first submission
+ * stamps the incident's authority-notification fields. */
+export interface SheStatutoryIncidentSubmissionCreateRequest {
+  incidentId: string;
+  regulatoryBodyId: string;
+  type: SheStatutorySubmissionType;
+  method: SheStatutorySubmissionMethod;
+  submissionDate?: string;
+  referenceNumber?: string | null;
+  submittedById: string;
+  documentPath?: string | null;
+  notes?: string | null;
+}
+
+export interface SheStatutoryIncidentSubmissionUpdateRequest {
+  id: string;
+  referenceNumber?: string | null;
+  documentPath?: string | null;
+  acknowledgementReceived: boolean;
+  acknowledgementDate?: string | null;
+  acknowledgementReference?: string | null;
+  notes?: string | null;
 }
 
 export interface SafetyIncidentSummary {
@@ -421,6 +494,7 @@ export interface SafetyIncidentUpdateRequest {
   severityBefore?: number | null;
   requiresInvestigation: boolean;
   reportableToAuthority: boolean;
+  lessonsLearned?: string | null;
 }
 
 export interface AssignInvestigationRequest {
@@ -473,6 +547,8 @@ export interface CloseIncidentRequest {
   closedById: string;
   closedDate?: string;
   closureNotes?: string | null;
+  /** Recorded at close-out (FR-ENV-027); omitted keeps any earlier value. */
+  lessonsLearned?: string | null;
 }
 
 export interface InvolvedPersonCreateRequest {

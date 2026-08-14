@@ -340,6 +340,10 @@ public class SafetyIncident : TenantEntity
     [MaxLength(1000)]
     public string? ClosureNotes { get; set; }
 
+    /// <summary>What the organisation takes away from this incident (FR-ENV-027 / FR-SHE-104; slice 15).</summary>
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
+
     // ── Navigation ──
     public virtual ICollection<SafetyIncidentInvolvedPerson> InvolvedPersons { get; set; } = new List<SafetyIncidentInvolvedPerson>();
     public virtual ICollection<SafetyIncidentWitness> Witnesses { get; set; } = new List<SafetyIncidentWitness>();
@@ -347,6 +351,7 @@ public class SafetyIncident : TenantEntity
     public virtual ICollection<SafetyIncidentFollowUp> FollowUps { get; set; } = new List<SafetyIncidentFollowUp>();
     public virtual ICollection<SafetyIncidentDocument> Documents { get; set; } = new List<SafetyIncidentDocument>();
     public virtual ICollection<SafetyIncidentInvestigationTeamMember> InvestigationTeam { get; set; } = new List<SafetyIncidentInvestigationTeamMember>();
+    public virtual ICollection<SheStatutoryIncidentSubmission> StatutorySubmissions { get; set; } = new List<SheStatutoryIncidentSubmission>();
 }
 
 public class SafetyIncidentInvolvedPerson : TenantEntity
@@ -3083,4 +3088,333 @@ public class SheReminderDispatchLog : TenantEntity
 
     [Required, MaxLength(300)]
     public string DedupeKey { get; set; } = string.Empty;
+}
+
+// ──────────────────────────────────────────────────────────
+//  T. SHE AUDIT MANAGEMENT  (slice 15, FRD §12 / FR-SHE-229)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// A management-system SHE audit: planning → execution → findings → CAPA →
+/// verification → closure. Distinct from workplace inspections (section D) and
+/// from Maintenance's unrelated SafetyAudit scaffolding.
+/// </summary>
+public class SheAudit : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string AuditNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    public SheAuditType Type { get; set; }
+
+    /// <summary>The standard or criteria audited against, e.g. "ISO 45001:2018", "Factories, Offices and Shops Act".</summary>
+    [MaxLength(200)]
+    public string? Standard { get; set; }
+
+    [MaxLength(1000)]
+    public string? Scope { get; set; }
+
+    [MaxLength(1000)]
+    public string? Objectives { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    /// <summary>Internal coordinator even for external audits — the accountable employee.</summary>
+    public Guid LeadAuditorId { get; set; }
+
+    [ForeignKey(nameof(LeadAuditorId))]
+    public virtual Employee LeadAuditor { get; set; } = null!;
+
+    [MaxLength(200)]
+    public string? ExternalAuditorName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalAuditorOrganization { get; set; }
+
+    public DateTime PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
+    public DateTime? ActualStartDate { get; set; }
+    public DateTime? ActualEndDate { get; set; }
+
+    public SheAuditStatus Status { get; set; }
+
+    // ── Report ──
+    [MaxLength(4000)]
+    public string? Summary { get; set; }
+
+    [MaxLength(500)]
+    public string? ReportDocumentPath { get; set; }
+
+    public DateTime? ReportIssuedDate { get; set; }
+
+    // ── Closure ──
+    public DateTime? ClosedDate { get; set; }
+
+    public Guid? ClosedById { get; set; }
+
+    [ForeignKey(nameof(ClosedById))]
+    public virtual Employee? ClosedBy { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClosureNotes { get; set; }
+
+    public virtual ICollection<SheAuditTeamMember> TeamMembers { get; set; } = new List<SheAuditTeamMember>();
+    public virtual ICollection<SheAuditFinding> Findings { get; set; } = new List<SheAuditFinding>();
+}
+
+public class SheAuditTeamMember : TenantEntity
+{
+    public Guid AuditId { get; set; }
+
+    [ForeignKey(nameof(AuditId))]
+    public virtual SheAudit Audit { get; set; } = null!;
+
+    public Guid EmployeeId { get; set; }
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+
+    [Required, MaxLength(100)]
+    public string Role { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One audit finding. Corrective actions hang off the finding as template-linked
+/// rows (the slice-14 unified tracker's fifth source); the finding itself closes
+/// only after its actions complete and the resolution is verified.
+/// </summary>
+public class SheAuditFinding : TenantEntity
+{
+    public Guid AuditId { get; set; }
+
+    [ForeignKey(nameof(AuditId))]
+    public virtual SheAudit Audit { get; set; } = null!;
+
+    /// <summary>Server-assigned sequence within the audit; soft-deleted findings keep their number.</summary>
+    public int FindingNumber { get; set; }
+
+    public SheAuditFindingClassification Classification { get; set; }
+
+    /// <summary>Clause / section of the audited standard, e.g. "45001 §8.1.2".</summary>
+    [MaxLength(100)]
+    public string? ClauseReference { get; set; }
+
+    [Required, MaxLength(2000)]
+    public string Description { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Evidence { get; set; }
+
+    public SheAuditFindingStatus Status { get; set; }
+
+    public Guid? ResponsiblePersonId { get; set; }
+
+    [ForeignKey(nameof(ResponsiblePersonId))]
+    public virtual Employee? ResponsiblePerson { get; set; }
+
+    public DateTime? DueDate { get; set; }
+
+    [MaxLength(2000)]
+    public string? ResolutionNotes { get; set; }
+
+    public DateTime? ResolvedDate { get; set; }
+
+    // ── Effectiveness verification ──
+    public Guid? VerifiedById { get; set; }
+
+    [ForeignKey(nameof(VerifiedById))]
+    public virtual Employee? VerifiedBy { get; set; }
+
+    public DateTime? VerifiedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? VerificationNotes { get; set; }
+
+    public virtual ICollection<SheAuditFindingAction> Actions { get; set; } = new List<SheAuditFindingAction>();
+}
+
+public class SheAuditFindingAction : TenantEntity
+{
+    public Guid FindingId { get; set; }
+
+    [ForeignKey(nameof(FindingId))]
+    public virtual SheAuditFinding Finding { get; set; } = null!;
+
+    public Guid CorrectiveActionTemplateId { get; set; }
+
+    [ForeignKey(nameof(CorrectiveActionTemplateId))]
+    public virtual SheCorrectiveActionTemplate CorrectiveActionTemplate { get; set; } = null!;
+
+    public SheCorrectiveActionStatus Status { get; set; }
+    public DateTime? DueDate { get; set; }
+    public DateTime? CompletionDate { get; set; }
+
+    [MaxLength(500)]
+    public string? CompletionNotes { get; set; }
+
+    public Guid? AssignedToId { get; set; }
+
+    [ForeignKey(nameof(AssignedToId))]
+    public virtual Employee? AssignedTo { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  U. STOP-WORK AUTHORITY  (slice 15, FR-SHE-200)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// A stop-work order: any employee may halt work they believe is imminently
+/// dangerous (raise stays open like incident/hazard reporting); HR/SHE routes,
+/// resolves and finally clears the resumption. Raised → UnderReview → Resolved
+/// → Cleared, with Cancelled for false alarms.
+/// </summary>
+public class SheStopWorkOrder : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string OrderNumber { get; set; } = string.Empty;
+
+    public Guid RaisedById { get; set; }
+
+    [ForeignKey(nameof(RaisedById))]
+    public virtual Employee RaisedBy { get; set; } = null!;
+
+    public DateTime RaisedDate { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    [MaxLength(200)]
+    public string? SpecificArea { get; set; }
+
+    /// <summary>What work was stopped.</summary>
+    [Required, MaxLength(1000)]
+    public string WorkDescription { get; set; } = string.Empty;
+
+    /// <summary>Why — the imminent danger observed.</summary>
+    [Required, MaxLength(2000)]
+    public string ReasonDescription { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? ImmediateActionsTaken { get; set; }
+
+    // Optional bridges to the records the stop-work concerns.
+    public Guid? PermitToWorkId { get; set; }
+
+    [ForeignKey(nameof(PermitToWorkId))]
+    public virtual ShePermitToWork? PermitToWork { get; set; }
+
+    public Guid? HazardId { get; set; }
+
+    [ForeignKey(nameof(HazardId))]
+    public virtual SheHazard? Hazard { get; set; }
+
+    public Guid? IncidentId { get; set; }
+
+    [ForeignKey(nameof(IncidentId))]
+    public virtual SafetyIncident? Incident { get; set; }
+
+    public SheStopWorkStatus Status { get; set; }
+
+    /// <summary>The manager the order is routed to for resolution.</summary>
+    public Guid? RoutedToId { get; set; }
+
+    [ForeignKey(nameof(RoutedToId))]
+    public virtual Employee? RoutedTo { get; set; }
+
+    public DateTime? RoutedDate { get; set; }
+
+    // ── Resolution ──
+    [MaxLength(2000)]
+    public string? ResolutionDescription { get; set; }
+
+    public Guid? ResolvedById { get; set; }
+
+    [ForeignKey(nameof(ResolvedById))]
+    public virtual Employee? ResolvedBy { get; set; }
+
+    public DateTime? ResolvedDate { get; set; }
+
+    // ── Clearance (work resumes) ──
+    public Guid? ClearedById { get; set; }
+
+    [ForeignKey(nameof(ClearedById))]
+    public virtual Employee? ClearedBy { get; set; }
+
+    public DateTime? ClearedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClearanceNotes { get; set; }
+
+    // ── Cancellation (false alarm) ──
+    public Guid? CancelledById { get; set; }
+
+    [ForeignKey(nameof(CancelledById))]
+    public virtual Employee? CancelledBy { get; set; }
+
+    public DateTime? CancelledDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  V. STATUTORY INCIDENT SUBMISSIONS  (slice 15, FR-SHE-103)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One submission of a reportable incident to a regulatory body (Labour
+/// Department, EPA, GNFS, …) — initial notification through final report. The
+/// first submission stamps the incident's denormalised authority-notification
+/// fields when they are still blank.
+/// </summary>
+public class SheStatutoryIncidentSubmission : TenantEntity
+{
+    public Guid IncidentId { get; set; }
+
+    [ForeignKey(nameof(IncidentId))]
+    public virtual SafetyIncident Incident { get; set; } = null!;
+
+    public Guid RegulatoryBodyId { get; set; }
+
+    [ForeignKey(nameof(RegulatoryBodyId))]
+    public virtual SheRegulatoryBody RegulatoryBody { get; set; } = null!;
+
+    public SheStatutorySubmissionType Type { get; set; }
+    public SheStatutorySubmissionMethod Method { get; set; }
+
+    public DateTime SubmissionDate { get; set; }
+
+    /// <summary>The authority's reference for this submission, once assigned.</summary>
+    [MaxLength(100)]
+    public string? ReferenceNumber { get; set; }
+
+    public Guid SubmittedById { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee SubmittedBy { get; set; } = null!;
+
+    /// <summary>The submitted artefact (report / form) on the document store.</summary>
+    [MaxLength(500)]
+    public string? DocumentPath { get; set; }
+
+    public bool AcknowledgementReceived { get; set; }
+    public DateTime? AcknowledgementDate { get; set; }
+
+    [MaxLength(100)]
+    public string? AcknowledgementReference { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
 }

@@ -25,6 +25,8 @@ import {
   Signpost,
   GraduationCap,
   BarChart3,
+  OctagonX,
+  FileSearch,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -109,6 +111,13 @@ export default function SafetyHomePage() {
                 'Open to everyone — flag anything that could hurt someone before it does. No SHE role needed.',
               href: '/hr/safety/report-hazard',
               icon: FileWarning,
+            },
+            {
+              title: 'Raise Stop-Work',
+              description:
+                'Open to everyone — stop work you believe is imminently dangerous and record why. No SHE role needed.',
+              href: '/hr/safety/raise-stop-work',
+              icon: OctagonX,
             },
             {
               title: 'Hazard Register',
@@ -272,6 +281,20 @@ export default function SafetyHomePage() {
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Governance</h2>
         <NavCardGrid
           items={[
+            {
+              title: 'SHE Audits',
+              description:
+                'Management-system audits — planning, execution, findings with CAPA, verification and closure.',
+              href: '/hr/safety/audits',
+              icon: FileSearch,
+            },
+            {
+              title: 'Stop-Work Orders',
+              description:
+                'Work halted under stop-work authority — routing, resolution and cleared resumption.',
+              href: '/hr/safety/stop-work',
+              icon: OctagonX,
+            },
             {
               title: 'Safety Committees',
               description:

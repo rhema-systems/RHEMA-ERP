@@ -196,6 +196,9 @@ public class SheReminderService : ISheReminderService
         await SweepFirstAidStationsAsync(tenantId, today, pending, cancellationToken);
         await SweepPpeAsync(tenantId, today, pending, cancellationToken);
         await SweepCorrectiveActionsAsync(tenantId, today, pending, cancellationToken);
+        await SweepAuditsAsync(tenantId, today, pending, cancellationToken);
+        await SweepStopWorkAsync(tenantId, today, pending, cancellationToken);
+        await SweepStatutoryPendingAsync(tenantId, today, pending, cancellationToken);
 
         // Dedupe against everything any earlier run already dispatched. The unique
         // (TenantId, DedupeKey) index backstops the read-then-write race; one retry
@@ -736,6 +739,64 @@ public class SheReminderService : ISheReminderService
                 SheReminderLadder.FortnightLadder, action.Id,
                 $"{action.ParentReference} — {description}",
                 action.DueDate, action.ParentPath);
+        }
+    }
+
+    private async Task SweepAuditsAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 15 — planned audits ladder toward their start date; one still Planned
+        // past its start escalates like any overdue obligation. Finding actions ride
+        // the corrective-action sweep via the union tracker.
+        var audits = await _unitOfWork.Repository<SheAudit>()
+            .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted && a.Status == SheAuditStatus.Planned)
+            .Select(a => new { a.Id, a.AuditNumber, a.Title, a.PlannedStartDate })
+            .ToListAsync(cancellationToken);
+        foreach (var a in audits)
+        {
+            Evaluate(pending, today, "AuditDue", "SHE audit",
+                SheReminderLadder.FortnightLadder, a.Id, $"{a.AuditNumber} — {a.Title}",
+                a.PlannedStartDate, $"/hr/safety/audits/{a.Id}");
+        }
+    }
+
+    private async Task SweepStopWorkAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 15 — an open stop-work order is stopped work: the raise date is its
+        // "due date", so the first sweep alerts immediately (day-0 rung) and an order
+        // still open after a week escalates to the admin audience (tiers 2–3 at 8/31
+        // days). Resolved-but-not-cleared still counts — the work is still stopped.
+        var live = new[] { SheStopWorkStatus.Raised, SheStopWorkStatus.UnderReview, SheStopWorkStatus.Resolved };
+        var orders = await _unitOfWork.Repository<SheStopWorkOrder>()
+            .GetQueryable(o => o.TenantId == tenantId && !o.IsDeleted && live.Contains(o.Status))
+            .Select(o => new { o.Id, o.OrderNumber, o.WorkDescription, o.RaisedDate })
+            .ToListAsync(cancellationToken);
+        foreach (var o in orders)
+        {
+            var work = o.WorkDescription.Length > 120 ? o.WorkDescription[..117] + "…" : o.WorkDescription;
+            Evaluate(pending, today, "StopWorkOpen", "Stop-work order",
+                SheReminderLadder.PermitLadder, o.Id, $"{o.OrderNumber} — {work}",
+                o.RaisedDate, $"/hr/safety/stop-work/{o.Id}");
+        }
+    }
+
+    private async Task SweepStatutoryPendingAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 15 — a reportable incident with no submission artefact and no recorded
+        // authority notification is an unmet statutory duty; its clock runs from the
+        // incident date, so these are typically overdue from the first sweep and
+        // escalate by age (FR-SHE-103).
+        var incidents = await _unitOfWork.Repository<SafetyIncident>()
+            .GetQueryable(i => i.TenantId == tenantId && !i.IsDeleted &&
+                               i.ReportableToAuthority &&
+                               i.AuthorityNotificationDate == null &&
+                               !i.StatutorySubmissions.Any(s => !s.IsDeleted))
+            .Select(i => new { i.Id, i.IncidentNumber, i.IncidentDate })
+            .ToListAsync(cancellationToken);
+        foreach (var i in incidents)
+        {
+            Evaluate(pending, today, "StatutorySubmissionPending", "Statutory incident report",
+                SheReminderLadder.PermitLadder, i.Id, i.IncidentNumber,
+                i.IncidentDate, $"/hr/safety/incidents/{i.Id}");
         }
     }
 

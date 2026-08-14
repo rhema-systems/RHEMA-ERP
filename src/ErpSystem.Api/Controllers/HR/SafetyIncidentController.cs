@@ -163,6 +163,32 @@ public class SafetyIncidentController : SheApiControllerBase
         return Ok(new { message = "Authority notification recorded." });
     }
 
+    // ── Statutory submissions (slice 15, FR-SHE-103) ──
+    /// <summary>Records a submission to a regulatory body. Refused (422) unless the incident is
+    /// flagged reportable; the first submission stamps the incident's notification fields.</summary>
+    [Authorize(Roles = HrRoles)]
+    [HttpPost("{id:guid}/statutory-submissions")]
+    public async Task<ActionResult<SheStatutoryIncidentSubmissionDto>> AddStatutorySubmission(Guid id, [FromBody] CreateSheStatutoryIncidentSubmissionDto dto)
+    {
+        dto.IncidentId = id;
+        return Ok(await _service.AddStatutorySubmissionAsync(dto, TenantId, UserId));
+    }
+
+    [Authorize(Roles = HrRoles)]
+    [HttpGet("{id:guid}/statutory-submissions")]
+    public async Task<ActionResult<IEnumerable<SheStatutoryIncidentSubmissionDto>>> GetStatutorySubmissions(Guid id)
+        => Ok(await _service.GetStatutorySubmissionsAsync(id));
+
+    /// <summary>Records the authority's acknowledgement or corrects submission detail. No delete —
+    /// statutory submissions are permanent records, like non-compliance notices.</summary>
+    [Authorize(Roles = HrRoles)]
+    [HttpPut("statutory-submissions/{submissionId:guid}")]
+    public async Task<ActionResult<SheStatutoryIncidentSubmissionDto>> UpdateStatutorySubmission(Guid submissionId, [FromBody] UpdateSheStatutoryIncidentSubmissionDto dto)
+    {
+        if (submissionId != dto.Id) return BadRequest("ID mismatch.");
+        return Ok(await _service.UpdateStatutorySubmissionAsync(dto, UserId));
+    }
+
     [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/file-claim")]
     public async Task<IActionResult> FileClaim(Guid id, [FromBody] FileSafetyIncidentClaimDto dto)

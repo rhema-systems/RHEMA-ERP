@@ -93,6 +93,11 @@ public interface ISafetyIncidentService
     Task<bool> ReviewAsync(ReviewSafetyIncidentDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> CloseAsync(CloseSafetyIncidentDto dto, Guid userId, CancellationToken cancellationToken = default);
 
+    // Statutory submissions (slice 15, FR-SHE-103)
+    Task<SheStatutoryIncidentSubmissionDto> AddStatutorySubmissionAsync(CreateSheStatutoryIncidentSubmissionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+    Task<SheStatutoryIncidentSubmissionDto> UpdateStatutorySubmissionAsync(UpdateSheStatutoryIncidentSubmissionDto dto, Guid userId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<SheStatutoryIncidentSubmissionDto>> GetStatutorySubmissionsAsync(Guid incidentId, CancellationToken cancellationToken = default);
+
     // Involved persons (+ injured body parts)
     Task<SafetyIncidentInvolvedPersonDto> AddInvolvedPersonAsync(CreateSafetyIncidentInvolvedPersonDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<SafetyIncidentInvolvedPersonDto> UpdateInvolvedPersonAsync(UpdateSafetyIncidentInvolvedPersonDto dto, Guid userId, CancellationToken cancellationToken = default);

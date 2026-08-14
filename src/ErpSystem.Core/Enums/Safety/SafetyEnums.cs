@@ -685,3 +685,65 @@ public enum SheReturnToWorkStatus
     Completed = 4,
     Discontinued = 5
 }
+
+// ── SHE Audits (slice 15, FRD §12 / FR-SHE-229) ──────────
+public enum SheAuditType
+{
+    Internal = 1,
+    External = 2,
+    Regulatory = 3,
+    Certification = 4
+}
+
+public enum SheAuditStatus
+{
+    Planned = 1,
+    InProgress = 2,
+    ReportIssued = 3,
+    Closed = 4,
+    Cancelled = 5
+}
+
+public enum SheAuditFindingClassification
+{
+    MajorNonConformity = 1,
+    MinorNonConformity = 2,
+    Observation = 3,
+    OpportunityForImprovement = 4
+}
+
+public enum SheAuditFindingStatus
+{
+    Open = 1,
+    Resolved = 2,
+    Verified = 3,
+    Closed = 4
+}
+
+// ── Stop-Work Authority (slice 15, FR-SHE-200) ───────────
+public enum SheStopWorkStatus
+{
+    Raised = 1,
+    UnderReview = 2,
+    Resolved = 3,
+    Cleared = 4,
+    Cancelled = 5
+}
+
+// ── Statutory incident submissions (slice 15, FR-SHE-103) ─
+public enum SheStatutorySubmissionType
+{
+    InitialNotification = 1,
+    FollowUpReport = 2,
+    FinalReport = 3,
+    AdditionalInformation = 4
+}
+
+public enum SheStatutorySubmissionMethod
+{
+    OnlinePortal = 1,
+    Email = 2,
+    Letter = 3,
+    InPerson = 4,
+    Phone = 5
+}

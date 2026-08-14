@@ -404,6 +404,12 @@ public partial class ApplicationDbContext
     public DbSet<SheReturnToWorkReview> SheReturnToWorkReviews { get; set; } = null!;
     public DbSet<SheReminderRun> SheReminderRuns { get; set; } = null!;
     public DbSet<SheReminderDispatchLog> SheReminderDispatchLogs { get; set; } = null!;
+    public DbSet<SheAudit> SheAudits { get; set; } = null!;
+    public DbSet<SheAuditTeamMember> SheAuditTeamMembers { get; set; } = null!;
+    public DbSet<SheAuditFinding> SheAuditFindings { get; set; } = null!;
+    public DbSet<SheAuditFindingAction> SheAuditFindingActions { get; set; } = null!;
+    public DbSet<SheStopWorkOrder> SheStopWorkOrders { get; set; } = null!;
+    public DbSet<SheStatutoryIncidentSubmission> SheStatutoryIncidentSubmissions { get; set; } = null!;
     public DbSet<SuccessionPlan> SuccessionPlans { get; set; } = null!;
     public DbSet<SuccessionCompetencyRequirement> SuccessionCompetencyRequirements { get; set; } = null!;
     public DbSet<SuccessionCandidate> SuccessionCandidates { get; set; } = null!;
@@ -8650,6 +8656,24 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
             e.HasIndex(x => new { x.TenantId, x.CreatedAt });
         });
+
+        // T. SHE audit management ─────────────────────────────────────
+        builder.Entity<SheAudit>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.AuditNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+        });
+        builder.Entity<SheAuditFinding>(e => e.HasIndex(x => new { x.AuditId, x.FindingNumber }));
+
+        // U. Stop-work authority ──────────────────────────────────────
+        builder.Entity<SheStopWorkOrder>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.OrderNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+        });
+
+        // V. Statutory incident submissions ───────────────────────────
+        builder.Entity<SheStatutoryIncidentSubmission>(e => e.HasIndex(x => x.IncidentId));
 
         // ── Force every relationship declared on a HR.Safety entity to Restrict ──
         // Prevents multiple-cascade-path errors (many SHE FKs target Employee). Scoped

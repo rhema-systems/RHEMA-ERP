@@ -399,6 +399,9 @@ public class SafetyIncidentDto : BaseDto
     public string? ClosedByName { get; set; }
     public string? ClosureNotes { get; set; }
 
+    /// <summary>What the organisation takes away from this incident (slice 15).</summary>
+    public string? LessonsLearned { get; set; }
+
     // Children
     public List<SafetyIncidentInvolvedPersonDto> InvolvedPersons { get; set; } = new();
     public List<SafetyIncidentWitnessDto> Witnesses { get; set; } = new();
@@ -406,6 +409,7 @@ public class SafetyIncidentDto : BaseDto
     public List<SafetyIncidentCorrectiveActionDto> CorrectiveActions { get; set; } = new();
     public List<SafetyIncidentFollowUpDto> FollowUps { get; set; } = new();
     public List<SafetyIncidentDocumentDto> Documents { get; set; } = new();
+    public List<SheStatutoryIncidentSubmissionDto> StatutorySubmissions { get; set; } = new();
 }
 
 public class SafetyIncidentSummaryDto
@@ -539,6 +543,9 @@ public class UpdateSafetyIncidentDto : UpdateDtoBase
 
     public bool RequiresInvestigation { get; set; }
     public bool ReportableToAuthority { get; set; }
+
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
 }
 
 /// <summary>Assigns/updates the investigation for an incident.</summary>
@@ -642,6 +649,10 @@ public class CloseSafetyIncidentDto
 
     [MaxLength(1000)]
     public string? ClosureNotes { get; set; }
+
+    /// <summary>Recorded at close-out per FR-ENV-027; also editable pre-closure via update.</summary>
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
 }
 
 #endregion

@@ -11,11 +11,12 @@ namespace ErpSystem.Core.Services.HR;
 // ============================================================================
 // UNIFIED CORRECTIVE-ACTION TRACKER (slice 14, FR-SHE-245).
 //
-// A union READ-MODEL over the four live corrective-action silos:
+// A union READ-MODEL over the live corrective-action silos:
 //   1. SafetyIncidentCorrectiveAction   (incident investigations)
 //   2. SafetyInspectionHazardAction     (workplace inspection findings)
 //   3. SafetyEquipmentInspectionAction  (safety-equipment inspections)
 //   4. SafetyMeetingActionItem          (committee meetings)
+//   5. SheAuditFindingAction            (audit findings — added by slice 15)
 //
 // The tables stay exactly as ported — no schema consolidation. Each silo is
 // projected server-side (no Includes — the navs are reached inside the Select,
@@ -223,6 +224,28 @@ public class SheCorrectiveActionTrackerService : ISheCorrectiveActionTrackerServ
                 .ToListAsync(cancellationToken);
             result.AddRange(rows.Select(r => ToUnified(r, SheCorrectiveActionSource.Equipment,
                 $"/hr/safety/equipment/{r.ParentId}", MapCaStatus((SheCorrectiveActionStatus)r.RawStatus),
+                ((SheCorrectiveActionStatus)r.RawStatus).ToString())));
+        }
+
+        if (source is null or SheCorrectiveActionSource.Audit)
+        {
+            var rows = await _unitOfWork.Repository<SheAuditFindingAction>()
+                .GetQueryable(a => a.TenantId == tenantId && !a.IsDeleted &&
+                                   !a.Finding.IsDeleted && !a.Finding.Audit.IsDeleted)
+                .Select(a => new ActionRow(
+                    a.Id, a.Finding.AuditId,
+                    a.Finding.Audit.AuditNumber + " finding #" + a.Finding.FindingNumber,
+                    a.CorrectiveActionTemplate.Title,
+                    null, (int)a.Status,
+                    a.AssignedToId,
+                    a.AssignedTo != null ? a.AssignedTo.FirstName : null,
+                    a.AssignedTo != null ? a.AssignedTo.MiddleName : null,
+                    a.AssignedTo != null ? a.AssignedTo.LastName : null,
+                    a.DueDate, a.CompletionDate,
+                    null, a.CreatedAt))
+                .ToListAsync(cancellationToken);
+            result.AddRange(rows.Select(r => ToUnified(r, SheCorrectiveActionSource.Audit,
+                $"/hr/safety/audits/{r.ParentId}", MapCaStatus((SheCorrectiveActionStatus)r.RawStatus),
                 ((SheCorrectiveActionStatus)r.RawStatus).ToString())));
         }
 

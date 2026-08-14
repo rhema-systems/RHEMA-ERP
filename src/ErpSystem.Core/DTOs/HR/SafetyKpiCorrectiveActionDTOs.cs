@@ -26,6 +26,8 @@ public enum SheCorrectiveActionSource
     Inspection = 2,
     Equipment = 3,
     Committee = 4,
+    /// <summary>Audit-finding corrective actions — the fifth source, added by slice 15.</summary>
+    Audit = 5,
 }
 
 /// <summary>

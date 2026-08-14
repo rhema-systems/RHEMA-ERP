@@ -11,13 +11,14 @@ const opts = <T extends string>(entries: [T, string][]) =>
 
 // ── Unified corrective-action tracker ────────────────────────────────────────
 
-export type SheCorrectiveActionSource = 'Incident' | 'Inspection' | 'Equipment' | 'Committee';
+export type SheCorrectiveActionSource = 'Incident' | 'Inspection' | 'Equipment' | 'Committee' | 'Audit';
 
 export const SHE_CORRECTIVE_ACTION_SOURCE_OPTIONS = opts<SheCorrectiveActionSource>([
   ['Incident', 'Incident investigation'],
   ['Inspection', 'Workplace inspection'],
   ['Equipment', 'Safety equipment'],
   ['Committee', 'Committee meeting'],
+  ['Audit', 'Audit finding'],
 ]);
 
 /** Lifecycle stage normalised across the silos' own status enums. A stored "Overdue"
