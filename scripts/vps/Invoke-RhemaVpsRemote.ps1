@@ -237,6 +237,18 @@ BEGIN
         INSERT @R VALUES(N'Controlled sourcing method trigger baseline', 1);
 END;
 IF NOT EXISTS (
+       SELECT 1 FROM dbo.__EFMigrationsHistory
+       WHERE MigrationId = N'20260813103000_AddFixedAssetDisposalSettlement')
+   AND EXISTS (
+       SELECT required.name
+       FROM (VALUES
+           (N'AssetDisposals'), (N'BusinessPartners'), (N'TaxGroups'),
+           (N'PaymentTerms'), (N'PaymentMethod'), (N'BankAccounts'),
+           (N'LiquidityAccounts'), (N'Invoices'), (N'CustomerPayment')
+       ) required(name)
+       WHERE OBJECT_ID(N'dbo.' + required.name, N'U') IS NULL)
+    INSERT @R VALUES(N'Fixed-asset disposal settlement table prerequisites', 1);
+IF NOT EXISTS (
     SELECT 1 FROM dbo.__EFMigrationsHistory
     WHERE MigrationId = N'20260813063001_INVREQFU002MaintenanceReservationLifecycle')
 BEGIN

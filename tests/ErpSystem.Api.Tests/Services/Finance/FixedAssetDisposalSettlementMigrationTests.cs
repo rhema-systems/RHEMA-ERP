@@ -41,7 +41,8 @@ public sealed class FixedAssetDisposalSettlementMigrationTests
 
         var foreignKeys = builder.Operations.OfType<AddForeignKeyOperation>().ToArray();
         foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerInvoiceId" && item.PrincipalTable == "Invoices");
-        foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerPaymentId" && item.PrincipalTable == "CustomerPayments");
+        foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerPaymentId" && item.PrincipalTable == "CustomerPayment");
+        foreignKeys.Should().Contain(item => item.Columns.Single() == "SettlementPaymentMethodId" && item.PrincipalTable == "PaymentMethod");
         foreignKeys.Should().OnlyContain(item => item.OnDelete == ReferentialAction.Restrict);
     }
 
