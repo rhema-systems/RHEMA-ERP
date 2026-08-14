@@ -1063,7 +1063,6 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         TenantId = tenantId,
         ReturnToWorkPlanId = dto.ReturnToWorkPlanId,
         PhaseName = dto.PhaseName,
-        PhaseNumber = dto.PhaseNumber,
         StartDate = dto.StartDate,
         EndDate = dto.EndDate,
         RequiresReducedHours = dto.RequiresReducedHours,
@@ -1079,7 +1078,6 @@ public static class SafetyEmergencyGovernanceMappingExtensions
     public static void UpdateEntity(this SheReturnToWorkPhase e, UpdateSheReturnToWorkPhaseDto dto, Guid userId)
     {
         e.PhaseName = dto.PhaseName;
-        e.PhaseNumber = dto.PhaseNumber;
         e.StartDate = dto.StartDate;
         e.EndDate = dto.EndDate;
         e.RequiresReducedHours = dto.RequiresReducedHours;
@@ -1125,7 +1123,6 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         TenantId = tenantId,
         ReturnToWorkPlanId = dto.ReturnToWorkPlanId,
         ReviewDate = dto.ReviewDate,
-        ReviewNumber = dto.ReviewNumber,
         EmployeeCondition = dto.EmployeeCondition,
         WorkProgress = dto.WorkProgress,
         IssuesIdentified = dto.IssuesIdentified,

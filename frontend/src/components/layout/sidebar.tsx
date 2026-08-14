@@ -112,6 +112,8 @@ import {
   FastForward,
   HandCoins,
   UserPlus,
+  Stethoscope,
+  HeartPulse,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -611,6 +613,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Safety Equipment', href: '/hr/safety/equipment', icon: FireExtinguisher },
           { title: 'Emergency Plans', href: '/hr/safety/emergency', icon: Siren },
           { title: 'Contractors', href: '/hr/safety/contractors', icon: Handshake },
+          // Occ-health + RTW ride the HR.Medical.* policies, not the SHE HR-role gate.
+          { title: 'Occupational Health', href: '/hr/safety/occupational-health', icon: Stethoscope },
+          { title: 'Return to Work', href: '/hr/safety/return-to-work', icon: HeartPulse },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

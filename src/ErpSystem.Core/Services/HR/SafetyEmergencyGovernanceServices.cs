@@ -1213,7 +1213,7 @@ public class SheReturnToWorkService : ISheReturnToWorkService
 
     private async Task<SheReturnToWorkPlan> GetOwnedPlanAsync(Guid id)
     {
-        var entity = await _planRepository.GetByIdAsync(id);
+        var entity = await _planRepository.GetByIdAsync(id, p => p.Employee, p => p.SafetyIncident!, p => p.Coordinator!, p => p.Supervisor!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Return-to-work plan with ID '{id}' not found.");
         return entity;
@@ -1221,10 +1221,28 @@ public class SheReturnToWorkService : ISheReturnToWorkService
 
     private async Task<SheReturnToWorkPhase> GetOwnedPhaseAsync(Guid id)
     {
-        var entity = await _unitOfWork.Repository<SheReturnToWorkPhase>().GetByIdAsync(id);
+        var entity = await _unitOfWork.Repository<SheReturnToWorkPhase>().GetByIdAsync(id, ph => ph.AssessedBy);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Return-to-work phase with ID '{id}' not found.");
         return entity;
+    }
+
+    // Guards body-supplied FKs so a bad id surfaces as 404 instead of SQL 547/HTTP 500; fetching on
+    // this context also lets change-tracker fixup resolve the navigation for the write response.
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task<SafetyIncident> GetOwnedIncidentAsync(Guid id)
+    {
+        var incident = await _unitOfWork.Repository<SafetyIncident>().GetByIdAsync(id);
+        if (incident == null || incident.TenantId != GetTenantId())
+            throw new ArgumentException($"Safety incident with ID '{id}' not found.");
+        return incident;
     }
 
     public async Task<SheReturnToWorkPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1239,10 +1257,15 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPlanDto?> GetByNumberAsync(string planNumber, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _planRepository.GetByNumberAsync(planNumber);
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
+        var number = planNumber.Trim();
+        var id = await _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId && p.PlanNumber == number)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (id == null) return null;
+
+        var entity = await _planRepository.GetWithFullDetailsAsync(id.Value);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<SheReturnToWorkPlanSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -1288,6 +1311,18 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPlanDto> CreateAsync(CreateSheReturnToWorkPlanDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        var number = dto.PlanNumber.Trim();
+        var numberTaken = await _planRepository.GetQueryable()
+            .AnyAsync(p => p.TenantId == tenantId && p.PlanNumber == number, cancellationToken);
+        if (numberTaken)
+            throw new InvalidOperationException($"A return-to-work plan with number '{number}' already exists for this tenant.");
+
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        if (dto.SafetyIncidentId.HasValue) await GetOwnedIncidentAsync(dto.SafetyIncidentId.Value);
+        if (dto.CoordinatorId.HasValue) await GetOwnedEmployeeAsync(dto.CoordinatorId.Value);
+        if (dto.SupervisorId.HasValue) await GetOwnedEmployeeAsync(dto.SupervisorId.Value);
+
+        dto.PlanNumber = number;
         var entity = dto.ToEntity(tenantId, userId);
         await _planRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1297,6 +1332,12 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPlanDto> UpdateAsync(UpdateSheReturnToWorkPlanDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(dto.Id);
+        if (dto.SafetyIncidentId.HasValue && dto.SafetyIncidentId != entity.SafetyIncidentId)
+            await GetOwnedIncidentAsync(dto.SafetyIncidentId.Value);
+        if (dto.CoordinatorId.HasValue && dto.CoordinatorId != entity.CoordinatorId)
+            await GetOwnedEmployeeAsync(dto.CoordinatorId.Value);
+        if (dto.SupervisorId.HasValue && dto.SupervisorId != entity.SupervisorId)
+            await GetOwnedEmployeeAsync(dto.SupervisorId.Value);
         entity.UpdateEntity(dto, userId);
         await _planRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1314,7 +1355,17 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkPhaseDto> AddPhaseAsync(CreateSheReturnToWorkPhaseDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.ReturnToWorkPlanId);
+        await GetOwnedEmployeeAsync(dto.AssessedById);
+
+        // The phase sequence is server-assigned per plan, like permit extension numbers.
+        // Soft-deleted phases keep their number so it is never re-issued.
+        var maxPhase = await _unitOfWork.Repository<SheReturnToWorkPhase>()
+            .GetQueryableIncludingDeleted(ph => ph.TenantId == tenantId && ph.ReturnToWorkPlanId == dto.ReturnToWorkPlanId)
+            .MaxAsync(ph => (int?)ph.PhaseNumber, cancellationToken) ?? 0;
+
         var entity = dto.ToEntity(tenantId, userId);
+        entity.PhaseNumber = maxPhase + 1;
         await _unitOfWork.Repository<SheReturnToWorkPhase>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -1340,6 +1391,7 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<IEnumerable<SheReturnToWorkReviewDto>> GetReviewsAsync(Guid planId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await GetOwnedPlanAsync(planId);
         var reviews = await _unitOfWork.Repository<SheReturnToWorkReview>()
             .FindAsync(r => r.TenantId == tenantId && r.ReturnToWorkPlanId == planId, r => r.ReviewedBy);
         return reviews.OrderBy(r => r.ReviewNumber).Select(r => r.ToDto());
@@ -1348,7 +1400,16 @@ public class SheReturnToWorkService : ISheReturnToWorkService
     public async Task<SheReturnToWorkReviewDto> AddReviewAsync(CreateSheReturnToWorkReviewDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedPlanAsync(dto.ReturnToWorkPlanId);
+        await GetOwnedEmployeeAsync(dto.ReviewedById);
+
+        // The review sequence is server-assigned per plan; soft-deleted rows keep their number.
+        var maxReview = await _unitOfWork.Repository<SheReturnToWorkReview>()
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.ReturnToWorkPlanId == dto.ReturnToWorkPlanId)
+            .MaxAsync(r => (int?)r.ReviewNumber, cancellationToken) ?? 0;
+
         var entity = dto.ToEntity(tenantId, userId);
+        entity.ReviewNumber = maxReview + 1;
         await _unitOfWork.Repository<SheReturnToWorkReview>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();

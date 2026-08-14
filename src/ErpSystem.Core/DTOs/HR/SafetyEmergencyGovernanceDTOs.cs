@@ -1314,8 +1314,6 @@ public class CreateSheReturnToWorkPhaseDto : CreateDtoBase
     [Required, MaxLength(100)]
     public string PhaseName { get; set; } = string.Empty;
 
-    public int PhaseNumber { get; set; }
-
     [Required]
     public DateTime StartDate { get; set; }
 
@@ -1341,8 +1339,6 @@ public class UpdateSheReturnToWorkPhaseDto : UpdateDtoBase
 {
     [Required, MaxLength(100)]
     public string PhaseName { get; set; } = string.Empty;
-
-    public int PhaseNumber { get; set; }
 
     [Required]
     public DateTime StartDate { get; set; }
@@ -1405,8 +1401,6 @@ public class CreateSheReturnToWorkReviewDto : CreateDtoBase
 
     [Required]
     public DateTime ReviewDate { get; set; }
-
-    public int ReviewNumber { get; set; }
 
     [MaxLength(500)]
     public string? EmployeeCondition { get; set; }

@@ -17,6 +17,8 @@ import {
   FireExtinguisher,
   Siren,
   Handshake,
+  Stethoscope,
+  HeartPulse,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -181,6 +183,28 @@ export default function SafetyHomePage() {
                 'The contractor register — pre-qualification, worker inductions, site inspections, non-compliance notices and documents.',
               href: '/hr/safety/contractors',
               icon: Handshake,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Health</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Occupational Health',
+              description:
+                'Health surveillance, first-aid stations and wellness programs. Requires medical permissions.',
+              href: '/hr/safety/occupational-health',
+              icon: Stethoscope,
+            },
+            {
+              title: 'Return to Work',
+              description:
+                'Phased return plans with medical clearance, duties and periodic reviews. Requires medical permissions.',
+              href: '/hr/safety/return-to-work',
+              icon: HeartPulse,
             },
           ]}
         />

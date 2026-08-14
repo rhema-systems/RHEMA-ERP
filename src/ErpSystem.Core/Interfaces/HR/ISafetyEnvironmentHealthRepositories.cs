@@ -83,6 +83,10 @@ public interface ISheOccupationalHealthSurveillanceRepository : IGenericReposito
 public interface ISheFirstAidStationRepository : IGenericRepository<SheFirstAidStation>
 {
     Task<SheFirstAidStation?> GetByCodeAsync(string stationCode);
+
+    /// <summary>All stations with Location and ResponsibleAider resolved — the default register read.</summary>
+    Task<IEnumerable<SheFirstAidStation>> GetAllListAsync();
+
     Task<IEnumerable<SheFirstAidStation>> GetByLocationAsync(Guid locationId);
     Task<IEnumerable<SheFirstAidStation>> GetActiveAsync();
 
@@ -96,6 +100,9 @@ public interface ISheFirstAidStationRepository : IGenericRepository<SheFirstAidS
 public interface ISheWellnessProgramRepository : IGenericRepository<SheWellnessProgram>
 {
     Task<SheWellnessProgram?> GetByCodeAsync(string programCode);
+
+    /// <summary>All programs with the Coordinator resolved — the default register read.</summary>
+    Task<IEnumerable<SheWellnessProgram>> GetAllListAsync();
     Task<IEnumerable<SheWellnessProgram>> GetByStatusAsync(SheWellnessProgramStatus status);
     Task<IEnumerable<SheWellnessProgram>> GetByTypeAsync(SheWellnessProgramType type);
     Task<IEnumerable<SheWellnessProgram>> GetActiveAsync();

@@ -1,4 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
@@ -525,7 +527,7 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
 
     private async Task<SheOccupationalHealthSurveillance> GetOwnedSurveillanceAsync(Guid id)
     {
-        var entity = await _surveillanceRepository.GetByIdAsync(id);
+        var entity = await _surveillanceRepository.GetByIdAsync(id, s => s.Employee, s => s.HealthcareFacility!, s => s.RecordedBy);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Health surveillance record with ID '{id}' not found.");
         return entity;
@@ -533,7 +535,7 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
 
     private async Task<SheFirstAidStation> GetOwnedFirstAidStationAsync(Guid id)
     {
-        var entity = await _firstAidRepository.GetByIdAsync(id);
+        var entity = await _firstAidRepository.GetByIdAsync(id, s => s.Location, s => s.ResponsibleAider!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"First aid station with ID '{id}' not found.");
         return entity;
@@ -541,10 +543,38 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
 
     private async Task<SheWellnessProgram> GetOwnedWellnessProgramAsync(Guid id)
     {
-        var entity = await _wellnessRepository.GetByIdAsync(id);
+        var entity = await _wellnessRepository.GetByIdAsync(id, p => p.Coordinator!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Wellness program with ID '{id}' not found.");
         return entity;
+    }
+
+    // Guards body-supplied FKs so a bad id surfaces as 404 instead of SQL 547/HTTP 500; fetching on
+    // this context also lets change-tracker fixup resolve the navigation for the write response.
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task<Location> GetOwnedLocationAsync(Guid id)
+    {
+        var location = await _unitOfWork.Repository<Location>().GetByIdAsync(id);
+        if (location == null || location.TenantId != GetTenantId())
+            throw new ArgumentException($"Location with ID '{id}' not found.");
+        return location;
+    }
+
+    // The facility register belongs to the Medical module; SHE surveillance references it by id
+    // (the agreed bridge), so the FK is validated against the owned tenant like any other.
+    private async Task<HealthcareFacility> GetOwnedFacilityAsync(Guid id)
+    {
+        var facility = await _unitOfWork.Repository<HealthcareFacility>().GetByIdAsync(id);
+        if (facility == null || facility.TenantId != GetTenantId())
+            throw new ArgumentException($"Healthcare facility with ID '{id}' not found.");
+        return facility;
     }
 
     // ── Health surveillance ──
@@ -596,15 +626,17 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
     public async Task<SheOccupationalHealthSurveillanceDto> CreateSurveillanceAsync(CreateSheOccupationalHealthSurveillanceDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        if (!string.IsNullOrWhiteSpace(dto.SurveillanceNumber))
-        {
-            var number = dto.SurveillanceNumber.Trim();
-            var exists = await _surveillanceRepository.GetQueryable()
-                .AnyAsync(s => s.TenantId == tenantId && s.SurveillanceNumber == number, cancellationToken);
-            if (exists)
-                throw new InvalidOperationException($"A health surveillance record with number '{number}' already exists for this tenant.");
-        }
+        var number = dto.SurveillanceNumber.Trim();
+        var exists = await _surveillanceRepository.GetQueryable()
+            .AnyAsync(s => s.TenantId == tenantId && s.SurveillanceNumber == number, cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"A health surveillance record with number '{number}' already exists for this tenant.");
 
+        await GetOwnedEmployeeAsync(dto.EmployeeId);
+        await GetOwnedEmployeeAsync(dto.RecordedById);
+        if (dto.HealthcareFacilityId.HasValue) await GetOwnedFacilityAsync(dto.HealthcareFacilityId.Value);
+
+        dto.SurveillanceNumber = number;
         var entity = dto.ToEntity(tenantId, userId);
         await _surveillanceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -614,6 +646,8 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
     public async Task<SheOccupationalHealthSurveillanceDto> UpdateSurveillanceAsync(UpdateSheOccupationalHealthSurveillanceDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSurveillanceAsync(dto.Id);
+        if (dto.HealthcareFacilityId.HasValue && dto.HealthcareFacilityId != entity.HealthcareFacilityId)
+            await GetOwnedFacilityAsync(dto.HealthcareFacilityId.Value);
         entity.UpdateEntity(dto, userId);
         await _surveillanceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -641,7 +675,7 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
     public async Task<IEnumerable<SheFirstAidStationDto>> GetFirstAidStationsAsync(bool activeOnly = false, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = activeOnly ? await _firstAidRepository.GetActiveAsync() : await _firstAidRepository.GetAllAsync();
+        var entities = activeOnly ? await _firstAidRepository.GetActiveAsync() : await _firstAidRepository.GetAllListAsync();
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
@@ -672,6 +706,10 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
         if (exists)
             throw new InvalidOperationException($"A first aid station with code '{code}' already exists for this tenant.");
 
+        await GetOwnedLocationAsync(dto.LocationId);
+        if (dto.ResponsibleAiderId.HasValue) await GetOwnedEmployeeAsync(dto.ResponsibleAiderId.Value);
+
+        dto.StationCode = code;
         var entity = dto.ToEntity(tenantId, userId);
         await _firstAidRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -681,6 +719,10 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
     public async Task<SheFirstAidStationDto> UpdateFirstAidStationAsync(UpdateSheFirstAidStationDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedFirstAidStationAsync(dto.Id);
+        if (dto.LocationId != entity.LocationId)
+            await GetOwnedLocationAsync(dto.LocationId);
+        if (dto.ResponsibleAiderId.HasValue && dto.ResponsibleAiderId != entity.ResponsibleAiderId)
+            await GetOwnedEmployeeAsync(dto.ResponsibleAiderId.Value);
         entity.UpdateEntity(dto, userId);
         await _firstAidRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -708,7 +750,7 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
     public async Task<IEnumerable<SheWellnessProgramDto>> GetWellnessProgramsAsync(bool activeOnly = false, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = activeOnly ? await _wellnessRepository.GetActiveAsync() : await _wellnessRepository.GetAllAsync();
+        var entities = activeOnly ? await _wellnessRepository.GetActiveAsync() : await _wellnessRepository.GetAllListAsync();
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
@@ -733,6 +775,9 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
         if (exists)
             throw new InvalidOperationException($"A wellness program with code '{code}' already exists for this tenant.");
 
+        if (dto.CoordinatorId.HasValue) await GetOwnedEmployeeAsync(dto.CoordinatorId.Value);
+
+        dto.ProgramCode = code;
         var entity = dto.ToEntity(tenantId, userId);
         await _wellnessRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -742,6 +787,8 @@ public class SheOccupationalHealthService : ISheOccupationalHealthService
     public async Task<SheWellnessProgramDto> UpdateWellnessProgramAsync(UpdateSheWellnessProgramDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedWellnessProgramAsync(dto.Id);
+        if (dto.CoordinatorId.HasValue && dto.CoordinatorId != entity.CoordinatorId)
+            await GetOwnedEmployeeAsync(dto.CoordinatorId.Value);
         entity.UpdateEntity(dto, userId);
         await _wellnessRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

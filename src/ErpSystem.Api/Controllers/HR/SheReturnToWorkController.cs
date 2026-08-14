@@ -9,10 +9,13 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+// Gated on the Medical permission policies rather than the SHE HR-role gate: plans carry
+// medical restrictions and clearance notes — medical-grade data, per the agreed SHE↔Medical
+// boundary. Reads need MedicalRead; writes MedicalWrite; deletes MedicalAdmin.
 [ApiController]
 [Route("api/safety/return-to-work")]
 [SafetyBusinessRules]
-[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr)]
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class SheReturnToWorkController : SheApiControllerBase
 {
     private readonly ISheReturnToWorkService _service;
@@ -49,6 +52,7 @@ public class SheReturnToWorkController : SheApiControllerBase
         => Ok(await _service.GetActiveAsync());
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheReturnToWorkPlanDto>> Create([FromBody] CreateSheReturnToWorkPlanDto dto)
     {
         var created = await _service.CreateAsync(dto, TenantId, UserId);
@@ -56,6 +60,7 @@ public class SheReturnToWorkController : SheApiControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheReturnToWorkPlanDto>> Update(Guid id, [FromBody] UpdateSheReturnToWorkPlanDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -63,6 +68,7 @@ public class SheReturnToWorkController : SheApiControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -71,6 +77,7 @@ public class SheReturnToWorkController : SheApiControllerBase
 
     // ── Phases ──
     [HttpPost("{id:guid}/phases")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheReturnToWorkPhaseDto>> AddPhase(Guid id, [FromBody] CreateSheReturnToWorkPhaseDto dto)
     {
         dto.ReturnToWorkPlanId = id;
@@ -78,6 +85,7 @@ public class SheReturnToWorkController : SheApiControllerBase
     }
 
     [HttpPut("phases/{phaseId:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheReturnToWorkPhaseDto>> UpdatePhase(Guid phaseId, [FromBody] UpdateSheReturnToWorkPhaseDto dto)
     {
         if (phaseId != dto.Id) return BadRequest("ID mismatch.");
@@ -85,6 +93,7 @@ public class SheReturnToWorkController : SheApiControllerBase
     }
 
     [HttpDelete("phases/{phaseId:guid}")]
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     public async Task<IActionResult> DeletePhase(Guid phaseId)
     {
         await _service.DeletePhaseAsync(phaseId);
@@ -97,6 +106,7 @@ public class SheReturnToWorkController : SheApiControllerBase
         => Ok(await _service.GetReviewsAsync(id));
 
     [HttpPost("{id:guid}/reviews")]
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     public async Task<ActionResult<SheReturnToWorkReviewDto>> AddReview(Guid id, [FromBody] CreateSheReturnToWorkReviewDto dto)
     {
         dto.ReturnToWorkPlanId = id;

@@ -366,6 +366,7 @@ public class SheReturnToWorkPlanRepository : GenericRepository<SheReturnToWorkPl
             .Include(p => p.Supervisor)
             .Include(p => p.Phases).ThenInclude(ph => ph.AssessedBy)
             .Include(p => p.Reviews).ThenInclude(r => r.ReviewedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<SheReturnToWorkPlan>> GetAllSummaryAsync() =>
