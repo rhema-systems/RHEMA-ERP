@@ -114,8 +114,9 @@ public class SheWasteDisposalRecordSummaryDto
 
 public class CreateSheWasteDisposalRecordDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
-    public string RecordNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left blank, the server assigns the next number in sequence.</summary>
+    [MaxLength(30)]
+    public string? RecordNumber { get; set; }
 
     [Required]
     public Guid WasteTypeId { get; set; }
@@ -254,8 +255,9 @@ public class SheEnvironmentalIncidentSummaryDto
 
 public class CreateSheEnvironmentalIncidentDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
-    public string IncidentNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left blank, the server assigns the next number in sequence.</summary>
+    [MaxLength(30)]
+    public string? IncidentNumber { get; set; }
 
     public Guid? SafetyIncidentId { get; set; }
 
@@ -388,8 +390,9 @@ public class SheEnvironmentalMonitoringRecordDto : BaseDto
 
 public class CreateSheEnvironmentalMonitoringRecordDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
-    public string RecordNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left blank, the server assigns the next number in sequence.</summary>
+    [MaxLength(30)]
+    public string? RecordNumber { get; set; }
 
     [Required]
     public SheEnvironmentalMonitoringType MonitoringType { get; set; }
@@ -409,8 +412,6 @@ public class CreateSheEnvironmentalMonitoringRecordDto : CreateDtoBase
 
     public decimal? RegulatoryLimit { get; set; }
     public decimal? ActionLevel { get; set; }
-    public bool ExceedsLimit { get; set; }
-    public bool ExceedsActionLevel { get; set; }
 
     [MaxLength(500)]
     public string? InstrumentUsed { get; set; }
@@ -448,8 +449,6 @@ public class UpdateSheEnvironmentalMonitoringRecordDto : UpdateDtoBase
 
     public decimal? RegulatoryLimit { get; set; }
     public decimal? ActionLevel { get; set; }
-    public bool ExceedsLimit { get; set; }
-    public bool ExceedsActionLevel { get; set; }
 
     [MaxLength(500)]
     public string? InstrumentUsed { get; set; }

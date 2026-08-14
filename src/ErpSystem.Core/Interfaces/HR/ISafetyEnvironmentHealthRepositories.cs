@@ -24,7 +24,6 @@ public interface ISheWasteDisposalRecordRepository : IGenericRepository<SheWaste
     Task<IEnumerable<SheWasteDisposalRecord>> GetByWasteTypeAsync(Guid wasteTypeId);
     Task<IEnumerable<SheWasteDisposalRecord>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate);
     Task<IEnumerable<SheWasteDisposalRecord>> GetByContractorAsync(Guid contractorId);
-    Task<string> GetNextRecordNumberAsync();
 }
 
 // ============================================================================
@@ -45,7 +44,6 @@ public interface ISheEnvironmentalIncidentRepository : IGenericRepository<SheEnv
     /// <summary>Returns incidents that are not yet closed.</summary>
     Task<IEnumerable<SheEnvironmentalIncident>> GetOpenAsync();
 
-    Task<string> GetNextIncidentNumberAsync();
 }
 
 public interface ISheEnvironmentalMonitoringRecordRepository : IGenericRepository<SheEnvironmentalMonitoringRecord>
@@ -58,7 +56,6 @@ public interface ISheEnvironmentalMonitoringRecordRepository : IGenericRepositor
     /// <summary>Returns readings that exceeded the regulatory limit or action level.</summary>
     Task<IEnumerable<SheEnvironmentalMonitoringRecord>> GetExceedancesAsync();
 
-    Task<string> GetNextRecordNumberAsync();
 }
 
 // ============================================================================

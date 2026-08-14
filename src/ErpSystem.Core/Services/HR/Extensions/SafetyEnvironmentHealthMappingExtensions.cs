@@ -106,7 +106,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
     public static SheWasteDisposalRecord ToEntity(this CreateSheWasteDisposalRecordDto dto, Guid tenantId, Guid userId) => new()
     {
         TenantId = tenantId,
-        RecordNumber = dto.RecordNumber,
+        RecordNumber = dto.RecordNumber ?? string.Empty,
         WasteTypeId = dto.WasteTypeId,
         LocationId = dto.LocationId,
         GenerationArea = dto.GenerationArea,
@@ -204,7 +204,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
     public static SheEnvironmentalIncident ToEntity(this CreateSheEnvironmentalIncidentDto dto, Guid tenantId, Guid userId) => new()
     {
         TenantId = tenantId,
-        IncidentNumber = dto.IncidentNumber,
+        IncidentNumber = dto.IncidentNumber ?? string.Empty,
         SafetyIncidentId = dto.SafetyIncidentId,
         Type = dto.Type,
         AffectedMedia = dto.AffectedMedia,
@@ -283,7 +283,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
     public static SheEnvironmentalMonitoringRecord ToEntity(this CreateSheEnvironmentalMonitoringRecordDto dto, Guid tenantId, Guid userId) => new()
     {
         TenantId = tenantId,
-        RecordNumber = dto.RecordNumber,
+        RecordNumber = dto.RecordNumber ?? string.Empty,
         MonitoringType = dto.MonitoringType,
         LocationId = dto.LocationId,
         MonitoringPoint = dto.MonitoringPoint,
@@ -292,8 +292,6 @@ public static class SafetyEnvironmentHealthMappingExtensions
         Unit = dto.Unit,
         RegulatoryLimit = dto.RegulatoryLimit,
         ActionLevel = dto.ActionLevel,
-        ExceedsLimit = dto.ExceedsLimit,
-        ExceedsActionLevel = dto.ExceedsActionLevel,
         InstrumentUsed = dto.InstrumentUsed,
         WeatherConditions = dto.WeatherConditions,
         MeasuredById = dto.MeasuredById,
@@ -312,8 +310,6 @@ public static class SafetyEnvironmentHealthMappingExtensions
         e.Unit = dto.Unit;
         e.RegulatoryLimit = dto.RegulatoryLimit;
         e.ActionLevel = dto.ActionLevel;
-        e.ExceedsLimit = dto.ExceedsLimit;
-        e.ExceedsActionLevel = dto.ExceedsActionLevel;
         e.InstrumentUsed = dto.InstrumentUsed;
         e.WeatherConditions = dto.WeatherConditions;
         e.Comments = dto.Comments;

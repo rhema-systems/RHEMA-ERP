@@ -114,6 +114,8 @@ import {
   UserPlus,
   Stethoscope,
   HeartPulse,
+  Leaf,
+  Recycle,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -616,6 +618,8 @@ export const navigationItems: NavItem[] = [
           // Occ-health + RTW ride the HR.Medical.* policies, not the SHE HR-role gate.
           { title: 'Occupational Health', href: '/hr/safety/occupational-health', icon: Stethoscope },
           { title: 'Return to Work', href: '/hr/safety/return-to-work', icon: HeartPulse },
+          { title: 'Environmental', href: '/hr/safety/environmental', icon: Leaf },
+          { title: 'Waste Management', href: '/hr/safety/waste', icon: Recycle },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

@@ -19,6 +19,8 @@ import {
   Handshake,
   Stethoscope,
   HeartPulse,
+  Leaf,
+  Recycle,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -205,6 +207,28 @@ export default function SafetyHomePage() {
                 'Phased return plans with medical clearance, duties and periodic reviews. Requires medical permissions.',
               href: '/hr/safety/return-to-work',
               icon: HeartPulse,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Environment</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Environmental',
+              description:
+                'Spills, exceedances and contamination with EPA-notification tracking, plus monitoring readings with computed exceedances.',
+              href: '/hr/safety/environmental',
+              icon: Leaf,
+            },
+            {
+              title: 'Waste Management',
+              description:
+                'Disposal records and the waste-type catalogue. Manifest-requiring types are gated on their certificate.',
+              href: '/hr/safety/waste',
+              icon: Recycle,
             },
           ]}
         />

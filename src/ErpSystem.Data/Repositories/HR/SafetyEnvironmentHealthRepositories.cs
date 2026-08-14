@@ -47,21 +47,6 @@ public class SheWasteDisposalRecordRepository : GenericRepository<SheWasteDispos
         await WithNavigations().Where(r => r.WasteContractorId == contractorId && !r.IsDeleted)
             .OrderByDescending(r => r.DisposalDate).ToListAsync();
 
-    public async Task<string> GetNextRecordNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"WD-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(r => r.RecordNumber.StartsWith(prefix))
-            .OrderByDescending(r => r.RecordNumber)
-            .Select(r => r.RecordNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 #endregion
@@ -106,21 +91,6 @@ public class SheEnvironmentalIncidentRepository : GenericRepository<SheEnvironme
         await WithListNavigations().Where(e => e.Status != SheEnvironmentalIncidentStatus.Closed && !e.IsDeleted)
             .OrderByDescending(e => e.IncidentDate).ToListAsync();
 
-    public async Task<string> GetNextIncidentNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"ENV-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(e => e.IncidentNumber.StartsWith(prefix))
-            .OrderByDescending(e => e.IncidentNumber)
-            .Select(e => e.IncidentNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 public class SheEnvironmentalMonitoringRecordRepository : GenericRepository<SheEnvironmentalMonitoringRecord>, ISheEnvironmentalMonitoringRecordRepository
@@ -149,21 +119,6 @@ public class SheEnvironmentalMonitoringRecordRepository : GenericRepository<SheE
         await WithNavigations().Where(r => (r.ExceedsLimit || r.ExceedsActionLevel) && !r.IsDeleted)
             .OrderByDescending(r => r.MeasurementDate).ToListAsync();
 
-    public async Task<string> GetNextRecordNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"EM-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(r => r.RecordNumber.StartsWith(prefix))
-            .OrderByDescending(r => r.RecordNumber)
-            .Select(r => r.RecordNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 #endregion
