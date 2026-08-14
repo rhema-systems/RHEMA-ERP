@@ -755,6 +755,37 @@ public sealed class FinanceConcurrencyHardeningTests
 
     [Fact]
     [Trait("Category", "Architecture")]
+    [Trait("Contract", "FIN-INT-007")]
+    public void ProcurementAssetDraft_ShouldReserveAcceptedQuantityAtomically()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "FixedAssets",
+            "ProcurementFixedAssetCapitalizationAdapter.cs"));
+        var createMethod = ExtractMember(
+            source,
+            "public async Task<ProcurementFixedAssetCapitalizationDto> CreateDraftAsync",
+            "private async Task<ProcurementFixedAssetCapitalizationDto> CreateDraftCoreAsync");
+
+        createMethod.Should().Contain("CreateExecutionStrategy()",
+            "SQL Server transient retry handling must own the Finance reservation transaction");
+        createMethod.Should().Contain("BeginTransactionAsync(IsolationLevel.Serializable",
+            "availability and reservation must be serialized for concurrent Finance users");
+        createMethod.Should().Contain("CreateDraftCoreAsync",
+            "ambient and adapter-owned transactions must execute the same source-validation logic");
+        createMethod.Should().Contain("CommitAsync(cancellationToken)",
+            "the asset draft and accepted-unit reservation must commit together");
+        createMethod.Should().Contain("RollbackAsync(cancellationToken)",
+            "a failed handoff must not leave an orphaned asset draft or source reservation");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
     public void YearEndClose_ShouldPostThroughFinancePostingEngine()
     {

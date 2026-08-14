@@ -19,7 +19,7 @@ This catalogue tells module owners which Finance boundaries are callable now, wh
 | FIN-INT-004 | Inventory landed-cost valuation → GL | Inventory → Finance GL | Available | 1.0 | `IInventoryLandedCostFinancePostingService.PostLandedCostAsync` | Inventory valuation accounting |
 | FIN-INT-005 | Sales return credit note → AR and GL | Sales → Finance AR | Available | 1.0 | `IReturnOrderService.PostCreditNoteAsync` | Sales return accounting |
 | FIN-INT-006 | Fixed-asset sale → AR, tax and cash | Finance Fixed Assets → Finance AR/Tax/Cash | Available | 1.0 | `IAssetDisposalService.CompleteDisposalAsync` | FIN-LIM-0040 |
-| FIN-INT-007 | Accepted procured asset → capitalization | Procurement → Finance Fixed Assets | Planned | 0.1 | Joint adapter, event shape to agree | FIN-LIM-0028 |
+| FIN-INT-007 | Accepted procured asset → capitalization | Procurement → Finance Fixed Assets | Available | 1.0 | `IProcurementFixedAssetCapitalizationAdapter` | FIN-LIM-0028 |
 | FIN-INT-008 | Sales billing → AR invoice | Sales → Finance AR | Planned | 0.1 | Joint adapter using `IInvoiceService` | FIN-LIM-0051 |
 | FIN-INT-009 | Shared payment-method ownership | Sales/Procurement/etc. → Finance Cash | Decision required | 0.1 | Shared reference contract | FIN-LIM-0050 |
 | FIN-INT-010 | Different customer and supplier payment terms | Sales/Procurement → Finance AR/AP | Decision required | 0.1 | Shared partner/payment-term contract | FIN-LIM-0053 |

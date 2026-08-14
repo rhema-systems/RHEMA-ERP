@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -1584,6 +1585,164 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         }
     }
 
+    public async Task<FixedAssetDto> CapitalizeFromProcurementAsync(
+        Guid id,
+        ProcurementFixedAssetPostingInstructionDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        if (_financePostingEngine == null)
+            throw new InvalidOperationException("Central finance posting engine is not configured for Procurement fixed asset capitalization.");
+
+        var asset = await _context.FixedAssets
+            .Include(value => value.Category)
+            .Include(value => value.BookValues)
+            .SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == id && !value.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("Fixed asset not found.");
+
+        // A retry after the posting engine committed but before the handoff row was updated must
+        // return the same asset. A different source, however, is an attempt to capitalize cost a
+        // second time and is rejected explicitly.
+        if (IsCapitalized(asset))
+        {
+            if (string.Equals(asset.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.OrdinalIgnoreCase) &&
+                asset.SourceDocumentId == dto.CapitalizationId &&
+                asset.SourceDocumentLineId == dto.PurchaseOrderItemId)
+                return MapToDto(asset);
+            throw new InvalidOperationException($"Fixed asset '{asset.AssetCode}' is already capitalized by another source document.");
+        }
+
+        var handoff = await _context.Set<ProcurementFixedAssetCapitalization>().AsNoTracking()
+            .SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == dto.CapitalizationId &&
+                value.FixedAssetId == asset.Id && value.PurchaseOrderItemId == dto.PurchaseOrderItemId &&
+                !value.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The Finance-owned Procurement capitalization handoff was not found or does not match this asset.");
+        if (handoff.Status == ProcurementFixedAssetCapitalizationStatus.Reversed)
+            throw new InvalidOperationException("A reversed Procurement capitalization handoff cannot be posted again.");
+        if (dto.FunctionalAmount <= 0m || RoundMoney(dto.FunctionalAmount) != RoundMoney(handoff.FunctionalAmount))
+            throw new InvalidOperationException("The capitalization amount does not match the reserved Procurement receipt carrying value.");
+
+        await EnsureDirectCapitalizationApprovedAsync(asset, dto.Reason);
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        var assetAccount = await ResolveFixedAssetPostingAccountAsync(
+            category.AssetAccountId,
+            "fixed asset cost account",
+            AccountType.Asset);
+        await ResolveProcurementInventoryControlAccountAsync(dto.InventoryControlAccountId, cancellationToken);
+
+        var functionalCurrency = NormalizeCurrency(dto.FunctionalCurrencyCode, "GHS");
+        var amount = RoundMoney(dto.FunctionalAmount);
+        var request = new FinancePostingRequestDto
+        {
+            SourceModule = "FA",
+            // Period locks use the canonical short code, while journal inquiry retains the
+            // human-readable Procurement origin through the catalog definition.
+            OriginModuleCode = FinanceModuleLockCatalog.Procurement,
+            SourceDocumentType = "ProcurementFixedAssetCapitalization",
+            SourceDocumentId = dto.CapitalizationId,
+            SourceDocumentTenantId = asset.TenantId,
+            PostingAction = "CapitalizeAcceptedAsset",
+            SourceDocumentReference = dto.SourceReference,
+            Description = $"Capitalize accepted procured asset {asset.AssetCode} - {asset.Name}",
+            PostingDate = dto.CapitalizationDate.Date,
+            JournalType = "Fixed Asset Capitalization",
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = functionalCurrency,
+            IdempotencyKey = $"FA:ProcurementFixedAssetCapitalization:{asset.TenantId:N}:{dto.CapitalizationId:N}:Post:v1",
+            ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                BuildCapitalizationPostingLine(
+                    assetAccount.Id,
+                    $"Capitalize accepted procured asset {asset.AssetCode}",
+                    amount,
+                    0m,
+                    functionalCurrency,
+                    functionalCurrency,
+                    1m,
+                    null,
+                    dto.CapitalizationDate.Date,
+                    dto.SourceReference,
+                    1,
+                    $"FixedAssetId={asset.Id:N};PurchaseOrderItemId={dto.PurchaseOrderItemId:N}",
+                    "FA-Procurement-Capitalization"),
+                BuildCapitalizationPostingLine(
+                    dto.InventoryControlAccountId,
+                    $"Release accepted inventory carrying value for {asset.AssetCode}",
+                    0m,
+                    amount,
+                    functionalCurrency,
+                    functionalCurrency,
+                    1m,
+                    null,
+                    dto.CapitalizationDate.Date,
+                    dto.SourceReference,
+                    2,
+                    $"FixedAssetId={asset.Id:N};PurchaseOrderItemId={dto.PurchaseOrderItemId:N}",
+                    "FA-Procurement-Inventory-Clearing")
+            ]
+        };
+
+        try
+        {
+            var posting = await _financePostingEngine.PostAsync(request, cancellationToken);
+            // The posting engine may clear the tracker during an idempotent race recovery. Reload
+            // before applying the register evidence, matching the direct-capitalization safeguard.
+            if (_context.Entry(asset).State == EntityState.Detached)
+            {
+                asset = await _context.FixedAssets.Include(value => value.BookValues)
+                    .SingleAsync(value => value.TenantId == TenantId && value.Id == id && !value.IsDeleted, cancellationToken);
+            }
+
+            await ApplyCapitalizationAsync(
+                asset,
+                category,
+                dto.CapitalizationDate.Date,
+                "ProcurementFixedAssetCapitalization",
+                dto.CapitalizationId,
+                dto.PurchaseOrderItemId,
+                posting.JournalEntryId,
+                posting.PostingEventId,
+                functionalCurrency,
+                functionalCurrency,
+                null,
+                null,
+                dto.CapitalizationDate.Date,
+                amount,
+                handoff.SourceTransactionAmount,
+                "Procurement accepted-receipt capitalization");
+            await _context.SaveChangesAsync(cancellationToken);
+
+            await RecordFixedAssetAuditAsync(
+                FinanceAuditEvents.FixedAssetCapitalized,
+                asset,
+                postingEventId: posting.PostingEventId,
+                journalEntryId: posting.JournalEntryId,
+                afterValues: new
+                {
+                    Contract = "FIN-INT-007",
+                    dto.CapitalizationId,
+                    dto.PurchaseOrderItemId,
+                    asset.AcquisitionCost,
+                    asset.Status
+                },
+                comment: dto.Reason);
+            return MapToDto(asset);
+        }
+        catch (Exception exception)
+        {
+            await RecordFixedAssetAuditAsync(
+                exception.Message.Contains("period is not open", StringComparison.OrdinalIgnoreCase)
+                    ? FinanceAuditEvents.FixedAssetCapitalizationBlockedClosedPeriod
+                    : FinanceAuditEvents.FixedAssetCapitalizationFailed,
+                asset,
+                afterValues: new { Contract = "FIN-INT-007", error = exception.Message },
+                reason: exception.Message,
+                comment: dto.Reason);
+            throw;
+        }
+    }
+
     public async Task<FixedAssetCapitalizationReversalDto> RequestCapitalizationReversalAsync(
         Guid id,
         RequestFixedAssetCapitalizationReversalDto dto,
@@ -1803,6 +1962,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     posting.PostingDate,
                     policy.Reason,
                     request);
+                await MarkProcurementCapitalizationReversedAsync(
+                    request.FixedAsset,
+                    posting.JournalEntryId,
+                    posting.PostingEventId,
+                    posting.PostingDate,
+                    cancellationToken);
                 await _context.SaveChangesAsync(cancellationToken);
                 // The audit event is written before committing the surrounding transaction so a
                 // successful journal can never exist without its maker-checker/register evidence.
@@ -2591,6 +2756,22 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         return account;
     }
 
+    private async Task ResolveProcurementInventoryControlAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken)
+    {
+        var account = await _context.Accounts.AsNoTracking().SingleOrDefaultAsync(value =>
+            value.TenantId == TenantId && value.Id == accountId && !value.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The configured Inventory Control Account was not found for this tenant.");
+        if (account.Status != AccountStatus.Active || account.AccountType != AccountType.Asset)
+            throw new InvalidOperationException("The configured Inventory Control Account must be an active asset account.");
+
+        // Control accounts normally disallow manual direct posting. FIN-INT-007 is a system-owned
+        // reclassification through the central engine, so requiring AllowDirectPosting here would
+        // incorrectly weaken the control-account policy just to support the integration.
+    }
+
     private async Task<FinanceSettings> GetFinanceSettingsAsync()
     {
         return await _context.FinanceSettings
@@ -2682,11 +2863,35 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             throw new InvalidOperationException("Only a currently posted fixed asset capitalization can be reversed.");
         if (!asset.PostingEventId.HasValue || !asset.JournalEntryId.HasValue)
             throw new InvalidOperationException("The fixed asset capitalization is missing its original posting event or journal lineage and cannot be reversed safely.");
-        if (!string.Equals(asset.SourceDocumentType, "FixedAsset", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(asset.SourceDocumentType, "FixedAsset", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(asset.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 "This capitalization belongs to a source document. Reverse that source document so its shared journal and the asset register remain synchronized.");
         }
+    }
+
+    private async Task MarkProcurementCapitalizationReversedAsync(
+        FixedAsset asset,
+        Guid reversalJournalEntryId,
+        Guid reversalPostingEventId,
+        DateTime reversedAt,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(asset.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.OrdinalIgnoreCase) ||
+            !asset.SourceDocumentId.HasValue)
+            return;
+
+        var handoff = await _context.Set<ProcurementFixedAssetCapitalization>().SingleOrDefaultAsync(value =>
+            value.TenantId == TenantId && value.Id == asset.SourceDocumentId.Value &&
+            value.FixedAssetId == asset.Id && !value.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The Procurement capitalization handoff was not found for the approved reversal.");
+        handoff.Status = ProcurementFixedAssetCapitalizationStatus.Reversed;
+        handoff.ReversalJournalEntryId = reversalJournalEntryId;
+        handoff.ReversalPostingEventId = reversalPostingEventId;
+        handoff.ReversedAt = reversedAt;
+        handoff.UpdatedAt = DateTime.UtcNow;
+        handoff.UpdatedBy = UserName;
     }
 
     private async Task EnsureNoDownstreamAssetAccountingAsync(

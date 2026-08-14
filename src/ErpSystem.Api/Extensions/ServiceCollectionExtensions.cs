@@ -840,6 +840,10 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
             services.AddScoped<ErpSystem.Api.Services.Finance.AP.FinancePurchaseOrderReceiptPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetService>();
+            // FIN-INT-007 consumes Procurement's accepted-supply contract but keeps all asset
+            // policy, register reservation and capitalization posting inside Finance.
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IProcurementFixedAssetCapitalizationAdapter,
+                ErpSystem.Api.Services.Finance.FixedAssets.ProcurementFixedAssetCapitalizationAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetCategoryService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetCategoryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFixedAssetDepreciationService, ErpSystem.Api.Services.Finance.FixedAssets.FixedAssetDepreciationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAssetValuationService, ErpSystem.Api.Services.Finance.FixedAssets.AssetValuationService>();
