@@ -242,8 +242,6 @@ public static class SafetyContractorTrainingMappingExtensions
         ViolationDescription = dto.ViolationDescription,
         Severity = dto.Severity,
         RectificationDeadline = dto.RectificationDeadline,
-        IsRepeatViolation = dto.IsRepeatViolation,
-        RepeatCount = dto.RepeatCount,
         Status = SheNonComplianceStatus.Open,
         CreatedBy = userId.ToString(),
     };

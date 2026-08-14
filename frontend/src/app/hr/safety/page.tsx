@@ -16,6 +16,7 @@ import {
   Users,
   FireExtinguisher,
   Siren,
+  Handshake,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -165,6 +166,21 @@ export default function SafetyHomePage() {
                 'Plans with assembly points, contact trees, drills and response teams — plus the review chase.',
               href: '/hr/safety/emergency',
               icon: Siren,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Contractors</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Contractor SHE',
+              description:
+                'The contractor register — pre-qualification, worker inductions, site inspections, non-compliance notices and documents.',
+              href: '/hr/safety/contractors',
+              icon: Handshake,
             },
           ]}
         />

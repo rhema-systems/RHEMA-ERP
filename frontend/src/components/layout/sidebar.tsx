@@ -610,6 +610,7 @@ export const navigationItems: NavItem[] = [
           { title: 'PPE Issuance', href: '/hr/safety/ppe/issuances', icon: Users },
           { title: 'Safety Equipment', href: '/hr/safety/equipment', icon: FireExtinguisher },
           { title: 'Emergency Plans', href: '/hr/safety/emergency', icon: Siren },
+          { title: 'Contractors', href: '/hr/safety/contractors', icon: Handshake },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
         ],
       },

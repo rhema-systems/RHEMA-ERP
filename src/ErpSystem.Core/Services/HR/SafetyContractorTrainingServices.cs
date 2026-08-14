@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
@@ -72,7 +73,7 @@ public class SheContractorService : ISheContractorService
 
     private async Task<SheContractorInduction> GetOwnedInductionAsync(Guid id)
     {
-        var entity = await _unitOfWork.Repository<SheContractorInduction>().GetByIdAsync(id);
+        var entity = await _unitOfWork.Repository<SheContractorInduction>().GetByIdAsync(id, i => i.ConductedBy);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Contractor induction with ID '{id}' not found.");
         return entity;
@@ -80,7 +81,7 @@ public class SheContractorService : ISheContractorService
 
     private async Task<SheContractorInspection> GetOwnedInspectionAsync(Guid id)
     {
-        var entity = await _inspectionRepository.GetByIdAsync(id);
+        var entity = await _inspectionRepository.GetByIdAsync(id, i => i.Inspector, i => i.Location!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Contractor inspection with ID '{id}' not found.");
         return entity;
@@ -88,7 +89,7 @@ public class SheContractorService : ISheContractorService
 
     private async Task<SheContractorNonCompliance> GetOwnedNonComplianceAsync(Guid id)
     {
-        var entity = await _nonComplianceRepository.GetByIdAsync(id);
+        var entity = await _nonComplianceRepository.GetByIdAsync(id, n => n.IssuedBy, n => n.ClosedBy!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Contractor non-compliance with ID '{id}' not found.");
         return entity;
@@ -96,10 +97,28 @@ public class SheContractorService : ISheContractorService
 
     private async Task<SheContractorDocument> GetOwnedDocumentAsync(Guid id)
     {
-        var entity = await _documentRepository.GetByIdAsync(id);
+        var entity = await _documentRepository.GetByIdAsync(id, d => d.UploadedBy, d => d.VerifiedBy!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Contractor document with ID '{id}' not found.");
         return entity;
+    }
+
+    // Guards body-supplied FKs so a bad id surfaces as 404 instead of SQL 547/HTTP 500; fetching on
+    // this context also lets change-tracker fixup resolve the navigation for the write response.
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid id)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(id);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{id}' not found.");
+        return employee;
+    }
+
+    private async Task<Location> GetOwnedLocationAsync(Guid id)
+    {
+        var location = await _unitOfWork.Repository<Location>().GetByIdAsync(id);
+        if (location == null || location.TenantId != GetTenantId())
+            throw new ArgumentException($"Location with ID '{id}' not found.");
+        return location;
     }
 
     public async Task<SheContractorDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -114,8 +133,15 @@ public class SheContractorService : ISheContractorService
     public async Task<SheContractorDto?> GetByCodeAsync(string contractorCode, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _contractorRepository.GetByCodeAsync(contractorCode);
-        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
+        var code = contractorCode.Trim();
+        var id = await _contractorRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.ContractorCode == code)
+            .Select(c => (Guid?)c.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (id == null) return null;
+
+        var entity = await _contractorRepository.GetWithFullDetailsAsync(id.Value);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<SheContractorSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -157,6 +183,7 @@ public class SheContractorService : ISheContractorService
         if (exists)
             throw new InvalidOperationException($"A contractor with code '{code}' already exists for this tenant.");
 
+        dto.ContractorCode = code;
         var entity = dto.ToEntity(tenantId, userId);
         await _contractorRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -169,7 +196,9 @@ public class SheContractorService : ISheContractorService
         entity.UpdateEntity(dto, userId);
         await _contractorRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var refreshed = await _contractorRepository.GetWithFullDetailsAsync(entity.Id);
+        return (refreshed ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -183,6 +212,10 @@ public class SheContractorService : ISheContractorService
     public async Task<bool> PreQualifyAsync(PreQualifySheContractorDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedContractorAsync(dto.ContractorId);
+
+        if (dto.SheStatus == SheContractorStatus.PendingAssessment)
+            throw new InvalidOperationException("Pre-qualification must record an assessment outcome; 'PendingAssessment' is not an outcome status.");
+        await GetOwnedEmployeeAsync(dto.PreQualifiedById);
 
         entity.SheStatus = dto.SheStatus;
         entity.PreQualificationScore = dto.PreQualificationScore;
@@ -204,6 +237,7 @@ public class SheContractorService : ISheContractorService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedContractorAsync(dto.ContractorId);
+        await GetOwnedEmployeeAsync(dto.ConductedById);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SheContractorInduction>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -241,6 +275,16 @@ public class SheContractorService : ISheContractorService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedContractorAsync(dto.ContractorId);
+        await GetOwnedEmployeeAsync(dto.InspectorId);
+        if (dto.LocationId.HasValue) await GetOwnedLocationAsync(dto.LocationId.Value);
+
+        var number = dto.InspectionNumber.Trim();
+        var numberTaken = await _inspectionRepository.GetQueryable()
+            .AnyAsync(i => i.TenantId == tenantId && i.InspectionNumber == number, cancellationToken);
+        if (numberTaken)
+            throw new InvalidOperationException($"A contractor SHE inspection with number '{number}' already exists for this tenant.");
+
+        dto.InspectionNumber = number;
         var entity = dto.ToEntity(tenantId, userId);
         await _inspectionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -250,6 +294,8 @@ public class SheContractorService : ISheContractorService
     public async Task<SheContractorInspectionDto> UpdateInspectionAsync(UpdateSheContractorInspectionDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInspectionAsync(dto.Id);
+        if (dto.LocationId.HasValue && dto.LocationId != entity.LocationId)
+            await GetOwnedLocationAsync(dto.LocationId.Value);
         entity.UpdateEntity(dto, userId);
         await _inspectionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -286,7 +332,22 @@ public class SheContractorService : ISheContractorService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedContractorAsync(dto.ContractorId);
+        await GetOwnedEmployeeAsync(dto.IssuedById);
+
+        var number = dto.NoticeNumber.Trim();
+        var numberTaken = await _nonComplianceRepository.GetQueryable()
+            .AnyAsync(n => n.TenantId == tenantId && n.NoticeNumber == number, cancellationToken);
+        if (numberTaken)
+            throw new InvalidOperationException($"A non-compliance notice with number '{number}' already exists for this tenant.");
+
+        // Repeat-violation flags are derived from the contractor's prior notices, not client-supplied.
+        var priorCount = await _nonComplianceRepository.GetQueryable()
+            .CountAsync(n => n.TenantId == tenantId && n.ContractorId == dto.ContractorId, cancellationToken);
+
+        dto.NoticeNumber = number;
         var entity = dto.ToEntity(tenantId, userId);
+        entity.RepeatCount = priorCount;
+        entity.IsRepeatViolation = priorCount > 0;
         await _nonComplianceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -295,6 +356,10 @@ public class SheContractorService : ISheContractorService
     public async Task<SheContractorNonComplianceDto> UpdateNonComplianceAsync(UpdateSheContractorNonComplianceDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNonComplianceAsync(dto.Id);
+        if (entity.Status == SheNonComplianceStatus.Closed)
+            throw new InvalidOperationException("A closed non-compliance notice cannot be edited.");
+        if (dto.Status == SheNonComplianceStatus.Closed)
+            throw new InvalidOperationException("A non-compliance notice must be closed via the close endpoint, which records who closed it.");
         entity.UpdateEntity(dto, userId);
         await _nonComplianceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -304,6 +369,9 @@ public class SheContractorService : ISheContractorService
     public async Task<bool> CloseNonComplianceAsync(CloseSheContractorNonComplianceDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNonComplianceAsync(dto.NonComplianceId);
+        if (entity.Status == SheNonComplianceStatus.Closed)
+            throw new InvalidOperationException("This non-compliance notice is already closed.");
+        await GetOwnedEmployeeAsync(dto.ClosedById);
 
         entity.Status = SheNonComplianceStatus.Closed;
         entity.ClosedById = dto.ClosedById;
@@ -348,6 +416,7 @@ public class SheContractorService : ISheContractorService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedContractorAsync(dto.ContractorId);
+        await GetOwnedEmployeeAsync(dto.UploadedById);
         var entity = dto.ToEntity(tenantId, userId);
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -357,6 +426,9 @@ public class SheContractorService : ISheContractorService
     public async Task<bool> VerifyDocumentAsync(VerifySheContractorDocumentDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedDocumentAsync(dto.DocumentId);
+        if (entity.IsVerified)
+            throw new InvalidOperationException("This document has already been verified.");
+        await GetOwnedEmployeeAsync(dto.VerifiedById);
 
         entity.IsVerified = true;
         entity.VerifiedById = dto.VerifiedById;
