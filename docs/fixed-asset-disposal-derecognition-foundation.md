@@ -108,7 +108,9 @@ After a successful disposal, the default book value clears accumulated depreciat
 
 ## Tax, Proceeds, And FX
 
-Sale proceeds are posted to a configured disposal proceeds clearing account. The batch does not create AR invoices, cash/bank receipts, VAT documents, or statutory sale tax outputs. That gap is tracked as `FIN-LIM-0040`.
+The original Batch 21C posted sale proceeds to a configured disposal proceeds clearing account and deliberately did not create AR invoices, cash/bank receipts, VAT documents, or statutory sale tax outputs. That historical gap was tracked as `FIN-LIM-0040`.
+
+**Current status (2026-08-13):** `FIN-LIM-0040` is resolved by the subsequent Fixed Asset Sale Settlement Foundation. Approved positive-proceeds sales now create/post a canonical AR invoice and, for immediate collection, an allocated receipt; see `docs/fixed-asset-sale-settlement-foundation.md`.
 
 Disposal proceeds may be denominated in the tenant functional currency or an approved foreign currency. The foreign-currency workflow freezes the tenant-owned Daily rate and native/functional values described in `docs/fixed-asset-foreign-currency-disposal-proceeds-foundation.md`; this resolves `FIN-LIM-0043` without implying AR/cash/tax settlement integration.
 
@@ -333,10 +335,10 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 
 - `FIN-LIM-0026`: resolved for whole-asset sale/write-off disposal foundation.
 - `FIN-LIM-0039`: resolved by controlled disposal-date depreciation; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
-- `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
+- `FIN-LIM-0040`: resolved by the Fixed Asset Sale Settlement Foundation; see `docs/fixed-asset-sale-settlement-foundation.md`.
 - `FIN-LIM-0041`: resolved for full remaining asset-specific surplus transfer directly to retained earnings on whole-asset disposal.
 - `FIN-LIM-0042`: resolved by controlled proportional partial/component derecognition; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
-- `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
+- `FIN-LIM-0043`: resolved by the foreign-currency disposal proceeds foundation.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open and is the natural next batch.
 
 No remaining disposal limitation blocks fixed asset reporting/reconciliation because unsupported paths either fail clearly or post to controlled clearing accounts.

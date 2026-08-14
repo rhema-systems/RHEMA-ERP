@@ -63,15 +63,15 @@ The following entries remain open, partially resolved, accepted with a remainder
 but awaiting external acceptance:
 
 - `FIN-LIM-0014`: tenant-aware role assignment / central authorization product decision;
-- `FIN-LIM-0016`: fixed-asset umbrella should be reassessed, but its remaining production blockers include
-  cross-module `FIN-LIM-0028` and `FIN-LIM-0040`;
+- `FIN-LIM-0016`: fixed-asset umbrella should be reassessed after the Finance-owned disposal gaps were
+  resolved; its remaining production dependency is cross-module `FIN-LIM-0028`, plus migration/UAT evidence;
 - `FIN-LIM-0017`: representative migration, reconciliation, and accountant sign-off;
 - `FIN-LIM-0028`: procurement-origin fixed-asset capitalization;
-- `FIN-LIM-0040`: fixed-asset disposal proceeds into AR/cash and statutory sale tax;
+- `FIN-LIM-0040`: resolved on 2026-08-13 by the Fixed Asset Sale Settlement Foundation; migration application and representative taxable-sale UAT remain release gates rather than feature gaps;
 - `FIN-LIM-0046`: accepted non-blocking remainder for rich formatted packs not selected as product outputs;
 - `FIN-LIM-0047`: external Ghana portal/direct-submission and distribution interfaces;
-- `FIN-LIM-0048`: PR #66 implements specialised advance/WHT opening support, but merge, migration, rehearsal,
-  reconciliation, and accountant acceptance remain separate gates;
+- `FIN-LIM-0048`: merged PR #66 implements specialised advance/WHT opening support; migration, rehearsal,
+  reconciliation, and accountant acceptance remain separate release gates;
 - `FIN-LIM-0050`, `FIN-LIM-0051`, and `FIN-LIM-0053`: cross-module payment-method, Sales-to-AR invoice, and
   asymmetric Procurement/Finance commercial-term decisions; and
 - `FIN-LIM-0055`: software resilience foundation implemented; TDC operational rehearsal and acceptance pending.

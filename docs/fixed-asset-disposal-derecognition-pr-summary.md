@@ -174,7 +174,7 @@ Implemented/emitted where applicable:
 
 - `FIN-LIM-0026`: resolved for whole-asset disposal/write-off foundation.
 - `FIN-LIM-0039`: subsequently resolved for whole-asset disposal.
-- `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
+- `FIN-LIM-0040`: opened by this historical batch and subsequently resolved by `docs/fixed-asset-sale-settlement-foundation.md`.
 - `FIN-LIM-0041`: resolved by the dedicated whole-asset disposal equity-transfer policy slice.
 - `FIN-LIM-0042`: resolved by controlled proportional partial/component derecognition.
 - `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.

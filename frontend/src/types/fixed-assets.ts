@@ -449,6 +449,12 @@ export type AssetDisposalStatus =
 
 export type AssetDisposalScope = 'WholeAsset' | 'PartialPortion' | 'Component';
 
+export type AssetDisposalSettlementMode = 'NotApplicable' | 'CreditSale' | 'ImmediateReceipt';
+
+export type AssetDisposalSettlementStatus = 'NotApplicable' | 'Pending' | 'Invoiced' | 'Settled' | 'Failed';
+
+export type AssetDisposalSaleTaxTreatment = 'Standard' | 'Exempt' | 'ZeroRated' | 'OutOfScope';
+
 export interface AssetDisposal {
   id: string;
   fixedAssetId: string;
@@ -498,6 +504,21 @@ export interface AssetDisposal {
   retainedEarningsAccountId?: string;
   revaluationSurplusTransferAmount: number;
   buyerName?: string;
+  buyerBusinessPartnerId?: string;
+  settlementMode: AssetDisposalSettlementMode;
+  settlementStatus: AssetDisposalSettlementStatus;
+  saleTaxGroupId?: string;
+  saleTaxTreatment: AssetDisposalSaleTaxTreatment;
+  settlementPaymentTermId?: string;
+  settlementPaymentMethodId?: string;
+  settlementBankAccountId?: string;
+  settlementLiquidityAccountId?: string;
+  settlementReference?: string;
+  customerInvoiceId?: string;
+  customerPaymentId?: string;
+  settlementInvoiceAmount: number;
+  settlementTaxAmount: number;
+  settlementCompletedAt?: string;
   referenceNumber?: string;
   requestedById?: string;
   requestedByName?: string;
@@ -524,6 +545,15 @@ export interface RequestAssetDisposalDto {
   proceedsCurrencyCode?: string;
   proceedsExchangeRateId?: string;
   buyerName?: string;
+  buyerBusinessPartnerId?: string;
+  settlementMode?: AssetDisposalSettlementMode;
+  saleTaxGroupId?: string;
+  saleTaxTreatment?: AssetDisposalSaleTaxTreatment;
+  settlementPaymentTermId?: string;
+  settlementPaymentMethodId?: string;
+  settlementBankAccountId?: string;
+  settlementLiquidityAccountId?: string;
+  settlementReference?: string;
   finalDepreciationProductionUnits?: number;
   finalDepreciationEvidenceReference?: string;
   finalDepreciationEvidenceNotes?: string;

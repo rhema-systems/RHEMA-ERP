@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Trash2, Plus, Loader2, CheckCircle2, XCircle, Clock, Info, Search, Filter, TrendingDown, ChevronsUpDown, Check } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -16,12 +17,40 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from "@/lib/utils";
 import { format } from 'date-fns';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
+import { arService } from '@/services/ar-service';
+import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { taxDataService } from '@/services/finance/tax-data.service';
 import { AssetDisposal, AssetDisposalScope, AssetDisposalStatus, RequestAssetDisposalDto, FixedAsset } from '@/types/fixed-assets';
+import type { Customer } from '@/types/ar';
+import { PaymentMethodType, type BankAccount, type LiquidityAccount, type PaymentMethod } from '@/types/cash-management';
+import type { TaxGroup } from '@/types/tax';
 import { useToast } from "@/components/ui/use-toast";
+
+const directBankSettlementTypes = new Set<PaymentMethodType>([
+    PaymentMethodType.BankTransfer,
+    PaymentMethodType.EFT,
+    PaymentMethodType.DirectDebit,
+    PaymentMethodType.StandingOrder,
+]);
+
+const expectedLiquidityType = (type?: PaymentMethodType) => {
+    switch (type) {
+        case PaymentMethodType.Cheque: return 'ChequesAwaitingDeposit';
+        case PaymentMethodType.Card: return 'CardSettlementClearing';
+        case PaymentMethodType.MobileMoney: return 'MobileMoneyClearing';
+        case PaymentMethodType.Cash:
+        default: return 'UndepositedCash';
+    }
+};
 
 export default function AssetDisposalsPage() {
     const [disposals, setDisposals] = useState<AssetDisposal[]>([]);
     const [assets, setAssets] = useState<FixedAsset[]>([]);
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [saleTaxGroups, setSaleTaxGroups] = useState<TaxGroup[]>([]);
+    const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+    const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+    const [liquidityAccounts, setLiquidityAccounts] = useState<LiquidityAccount[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -37,7 +66,9 @@ export default function AssetDisposalsPage() {
         disposalDate: new Date().toISOString().split('T')[0],
         saleProceeds: 0,
         disposalCost: 0,
-        proceedsCurrencyCode: 'GHS'
+        proceedsCurrencyCode: 'GHS',
+        settlementMode: 'CreditSale',
+        saleTaxTreatment: 'Standard'
     });
 
     useEffect(() => {
@@ -59,6 +90,36 @@ export default function AssetDisposalsPage() {
             setAssets((assetsData || []).filter(a => a.status !== 'Disposed' && a.status !== 'WrittenOff'));
         } catch (error) {
             console.error('Failed to load assets:', error);
+        }
+        // The disposal workspace consumes the canonical AR, Tax and Cash master data. Keeping
+        // these lookups here means the resulting invoice and receipt remain visible and operable
+        // in their normal Finance workspaces instead of becoming disposal-specific shadow data.
+        try {
+            const customerResult = await arService.getCustomers({ page: 1, pageSize: 500, status: 'Active' });
+            setCustomers(customerResult.items || []);
+        } catch (error) {
+            console.error('Failed to load active customers:', error);
+        }
+        try {
+            const groups = await taxDataService.getActiveTaxGroups('Sales');
+            setSaleTaxGroups(groups || []);
+            setFormData(current => current.saleTaxGroupId || !groups?.length
+                ? current
+                : { ...current, saleTaxGroupId: groups.find(group => group.isDefault)?.id || groups[0].id });
+        } catch (error) {
+            console.error('Failed to load active sales tax groups:', error);
+        }
+        try {
+            const [methods, banks, liquidity] = await Promise.all([
+                cashManagementDataService.getActivePaymentMethods(),
+                cashManagementDataService.getActiveBankAccounts(),
+                cashManagementDataService.getLiquidityAccounts(true),
+            ]);
+            setPaymentMethods(methods || []);
+            setBankAccounts(banks || []);
+            setLiquidityAccounts(liquidity || []);
+        } catch (error) {
+            console.error('Failed to load settlement destinations:', error);
         }
         setLoading(false);
     };
@@ -100,6 +161,38 @@ export default function AssetDisposalsPage() {
             });
             return;
         }
+        if (formData.disposalType === 'Sale' && (formData.saleProceeds || 0) > 0) {
+            if (!formData.buyerBusinessPartnerId) {
+                toast({ title: "Customer required", description: "Select the canonical AR customer buying the asset.", variant: "destructive" });
+                return;
+            }
+            if (formData.saleTaxTreatment === 'Standard' && !formData.saleTaxGroupId) {
+                toast({ title: "Tax group required", description: "Select the statutory sales tax group or choose the appropriate non-standard tax treatment.", variant: "destructive" });
+                return;
+            }
+            if (formData.settlementMode === 'ImmediateReceipt' && !formData.settlementPaymentMethodId) {
+                toast({ title: "Payment method required", description: "Choose how the immediate disposal receipt was collected.", variant: "destructive" });
+                return;
+            }
+            if (formData.settlementMode === 'ImmediateReceipt') {
+                const method = paymentMethods.find(item => item.id === formData.settlementPaymentMethodId);
+                const requiresBank = method ? directBankSettlementTypes.has(method.type) : true;
+                if ((requiresBank && !formData.settlementBankAccountId) || (!requiresBank && !formData.settlementLiquidityAccountId)) {
+                    toast({
+                        title: "Receipt destination required",
+                        description: requiresBank
+                            ? "Select the bank account that received the disposal proceeds."
+                            : "Select the holding account appropriate for this payment method.",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+                if (method?.requiresReference && !formData.settlementReference?.trim()) {
+                    toast({ title: "Transaction reference required", description: `${method.name} requires a receipt or transaction reference.`, variant: "destructive" });
+                    return;
+                }
+            }
+        }
 
         try {
             setIsSubmitting(true);
@@ -116,7 +209,10 @@ export default function AssetDisposalsPage() {
                 disposalDate: new Date().toISOString().split('T')[0],
                 saleProceeds: 0,
                 disposalCost: 0,
-                proceedsCurrencyCode: 'GHS'
+                proceedsCurrencyCode: 'GHS',
+                settlementMode: 'CreditSale',
+                saleTaxTreatment: 'Standard',
+                saleTaxGroupId: saleTaxGroups.find(group => group.isDefault)?.id || saleTaxGroups[0]?.id
             });
             loadData();
         } catch (error) {
@@ -229,6 +325,18 @@ export default function AssetDisposalsPage() {
         return (proceeds - cost) - (selectedAssetNBV * disposalRate);
     }, [formData.saleProceeds, formData.disposalCost, formData.disposalScope, formData.disposedPortionPercent, selectedAssetNBV]);
     const hasForeignProceeds = (formData.proceedsCurrencyCode || 'GHS') !== 'GHS';
+    const selectedPaymentMethod = paymentMethods.find(method => method.id === formData.settlementPaymentMethodId);
+    const usesDirectBankSettlement = selectedPaymentMethod
+        ? directBankSettlementTypes.has(selectedPaymentMethod.type)
+        : true;
+    const eligibleBankAccounts = bankAccounts.filter(account =>
+        account.isActive && account.currency === (formData.proceedsCurrencyCode || 'GHS'));
+    const eligibleLiquidityAccounts = liquidityAccounts.filter(account =>
+        account.isActive &&
+        account.currency === (formData.proceedsCurrencyCode || 'GHS') &&
+        (account.accountType === expectedLiquidityType(selectedPaymentMethod?.type) ||
+            account.accountType === 'OtherSettlementClearing' ||
+            (selectedPaymentMethod?.type === PaymentMethodType.Cash && account.accountType === 'CashTill')));
 
     if (loading && disposals.length === 0) {
         return (
@@ -346,7 +454,20 @@ export default function AssetDisposalsPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="disposalType">Disposal Method</Label>
-                                    <Select value={formData.disposalType} onValueChange={(val: any) => setFormData({ ...formData, disposalType: val })}>
+                                    <Select value={formData.disposalType} onValueChange={(val: RequestAssetDisposalDto['disposalType']) => setFormData({
+                                        ...formData,
+                                        disposalType: val,
+                                        // Non-sale retirements must never retain hidden AR, tax or cash instructions.
+                                        settlementMode: val === 'Sale' ? 'CreditSale' : 'NotApplicable',
+                                        buyerBusinessPartnerId: val === 'Sale' ? formData.buyerBusinessPartnerId : undefined,
+                                        buyerName: val === 'Sale' ? formData.buyerName : undefined,
+                                        saleTaxGroupId: val === 'Sale' ? formData.saleTaxGroupId : undefined,
+                                        saleTaxTreatment: val === 'Sale' ? (formData.saleTaxTreatment || 'Standard') : 'OutOfScope',
+                                        settlementPaymentMethodId: undefined,
+                                        settlementBankAccountId: undefined,
+                                        settlementLiquidityAccountId: undefined,
+                                        settlementReference: undefined,
+                                    })}>
                                         <SelectTrigger id="disposalType">
                                             <SelectValue placeholder="Select method" />
                                         </SelectTrigger>
@@ -358,15 +479,37 @@ export default function AssetDisposalsPage() {
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="buyer">Buyer / Recipient Name</Label>
-                                    <Input
-                                        id="buyer"
-                                        placeholder="Company or Person"
-                                        value={formData.buyerName || ''}
-                                        onChange={(e) => setFormData({ ...formData, buyerName: e.target.value })}
-                                    />
-                                </div>
+                                {formData.disposalType === 'Sale' && (
+                                    <div className="space-y-2">
+                                        <Label htmlFor="buyer">AR Customer / Buyer <span className="text-red-500">*</span></Label>
+                                        <Select value={formData.buyerBusinessPartnerId || ''} onValueChange={(customerId) => {
+                                            const customer = customers.find(item => item.id === customerId);
+                                            setFormData({
+                                                ...formData,
+                                                buyerBusinessPartnerId: customerId,
+                                                buyerName: customer?.customerName,
+                                                settlementPaymentTermId: customer?.paymentTermId || undefined,
+                                                proceedsCurrencyCode: customer?.currencyCode || formData.proceedsCurrencyCode,
+                                                // Receipt destinations and FX evidence are currency-specific. Clear
+                                                // them when the buyer changes currency so hidden stale selections
+                                                // cannot reach approval and fail only during final posting.
+                                                proceedsExchangeRateId: undefined,
+                                                settlementBankAccountId: undefined,
+                                                settlementLiquidityAccountId: undefined,
+                                            });
+                                        }}>
+                                            <SelectTrigger id="buyer"><SelectValue placeholder="Select a registered customer" /></SelectTrigger>
+                                            <SelectContent>
+                                                {customers.map(customer => (
+                                                    <SelectItem key={customer.id} value={customer.id}>
+                                                        {customer.customerCode} - {customer.customerName}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-slate-500">The resulting sales invoice appears in the normal Accounts Receivable workspace.</p>
+                                    </div>
+                                )}
                                 <div className="space-y-2">
                                     <Label htmlFor="proceeds">Sale Proceeds ({formData.proceedsCurrencyCode || 'GHS'})</Label>
                                     <Input
@@ -404,6 +547,130 @@ export default function AssetDisposalsPage() {
                                     </p>
                                 </div>
                             </div>
+
+                            {formData.disposalType === 'Sale' && (formData.saleProceeds || 0) > 0 && (
+                                <Card className="border-emerald-200 bg-emerald-50/70">
+                                    <CardHeader className="pb-3">
+                                        <CardTitle className="text-base text-emerald-950">Sale invoice and collection</CardTitle>
+                                        <CardDescription>
+                                            Completion posts one controlled transaction: asset derecognition, statutory sales invoice and, for an immediate sale, the allocated customer receipt.
+                                        </CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="settlementMode">Settlement Mode <span className="text-red-500">*</span></Label>
+                                            <Select value={formData.settlementMode || 'CreditSale'} onValueChange={(value: 'CreditSale' | 'ImmediateReceipt') => setFormData({
+                                                ...formData,
+                                                settlementMode: value,
+                                                settlementPaymentMethodId: value === 'ImmediateReceipt' ? formData.settlementPaymentMethodId : undefined,
+                                                settlementBankAccountId: value === 'ImmediateReceipt' ? formData.settlementBankAccountId : undefined,
+                                                settlementLiquidityAccountId: value === 'ImmediateReceipt' ? formData.settlementLiquidityAccountId : undefined,
+                                                settlementReference: value === 'ImmediateReceipt' ? formData.settlementReference : undefined,
+                                            })}>
+                                                <SelectTrigger id="settlementMode"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="CreditSale">Invoice now; collect later</SelectItem>
+                                                    <SelectItem value="ImmediateReceipt">Invoice and collect now</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="saleTaxTreatment">Statutory Tax Treatment <span className="text-red-500">*</span></Label>
+                                            <Select value={formData.saleTaxTreatment || 'Standard'} onValueChange={(value: RequestAssetDisposalDto['saleTaxTreatment']) => setFormData({
+                                                ...formData,
+                                                saleTaxTreatment: value,
+                                                saleTaxGroupId: value === 'Standard'
+                                                    ? (formData.saleTaxGroupId || saleTaxGroups.find(group => group.isDefault)?.id || saleTaxGroups[0]?.id)
+                                                    : undefined,
+                                            })}>
+                                                <SelectTrigger id="saleTaxTreatment"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Standard">Standard rated</SelectItem>
+                                                    <SelectItem value="ZeroRated">Zero rated</SelectItem>
+                                                    <SelectItem value="Exempt">Exempt</SelectItem>
+                                                    <SelectItem value="OutOfScope">Out of scope</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        {formData.saleTaxTreatment === 'Standard' && (
+                                            <div className="space-y-2 md:col-span-2">
+                                                <Label htmlFor="saleTaxGroup">Sales Tax Group <span className="text-red-500">*</span></Label>
+                                                <Select value={formData.saleTaxGroupId || ''} onValueChange={(value) => setFormData({ ...formData, saleTaxGroupId: value })}>
+                                                    <SelectTrigger id="saleTaxGroup"><SelectValue placeholder="Select active sales tax group" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {saleTaxGroups.map(group => (
+                                                            <SelectItem key={group.id} value={group.id}>{group.code} - {group.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+                                        {formData.settlementMode === 'ImmediateReceipt' && (
+                                            <>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="settlementPaymentMethod">Payment Method <span className="text-red-500">*</span></Label>
+                                                    <Select value={formData.settlementPaymentMethodId || ''} onValueChange={(value) => {
+                                                        const method = paymentMethods.find(item => item.id === value);
+                                                        const directBank = method ? directBankSettlementTypes.has(method.type) : true;
+                                                        setFormData({
+                                                            ...formData,
+                                                            settlementPaymentMethodId: value,
+                                                            settlementBankAccountId: directBank ? formData.settlementBankAccountId : undefined,
+                                                            settlementLiquidityAccountId: directBank ? undefined : formData.settlementLiquidityAccountId,
+                                                        });
+                                                    }}>
+                                                        <SelectTrigger id="settlementPaymentMethod"><SelectValue placeholder="Select method" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            {paymentMethods.map(method => (
+                                                                <SelectItem key={method.id} value={method.id}>{method.name}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                {usesDirectBankSettlement ? (
+                                                    <div className="space-y-2">
+                                                        <Label htmlFor="settlementBank">Receiving Bank Account <span className="text-red-500">*</span></Label>
+                                                        <Select value={formData.settlementBankAccountId || ''} onValueChange={(value) => setFormData({
+                                                            ...formData,
+                                                            settlementBankAccountId: value,
+                                                            settlementLiquidityAccountId: undefined,
+                                                        })}>
+                                                            <SelectTrigger id="settlementBank"><SelectValue placeholder="Select matching-currency bank" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {eligibleBankAccounts.map(account => (
+                                                                    <SelectItem key={account.id} value={account.id}>{account.accountName} - {account.accountNumber}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-2">
+                                                        <Label htmlFor="settlementLiquidity">Receipt Holding Account <span className="text-red-500">*</span></Label>
+                                                        <Select value={formData.settlementLiquidityAccountId || ''} onValueChange={(value) => setFormData({
+                                                            ...formData,
+                                                            settlementLiquidityAccountId: value,
+                                                            settlementBankAccountId: undefined,
+                                                        })}>
+                                                            <SelectTrigger id="settlementLiquidity"><SelectValue placeholder="Select matching holding account" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {eligibleLiquidityAccounts.map(account => (
+                                                                    <SelectItem key={account.id} value={account.id}>{account.code} - {account.name}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                )}
+                                                <div className="space-y-2 md:col-span-2">
+                                                    <Label htmlFor="settlementReference">Receipt / Transaction Reference</Label>
+                                                    <Input id="settlementReference" value={formData.settlementReference || ''}
+                                                        onChange={(event) => setFormData({ ...formData, settlementReference: event.target.value })}
+                                                        placeholder="Bank advice, cheque, MoMo, card or till reference" />
+                                                </div>
+                                            </>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
 
                             {formData.disposalScope !== 'WholeAsset' && (
                                 <Card className="border-violet-200 bg-violet-50/70">
@@ -580,6 +847,7 @@ export default function AssetDisposalsPage() {
                                 <TableHead className="font-semibold text-right">Proceeds</TableHead>
                                 <TableHead className="font-semibold text-right">Gain/Loss</TableHead>
                                 <TableHead className="font-semibold text-right">Equity Transfer</TableHead>
+                                <TableHead className="font-semibold">Sale Settlement</TableHead>
                                 <TableHead className="font-semibold">Status</TableHead>
                                 <TableHead className="text-right font-semibold">Actions</TableHead>
                             </TableRow>
@@ -587,7 +855,7 @@ export default function AssetDisposalsPage() {
                         <TableBody>
                             {filteredDisposals.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={12} className="h-48 text-center text-slate-400">
+                                    <TableCell colSpan={13} className="h-48 text-center text-slate-400">
                                         <div className="flex flex-col items-center justify-center">
                                             <Trash2 className="h-10 w-10 mb-2 opacity-20" />
                                             <p>No asset disposals found matching your search.</p>
@@ -641,6 +909,21 @@ export default function AssetDisposalsPage() {
                                                 <div className="flex flex-col">
                                                     <span className="font-semibold text-indigo-700">₵ {disposal.revaluationSurplusTransferAmount.toLocaleString()}</span>
                                                     <span className="text-[11px] text-slate-500">reserve → retained earnings</span>
+                                                </div>
+                                            ) : '—'}
+                                        </TableCell>
+                                        <TableCell>
+                                            {disposal.disposalType === 'Sale' && disposal.customerInvoiceId ? (
+                                                <div className="flex flex-col gap-1 text-xs">
+                                                    <Badge variant="outline" className="w-fit">{disposal.settlementStatus}</Badge>
+                                                    <Link className="text-blue-600 hover:underline" href={`/finance/ar/invoices/${disposal.customerInvoiceId}`}>
+                                                        View AR invoice
+                                                    </Link>
+                                                    {disposal.customerPaymentId && (
+                                                        <Link className="text-emerald-700 hover:underline" href={`/finance/ar/payments/${disposal.customerPaymentId}`}>
+                                                            View receipt
+                                                        </Link>
+                                                    )}
                                                 </div>
                                             ) : '—'}
                                         </TableCell>
