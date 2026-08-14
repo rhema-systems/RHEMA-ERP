@@ -27,6 +27,7 @@ import {
   BarChart3,
   OctagonX,
   FileSearch,
+  FolderArchive,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -294,6 +295,13 @@ export default function SafetyHomePage() {
                 'Work halted under stop-work authority — routing, resolution and cleared resumption.',
               href: '/hr/safety/stop-work',
               icon: OctagonX,
+            },
+            {
+              title: 'Document Register',
+              description:
+                'Controlled SHE documents — policies, procedures, plans and reports — with version history, approval and review cycles.',
+              href: '/hr/safety/documents',
+              icon: FolderArchive,
             },
             {
               title: 'Safety Committees',

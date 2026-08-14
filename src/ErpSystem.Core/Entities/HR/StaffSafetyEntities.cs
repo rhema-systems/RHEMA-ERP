@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Enums.Safety;
 
@@ -24,6 +25,10 @@ using ErpSystem.Core.Enums.Safety;
 //  Q. Safety Committee & Meetings
 //  R. Return-to-Work Plans
 //  S. SHE Reminder Engine
+//  T. SHE Audit Management
+//  U. Stop-Work Authority
+//  V. Statutory Incident Submissions
+//  W. SHE Controlled Document Register
 // ============================================================
 
 namespace ErpSystem.Core.Entities.HR.Safety;
@@ -3414,6 +3419,95 @@ public class SheStatutoryIncidentSubmission : TenantEntity
 
     [MaxLength(100)]
     public string? AcknowledgementReference { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  W. SHE CONTROLLED DOCUMENT REGISTER  (slice 16, FR-SHE-246/170)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One controlled SHE document (policy, procedure, emergency plan, …) in the
+/// area's register — FR-SHE-170 filing/retrieval and FR-SHE-246 version
+/// control. The register row carries the SHE classification and lifecycle;
+/// the file versions themselves live in the central DMS
+/// (<see cref="CentralDocumentRecord"/> / CentralDocumentVersion), each bound
+/// to a scanned controlled upload — SHE deliberately mints no parallel
+/// version store.
+/// </summary>
+public class SheControlledDocument : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string DocumentNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(250)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public SheControlledDocumentCategory Category { get; set; }
+
+    public SheControlledDocumentStatus Status { get; set; } = SheControlledDocumentStatus.Draft;
+
+    /// <summary>Free-text search terms for FR-SHE-170 retrieval.</summary>
+    [MaxLength(500)]
+    public string? Keywords { get; set; }
+
+    /// <summary>The document's custodian — owns the content and its review cycle.</summary>
+    public Guid OwnerId { get; set; }
+
+    [ForeignKey(nameof(OwnerId))]
+    public virtual Employee Owner { get; set; } = null!;
+
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    // ── Version control (central DMS binding) ──
+    /// <summary>Null until the first version is uploaded and DMS-registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    [ForeignKey(nameof(DocumentRecordId))]
+    public virtual CentralDocumentRecord? DocumentRecord { get; set; }
+
+    /// <summary>Mirror of the DMS record's CurrentVersion for list reads.</summary>
+    [MaxLength(20)]
+    public string? CurrentVersionLabel { get; set; }
+
+    // ── Approval / effectivity (FR-SHE-246) ──
+    public DateTime? EffectiveDate { get; set; }
+
+    /// <summary>Drives NextReviewDate on activation when no explicit date is given.</summary>
+    public int? ReviewFrequencyMonths { get; set; }
+
+    public DateTime? NextReviewDate { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    public DateTime? ApprovedDate { get; set; }
+
+    // ── Archival (obsolete documents stay on the register) ──
+    public Guid? ArchivedById { get; set; }
+
+    [ForeignKey(nameof(ArchivedById))]
+    public virtual Employee? ArchivedBy { get; set; }
+
+    public DateTime? ArchivedDate { get; set; }
+
+    [MaxLength(500)]
+    public string? ArchiveReason { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }

@@ -410,6 +410,7 @@ public partial class ApplicationDbContext
     public DbSet<SheAuditFindingAction> SheAuditFindingActions { get; set; } = null!;
     public DbSet<SheStopWorkOrder> SheStopWorkOrders { get; set; } = null!;
     public DbSet<SheStatutoryIncidentSubmission> SheStatutoryIncidentSubmissions { get; set; } = null!;
+    public DbSet<SheControlledDocument> SheControlledDocuments { get; set; } = null!;
     public DbSet<SuccessionPlan> SuccessionPlans { get; set; } = null!;
     public DbSet<SuccessionCompetencyRequirement> SuccessionCompetencyRequirements { get; set; } = null!;
     public DbSet<SuccessionCandidate> SuccessionCandidates { get; set; } = null!;
@@ -8674,6 +8675,15 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         // V. Statutory incident submissions ───────────────────────────
         builder.Entity<SheStatutoryIncidentSubmission>(e => e.HasIndex(x => x.IncidentId));
+
+        // W. SHE controlled document register ─────────────────────────
+        builder.Entity<SheControlledDocument>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.DocumentNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // The review sweep's scan: Active documents by review date.
+            e.HasIndex(x => new { x.TenantId, x.NextReviewDate });
+        });
 
         // ── Force every relationship declared on a HR.Safety entity to Restrict ──
         // Prevents multiple-cascade-path errors (many SHE FKs target Employee). Scoped

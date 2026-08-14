@@ -54,6 +54,7 @@ import {
   ListChecks,
   OctagonX,
   FileSearch,
+  FolderArchive,
   Medal,
   SlidersHorizontal,
   AlertTriangle,
@@ -634,6 +635,8 @@ export const navigationItems: NavItem[] = [
           // Slice 15: audits + the stop-work register (raise lives in the open block above).
           { title: 'SHE Audits', href: '/hr/safety/audits', icon: FileSearch },
           { title: 'Stop-Work Orders', href: '/hr/safety/stop-work', icon: OctagonX },
+          // Slice 16: the controlled document register (versions ride the central DMS).
+          { title: 'Document Register', href: '/hr/safety/documents', icon: FolderArchive },
           // Slice 14: the unified CA tracker (one queue over all five action stores) and the
           // computed-KPI layer (snapshot compute + the analytics screen).
           { title: 'Corrective Actions', href: '/hr/safety/corrective-actions', icon: ListChecks },

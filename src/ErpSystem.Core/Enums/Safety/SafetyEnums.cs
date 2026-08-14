@@ -747,3 +747,37 @@ public enum SheStatutorySubmissionMethod
     InPerson = 4,
     Phone = 5
 }
+
+// ── SHE controlled document register (slice 16, FR-SHE-246/170) ─
+/// <summary>
+/// The SRS §14 document-library families plus the SoW Module-14 additions
+/// (SWP, JSA, HIRA). Structured records (incident registers, training rows,
+/// contractor files) stay in their own tables; these categories classify the
+/// controlled DOCUMENTS about them.
+/// </summary>
+public enum SheControlledDocumentCategory
+{
+    Policy = 1,
+    Procedure = 2,
+    SafeWorkProcedure = 3,
+    JobSafetyAnalysis = 4,
+    RiskAssessment = 5,
+    EmergencyPlan = 6,
+    TrainingRecord = 7,
+    Permit = 8,
+    InspectionReport = 9,
+    AuditReport = 10,
+    IncidentReport = 11,
+    InvestigationReport = 12,
+    ContractorDocument = 13,
+    Form = 14,
+    Other = 15
+}
+
+public enum SheControlledDocumentStatus
+{
+    Draft = 1,
+    Active = 2,
+    UnderReview = 3,
+    Archived = 4
+}

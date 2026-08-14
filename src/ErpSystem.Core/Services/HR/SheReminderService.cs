@@ -199,6 +199,7 @@ public class SheReminderService : ISheReminderService
         await SweepAuditsAsync(tenantId, today, pending, cancellationToken);
         await SweepStopWorkAsync(tenantId, today, pending, cancellationToken);
         await SweepStatutoryPendingAsync(tenantId, today, pending, cancellationToken);
+        await SweepControlledDocumentsAsync(tenantId, today, pending, cancellationToken);
 
         // Dedupe against everything any earlier run already dispatched. The unique
         // (TenantId, DedupeKey) index backstops the read-then-write race; one retry
@@ -797,6 +798,26 @@ public class SheReminderService : ISheReminderService
             Evaluate(pending, today, "StatutorySubmissionPending", "Statutory incident report",
                 SheReminderLadder.PermitLadder, i.Id, i.IncidentNumber,
                 i.IncidentDate, $"/hr/safety/incidents/{i.Id}");
+        }
+    }
+
+    private async Task SweepControlledDocumentsAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 16 — Active register documents ladder toward their next review
+        // date (FR-SHE-246's review cycle); one past its date escalates like any
+        // overdue obligation. Documents already UnderReview are being handled and
+        // are not nagged.
+        var documents = await _unitOfWork.Repository<SheControlledDocument>()
+            .GetQueryable(d => d.TenantId == tenantId && !d.IsDeleted &&
+                               d.Status == SheControlledDocumentStatus.Active &&
+                               d.NextReviewDate != null)
+            .Select(d => new { d.Id, d.DocumentNumber, d.Title, d.NextReviewDate })
+            .ToListAsync(cancellationToken);
+        foreach (var d in documents)
+        {
+            Evaluate(pending, today, "DocumentReviewDue", "Controlled document",
+                SheReminderLadder.MonthLadder, d.Id, $"{d.DocumentNumber} — {d.Title}",
+                d.NextReviewDate, $"/hr/safety/documents/{d.Id}");
         }
     }
 

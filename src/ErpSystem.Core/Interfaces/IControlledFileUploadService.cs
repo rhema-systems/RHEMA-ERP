@@ -53,6 +53,14 @@ public static class ControlledFileUploadCategories
     public const string HrPreEmploymentDocuments = "hr-pre-employment-documents";
 
     /// <summary>
+    /// Versions of SHE controlled documents (policies, procedures, emergency
+    /// plans, …) on the area's register. Not personal data, but the register is
+    /// HR-role-gated and the <c>hr-</c> prefix keeps the files on the private
+    /// storage tree rather than the public web root.
+    /// </summary>
+    public const string HrSheControlledDocuments = "hr-she-controlled-documents";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -80,7 +88,8 @@ public static class ControlledFileUploadCategories
                 HrMedicalExamDocuments,
                 HrAppraisalAttachments,
                 HrRecruitmentAttachments,
-                HrPreEmploymentDocuments
+                HrPreEmploymentDocuments,
+                HrSheControlledDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }
