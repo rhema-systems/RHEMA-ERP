@@ -41,7 +41,13 @@ public sealed class FixedAssetDisposalSettlementMigrationTests
 
         var foreignKeys = builder.Operations.OfType<AddForeignKeyOperation>().ToArray();
         foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerInvoiceId" && item.PrincipalTable == "Invoices");
-        foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerPaymentId" && item.PrincipalTable == "CustomerPayments");
+        foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerPaymentId" && item.PrincipalTable == "CustomerPayment");
+        // The Finance DbSet is plural, but its physical table is the legacy singular
+        // `PaymentMethod`. Assert the actual schema contract so a provider-neutral test catches
+        // the pluralization error before the migration reaches SQL Server again.
+        foreignKeys.Should().Contain(item =>
+            item.Columns.Single() == "SettlementPaymentMethodId" &&
+            item.PrincipalTable == "PaymentMethod");
         foreignKeys.Should().OnlyContain(item => item.OnDelete == ReferentialAction.Restrict);
     }
 

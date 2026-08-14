@@ -64,11 +64,19 @@ public class AddFixedAssetDisposalSettlement : Migration
         AddRestrictedForeignKey(migrationBuilder, "BuyerBusinessPartnerId", "BusinessPartners");
         AddRestrictedForeignKey(migrationBuilder, "SaleTaxGroupId", "TaxGroups");
         AddRestrictedForeignKey(migrationBuilder, "SettlementPaymentTermId", "PaymentTerms");
-        AddRestrictedForeignKey(migrationBuilder, "SettlementPaymentMethodId", "PaymentMethods");
+        // Finance's configured payment-method entity is intentionally mapped to the legacy
+        // singular table name `PaymentMethod` (see ApplicationDbContext). Using the DbSet name
+        // `PaymentMethods` here passed provider-neutral tests but failed on SQL Server because no
+        // plural physical table exists. Keep this migration aligned with the deployed schema so
+        // both existing databases and fresh migration runs create the settlement FK correctly.
+        AddRestrictedForeignKey(migrationBuilder, "SettlementPaymentMethodId", FinancePaymentMethodTable);
         AddRestrictedForeignKey(migrationBuilder, "SettlementBankAccountId", "BankAccounts");
         AddRestrictedForeignKey(migrationBuilder, "SettlementLiquidityAccountId", "LiquidityAccounts");
         AddRestrictedForeignKey(migrationBuilder, "CustomerInvoiceId", "Invoices");
-        AddRestrictedForeignKey(migrationBuilder, "CustomerPaymentId", "CustomerPayments");
+        // Customer receipts follow the same legacy singular-table convention. Use the mapped
+        // physical name rather than the conceptual DbSet name so SQL Server can create the
+        // disposal-to-receipt audit link on both upgraded and newly provisioned databases.
+        AddRestrictedForeignKey(migrationBuilder, "CustomerPaymentId", CustomerPaymentTable);
 
         // Persisted state rules prevent direct SQL or a future code path from linking both a bank
         // and a holding account, or from marking a non-sale disposal as settled without an invoice.
@@ -130,11 +138,11 @@ public class AddFixedAssetDisposalSettlement : Migration
         ["BuyerBusinessPartnerId"] = "BusinessPartners",
         ["SaleTaxGroupId"] = "TaxGroups",
         ["SettlementPaymentTermId"] = "PaymentTerms",
-        ["SettlementPaymentMethodId"] = "PaymentMethods",
+        ["SettlementPaymentMethodId"] = FinancePaymentMethodTable,
         ["SettlementBankAccountId"] = "BankAccounts",
         ["SettlementLiquidityAccountId"] = "LiquidityAccounts",
         ["CustomerInvoiceId"] = "Invoices",
-        ["CustomerPaymentId"] = "CustomerPayments"
+        ["CustomerPaymentId"] = CustomerPaymentTable
     };
 
     private static readonly string[] NewColumns =
@@ -144,4 +152,11 @@ public class AddFixedAssetDisposalSettlement : Migration
         "SettlementLiquidityAccountId", "SettlementReference", "CustomerInvoiceId", "CustomerPaymentId",
         "SettlementInvoiceAmount", "SettlementTaxAmount", "SettlementCompletedAt"
     };
+
+    // Do not pluralize this value: it is the physical table name established by the baseline
+    // migration and retained by the current Finance PaymentMethod model mapping.
+    private const string FinancePaymentMethodTable = "PaymentMethod";
+
+    // CustomerPayment is likewise mapped to a singular physical table by ApplicationDbContext.
+    private const string CustomerPaymentTable = "CustomerPayment";
 }
