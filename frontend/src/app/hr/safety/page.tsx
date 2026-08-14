@@ -23,6 +23,7 @@ import {
   Recycle,
   Scale,
   Signpost,
+  GraduationCap,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -172,6 +173,21 @@ export default function SafetyHomePage() {
                 'Plans with assembly points, contact trees, drills and response teams — plus the review chase.',
               href: '/hr/safety/emergency',
               icon: Siren,
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Training</h2>
+        <NavCardGrid
+          items={[
+            {
+              title: 'Safety Training',
+              description:
+                'SHE training plans, toolbox talks to certified courses, and the attendance register — contractor and visitor sign-ins included. Separate from corporate Training.',
+              href: '/hr/safety/training',
+              icon: GraduationCap,
             },
           ]}
         />

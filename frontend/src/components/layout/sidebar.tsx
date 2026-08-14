@@ -615,6 +615,8 @@ export const navigationItems: NavItem[] = [
           { title: 'PPE Issuance', href: '/hr/safety/ppe/issuances', icon: Users },
           { title: 'Safety Equipment', href: '/hr/safety/equipment', icon: FireExtinguisher },
           { title: 'Emergency Plans', href: '/hr/safety/emergency', icon: Siren },
+          // The SHE training record — deliberately separate from corporate Training (area 7).
+          { title: 'Safety Training', href: '/hr/safety/training', icon: GraduationCap },
           { title: 'Contractors', href: '/hr/safety/contractors', icon: Handshake },
           // Occ-health + RTW ride the HR.Medical.* policies, not the SHE HR-role gate.
           { title: 'Occupational Health', href: '/hr/safety/occupational-health', icon: Stethoscope },

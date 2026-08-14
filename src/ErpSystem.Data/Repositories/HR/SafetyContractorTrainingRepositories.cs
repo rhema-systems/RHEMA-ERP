@@ -139,10 +139,6 @@ public class SheTrainingPlanRepository : GenericRepository<SheTrainingPlan>, ISh
 {
     public SheTrainingPlanRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<SheTrainingPlan?> GetByNumberAsync(string planNumber) =>
-        await _dbSet.Include(p => p.PreparedBy)
-            .FirstOrDefaultAsync(p => p.PlanNumber == planNumber && !p.IsDeleted);
-
     public async Task<SheTrainingPlan?> GetWithProgramsAsync(Guid id) =>
         await _dbSet
             .Include(p => p.OrganizationUnit)
@@ -151,13 +147,18 @@ public class SheTrainingPlanRepository : GenericRepository<SheTrainingPlan>, ISh
             .Include(p => p.Programs)
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
+    // List reads carry every nav the plan mapper resolves — an uneven include maps blank
+    // org-unit/approver names on the register rows.
+    private IQueryable<SheTrainingPlan> WithListNavigations() =>
+        _dbSet.Include(p => p.PreparedBy).Include(p => p.ApprovedBy).Include(p => p.OrganizationUnit);
+
     public async Task<IEnumerable<SheTrainingPlan>> GetByYearAsync(int year) =>
-        await _dbSet.Include(p => p.PreparedBy)
+        await WithListNavigations()
             .Where(p => p.Year == year && !p.IsDeleted)
             .OrderByDescending(p => p.Year).ThenBy(p => p.Quarter).ToListAsync();
 
     public async Task<IEnumerable<SheTrainingPlan>> GetByStatusAsync(SheTrainingPlanStatus status) =>
-        await _dbSet.Include(p => p.PreparedBy)
+        await WithListNavigations()
             .Where(p => p.Status == status && !p.IsDeleted)
             .OrderByDescending(p => p.Year).ToListAsync();
 }
@@ -169,9 +170,8 @@ public class SheTrainingProgramRepository : GenericRepository<SheTrainingProgram
     private IQueryable<SheTrainingProgram> WithListNavigations() =>
         _dbSet.Include(p => p.Location).Include(p => p.Trainer).Include(p => p.Plan);
 
-    public async Task<SheTrainingProgram?> GetByCodeAsync(string programCode) =>
-        await WithListNavigations().FirstOrDefaultAsync(p => p.ProgramCode == programCode && !p.IsDeleted);
-
+    // Split query: the attendance collection multiplied by four reference includes is the
+    // 8060-byte worktable shape that 500'd the incident detail read.
     public async Task<SheTrainingProgram?> GetWithAttendancesAsync(Guid id) =>
         await _dbSet
             .Include(p => p.Location)
@@ -179,6 +179,7 @@ public class SheTrainingProgramRepository : GenericRepository<SheTrainingProgram
             .Include(p => p.Plan)
             .Include(p => p.EvaluatedBy)
             .Include(p => p.Attendances).ThenInclude(a => a.Employee)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
     public async Task<IEnumerable<SheTrainingProgram>> GetByPlanIdAsync(Guid planId) =>
