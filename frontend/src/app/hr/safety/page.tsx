@@ -24,6 +24,7 @@ import {
   Scale,
   Signpost,
   GraduationCap,
+  BarChart3,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -53,9 +54,24 @@ export default function SafetyHomePage() {
             },
             {
               title: 'Performance Snapshots',
-              description: 'Hand-reported KPI figures per period, with management review.',
+              description:
+                'KPI figures per period — hand-reported or computed from the live registers, with management review.',
               href: '/hr/safety/performance',
               icon: Gauge,
+            },
+            {
+              title: 'Corrective Action Tracker',
+              description:
+                'One queue over every corrective action — incidents, inspections, equipment and committee meetings — with overdue escalation.',
+              href: '/hr/safety/corrective-actions',
+              icon: ListChecks,
+            },
+            {
+              title: 'SHE Analytics',
+              description:
+                'Computed KPIs per period: departmental compliance, contractor ranking and the hazard heat-map.',
+              href: '/hr/safety/performance/analytics',
+              icon: BarChart3,
             },
           ]}
         />

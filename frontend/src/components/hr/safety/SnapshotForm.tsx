@@ -24,11 +24,11 @@ import type { Location } from '@/types/hr/location';
 /**
  * Create/edit form for a hand-reported SHE performance snapshot.
  *
- * Every figure here is REPORTED — the SHE officer types it in; nothing is computed from the
- * registers yet (that is the KPI-computation slice). The form says so, and the identity fields
- * (number, period, year, location, preparer) only exist in create mode: the server fixes them at
- * creation, and an edit sends figures only. Once management reviews a snapshot it locks — the
- * server refuses further edits with 422.
+ * Every figure here is typed in by the SHE officer; the snapshot detail's "Compute from live
+ * data" can then overwrite the derivable ones from the registers (hand-entered inputs like
+ * man-hours survive). The identity fields (number, period, year, location, preparer) only exist
+ * in create mode: the server fixes them at creation, and an edit sends figures only. Once
+ * management reviews a snapshot it locks — the server refuses edits and recompute with 422.
  */
 export const snapshotFiguresSchema = z.object({
   totalAccidents: z.coerce.number().min(0),

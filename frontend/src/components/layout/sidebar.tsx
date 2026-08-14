@@ -627,7 +627,11 @@ export const navigationItems: NavItem[] = [
           { title: 'Safety Committees', href: '/hr/safety/committees', icon: Users },
           { title: 'Regulatory Compliance', href: '/hr/safety/regulatory', icon: Scale },
           { title: 'Safety Signage', href: '/hr/safety/signs', icon: Signpost },
+          // Slice 14: the unified CA tracker (one queue over all four action stores) and the
+          // computed-KPI layer (snapshot compute + the analytics screen).
+          { title: 'Corrective Actions', href: '/hr/safety/corrective-actions', icon: ListChecks },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
+          { title: 'SHE Analytics', href: '/hr/safety/performance/analytics', icon: BarChart3 },
         ],
       },
     ],

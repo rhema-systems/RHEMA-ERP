@@ -709,6 +709,17 @@ public class ShePerformanceSnapshotDto : BaseDto
     public DateTime? ReviewedDate { get; set; }
     public string? ManagementComments { get; set; }
     public string? ReportDocumentPath { get; set; }
+
+    // Computed KPIs (slice 14) — written only by the KPI computation engine.
+    public decimal? TotalRecordableIncidentRate { get; set; }
+    public decimal? NearMissFrequencyRate { get; set; }
+    public decimal? TrainingCompletionRate { get; set; }
+    public decimal? FireDrillObjectivesMetRate { get; set; }
+    public decimal? WasteRecyclingRate { get; set; }
+    public decimal? AverageInspectionComplianceScore { get; set; }
+    public DateTime? KpisComputedAt { get; set; }
+    public Guid? KpisComputedById { get; set; }
+    public string? KpisComputedByName { get; set; }
 }
 
 public class ShePerformanceSnapshotSummaryDto

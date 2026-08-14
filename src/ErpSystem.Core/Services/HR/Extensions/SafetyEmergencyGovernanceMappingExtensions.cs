@@ -555,6 +555,15 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         ReviewedDate = e.ReviewedDate,
         ManagementComments = e.ManagementComments,
         ReportDocumentPath = e.ReportDocumentPath,
+        TotalRecordableIncidentRate = e.TotalRecordableIncidentRate,
+        NearMissFrequencyRate = e.NearMissFrequencyRate,
+        TrainingCompletionRate = e.TrainingCompletionRate,
+        FireDrillObjectivesMetRate = e.FireDrillObjectivesMetRate,
+        WasteRecyclingRate = e.WasteRecyclingRate,
+        AverageInspectionComplianceScore = e.AverageInspectionComplianceScore,
+        KpisComputedAt = e.KpisComputedAt,
+        KpisComputedById = e.KpisComputedById,
+        KpisComputedByName = e.KpisComputedBy?.FullName,
     };
 
     public static ShePerformanceSnapshotSummaryDto ToSummaryDto(this ShePerformanceSnapshot e) => new()

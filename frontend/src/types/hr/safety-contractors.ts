@@ -4,9 +4,10 @@
 // Mirrors ErpSystem.Core.DTOs.HR.SafetyContractorTrainingDTOs (region H).
 // Backend route: api/safety/contractors.
 //
-// ⚠ FR-CON-001 caveat: every score here is hand-entered — the pre-qualification score (0–100)
-// and the per-inspection compliance score (0–100) are REPORTED, NOT COMPUTED. No contractor
-// ranking or aggregate compliance score exists anywhere yet (slice-14 KPI computation).
+// FR-CON-001: the pre-qualification score and per-inspection compliance score (0–100) are
+// hand-entered by the assessor/inspector; the AGGREGATE is computed — the slice-14 contractor
+// ranking (api/safety/performance/kpis/contractor-ranking, surfaced on the SHE Analytics
+// screen) averages the period's inspection scores per contractor and ranks them.
 // Repeat-violation flags on notices ARE computed server-side from the contractor's prior notices.
 // Expiring pre-qualifications, documents and inductions alert automatically via the slice-13
 // reminder engine; the polled queries remain the screens' work views.
@@ -138,7 +139,7 @@ export interface SheContractorSummary {
   primaryContactName?: string | null;
   sheStatus: SheContractorStatus;
   sheStatusName: string;
-  /** Hand-entered at pre-qualification (0–100) — reported, not computed. */
+  /** Hand-entered at pre-qualification (0–100); feeds the computed slice-14 ranking as a tie-breaker. */
   preQualificationScore?: number | null;
   preQualificationExpiryDate?: string | null;
   isActive: boolean;
@@ -264,7 +265,7 @@ export interface SheContractorInspection extends AuditFields {
   specificArea?: string | null;
   inspectorId: string;
   inspectorName: string;
-  /** Hand-entered by the inspector (0–100) — reported, not computed. */
+  /** Hand-entered by the inspector (0–100); the slice-14 ranking averages these per contractor. */
   complianceScore?: number | null;
   result: SheInspectionResult;
   resultName: string;

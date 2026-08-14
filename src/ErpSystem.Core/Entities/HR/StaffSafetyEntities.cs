@@ -2688,6 +2688,37 @@ public class ShePerformanceSnapshot : TenantEntity
 
     [MaxLength(500)]
     public string? ReportDocumentPath { get; set; }
+
+    // ── Computed KPIs (slice 14) ──
+    // Written only by SheKpiComputationService — never hand-entered. Null until the
+    // first computation runs (or when the inputs make the figure undefined, e.g.
+    // zero man-hours for the frequency rates).
+
+    /// <summary>TRIR — recordable incidents (accidents + occupational illness) × 200,000 / man-hours (OSHA base).</summary>
+    public decimal? TotalRecordableIncidentRate { get; set; }
+
+    /// <summary>Near misses × 1,000,000 / man-hours (same base as LTIFR).</summary>
+    public decimal? NearMissFrequencyRate { get; set; }
+
+    /// <summary>Attended employee sign-ins / registered employee sign-ins on conducted SHE programs, %.</summary>
+    public decimal? TrainingCompletionRate { get; set; }
+
+    /// <summary>Drills conducted in the period that met their objectives, %.</summary>
+    public decimal? FireDrillObjectivesMetRate { get; set; }
+
+    /// <summary>Waste mass diverted to recycling/composting over total disposed mass (kg/tonne records), %.</summary>
+    public decimal? WasteRecyclingRate { get; set; }
+
+    /// <summary>Average compliance score across scored workplace inspections in the period, %.</summary>
+    public decimal? AverageInspectionComplianceScore { get; set; }
+
+    /// <summary>When the computed figures were last refreshed from live data. Null = figures are hand-reported only.</summary>
+    public DateTime? KpisComputedAt { get; set; }
+
+    public Guid? KpisComputedById { get; set; }
+
+    [ForeignKey(nameof(KpisComputedById))]
+    public virtual Employee? KpisComputedBy { get; set; }
 }
 
 // ──────────────────────────────────────────────────────────

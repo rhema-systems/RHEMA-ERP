@@ -275,8 +275,10 @@ export interface SheDashboard {
 }
 
 // ── Performance snapshots ─────────────────────────────────────────────────────
-// ⚠ Every figure on a snapshot is REPORTED — typed in by the SHE officer, not computed from the
-// registers. Screens must label them as such until the KPI-computation slice lands (slice 14).
+// Figures are hand-reported at creation, and can be recomputed from the live registers by the
+// KPI engine (slice 14): POST /{id}/compute rewrites every derivable figure and stamps
+// kpisComputedAt/By. Hand-entered-only inputs (man-hours, inspections planned, drills planned)
+// are never overwritten. A snapshot with kpisComputedAt == null is reported-only.
 
 export interface ShePerformanceSnapshot extends AuditFields {
   tenantId: string;
@@ -339,6 +341,17 @@ export interface ShePerformanceSnapshot extends AuditFields {
   reviewedDate?: string | null;
   managementComments?: string | null;
   reportDocumentPath?: string | null;
+
+  // Computed KPIs (slice 14) — written only by POST /{id}/compute, never hand-entered.
+  totalRecordableIncidentRate?: number | null;
+  nearMissFrequencyRate?: number | null;
+  trainingCompletionRate?: number | null;
+  fireDrillObjectivesMetRate?: number | null;
+  wasteRecyclingRate?: number | null;
+  averageInspectionComplianceScore?: number | null;
+  kpisComputedAt?: string | null;
+  kpisComputedById?: string | null;
+  kpisComputedByName?: string | null;
 }
 
 export interface ShePerformanceSnapshotSummary {

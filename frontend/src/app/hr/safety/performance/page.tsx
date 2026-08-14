@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -28,9 +28,10 @@ const periodLabel = (s: ShePerformanceSnapshotSummary) =>
       : `${s.year}-${String(s.periodNumber).padStart(2, '0')}`;
 
 /**
- * The KPI snapshot register, one year at a time. All figures shown are REPORTED — typed in by
- * the SHE officer, not computed from the registers — hence the badge in the header. The KPI
- * computation slice replaces that badge, not this screen.
+ * The KPI snapshot register, one year at a time. Figures start hand-reported; the snapshot
+ * detail's "Compute from live data" refreshes every derivable figure from the registers.
+ * Period analytics (departmental compliance, contractor ranking, hazard heat-map, computed
+ * preview) live on the Analytics screen.
  */
 export default function PerformanceSnapshotsPage() {
   const [year, setYear] = useState(() => new Date().getFullYear());
@@ -47,12 +48,20 @@ export default function PerformanceSnapshotsPage() {
         description="Hand-reported KPI figures per period. Management reviews a snapshot to lock it."
         backHref="/hr/safety"
         actions={
-          <Button asChild>
-            <Link href="/hr/safety/performance/new">
-              <Plus className="mr-2 h-4 w-4" />
-              New snapshot
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link href="/hr/safety/performance/analytics">
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Analytics
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/hr/safety/performance/new">
+                <Plus className="mr-2 h-4 w-4" />
+                New snapshot
+              </Link>
+            </Button>
+          </div>
         }
       />
 
@@ -65,7 +74,7 @@ export default function PerformanceSnapshotsPage() {
           <ChevronRight className="h-4 w-4" />
         </Button>
         <Badge variant="outline" className="ml-2">
-          Reported figures — not computed
+          Computable from live data on each snapshot
         </Badge>
       </div>
 

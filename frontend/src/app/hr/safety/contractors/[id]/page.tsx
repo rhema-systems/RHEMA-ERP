@@ -65,8 +65,8 @@ import type {
  * (permanent records, no delete), non-compliance notices (closed through their own dialog,
  * never deleted) and the document file (verify once, then it is fixed).
  *
- * Both scores on this page are hand-entered: the pre-qualification score and each inspection's
- * compliance score are REPORTED, NOT COMPUTED — no contractor ranking exists yet (slice 14).
+ * Both scores on this page are hand-entered by the assessor/inspector; the aggregate is
+ * computed — the SHE Analytics screen ranks contractors by average inspection score (FR-CON-001).
  */
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
@@ -388,7 +388,7 @@ export default function ContractorDetailPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Fact
-              label="Pre-qual score (reported — not computed)"
+              label="Pre-qual score (hand-entered)"
               value={
                 contractor.preQualificationScore != null
                   ? `${contractor.preQualificationScore} / 100`
@@ -685,7 +685,7 @@ export default function ContractorDetailPage() {
                   <NumberField
                     form={f}
                     name="complianceScore"
-                    label="Compliance score 0–100 (reported — not computed)"
+                    label="Compliance score 0–100 (hand-entered; averaged into the ranking)"
                   />
                   <SelectField
                     form={f}

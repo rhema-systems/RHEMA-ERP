@@ -830,7 +830,7 @@ public class ShePerformanceService : IShePerformanceService
     public async Task<ShePerformanceSnapshotDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _snapshotRepository.GetByIdAsync(id, s => s.Location, s => s.PreparedBy, s => s.ReviewedBy);
+        var entity = await _snapshotRepository.GetByIdAsync(id, s => s.Location, s => s.PreparedBy, s => s.ReviewedBy, s => s.KpisComputedBy);
         if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Performance snapshot with ID '{id}' not found.");
         return entity.ToDto();

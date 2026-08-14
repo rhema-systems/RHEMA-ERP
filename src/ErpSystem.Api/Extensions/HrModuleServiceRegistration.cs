@@ -542,6 +542,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ISafetyCommitteeService, SafetyCommitteeService>();
         services.AddScoped<ISheReturnToWorkService, SheReturnToWorkService>();
         services.AddScoped<ISheReminderService, SheReminderService>();
+        services.AddScoped<ISheCorrectiveActionTrackerService, SheCorrectiveActionTrackerService>();
+        services.AddScoped<ISheKpiComputationService, SheKpiComputationService>();
         services.AddScoped<IOrientationCategoryService, OrientationCategoryService>();
         services.AddScoped<IOrientationProgramService, OrientationProgramService>();
         services.AddScoped<IOrientationSessionService, OrientationSessionService>();

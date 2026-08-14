@@ -170,3 +170,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260810121459_HrRecruitmentAttachmentDocumentLinks")] partial class HrRecruitmentAttachmentDocumentLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260811151131_HrPreEmploymentDocumentLinks")] partial class HrPreEmploymentDocumentLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260814174240_AddSheReminderEngine")] partial class AddSheReminderEngine { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260814191316_AddSheKpiComputation")] partial class AddSheKpiComputation { }

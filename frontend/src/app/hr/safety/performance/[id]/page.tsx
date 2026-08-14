@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Trash2, CheckCircle2 } from 'lucide-react';
+import { Loader2, Pencil, Trash2, CheckCircle2, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,9 +50,10 @@ function FigureGroup({ title, rows }: { title: string; rows: [string, string | n
 }
 
 /**
- * One snapshot, in full. Every figure is REPORTED (the badge says so). Editing is figures-only
- * and disappears once management reviews — the server locks the record at that point, so the
- * button not being there is honesty, not decoration.
+ * One snapshot, in full. Figures start hand-reported; "Compute from live data" rewrites every
+ * derivable figure from the registers (the badge says which state the snapshot is in). Editing
+ * and recomputing disappear once management reviews — the server locks the record at that
+ * point, so the buttons not being there is honesty, not decoration.
  */
 export default function PerformanceSnapshotDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -97,6 +98,31 @@ export default function PerformanceSnapshotDetailPage() {
       toast({
         title: 'Error',
         description: error?.message || 'Failed to record the review.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCompute = async () => {
+    if (
+      !window.confirm(
+        'Recompute the figures from live data? Every derivable figure is overwritten from the ' +
+          'registers; hand-entered inputs (man-hours, inspections planned, drills planned) are kept.',
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      await safetyPerformanceService.compute(id);
+      await invalidate();
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'safety-performance', 'detail', id] });
+      toast({ title: 'KPIs computed', description: 'Figures refreshed from the live registers.' });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to compute the KPIs.',
         variant: 'destructive',
       });
     } finally {
@@ -158,6 +184,10 @@ export default function PerformanceSnapshotDetailPage() {
           <div className="flex gap-2">
             {!reviewed && (
               <>
+                <Button variant="outline" onClick={handleCompute} disabled={busy}>
+                  <Calculator className="mr-2 h-4 w-4" />
+                  Compute from live data
+                </Button>
                 <Button asChild variant="outline">
                   <Link href={`/hr/safety/performance/${s.id}/edit`}>
                     <Pencil className="mr-2 h-4 w-4" />
@@ -179,7 +209,14 @@ export default function PerformanceSnapshotDetailPage() {
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">Reported figures — not computed</Badge>
+        {s.kpisComputedAt ? (
+          <Badge variant="secondary">
+            Computed from live data on {fmtDate(s.kpisComputedAt)}
+            {s.kpisComputedByName ? ` by ${s.kpisComputedByName}` : ''}
+          </Badge>
+        ) : (
+          <Badge variant="outline">Reported figures — not yet computed</Badge>
+        )}
         {reviewed ? (
           <Badge variant="secondary">
             Reviewed by {s.reviewedByName ?? '—'} on {fmtDate(s.reviewedDate)} — locked
@@ -201,22 +238,31 @@ export default function PerformanceSnapshotDetailPage() {
           ['Dangerous occurrences', s.totalDangerousOccurrences],
           ['Fatalities', s.totalFatalities],
           ['Lost-time injuries', s.totalLostTimeInjuries],
-          ['LTIFR (reported)', num(s.lostTimeInjuryFrequencyRate)],
-          ['Man-hours worked', s.totalManHoursWorked],
+          ['Man-hours worked (hand-entered)', s.totalManHoursWorked],
           ['Lost days', s.totalLostDays],
+        ]}
+      />
+
+      <FigureGroup
+        title="Frequency rates"
+        rows={[
+          ['LTIFR (per 1,000,000 h)', num(s.lostTimeInjuryFrequencyRate)],
+          ['TRIR (per 200,000 h)', num(s.totalRecordableIncidentRate)],
+          ['Near-miss rate (per 1,000,000 h)', num(s.nearMissFrequencyRate)],
         ]}
       />
 
       <FigureGroup
         title="Inspections & corrective actions"
         rows={[
-          ['Inspections planned', s.inspectionsPlanned],
+          ['Inspections planned (hand-entered)', s.inspectionsPlanned],
           ['Conducted', s.inspectionsConducted],
           ['Overdue', s.inspectionsOverdue],
+          ['Avg inspection compliance', num(s.averageInspectionComplianceScore, '%')],
           ['CAs issued', s.correctiveActionsIssued],
           ['CAs completed', s.correctiveActionsCompleted],
           ['CAs overdue', s.correctiveActionsOverdue],
-          ['CA closure rate (reported)', num(s.correctiveActionClosureRate, '%')],
+          ['CA closure rate', num(s.correctiveActionClosureRate, '%')],
         ]}
       />
 
@@ -226,10 +272,11 @@ export default function PerformanceSnapshotDetailPage() {
           ['Training planned', s.trainingProgramsPlanned],
           ['Training conducted', s.trainingProgramsConducted],
           ['Training hours', s.totalTrainingHours],
+          ['Training completion', num(s.trainingCompletionRate, '%')],
           ['Contractors on site', s.contractorsOnSite],
           ['Contractor inspections', s.contractorInspectionsConducted],
           ['Non-compliance notices', s.contractorNonComplianceNoticesIssued],
-          ['Contractor compliance (reported)', num(s.contractorComplianceRate, '%')],
+          ['Contractor compliance', num(s.contractorComplianceRate, '%')],
         ]}
       />
 
@@ -238,10 +285,12 @@ export default function PerformanceSnapshotDetailPage() {
         rows={[
           ['Environmental incidents', s.environmentalIncidents],
           ['Reported to EPA', s.environmentalIncidentsReportedToEpa],
-          ['Drills planned', s.emergencyDrillsPlanned],
+          ['Waste recycling rate', num(s.wasteRecyclingRate, '%')],
+          ['Drills planned (hand-entered)', s.emergencyDrillsPlanned],
           ['Drills conducted', s.emergencyDrillsConducted],
-          ['PPE compliance (reported)', num(s.ppeComplianceRate, '%')],
-          ['Housekeeping rating (reported)', num(s.housekeepingComplianceRating, '%')],
+          ['Drill objectives met', num(s.fireDrillObjectivesMetRate, '%')],
+          ['PPE compliance', num(s.ppeComplianceRate, '%')],
+          ['Housekeeping rating', num(s.housekeepingComplianceRating, '%')],
           ['Obligations total', s.regulatoryObligationsTotal],
           ['Compliant', s.regulatoryObligationsCompliant],
           ['Non-compliant', s.regulatoryObligationsNonCompliant],

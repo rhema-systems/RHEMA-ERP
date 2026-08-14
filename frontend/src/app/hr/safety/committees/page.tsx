@@ -220,7 +220,7 @@ export default function SafetyCommitteesPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Safety Committees"
-        description="Committees with their members and meetings, plus the action-item queues raised in those meetings. Overdue action-item chasing is manual — the reminder engine does not cover corrective actions (that is the unified CA tracker, next slice)."
+        description="Committees with their members and meetings, plus the action-item queues raised in those meetings. Action items also appear in the unified corrective-action tracker, and overdue ones remind and escalate through the SHE reminder engine."
         backHref="/hr/safety"
         actions={
           <Button onClick={openCreate}>

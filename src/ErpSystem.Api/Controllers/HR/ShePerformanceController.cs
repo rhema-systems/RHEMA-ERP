@@ -1,5 +1,6 @@
 using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
@@ -15,9 +16,14 @@ namespace ErpSystem.Api.Controllers.HR;
 public class ShePerformanceController : SheApiControllerBase
 {
     private readonly IShePerformanceService _service;
+    private readonly ISheKpiComputationService _kpiService;
 
-    public ShePerformanceController(IShePerformanceService service, ICurrentUserService currentUser)
-        : base(currentUser) => _service = service;
+    public ShePerformanceController(IShePerformanceService service, ISheKpiComputationService kpiService, ICurrentUserService currentUser)
+        : base(currentUser)
+    {
+        _service = service;
+        _kpiService = kpiService;
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ShePerformanceSnapshotDto>> GetById(Guid id)
@@ -68,4 +74,36 @@ public class ShePerformanceController : SheApiControllerBase
         await _service.DeleteAsync(id);
         return NoContent();
     }
+
+    // ── computed KPIs (slice 14) ─────────────────────────────────────────────
+
+    /// <summary>Recomputes the snapshot's derivable figures from live data. Refused with 422 once reviewed.</summary>
+    [HttpPost("{id:guid}/compute")]
+    public async Task<ActionResult<ShePerformanceSnapshotDto>> Compute(Guid id)
+        => Ok(await _kpiService.ComputeSnapshotAsync(id, UserId));
+
+    /// <summary>What a snapshot for this period would compute, without persisting anything.
+    /// Pass manHours to see the frequency rates (LTIFR/TRIR/near-miss).</summary>
+    [HttpGet("compute/preview")]
+    public async Task<ActionResult<SheComputedKpisDto>> Preview(
+        [FromQuery] SheSnapshotPeriodType periodType, [FromQuery] int year,
+        [FromQuery] int? periodNumber, [FromQuery] Guid? locationId, [FromQuery] long manHours = 0)
+        => Ok(await _kpiService.PreviewAsync(periodType, year, periodNumber, locationId, manHours));
+
+    /// <summary>Per-organization-unit compliance for a period (FR-SHE-230).</summary>
+    [HttpGet("kpis/departmental")]
+    public async Task<ActionResult<IEnumerable<SheDepartmentalComplianceDto>>> Departmental(
+        [FromQuery] SheSnapshotPeriodType periodType, [FromQuery] int year, [FromQuery] int? periodNumber)
+        => Ok(await _kpiService.GetDepartmentalComplianceAsync(periodType, year, periodNumber));
+
+    /// <summary>Contractor SHE ranking for a period (FR-CON-001), best average inspection score first.</summary>
+    [HttpGet("kpis/contractor-ranking")]
+    public async Task<ActionResult<IEnumerable<SheContractorRankingDto>>> ContractorRanking(
+        [FromQuery] SheSnapshotPeriodType periodType, [FromQuery] int year, [FromQuery] int? periodNumber)
+        => Ok(await _kpiService.GetContractorRankingAsync(periodType, year, periodNumber));
+
+    /// <summary>5×5 likelihood × severity counts over the active hazard register (FR-SHE-232).</summary>
+    [HttpGet("kpis/hazard-heatmap")]
+    public async Task<ActionResult<SheHazardHeatmapDto>> HazardHeatmap()
+        => Ok(await _kpiService.GetHazardHeatmapAsync());
 }

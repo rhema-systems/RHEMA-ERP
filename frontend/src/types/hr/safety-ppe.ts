@@ -6,7 +6,8 @@
 // Reorder and issuance-expiry alerts fire automatically via the SHE reminder engine (slice 13):
 // below-reorder items raise a weekly notification, expiring issuances ride a 30/14/7 ladder —
 // `below-reorder` remains the query the screens poll. The PPE-compliance % on performance
-// snapshots is still hand-reported, not computed from this data (slice 14).
+// snapshots computes from this data once the requirement matrix's job-role codes match
+// position codes (slice 14); until they do, the snapshot figure stays hand-reported.
 
 import type { AuditFields } from './common';
 

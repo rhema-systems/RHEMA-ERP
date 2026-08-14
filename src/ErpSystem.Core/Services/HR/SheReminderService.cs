@@ -77,17 +77,20 @@ public class SheReminderService : ISheReminderService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ISheCorrectiveActionTrackerService _correctiveActionTracker;
     private readonly ILogger<SheReminderService> _logger;
 
     public SheReminderService(
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
         ICurrentUserProvider currentUserProvider,
+        ISheCorrectiveActionTrackerService correctiveActionTracker,
         ILogger<SheReminderService> logger)
     {
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
         _currentUserProvider = currentUserProvider;
+        _correctiveActionTracker = correctiveActionTracker;
         _logger = logger;
     }
 
@@ -192,6 +195,7 @@ public class SheReminderService : ISheReminderService
         await SweepHealthSurveillanceAsync(tenantId, today, pending, cancellationToken);
         await SweepFirstAidStationsAsync(tenantId, today, pending, cancellationToken);
         await SweepPpeAsync(tenantId, today, pending, cancellationToken);
+        await SweepCorrectiveActionsAsync(tenantId, today, pending, cancellationToken);
 
         // Dedupe against everything any earlier run already dispatched. The unique
         // (TenantId, DedupeKey) index backstops the read-then-write race; one retry
@@ -713,6 +717,25 @@ public class SheReminderService : ISheReminderService
                     ["Stock"] = p.QuantityInStock,
                     ["Reorder"] = p.ReorderLevel,
                 }));
+        }
+    }
+
+    private async Task SweepCorrectiveActionsAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 14 — the unified corrective-action tracker (FR-SHE-245) makes every
+        // silo's open actions sweepable in one pass, which retires the last
+        // "manual queue" left by slice 13: committee action items now remind and
+        // escalate like everything else. Undated open actions cannot ride a
+        // ladder — the tracker screen surfaces them in its own queue instead.
+        var open = await _correctiveActionTracker.GetOpenForTenantAsync(tenantId, cancellationToken);
+        foreach (var action in open)
+        {
+            if (action.DueDate == null) continue;
+            var description = action.Description.Length > 120 ? action.Description[..117] + "…" : action.Description;
+            Evaluate(pending, today, "CorrectiveActionDue", $"{action.SourceName} corrective action",
+                SheReminderLadder.FortnightLadder, action.Id,
+                $"{action.ParentReference} — {description}",
+                action.DueDate, action.ParentPath);
         }
     }
 
