@@ -19,6 +19,7 @@ public class FixedAssetsController : ControllerBase
     private readonly IAssetVerificationService _verificationService;
     private readonly IFixedAssetReportsService _reportsService;
     private readonly IAssetValuationService _valuationService;
+    private readonly IProcurementFixedAssetCapitalizationAdapter _procurementCapitalization;
     private readonly ICurrentUserService _currentUser;
     private readonly IAuthorizationService _authorizationService;
 
@@ -30,6 +31,7 @@ public class FixedAssetsController : ControllerBase
         IAssetVerificationService verificationService,
         IFixedAssetReportsService reportsService,
         IAssetValuationService valuationService,
+        IProcurementFixedAssetCapitalizationAdapter procurementCapitalization,
         ICurrentUserService currentUser,
         IAuthorizationService authorizationService)
     {
@@ -40,6 +42,7 @@ public class FixedAssetsController : ControllerBase
         _verificationService = verificationService;
         _reportsService = reportsService;
         _valuationService = valuationService;
+        _procurementCapitalization = procurementCapitalization;
         _currentUser = currentUser;
         _authorizationService = authorizationService;
     }
@@ -66,6 +69,86 @@ public class FixedAssetsController : ControllerBase
         {
             var result = await _fixedAssetService.CreateAsync(dto);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Shows only accepted Procurement lines whose Inventory master data classifies them as fixed
+    /// assets. The adapter reads approved source evidence; this endpoint does not alter Procurement.
+    /// </summary>
+    [HttpGet("procurement-capitalization/candidates")]
+    public async Task<ActionResult<IReadOnlyList<ProcurementFixedAssetCandidateDto>>> GetProcurementCapitalizationCandidates(
+        [FromQuery] Guid purchaseOrderId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _procurementCapitalization.GetCandidatesAsync(purchaseOrderId, cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpGet("procurement-capitalizations/{capitalizationId:guid}")]
+    public async Task<ActionResult<ProcurementFixedAssetCapitalizationDto>> GetProcurementCapitalization(
+        Guid capitalizationId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _procurementCapitalization.GetByIdAsync(capitalizationId, cancellationToken);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    /// <summary>
+    /// Reserves one accepted unit and creates the Finance asset draft. Existing fixed-asset
+    /// approval endpoints remain authoritative before the handoff can be posted.
+    /// </summary>
+    [HttpPost("procurement-capitalizations")]
+    public async Task<ActionResult<ProcurementFixedAssetCapitalizationDto>> CreateProcurementCapitalizationDraft(
+        [FromBody] CreateProcurementFixedAssetDraftDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _procurementCapitalization.CreateDraftAsync(dto, cancellationToken);
+            return CreatedAtAction(nameof(GetProcurementCapitalization), new { capitalizationId = result.Id }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Posts only after the existing Finance maker-checker workflow has moved the asset to
+    /// Acquired. Accounting is a reclassification of the already-posted inventory carrying value.
+    /// </summary>
+    [HttpPost("procurement-capitalizations/{capitalizationId:guid}/post")]
+    public async Task<ActionResult<ProcurementFixedAssetCapitalizationDto>> PostProcurementCapitalization(
+        Guid capitalizationId,
+        [FromBody] PostProcurementFixedAssetCapitalizationDto dto,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _procurementCapitalization.PostAsync(capitalizationId, dto, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (InvalidOperationException ex)
         {

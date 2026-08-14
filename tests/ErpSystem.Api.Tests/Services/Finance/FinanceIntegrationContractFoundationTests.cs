@@ -45,6 +45,18 @@ public sealed class FinanceIntegrationContractFoundationTests
     }
 
     [Fact]
+    public void ProcurementAssetContractShouldExposeFinanceOwnedAcceptedSupplyAdapter()
+    {
+        var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-007");
+
+        contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
+        contract.Version.Should().Be("1.0");
+        contract.EntryPoint.Should().Be("IProcurementFixedAssetCapitalizationAdapter");
+        contract.SourceDocumentType.Should().Be("ProcurementFixedAssetCapitalization");
+        contract.LimitationId.Should().Be("FIN-LIM-0028");
+    }
+
+    [Fact]
     public void ReusableConsumerAssertionsShouldAcceptCompleteBalancedRequest()
     {
         var tenantId = Guid.NewGuid();

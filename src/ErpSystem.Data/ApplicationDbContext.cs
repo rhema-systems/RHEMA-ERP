@@ -127,6 +127,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FixedAssetCategory> FixedAssetCategories { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<FixedAssetBookValue> FixedAssetBookValues { get; set; }
+    public DbSet<ProcurementFixedAssetCapitalization> ProcurementFixedAssetCapitalizations { get; set; }
     public DbSet<FixedAssetCapitalizationReversal> FixedAssetCapitalizationReversals { get; set; }
     public DbSet<FixedAssetDepreciationReversal> FixedAssetDepreciationReversals { get; set; }
     public DbSet<AssetDisposal> AssetDisposals { get; set; }
@@ -3442,6 +3443,58 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.PostingEvent)
                 .WithMany()
                 .HasForeignKey(e => e.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementFixedAssetCapitalization>(entity =>
+        {
+            entity.ToTable("ProcurementFixedAssetCapitalizations", table =>
+            {
+                table.HasCheckConstraint("CK_ProcurementFixedAssetCapitalizations_Quantity", "[CapitalizedQuantity] > 0");
+                table.HasCheckConstraint("CK_ProcurementFixedAssetCapitalizations_Amounts", "[SourceTransactionAmount] >= 0 AND [FunctionalAmount] > 0");
+            });
+            entity.HasIndex(value => new { value.TenantId, value.IdempotencyKey }).IsUnique();
+            entity.HasIndex(value => new { value.TenantId, value.PurchaseOrderItemId, value.Status });
+            entity.HasIndex(value => new { value.TenantId, value.FixedAssetId, value.Status });
+            entity.HasIndex(value => new { value.TenantId, value.PostingEventId });
+            entity.HasIndex(value => new { value.TenantId, value.JournalEntryId });
+            entity.Property(value => value.AcceptedSupplyReference).HasMaxLength(100).IsRequired();
+            entity.Property(value => value.SourceCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(value => value.FunctionalCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(value => value.SourceIntegrityHash).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(value => value.FailureReason).HasMaxLength(2000);
+            entity.HasOne(value => value.FixedAsset)
+                .WithMany()
+                .HasForeignKey(value => value.FixedAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(value => value.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.PurchaseOrderItem)
+                .WithMany()
+                .HasForeignKey(value => value.PurchaseOrderItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.InventoryItem)
+                .WithMany()
+                .HasForeignKey(value => value.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(value => value.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(value => value.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(value => value.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(value => value.ReversalJournalEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

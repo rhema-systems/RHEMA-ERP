@@ -62,6 +62,19 @@ namespace ErpSystem.Core.Enums
         Rejected = 12
     }
 
+    /// <summary>
+    /// Lifecycle of the Finance-owned handoff that turns an accepted Procurement item into a
+    /// fixed-asset register entry.  Procurement continues to own receipt and inspection approval;
+    /// this status describes only Finance reservation, capitalization and reversal state.
+    /// </summary>
+    public enum ProcurementFixedAssetCapitalizationStatus
+    {
+        Draft = 1,
+        Posted = 2,
+        Reversed = 3,
+        Failed = 4
+    }
+
     public enum DepreciationConvention
     {
         [Display(Name = "Full Month")]

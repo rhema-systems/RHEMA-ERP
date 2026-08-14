@@ -63,10 +63,11 @@ The following entries remain open, partially resolved, accepted with a remainder
 but awaiting external acceptance:
 
 - `FIN-LIM-0014`: tenant-aware role assignment / central authorization product decision;
-- `FIN-LIM-0016`: fixed-asset umbrella should be reassessed after the Finance-owned disposal gaps were
-  resolved; its remaining production dependency is cross-module `FIN-LIM-0028`, plus migration/UAT evidence;
+- `FIN-LIM-0016`: the fixed-asset functional lifecycle is implemented, including the FIN-INT-007
+  Procurement capitalization adapter; migration rehearsal and representative TDC UAT remain release evidence;
 - `FIN-LIM-0017`: representative migration, reconciliation, and accountant sign-off;
-- `FIN-LIM-0028`: procurement-origin fixed-asset capitalization;
+- `FIN-LIM-0028`: resolved on 2026-08-14 by FIN-INT-007; migration application and representative
+  Procurement receipt → capitalization → AP/GRV UAT remain release gates rather than feature gaps;
 - `FIN-LIM-0040`: resolved on 2026-08-13 by the Fixed Asset Sale Settlement Foundation; migration application and representative taxable-sale UAT remain release gates rather than feature gaps;
 - `FIN-LIM-0046`: accepted non-blocking remainder for rich formatted packs not selected as product outputs;
 - `FIN-LIM-0047`: external Ghana portal/direct-submission and distribution interfaces;

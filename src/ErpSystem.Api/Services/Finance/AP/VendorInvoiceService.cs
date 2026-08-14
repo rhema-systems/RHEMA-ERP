@@ -724,8 +724,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
             var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
-            var hasFixedAssetLines = !invoice.IsOpeningBalance && invoice.LineItems.Any(IsFixedAssetLine);
-            if (hasFixedAssetLines && _fixedAssetService == null)
+            // Procured assets are capitalized from the accepted receipt carrying value by
+            // FIN-INT-007. Their later supplier invoice clears GRV only, so treating those lines
+            // as direct AP capitalization would debit the asset account a second time.
+            var hasDirectApFixedAssetLines = !invoice.IsOpeningBalance &&
+                !IsProcurementGrvClearingInvoice(invoice) &&
+                invoice.LineItems.Any(IsFixedAssetLine);
+            if (hasDirectApFixedAssetLines && _fixedAssetService == null)
             {
                 throw new InvalidOperationException("Fixed asset capitalization service is not configured for AP fixed asset lines.");
             }
@@ -749,7 +754,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 
-                if (hasFixedAssetLines)
+                if (hasDirectApFixedAssetLines)
                 {
                     await _fixedAssetService!.RecordApInvoiceCapitalizationAsync(
                         invoice.Id,
@@ -1934,8 +1939,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             var linkedFinanceReceipt = await _unitOfWork.Repository<FinancePurchaseOrderReceipt>()
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted);
             var clearsFinanceGrv = linkedFinanceReceipt != null;
+            var clearsProcurementGrv = IsProcurementGrvClearingInvoice(invoice);
+            var clearsGrv = clearsFinanceGrv || clearsProcurementGrv;
             Guid? grvAccrualAccountId = null;
-            if (clearsFinanceGrv)
+            if (clearsGrv)
             {
                 grvAccrualAccountId = settings.ControlAccountGRVAccrualId
                     ?? throw new InvalidOperationException("GRV accrual control account is not configured for this tenant.");
@@ -1957,9 +1964,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 if (line.DiscountAmount < 0m || line.TaxAmount < 0m)
                     throw new InvalidOperationException("AP invoice line discount and tax amounts cannot be negative.");
 
-                if (clearsFinanceGrv)
+                if (clearsGrv)
                 {
-                    if (IsFixedAssetLine(line))
+                    if (clearsFinanceGrv && IsFixedAssetLine(line))
                     {
                         throw new InvalidOperationException("Fixed asset capitalization from GRV accrual clearing is deferred until procurement receipt capitalization is modeled.");
                     }
@@ -2589,6 +2596,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             => string.Equals(line.LineItemType, "FixedAsset", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(line.LineItemType, "Fixed Asset", StringComparison.OrdinalIgnoreCase)
                 || line.FixedAssetId.HasValue;
+
+        private static bool IsProcurementGrvClearingInvoice(VendorInvoice invoice)
+            => invoice.PurchaseOrderId.HasValue &&
+                invoice.AcceptedSupplyKind == ProcurementAcceptedSupplyKind.GoodsReceiptInspection &&
+                invoice.AcceptedSupplySourceId == invoice.PurchaseOrderId;
 
         private static string BuildFixedAssetLineNotes(VendorInvoiceLineItem line)
             => line.FixedAssetId.HasValue

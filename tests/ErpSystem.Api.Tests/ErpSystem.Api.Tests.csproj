@@ -176,6 +176,7 @@
     <Compile Include="Services\Finance\FinanceConsumerContractAssertions.cs" />
     <Compile Include="Services\Finance\FinanceIntegrationContractFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDisposalSettlementMigrationTests.cs" />
+    <Compile Include="Services\Finance\ProcurementFixedAssetCapitalizationMigrationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetReportingReconciliationFoundationTests.cs" />
     <Compile Include="Services\Finance\SubledgerSettlementReadModelFoundationTests.cs" />
     <Compile Include="Services\Finance\BackendReportingExportFoundationTests.cs" />

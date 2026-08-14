@@ -84,4 +84,7 @@ Covered scenarios:
 
 ## Scope Boundary
 
-This resolves depreciation run reversal/correction under `FIN-LIM-0033`. It does not add new depreciation calculation methods (`FIN-LIM-0031`), valuation/impairment correction (`FIN-LIM-0037`), automatic partial-period depreciation on disposal (`FIN-LIM-0039`), or cross-module procurement capitalization (`FIN-LIM-0028`).
+This resolves depreciation run reversal/correction under `FIN-LIM-0033`. It does not itself add
+new depreciation calculation methods (`FIN-LIM-0031`), valuation/impairment correction
+(`FIN-LIM-0037`), automatic partial-period depreciation on disposal (`FIN-LIM-0039`), or the
+separately delivered Procurement capitalization adapter (`FIN-LIM-0028` / FIN-INT-007).

@@ -17,6 +17,10 @@ public interface IFixedAssetService
     // Lifecycle Management
     Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CapitalizeAsync(Guid id, CapitalizeFixedAssetDto dto);
+    Task<FixedAssetDto> CapitalizeFromProcurementAsync(
+        Guid id,
+        ProcurementFixedAssetPostingInstructionDto dto,
+        CancellationToken cancellationToken = default);
     Task<FixedAssetCapitalizationReversalDto> RequestCapitalizationReversalAsync(
         Guid id,
         RequestFixedAssetCapitalizationReversalDto dto,
