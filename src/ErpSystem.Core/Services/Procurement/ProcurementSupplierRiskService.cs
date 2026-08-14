@@ -302,7 +302,8 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
             .ThenByDescending(item => item.ScorecardSequence)
             .FirstOrDefaultAsync(cancellationToken);
         var dimensionRows = BuildDimensionScores(
-            dimensions, partner, eligibility, metric, spend, categories, findings);
+            dimensions, partner, eligibility, metric, spend, categories,
+            orders.All(item => item.BusinessPartnerId != partner.Id), findings);
         var dataComplete = dimensionRows.All(item => item.Score.HasValue) &&
             findings.All(item => !item.DataGap);
         decimal? score = dataComplete
@@ -733,6 +734,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         ProcurementSupplierPerformanceScorecard? metric,
         IReadOnlyList<ProcurementSupplierSpendExposureDto> spend,
         IReadOnlyList<ProcurementSupplierCategoryExposureDto> categories,
+        bool firstAwardBaseline,
         ICollection<ProcurementSupplierRiskFindingDto> findings)
     {
         var result = new List<ProcurementSupplierRiskDimensionDto>();
@@ -786,9 +788,25 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                     source = metric is null
                         ? "ProcurementSupplierPerformanceScorecard"
                         : $"ProcurementSupplierPerformanceScorecard:{metric.Id:N}";
+                    if (!score.HasValue && firstAwardBaseline)
+                    {
+                        score = eligibility.DueDiligenceCurrent &&
+                                eligibility.DueDiligenceOutcome ==
+                                ProcurementSupplierDueDiligenceOutcome.Clear
+                            ? 100
+                            : eligibility.DueDiligenceOutcome ==
+                              ProcurementSupplierDueDiligenceOutcome.Adverse
+                                ? 0
+                                : null;
+                        source = eligibility.DueDiligenceReviewId.HasValue
+                            ? $"FirstAwardDueDiligence:{eligibility.DueDiligenceReviewId:N}"
+                            : "FirstAwardDueDiligence";
+                    }
                     missing = score.HasValue
                         ? null
-                        : "No governed contract-completion measure exists in the exposure window.";
+                        : firstAwardBaseline
+                            ? "No current approved due-diligence outcome exists for the first-award baseline."
+                            : "No governed contract-completion measure exists in the exposure window.";
                     break;
                 case "DUEDILIGENCE":
                     score = eligibility.DueDiligenceCurrent &&

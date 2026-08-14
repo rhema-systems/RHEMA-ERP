@@ -407,6 +407,8 @@ public sealed class ProcurementConfigurationServiceTests
                 RowVersion = decision.RowVersion
             }, "approve-rework");
 
+        approved.EvidenceStatus.Should().Be(ProcurementConfigurationEvidenceStatus.Verified);
+
         fixture.SetRoles("TenantAdmin");
         await fixture.Service.Invoking(service => service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
                 new SaveProcurementConfigurationDecisionRequest
@@ -448,6 +450,7 @@ public sealed class ProcurementConfigurationServiceTests
 
         returned.Status.Should().Be(ProcurementConfigurationDecisionStatus.Proposed);
         returned.ApprovalStatus.Should().Be(ProcurementConfigurationApprovalStatus.Pending);
+        returned.EvidenceStatus.Should().Be(ProcurementConfigurationEvidenceStatus.Attached);
         returned.ApprovedById.Should().BeNull();
         (await fixture.Context.ProcurementConfigurationRevisions
             .AnyAsync(item => item.ProfileId == profile.Id &&

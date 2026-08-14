@@ -79347,14 +79347,33 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "ProjectId", "Status", "ExpirationDate");
 
+                    b.HasIndex(new[] { "TenantId", "IdempotencyKey" }, "IX_InventoryAllocations_TenantId_WorkOrderIdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[AllocationType] = 'WorkOrder' AND [IdempotencyKey] IS NOT NULL");
+
+                    b.HasIndex(new[] { "TenantId", "ReferenceId", "Status", "RequiredDate" }, "IX_InventoryAllocations_TenantId_WorkOrder_Status_RequiredDate")
+                        .HasFilter("[AllocationType] = 'WorkOrder'");
+
                     b.ToTable("InventoryAllocations", null, t =>
                         {
+                            t.HasTrigger("TR_InventoryAllocations_ProjectReservationGuard");
+
+                            t.HasTrigger("TR_InventoryAllocations_WorkOrderReservationGuard");
+
                             t.HasCheckConstraint("CK_InventoryAllocations_ProjectHashes", "[AllocationType] <> 'ProjectRequisition' OR (LEN([IdempotencyKey]) > 0 AND LEN([PayloadHash]) = 64 AND LEN([CorrelationId]) > 0)");
 
                             t.HasCheckConstraint("CK_InventoryAllocations_ProjectLineage", "[AllocationType] <> 'ProjectRequisition' OR ([InventoryRequisitionId] IS NOT NULL AND [InventoryRequisitionItemId] IS NOT NULL AND [ProjectId] IS NOT NULL AND [DepartmentId] IS NOT NULL AND [LocationId] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_InventoryAllocations_Quantities", "[AllocationType] <> 'ProjectRequisition' OR ([AllocatedQuantity] > 0 AND [ConsumedQuantity] >= 0 AND [RemainingQuantity] >= 0 AND [ConsumedQuantity] + [RemainingQuantity] <= [AllocatedQuantity])");
+
+                            t.HasCheckConstraint("CK_InventoryAllocations_WorkOrderHashes", "[AllocationType] <> 'WorkOrder' OR [IdempotencyKey] IS NULL OR (LEN([IdempotencyKey]) > 0 AND LEN([PayloadHash]) = 64 AND LEN([CorrelationId]) > 0)");
+
+                            t.HasCheckConstraint("CK_InventoryAllocations_WorkOrderLineage", "[AllocationType] <> 'WorkOrder' OR [IdempotencyKey] IS NULL OR ([ReferenceId] IS NOT NULL AND [LocationId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_InventoryAllocations_WorkOrderQuantities", "[AllocationType] <> 'WorkOrder' OR ([AllocatedQuantity] > 0 AND [ConsumedQuantity] >= 0 AND [RemainingQuantity] >= 0 AND [ConsumedQuantity] + [RemainingQuantity] <= [AllocatedQuantity])");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryBalance", b =>
@@ -79456,7 +79475,12 @@ namespace ErpSystem.Data.Migrations
                         .HasDatabaseName("IX_InventoryBalances_Unique_Item_Warehouse_Location")
                         .HasFilter("[LocationId] IS NOT NULL");
 
-                    b.ToTable("InventoryBalances");
+                    b.ToTable("InventoryBalances", null, t =>
+                        {
+                            t.HasTrigger("TR_InventoryBalances_ExactBinNegativeStockGuard");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryCategory", b =>
@@ -80672,6 +80696,323 @@ namespace ErpSystem.Data.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueAccountingRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("EffectiveFromUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveToUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ExpenseAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FixedAssetCategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InventoryCategoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ItemType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MovementReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Treatment")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpenseAccountId");
+
+                    b.HasIndex("FixedAssetCategoryId");
+
+                    b.HasIndex("InventoryCategoryId");
+
+                    b.HasIndex("TenantId", "InventoryCategoryId", "ItemType", "MovementReasonCode")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "IsActive", "EffectiveFromUtc", "EffectiveToUtc");
+
+                    b.ToTable("InventoryIssueAccountingRules", null, t =>
+                        {
+                            t.HasTrigger("TR_InventoryIssueAccountingRules_TenantOwner");
+
+                            t.HasCheckConstraint("CK_InventoryIssueAccountingRules_Effective", "[EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]");
+
+                            t.HasCheckConstraint("CK_InventoryIssueAccountingRules_ItemType", "[ItemType] IN (1,2,3,4)");
+
+                            t.HasCheckConstraint("CK_InventoryIssueAccountingRules_Owner", "([Treatment] = 1 AND [ExpenseAccountId] IS NOT NULL AND [FixedAssetCategoryId] IS NULL AND [ItemType] <> 4) OR ([Treatment] = 2 AND [ExpenseAccountId] IS NULL AND [FixedAssetCategoryId] IS NOT NULL AND [ItemType] = 4 AND [MovementReasonCode] = 'ASSET_CUSTODY')");
+
+                            t.HasCheckConstraint("CK_InventoryIssueAccountingRules_Treatment", "[Treatment] IN (1,2)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueFinanceLineage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("FixedAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("IntegrityHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("InventoryIssueAccountingRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InventoryIssueVoucherLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("IssuedQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("IssuedValue")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MovementReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("PostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("ReturnedQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Treatment")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FixedAssetId");
+
+                    b.HasIndex("InventoryIssueAccountingRuleId");
+
+                    b.HasIndex("InventoryIssueVoucherLineId");
+
+                    b.HasIndex("TenantId", "FixedAssetId")
+                        .IsUnique()
+                        .HasFilter("[FixedAssetId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "InventoryIssueVoucherLineId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "PostingEventId");
+
+                    b.ToTable("InventoryIssueFinanceLineages", null, t =>
+                        {
+                            t.HasTrigger("TR_InventoryIssueFinanceLineages_Lifecycle");
+
+                            t.HasCheckConstraint("CK_InventoryIssueFinanceLineages_Asset", "([Treatment] = 1 AND [FixedAssetId] IS NULL) OR ([Treatment] = 2 AND [FixedAssetId] IS NOT NULL AND [IssuedQuantity] = 1)");
+
+                            t.HasCheckConstraint("CK_InventoryIssueFinanceLineages_Integrity", "LEN([IntegrityHash]) = 64");
+
+                            t.HasCheckConstraint("CK_InventoryIssueFinanceLineages_Quantity", "[IssuedQuantity] > 0 AND [ReturnedQuantity] >= 0 AND [ReturnedQuantity] <= [IssuedQuantity]");
+
+                            t.HasCheckConstraint("CK_InventoryIssueFinanceLineages_Status", "[Status] IN (1,2,3)");
+
+                            t.HasCheckConstraint("CK_InventoryIssueFinanceLineages_Treatment", "[Treatment] IN (1,2)");
+
+                            t.HasCheckConstraint("CK_InventoryIssueFinanceLineages_Value", "[IssuedValue] > 0");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueReturnAllocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("IntegrityHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("InventoryIssueFinanceLineageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InventoryReturnVoucherLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("PostedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid>("ReturnJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ReturnPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReversedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("Value")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InventoryIssueFinanceLineageId");
+
+                    b.HasIndex("InventoryReturnVoucherLineId");
+
+                    b.HasIndex("TenantId", "ReturnPostingEventId");
+
+                    b.HasIndex("TenantId", "ReversalPostingEventId")
+                        .HasFilter("[ReversalPostingEventId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "InventoryReturnVoucherLineId", "InventoryIssueFinanceLineageId")
+                        .IsUnique();
+
+                    b.ToTable("InventoryIssueReturnAllocations", null, t =>
+                        {
+                            t.HasTrigger("TR_InventoryIssueReturnAllocations_Immutable");
+
+                            t.HasCheckConstraint("CK_InventoryIssueReturnAllocations_Integrity", "LEN([IntegrityHash]) = 64");
+
+                            t.HasCheckConstraint("CK_InventoryIssueReturnAllocations_Quantity", "[Quantity] > 0 AND [Value] > 0");
+
+                            t.HasCheckConstraint("CK_InventoryIssueReturnAllocations_Reversal", "([ReversalPostingEventId] IS NULL AND [ReversalJournalEntryId] IS NULL AND [ReversedAtUtc] IS NULL) OR ([ReversalPostingEventId] IS NOT NULL AND [ReversalJournalEntryId] IS NOT NULL AND [ReversedAtUtc] IS NOT NULL)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueVoucher", b =>
                 {
                     b.Property<Guid>("Id")
@@ -80718,6 +81059,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<Guid?>("FinanceJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinancePostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -80745,6 +81092,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MovementReasonCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(2000)
@@ -80832,9 +81184,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("InventoryIssueVouchers", null, t =>
                         {
+                            t.HasTrigger("TR_InventoryIssueVouchers_ControlledLifecycle");
+
                             t.HasCheckConstraint("CK_InventoryIssueVouchers_Acknowledgement", "([Status] = 1 AND [AcknowledgedById] IS NULL AND [AcknowledgedAtUtc] IS NULL) OR ([Status] = 2 AND [AcknowledgedById] = [ReceiverUserId] AND [AcknowledgedAtUtc] IS NOT NULL)");
 
+                            t.HasCheckConstraint("CK_InventoryIssueVouchers_FinanceLineage", "([FinancePostingEventId] IS NULL AND [FinanceJournalEntryId] IS NULL) OR ([FinancePostingEventId] IS NOT NULL AND [FinanceJournalEntryId] IS NOT NULL)");
+
                             t.HasCheckConstraint("CK_InventoryIssueVouchers_Hashes", "LEN([PayloadHash]) = 64 AND LEN([IntegrityHash]) = 64");
+
+                            t.HasCheckConstraint("CK_InventoryIssueVouchers_MovementReason", "[MovementReasonCode] IN ('DEPARTMENT_CONSUMPTION','PROJECT_CONSUMPTION','MAINTENANCE_CONSUMPTION','ASSET_CUSTODY')");
 
                             t.HasCheckConstraint("CK_InventoryIssueVouchers_Sod", "[RequestedById] <> [ApprovedById] AND [RequestedById] <> [IssuedById] AND [ApprovedById] <> [IssuedById] AND [IssuedById] <> [ReceiverUserId]");
 
@@ -80931,6 +81289,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("InventoryIssueVoucherActions", null, t =>
                         {
+                            t.HasTrigger("TR_InventoryIssueVoucherActions_AppendOnly");
+
                             t.HasCheckConstraint("CK_InventoryIssueVoucherActions_ActionType", "[ActionType] IN (1,2)");
 
                             t.HasCheckConstraint("CK_InventoryIssueVoucherActions_IntegrityHash", "LEN([IntegrityHash]) = 64");
@@ -81051,6 +81411,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("InventoryIssueVoucherLines", null, t =>
                         {
+                            t.HasTrigger("TR_InventoryIssueVoucherLines_AppendOnly");
+
                             t.HasCheckConstraint("CK_InventoryIssueVoucherLines_IntegrityHash", "LEN([IntegrityHash]) = 64");
 
                             t.HasCheckConstraint("CK_InventoryIssueVoucherLines_Quantity", "[Quantity] > 0");
@@ -81742,7 +82104,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("InventoryLocations");
+                    b.ToTable("InventoryLocations", null, t =>
+                        {
+                            t.HasTrigger("TR_InventoryLocations_NegativeStockGuard");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryMovement", b =>
@@ -84793,6 +85160,139 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("InventoryValuationReconciliationActions", null, t =>
                         {
                             t.HasTrigger("TR_InventoryValuationReconciliationActions_Immutable");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryWorkOrderReservationAction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActionType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("IntegrityHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("InventoryAllocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("NewRequiredDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("NewStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("PreviousHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("PreviousRequiredDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PreviousStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("WorkOrderPartId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("InventoryAllocationId");
+
+                    b.HasIndex("WorkOrderPartId");
+
+                    b.HasIndex("TenantId", "InventoryAllocationId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "InventoryAllocationId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "WorkOrderPartId", "OccurredAtUtc");
+
+                    b.ToTable("InventoryWorkOrderReservationActions", null, t =>
+                        {
+                            t.HasTrigger("TR_InventoryWorkOrderReservationActions_Immutable");
+
+                            t.HasCheckConstraint("CK_InventoryWorkOrderReservationActions_Hashes", "LEN([PayloadHash]) = 64 AND LEN([IntegrityHash]) = 64 AND ([PreviousHash] IS NULL OR LEN([PreviousHash]) = 64)");
+
+                            t.HasCheckConstraint("CK_InventoryWorkOrderReservationActions_Quantity", "[Quantity] >= 0");
+
+                            t.HasCheckConstraint("CK_InventoryWorkOrderReservationActions_Sequence", "[Sequence] > 0");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -96998,13 +97498,20 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Status");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("WarehouseLocationId");
 
                     b.HasIndex("WorkOrderId");
 
-                    b.ToTable("WorkOrderParts");
+                    b.HasIndex("TenantId", "AllocationId")
+                        .IsUnique()
+                        .HasFilter("[AllocationId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.ToTable("WorkOrderParts", null, t =>
+                        {
+                            t.HasTrigger("TR_WorkOrderParts_ReservationLineageGuard");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Maintenance.WorkOrderQualityCheck", b =>
@@ -110164,8 +110671,9 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "SourceType", "SourceId", "IdempotencyKey")
                         .IsUnique();
 
-                    b.HasIndex("TenantId", "SourceType", "SourceId", "EventFamily", "Direction", "MappingKey", "EventReference")
-                        .IsUnique();
+                    b.HasIndex("TenantId", "SourceType", "SourceId", "EventFamily", "Direction", "MappingKey", "EventReference", "MappingIntegrityHash")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ProcGhanepsEvent_Source_MappingHash");
 
                     b.ToTable("ProcurementGhanepsExchangeEvents", null, t =>
                         {
@@ -118154,7 +118662,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_ProcurementSupplierDueDiligenceReviews_Lifecycle");
 
-                            t.HasCheckConstraint("CK_ProcurementSupplierDueDiligenceReviews_State", "[CycleNumber] >= 1 AND [ReviewType] BETWEEN 0 AND 1 AND [Status] BETWEEN 0 AND 5 AND [Outcome] BETWEEN 0 AND 2 AND [ReviewPeriodEndUtc] > [ReviewPeriodStartUtc] AND [ReviewFrequencyMonths] BETWEEN 1 AND 120 AND [PolicyProfileVersion] >= 1 AND LEN([PolicyValueHash]) = 64 AND LEN([CreationCorrelationId]) > 0 AND LEN([LastOperationCorrelationId]) > 0 AND LEN([IntegrityHash]) = 64 AND ISJSON([PolicySnapshotJson]) = 1 AND ISJSON([SnapshotJson]) = 1 AND (([Status] = 0 AND [Outcome] = 0) OR [Status] <> 0) AND (([Status] = 1 AND [SubmittedById] IS NOT NULL AND [SubmittedAtUtc] IS NOT NULL) OR [Status] <> 1) AND (([Status] = 2 AND [ApprovedById] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL) OR [Status] <> 2) AND (([Status] = 3 AND [RejectedById] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL) OR [Status] <> 3) AND (([Status] = 4 AND [ExpiredAtUtc] IS NOT NULL) OR [Status] <> 4) AND (([Status] = 5 AND [SupersededByReviewId] IS NOT NULL) OR [Status] <> 5)");
+                            t.HasCheckConstraint("CK_ProcurementSupplierDueDiligenceReviews_State", "[CycleNumber] >= 1 AND [ReviewType] BETWEEN 0 AND 1 AND [Status] BETWEEN 0 AND 5 AND [Outcome] BETWEEN 0 AND 2 AND [ReviewPeriodEndUtc] > [ReviewPeriodStartUtc] AND [ReviewFrequencyMonths] BETWEEN 1 AND 120 AND [PolicyProfileVersion] >= 1 AND LEN([PolicyValueHash]) = 64 AND LEN([CreationCorrelationId]) > 0 AND LEN([LastOperationCorrelationId]) > 0 AND LEN([IntegrityHash]) = 64 AND ISJSON([PolicySnapshotJson]) = 1 AND ISJSON([SnapshotJson]) = 1 AND (([Status] = 0 AND [Outcome] = 0) OR [Status] <> 0) AND (([Status] = 1 AND [SubmittedById] IS NOT NULL AND [SubmittedAtUtc] IS NOT NULL) OR [Status] <> 1) AND (([Status] = 2 AND [ApprovedById] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL) OR [Status] <> 2) AND (([Status] = 3 AND [RejectedById] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL) OR [Status] <> 3) AND (([Status] = 4 AND [ExpiredAtUtc] IS NOT NULL) OR [Status] <> 4) AND (([Status] = 5 AND ([SupersededByReviewId] IS NOT NULL OR [LastOperation] = N'PolicySuperseded')) OR [Status] <> 5)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -177264,6 +177772,100 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueAccountingRule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", "ExpenseAccount")
+                        .WithMany()
+                        .HasForeignKey("ExpenseAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAssetCategory", "FixedAssetCategory")
+                        .WithMany()
+                        .HasForeignKey("FixedAssetCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryCategory", "InventoryCategory")
+                        .WithMany()
+                        .HasForeignKey("InventoryCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ExpenseAccount");
+
+                    b.Navigation("FixedAssetCategory");
+
+                    b.Navigation("InventoryCategory");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueFinanceLineage", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset", "FixedAsset")
+                        .WithMany()
+                        .HasForeignKey("FixedAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryIssueAccountingRule", "InventoryIssueAccountingRule")
+                        .WithMany()
+                        .HasForeignKey("InventoryIssueAccountingRuleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryIssueVoucherLine", "InventoryIssueVoucherLine")
+                        .WithMany()
+                        .HasForeignKey("InventoryIssueVoucherLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("FixedAsset");
+
+                    b.Navigation("InventoryIssueAccountingRule");
+
+                    b.Navigation("InventoryIssueVoucherLine");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueReturnAllocation", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryIssueFinanceLineage", "InventoryIssueFinanceLineage")
+                        .WithMany()
+                        .HasForeignKey("InventoryIssueFinanceLineageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryReturnVoucherLine", "InventoryReturnVoucherLine")
+                        .WithMany()
+                        .HasForeignKey("InventoryReturnVoucherLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("InventoryIssueFinanceLineage");
+
+                    b.Navigation("InventoryReturnVoucherLine");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryIssueVoucher", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "AcknowledgedBy")
@@ -178482,6 +179084,41 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Reconciliation");
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.InventoryWorkOrderReservationAction", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "ActorUser")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryAllocation", "InventoryAllocation")
+                        .WithMany()
+                        .HasForeignKey("InventoryAllocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.WorkOrderPart", "WorkOrderPart")
+                        .WithMany()
+                        .HasForeignKey("WorkOrderPartId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ActorUser");
+
+                    b.Navigation("InventoryAllocation");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("WorkOrderPart");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.ItemSupplier", b =>
@@ -181644,7 +182281,8 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryAllocation", "Allocation")
                         .WithMany()
-                        .HasForeignKey("AllocationId");
+                        .HasForeignKey("AllocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "InventoryItem")
                         .WithMany()

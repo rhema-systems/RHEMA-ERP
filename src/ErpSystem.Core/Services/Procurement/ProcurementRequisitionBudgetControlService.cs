@@ -45,6 +45,14 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
         CancellationToken cancellationToken = default)
     {
         EnsureReader();
+        return await GetLinkedControlReadinessAsync(requisitionId, cancellationToken);
+    }
+
+    public async Task<PurchaseRequisitionBudgetReadinessDto> GetLinkedControlReadinessAsync(
+        Guid requisitionId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
         var requisition = await Requisitions.GetQueryable(item =>
                 item.Id == requisitionId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)

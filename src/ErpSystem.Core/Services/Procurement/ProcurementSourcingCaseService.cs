@@ -636,7 +636,8 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         PurchaseRequisitionSourcingReadinessDto release;
         try
         {
-            release = await _sourcingReleases.GetReadinessAsync(entity.PurchaseRequisitionId, cancellationToken);
+            release = await _sourcingReleases.GetLinkedControlReadinessAsync(
+                entity.PurchaseRequisitionId, cancellationToken);
         }
         catch (ProcurementRequisitionSourcingNotFoundException)
         {
@@ -875,6 +876,7 @@ public sealed class ProcurementSourcingCaseService : IProcurementSourcingCaseSer
         Amount = requisition.TotalAmount,
         CurrencyCode = NormalizeCurrency(requisition.Currency),
         RequestedMethod = method,
+        EvidenceStage = ProcurementEvidenceStage.Sourcing,
         SourceType = SourceType,
         SourceReference = requisition.RequisitionNumber,
         ActorUserId = _currentUser.UserId,

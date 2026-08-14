@@ -41,14 +41,22 @@ public sealed class InventoryIssueControlTests : IDisposable
 
         var voucher = model.FindEntityType(typeof(InventoryIssueVoucher))!;
         voucher.FindProperty(nameof(InventoryIssueVoucher.RowVersion))!.IsConcurrencyToken.Should().BeTrue();
+        voucher.GetDeclaredTriggers().Select(trigger => trigger.ModelName)
+            .Should().Contain("TR_InventoryIssueVouchers_ControlledLifecycle");
         voucher.GetIndexes().Should().Contain(index => index.IsUnique && index.Properties.Select(property => property.Name)
             .SequenceEqual(new[] { "TenantId", "InventoryRequisitionId", "IdempotencyKey" }));
         voucher.GetCheckConstraints().Select(value => value.Name).Should().Contain(new[]
         {
             "CK_InventoryIssueVouchers_Sod",
             "CK_InventoryIssueVouchers_Acknowledgement",
-            "CK_InventoryIssueVouchers_Hashes"
+            "CK_InventoryIssueVouchers_Hashes",
+            "CK_InventoryIssueVouchers_MovementReason",
+            "CK_InventoryIssueVouchers_FinanceLineage"
         });
+
+        var accountingRule = model.FindEntityType(typeof(InventoryIssueAccountingRule))!;
+        accountingRule.GetDeclaredTriggers().Select(trigger => trigger.ModelName)
+            .Should().Contain("TR_InventoryIssueAccountingRules_TenantOwner");
 
         model.FindEntityType(typeof(InventoryIssueVoucherLine))!.GetIndexes().Should().Contain(index =>
             index.IsUnique && index.GetFilter() == null && index.Properties.Select(property => property.Name)
@@ -57,8 +65,12 @@ public sealed class InventoryIssueControlTests : IDisposable
                     "TenantId", "InventoryIssueVoucherId", "InventoryRequisitionItemId", "LocationId",
                     "LotNumber", "BatchNumber", "SerialNumber"
                 }));
+        model.FindEntityType(typeof(InventoryIssueVoucherLine))!.GetDeclaredTriggers()
+            .Select(trigger => trigger.ModelName).Should().Contain("TR_InventoryIssueVoucherLines_AppendOnly");
 
         var action = model.FindEntityType(typeof(InventoryIssueVoucherAction))!;
+        action.GetDeclaredTriggers().Select(trigger => trigger.ModelName)
+            .Should().Contain("TR_InventoryIssueVoucherActions_AppendOnly");
         action.GetIndexes().Should().Contain(index => index.IsUnique && index.Properties.Select(property => property.Name)
             .SequenceEqual(new[] { "TenantId", "InventoryIssueVoucherId", "Sequence" }));
     }
@@ -107,6 +119,7 @@ public sealed class InventoryIssueControlTests : IDisposable
         results.SelectMany(value => value.MemberNames).Should().Contain(nameof(IssueRequisitionDto.IdempotencyKey));
         results.SelectMany(value => value.MemberNames).Should().Contain(nameof(IssueRequisitionDto.RowVersion));
         results.SelectMany(value => value.MemberNames).Should().Contain(nameof(IssueRequisitionDto.ReceiverUserId));
+        results.SelectMany(value => value.MemberNames).Should().Contain(nameof(IssueRequisitionDto.MovementReasonCode));
     }
 
     [Fact]
@@ -144,6 +157,65 @@ public sealed class InventoryIssueControlTests : IDisposable
     public void Store_issue_voucher_uses_shared_document_output_type()
     {
         DocumentTypes.InventoryStoreIssueVoucher.Should().Be("Inventory.StoreIssueVoucher");
+    }
+
+    [Fact]
+    public void Finance_asset_lifecycle_migration_uses_authoritative_owners_and_database_hard_stops()
+    {
+        var migration = new INVREQFU003IssueFinanceAssetLifecycle();
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { up });
+
+        up.Operations.OfType<CreateTableOperation>().Select(value => value.Name).Should().BeEquivalentTo(
+            "InventoryIssueAccountingRules", "InventoryIssueFinanceLineages", "InventoryIssueReturnAllocations");
+        var lineage = up.Operations.OfType<CreateTableOperation>()
+            .Single(value => value.Name == "InventoryIssueFinanceLineages");
+        lineage.Columns.Single(value => value.Name == "IssuedValue").ColumnType.Should().Be("decimal(18,2)");
+        var allocation = up.Operations.OfType<CreateTableOperation>()
+            .Single(value => value.Name == "InventoryIssueReturnAllocations");
+        allocation.Columns.Single(value => value.Name == "Value").ColumnType.Should().Be("decimal(18,2)");
+
+        var sql = string.Join(Environment.NewLine, up.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+        sql.Should().Contain("TR_InventoryIssueAccountingRules_TenantOwner");
+        sql.Should().Contain("TR_InventoryIssueFinanceLineages_Lifecycle");
+        sql.Should().Contain("TR_InventoryIssueReturnAllocations_Immutable");
+        sql.Should().Contain("TR_InventoryIssueVouchers_ControlledLifecycle");
+        sql.Should().Contain("v.FinancePostingEventId IS NULL OR v.FinanceJournalEntryId IS NULL");
+        sql.Should().Contain("stock issue requires complete posted Finance/asset lineage");
+        sql.Should().Contain("SourceDocumentType = N'InventoryIssueVoucher'");
+        sql.Should().Contain("j.IsBalanced = 1");
+        sql.Should().Contain("rj.OriginalJournalEntryId <> i.ReturnJournalEntryId");
+        sql.Should().Contain("expense.AccountType <> 5");
+        sql.Should().Contain("asset.AccountType <> 1");
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { down });
+        var downSql = string.Join(Environment.NewLine,
+            down.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+        downSql.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_InventoryIssueVouchers_ControlledLifecycle]");
+        downSql.Should().Contain("CREATE OR ALTER TRIGGER [dbo].[TR_StockMovements_GovernedRequisitionIssue]");
+    }
+
+    [Fact]
+    public void Full_return_reversal_migration_keeps_new_returns_issued_but_allows_posted_compensation()
+    {
+        var migration = new INVREQFU003AllowPostedFullReturnReversal();
+        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { up });
+
+        var sql = up.Operations.OfType<SqlOperation>().Should().ContainSingle().Subject.Sql;
+        sql.Should().Contain("r.Status NOT IN (5,6,7)");
+        sql.Should().Contain("r.Status = 3 AND i.Status IN (4,5)");
+        sql.Should().Contain("INV_RETURN_TRIGGER_DRIFT");
+
+        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { down });
+        down.Operations.OfType<SqlOperation>().Should().ContainSingle().Which.Sql
+            .Should().Contain("r.Status NOT IN (5,6,7)");
     }
 
     [Fact]
@@ -209,6 +281,7 @@ public sealed class InventoryIssueControlTests : IDisposable
             access.Object,
             Mock.Of<IProcurementControlEventService>(),
             Mock.Of<IInventoryReturnControlService>(),
+            Mock.Of<IInventoryIssueFinanceAssetService>(),
             NullLogger<InventoryRequisitionService>.Instance);
 
         var result = await service.GetIssueVouchersAsync(requisition.Id);

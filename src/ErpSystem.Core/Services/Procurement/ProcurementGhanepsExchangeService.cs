@@ -189,12 +189,11 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             .ToListAsync(cancellationToken);
         var results = mappings.Select(mapping =>
         {
+            var currentMappingHash = Hash(Serialize(mapping));
             var exchange = events
                 .Where(item =>
                     item.MappingKey == mapping.MappingKey &&
-                    item.ConfigurationProfileId == profile.Profile.Id &&
-                    item.ConfigurationDecisionId == profile.Decision.Id &&
-                    item.ConfigurationValueHash == profile.ValueHash)
+                    item.MappingIntegrityHash == currentMappingHash)
                 .OrderByDescending(item => item.PreparedAtUtc)
                 .ThenByDescending(item => item.CreatedAt)
                 .FirstOrDefault();
@@ -206,7 +205,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
                     AcknowledgementRequired = mapping.AcknowledgementRequired,
                     ReconciliationRequired = mapping.ReconciliationRequired,
                     Message =
-                        "No award-notification exchange exists for the current DEC-009 mapping."
+                        "No award-notification exchange exists for the effective DEC-009 mapping definition."
                 };
             }
 
@@ -966,9 +965,10 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
                 item.EventFamily == eventFamily &&
                 item.Direction == requestedDirection &&
                 item.MappingKey == mapping.MappingKey &&
-                item.EventReference == source.Reference, cancellationToken))
+                item.EventReference == source.Reference &&
+                item.MappingIntegrityHash == mappingIntegrityHash, cancellationToken))
             throw Conflict("GHANEPS_EVENT_ALREADY_EXISTS",
-                "This exact source event and DEC-009 mapping already has an exchange record.");
+                "This exact source event and DEC-009 mapping definition already has an exchange record.");
 
         var now = DateTime.UtcNow;
         var item = new ProcurementGhanepsExchangeEvent
@@ -2077,7 +2077,11 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
     {
         try
         {
-            return await action();
+            // Every mutation core uses an explicit transaction so the entire
+            // operation must run inside EF's configured retry strategy. Keeping
+            // this at the shared boundary covers create/import/attempt/retry/
+            // acknowledgement/reconciliation without duplicating strategy code.
+            return await _unitOfWork.ExecuteInStrategyAsync(action, cancellationToken);
         }
         catch (Exception exception) when (IsAuditableDenial(exception))
         {

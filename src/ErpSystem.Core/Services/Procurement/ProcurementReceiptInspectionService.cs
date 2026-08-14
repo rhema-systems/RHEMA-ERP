@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -29,8 +30,7 @@ public sealed class ProcurementReceiptInspectionService :
     private const string ApprovePermission = "procurement.purchase-order.approve";
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(value => $"DEC-{value:000}").ToList();
-    private static readonly JsonSerializerOptions JsonOptions =
-        new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
@@ -349,6 +349,8 @@ public sealed class ProcurementReceiptInspectionService :
             }
 
             var governance = await ResolveGovernanceAsync(receipt, correlation, cancellationToken);
+            var receiptWorkflowDefinitionId = await ResolveReceiptWorkflowDefinitionIdAsync(
+                cancellationToken);
             var sequence = (await Cases.GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId &&
                     item.PurchaseOrderReceiptId == receiptId && !item.IsDeleted)
@@ -389,7 +391,7 @@ public sealed class ProcurementReceiptInspectionService :
                 PolicyVersion = governance.Authority.Policy.Version,
                 AuthorityRuleId = governance.Authority.Steps.First().RuleId,
                 AuthorityName = governance.Authority.Steps.First().AuthorityName,
-                WorkflowDefinitionId = governance.Authority.Workflow!.WorkflowDefinitionId,
+                WorkflowDefinitionId = receiptWorkflowDefinitionId,
                 CreatedByUserId = _currentUser.UserId,
                 CreatedByName = ActorName,
                 IdempotencyKey = $"inspection:{receipt.Id:N}:{sequence}",
@@ -578,6 +580,15 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.PurchaseOrderReceiptId, cancellationToken);
 
             var before = Snapshot(inspection);
+            // Older Drafts may have captured the generic procurement-authority
+            // workflow. Receipt inspection has its own workflow entity and must
+            // never start a definition belonging to Purchase Requisition or any
+            // other source document.
+            var receiptWorkflowDefinitionId = await ResolveReceiptWorkflowDefinitionIdAsync(
+                cancellationToken);
+            var workflowRebindRequired =
+                inspection.WorkflowDefinitionId != receiptWorkflowDefinitionId;
+            inspection.WorkflowDefinitionId = receiptWorkflowDefinitionId;
             var configuredEvidenceRequirements = await LoadEvidenceRequirementKeysAsync(
                 inspection.ConfigurationProfileId, cancellationToken);
             EnsureConfiguredEvidenceRequirements(
@@ -595,8 +606,19 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.DecisionComment = request.Comment.Trim();
             inspection.CorrelationId = correlation;
             inspection.IntegrityHash = CaseHash(inspection);
-            await Cases.UpdateAsync(inspection);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (workflowRebindRequired)
+                await _store.SetWorkflowRebindContextAsync(
+                    inspection.Id, receiptWorkflowDefinitionId, cancellationToken);
+            try
+            {
+                await Cases.UpdateAsync(inspection);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                if (workflowRebindRequired)
+                    await _store.ClearMutationContextAsync(cancellationToken);
+            }
 
             var workflow = await _workflow.SubmitAsync(
                 WorkflowEntityType, inspection.Id, inspection.WorkflowDefinitionId);
@@ -1253,7 +1275,8 @@ public sealed class ProcurementReceiptInspectionService :
         await _valuation.ProcessReceiptAsync(poLine.InventoryItemId.Value,
             location.InventoryWarehouseId, receiptLine.LocationId, baseQuantity, baseCost,
             ReferenceType.PO, receipt.ReceiptNumber, receipt.Id,
-            receiptLine.LotNumber, receiptLine.SerialNumber, receiptLine.ExpirationDate);
+            receiptLine.LotNumber, receiptLine.SerialNumber, receiptLine.ExpirationDate,
+            ProcurementPurchaseOrderSodRules.ApproveReceiptInspection);
 
         var valuationBalance = await _unitOfWork.Repository<InventoryBalance>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
@@ -1544,13 +1567,22 @@ public sealed class ProcurementReceiptInspectionService :
                 if (!request.FileUploadRecordId.HasValue || request.WorkflowEvidenceDocumentId.HasValue)
                     throw Validation("RCV_DMS_EVIDENCE_INVALID",
                         "Central-DMS evidence requires exactly one controlled upload ID.");
+                var governedReceiptEvidenceVersions = _unitOfWork
+                    .Repository<ProcurementReceiptSourceEvidence>()
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.PurchaseOrderReceiptId == inspection.PurchaseOrderReceiptId &&
+                        item.FileUploadRecordId == request.FileUploadRecordId.Value &&
+                        item.IsCurrent && !item.IsDeleted)
+                    .Select(item => item.CentralDocumentVersionId);
                 var version = await _unitOfWork.Repository<CentralDocumentVersion>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                            item.FileUploadRecordId == request.FileUploadRecordId &&
                                            (item.DocumentRecord.SourceRecordId == inspection.Id ||
                                             item.DocumentRecord.SourceRecordId == inspection.PurchaseOrderReceiptId ||
                                             item.DocumentRecord.SourceRecordId ==
-                                                inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                                                inspection.PurchaseOrderReceipt.PurchaseOrderId ||
+                                            governedReceiptEvidenceVersions.Contains(item.Id)))
                     .Where(CentralDocumentEvidenceRules.CurrentPublished())
                     .Include(item => item.DocumentRecord)
                     .AsNoTracking().OrderByDescending(item => item.CreatedAt)
@@ -1635,6 +1667,14 @@ public sealed class ProcurementReceiptInspectionService :
                 continue;
             }
 
+            var governedReceiptEvidenceVersions = _unitOfWork
+                .Repository<ProcurementReceiptSourceEvidence>()
+                .GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.PurchaseOrderReceiptId == inspection.PurchaseOrderReceiptId &&
+                    item.FileUploadRecordId == row.FileUploadRecordId &&
+                    item.IsCurrent && !item.IsDeleted)
+                .Select(item => item.CentralDocumentVersionId);
             var dms = await (
                 from version in _unitOfWork.Repository<CentralDocumentVersion>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
@@ -1643,7 +1683,8 @@ public sealed class ProcurementReceiptInspectionService :
                                            item.DocumentRecord.SourceRecordId ==
                                                inspection.PurchaseOrderReceiptId ||
                                            item.DocumentRecord.SourceRecordId ==
-                                                inspection.PurchaseOrderReceipt.PurchaseOrderId))
+                                                inspection.PurchaseOrderReceipt.PurchaseOrderId ||
+                                           governedReceiptEvidenceVersions.Contains(item.Id)))
                     .Where(CentralDocumentEvidenceRules.CurrentPublished())
                 join upload in _unitOfWork.Repository<FileUploadRecord>()
                     .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
@@ -1820,7 +1861,7 @@ public sealed class ProcurementReceiptInspectionService :
         return ParseEvidenceRequirementKeys(decision.Value.GetRawText());
     }
 
-    private static IReadOnlyList<string> ParseEvidenceRequirementKeys(string valueJson)
+    internal static IReadOnlyList<string> ParseEvidenceRequirementKeys(string valueJson)
     {
         ProcurementReceiptDocumentDecisionValueDto value;
         try
@@ -1844,6 +1885,36 @@ public sealed class ProcurementReceiptInspectionService :
             throw Validation("RCV_DEC013_EVIDENCE_MISSING",
                 "DEC-013 must define at least one receipt evidence requirement.");
         return requirements;
+    }
+
+    private async Task<Guid> ResolveReceiptWorkflowDefinitionIdAsync(
+        CancellationToken cancellationToken)
+    {
+        var definitionId = await _unitOfWork.Repository<WorkflowDefinition>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.IsActive && !item.IsDeleted &&
+                item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                item.EntityType.IsActive && !item.EntityType.IsDeleted &&
+                (item.EntityType.Code == WorkflowEntityType ||
+                 item.EntityType.Name == WorkflowEntityType))
+            .OrderByDescending(item => item.Version)
+            .ThenByDescending(item => item.PublishedAt)
+            .Select(item => (Guid?)item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return definitionId ?? throw Validation(
+            "RCV_INSPECTION_WORKFLOW_CONFIGURATION_MISSING",
+            "No active Published receipt-inspection workflow is configured for this tenant.");
+    }
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter(
+            JsonNamingPolicy.CamelCase,
+            allowIntegerValues: false));
+        return options;
     }
 
     internal static void EnsureConfiguredEvidenceRequirements(
@@ -2275,18 +2346,32 @@ public sealed class ProcurementReceiptInspectionService :
             After = after,
             CorrelationId = correlation,
             OccurredAtUtc = DateTime.UtcNow,
-            Evidence = inspection.Evidence.Select(item => new ProcurementControlEventEvidenceReference
-            {
-                ReferenceKind = item.ReferenceKind == ProcurementReceiptInspectionEvidenceKind.WorkflowEvidenceDocument
-                    ? ProcurementControlEvidenceReferenceKind.WorkflowEvidenceDocument
-                    : ProcurementControlEvidenceReferenceKind.FileUploadRecord,
-                ReferenceId = item.WorkflowEvidenceDocumentId ?? item.FileUploadRecordId,
-                Reference = item.EvidenceReference,
-                Label = item.ActionKey,
-                RequirementKey = item.RequirementKey
-            }).ToList()
+            Evidence = BuildControlEventEvidence(inspection.Evidence)
         }, cancellationToken);
     }
+
+    internal static List<ProcurementControlEventEvidenceReference> BuildControlEventEvidence(
+        IEnumerable<ProcurementReceiptInspectionEvidence> evidence) =>
+        evidence
+            .GroupBy(item => new
+            {
+                item.ReferenceKind,
+                ReferenceId = item.WorkflowEvidenceDocumentId ?? item.FileUploadRecordId
+            })
+            .Select(group => new ProcurementControlEventEvidenceReference
+            {
+                ReferenceKind = group.Key.ReferenceKind ==
+                                ProcurementReceiptInspectionEvidenceKind.WorkflowEvidenceDocument
+                    ? ProcurementControlEvidenceReferenceKind.WorkflowEvidenceDocument
+                    : ProcurementControlEvidenceReferenceKind.FileUploadRecord,
+                ReferenceId = group.Key.ReferenceId,
+                Reference = group.First().EvidenceReference,
+                Label = string.Join(", ", group.Select(item => item.ActionKey)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)),
+                RequirementKey = string.Join(", ", group.Select(item => item.RequirementKey)
+                    .Distinct(StringComparer.OrdinalIgnoreCase))
+            })
+            .ToList();
 
     private async Task PublishAsync(
         string topic,

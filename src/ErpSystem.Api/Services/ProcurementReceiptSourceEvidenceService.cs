@@ -8,6 +8,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using Microsoft.Data.SqlClient;
@@ -135,7 +136,7 @@ public sealed class ProcurementReceiptSourceEvidenceService(
                 DocumentType = "PurchaseReceiptSourceEvidence",
                 MetadataTemplateCode = TemplateCode,
                 AccessProfile = AccessProfile,
-                VersionStatus = "Submitted",
+                VersionStatus = CentralDocumentEvidenceRules.PublishedVersionStatus,
                 ChangeSummary = $"Clean-scanned {KindLabel(command.EvidenceKind)} retained for receipt {receipt.ReceiptNumber}.",
                 RequirePublishedGovernance = true,
                 MetadataValues =
@@ -363,7 +364,14 @@ public sealed class ProcurementReceiptSourceEvidenceService(
         string.Equals(item.FileUploadRecord.Category,
             ControlledFileUploadCategories.ProcurementReceiptSourceEvidence,
             StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(item.CentralDocumentRecord.LifecycleStatus, "Active", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(item.CentralDocumentRecord.LifecycleStatus,
+            CentralDocumentEvidenceRules.ActiveLifecycleStatus, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(item.CentralDocumentRecord.VersionStatus,
+            CentralDocumentEvidenceRules.PublishedVersionStatus, StringComparison.OrdinalIgnoreCase) &&
+        item.CentralDocumentRecord.CurrentVersion == item.CentralDocumentVersion.VersionNumber &&
+        string.Equals(item.CentralDocumentVersion.Status,
+            CentralDocumentEvidenceRules.PublishedVersionStatus, StringComparison.OrdinalIgnoreCase) &&
+        item.CentralDocumentVersion.PublishedAt.HasValue &&
         item.ChecksumSha256.Length == 64;
 
     private async Task RequireReadAsync(PurchaseOrderReceipt receipt, CancellationToken token)

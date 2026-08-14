@@ -2718,6 +2718,12 @@ export const navigationItems: NavItem[] = [
             href: '/administration/inventory/warehouses',
             icon: Building2,
           },
+          {
+            title: 'Issue Accounting & Asset Custody',
+            href: '/administration/inventory/issue-accounting',
+            icon: Landmark,
+            permissions: ['procurement.inventory.master-data.manage'],
+          },
         ],
       },
       {

@@ -8,6 +8,10 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813150000_INVREQFU003AllowPostedFullReturnReversal")] partial class INVREQFU003AllowPostedFullReturnReversal { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813171000_INVREQFU004RequireCleanTransferEvidence")] partial class INVREQFU004RequireCleanTransferEvidence { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813143000_INVREQFU003ReturnReversalAllocationGate")] partial class INVREQFU003ReturnReversalAllocationGate { }
+
 [DbContext(typeof(ApplicationDbContext)), Migration("20260304155434_RecreateHRTables")] partial class RecreateHRTables { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260311184920_AddProjectMaterialCostLedger")] partial class AddProjectMaterialCostLedger { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260311213738_AddProjectDeliverableExternalReviews")] partial class AddProjectDeliverableExternalReviews { }
@@ -187,3 +191,5 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260811010013_AddQuantitySurveyContractClaimLifecycle")] partial class AddQuantitySurveyContractClaimLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260811013838_AddQuantitySurveyDayworkLifecycle")] partial class AddQuantitySurveyDayworkLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260812195409_INVREQFU001GovernedReceiptSourceEvidence")] partial class INVREQFU001GovernedReceiptSourceEvidence { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813063001_INVREQFU002MaintenanceReservationLifecycle")] partial class INVREQFU002MaintenanceReservationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813103157_INVREQFU003IssueFinanceAssetLifecycle")] partial class INVREQFU003IssueFinanceAssetLifecycle { }

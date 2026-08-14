@@ -662,6 +662,7 @@ public class RfqService : IRfqService
                 // resolving the immutable PO snapshot. Revalidation must hash the
                 // same final status and commercial terms as creation.
                 var awardRepo = _unitOfWork.Repository<RequestForQuotationAwardLine>();
+                var awardedAtUtc = DateTime.UtcNow;
                 foreach (var (item, quote, quoteItem) in selections)
                 {
                     await awardRepo.AddAsync(new RequestForQuotationAwardLine
@@ -680,13 +681,15 @@ public class RfqService : IRfqService
                             out var reason)
                             ? reason
                             : null,
-                        CreatedAt = DateTime.UtcNow,
+                        CreatedAt = awardedAtUtc,
                         CreatedById = _currentUserProvider.UserId
                     });
                 }
-                rfq.Status = "Awarded";
-                rfq.UpdatedAt = DateTime.UtcNow;
-                rfq.LastModifiedById = _currentUserProvider.UserId;
+                ApplyAwardLineage(
+                    rfq,
+                    groups.Select(group => group.Key),
+                    awardedAtUtc,
+                    _currentUserProvider.UserId);
                 await _rfqRepository.UpdateAsync(rfq);
                 await _unitOfWork.SaveChangesAsync();
 
@@ -860,6 +863,27 @@ public class RfqService : IRfqService
         return response ?? new CreatePurchaseOrdersFromRfqResponseDto();
     }
 
+    internal static void ApplyAwardLineage(
+        RequestForQuotation rfq,
+        IEnumerable<Guid> awardedBusinessPartnerIds,
+        DateTime awardedAtUtc,
+        Guid actorUserId)
+    {
+        var suppliers = awardedBusinessPartnerIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (suppliers.Count == 0)
+            throw new InvalidOperationException("An RFQ award must identify at least one supplier.");
+
+        rfq.Status = "Awarded";
+        rfq.AwardedAt = awardedAtUtc;
+        rfq.AwardedBusinessPartnerId = suppliers.Count == 1 ? suppliers[0] : null;
+        rfq.UpdatedAt = awardedAtUtc;
+        rfq.LastModifiedById = actorUserId;
+    }
+
     private static bool IsDuplicatePurchaseOrderNumber(DbUpdateException ex)
     {
         var msg = ex.InnerException?.Message ?? ex.Message;
@@ -956,9 +980,9 @@ public class RfqService : IRfqService
         }
     }
 
-    private static List<string>? ParseEmails(string? raw)
+    private static List<string> ParseEmails(string? raw)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (string.IsNullOrWhiteSpace(raw)) return [];
 
         return raw
             .Split(new[] { ',', ';', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

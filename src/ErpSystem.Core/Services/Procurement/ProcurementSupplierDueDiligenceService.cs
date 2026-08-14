@@ -284,7 +284,12 @@ public sealed class ProcurementSupplierDueDiligenceService :
             previous is null)
             throw Validation("SUPPLIER_DUE_DILIGENCE_INITIAL_REVIEW_REQUIRED",
                 "An Annual reassessment requires a prior review.");
-        var cycle = (previous?.CycleNumber ?? 0) + 1;
+        var maxRetainedCycle = await Reviews.GetQueryableIncludingDeleted(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.BusinessPartnerId == partner.Id)
+            .Select(item => (int?)item.CycleNumber)
+            .MaxAsync(cancellationToken) ?? 0;
+        var cycle = maxRetainedCycle + 1;
         var periodEnd = now.AddMonths(policy.Value.ReviewFrequencyMonths);
         var entity = new ProcurementSupplierDueDiligenceReview
         {
@@ -545,6 +550,49 @@ public sealed class ProcurementSupplierDueDiligenceService :
         await RecordEventAsync(entity, "Rejected", ProcurementControlEventResult.Rejected,
             before, Snapshot(entity), request.Comment, request.Evidence, correlation, now, cancellationToken);
         await PublishNotificationAsync("procurement.supplier-due-diligence.rejected",
+            entity, cancellationToken);
+        return Map(await LoadAsync(entity.Id, false, cancellationToken), now);
+    }
+
+    public async Task<ProcurementSupplierDueDiligenceDto> SupersedeStaleAsync(
+        Guid id,
+        ProcurementSupplierDueDiligenceLifecycleRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var correlation = NormalizeCorrelation(correlationId);
+        var entity = await LoadAsync(id, tracked: true, cancellationToken);
+        await EnsureCapabilityAsync(ApprovePermission, entity.ReviewReference, correlation, cancellationToken);
+        if (IsReplay(entity, "PolicySuperseded", correlation))
+            return Map(entity, DateTime.UtcNow);
+        EnsureRowVersion(entity.RowVersion, request.RowVersion);
+        EnsureStatus(entity, ProcurementSupplierDueDiligenceStatus.PendingApproval,
+            "Only a PendingApproval review can be superseded after a policy replacement.");
+        EnsureLifecycleEvidence(request.Evidence);
+        await EnsureIndependentActorAsync(entity.SubmittedById, entity.ReviewReference,
+            correlation, cancellationToken);
+        await EnsureWorkflowOutcomeAsync(entity, approving: true, cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var currentPolicy = await ResolvePolicyAsync(now, cancellationToken);
+        if (entity.PolicyDecisionId == currentPolicy.Decision.Id &&
+            entity.PolicyValueHash == Hash(currentPolicy.Decision.ValueJson))
+            throw Validation("SUPPLIER_DUE_DILIGENCE_POLICY_STILL_CURRENT",
+                "The review is already bound to the current DEC-011 policy and must follow the normal approval path.");
+
+        var before = Snapshot(entity);
+        entity.Status = ProcurementSupplierDueDiligenceStatus.Superseded;
+        entity.ReviewComment = Trim(request.Comment, 1000);
+        Touch(entity, "PolicySuperseded", correlation, now);
+        Capture(entity);
+        await Reviews.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await RecordEventAsync(entity, "PolicySuperseded",
+            ProcurementControlEventResult.ReviewRequired,
+            before, Snapshot(entity), request.Comment, request.Evidence,
+            correlation, now, cancellationToken);
+        await PublishNotificationAsync(
+            "procurement.supplier-due-diligence.policy-superseded",
             entity, cancellationToken);
         return Map(await LoadAsync(entity.Id, false, cancellationToken), now);
     }

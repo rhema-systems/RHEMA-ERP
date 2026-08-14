@@ -273,7 +273,8 @@ public interface IInventoryValuationService
         Guid? referenceId,
         string? lotNumber = null,
         string? serialNumber = null,
-        DateTime? expirationDate = null);
+        DateTime? expirationDate = null,
+        string authorizationAction = "AuthorizeInventoryPosting");
 
     /// <summary>
     /// Processes an inventory issue based on the item's valuation method

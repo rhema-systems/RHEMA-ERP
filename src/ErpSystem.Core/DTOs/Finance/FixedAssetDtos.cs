@@ -132,6 +132,57 @@ public class FixedAssetDto
     public List<FixedAssetBookValueDto> BookValues { get; set; } = new();
 }
 
+/// <summary>
+/// Authoritative Fixed Assets registration request produced by a governed stores issue.
+/// Finance has already posted the balanced inventory-to-asset journal identified below;
+/// this contract records the physical asset/custody side without creating a second journal.
+/// </summary>
+public sealed class RegisterInventoryIssueFixedAssetDto
+{
+    public Guid IssueVoucherId { get; set; }
+    public Guid IssueVoucherLineId { get; set; }
+    public string IssueVoucherNumber { get; set; } = string.Empty;
+    public Guid FixedAssetCategoryId { get; set; }
+    public string ItemCode { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? Location { get; set; }
+    public string SerialNumber { get; set; } = string.Empty;
+    public Guid CustodianEmployeeId { get; set; }
+    public DateTime IssueDate { get; set; }
+    public Guid PostingEventId { get; set; }
+    public Guid JournalEntryId { get; set; }
+}
+
+/// <summary>
+/// Compensating register update for a full, governed return of an inventory-issued asset.
+/// The journal is posted by the central Finance engine before this owner is invoked.
+/// </summary>
+public sealed class ReverseInventoryIssueFixedAssetDto
+{
+    public Guid ReturnVoucherId { get; set; }
+    public Guid ReturnVoucherLineId { get; set; }
+    public string ReturnVoucherNumber { get; set; } = string.Empty;
+    public DateTime ReturnDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public Guid PostingEventId { get; set; }
+    public Guid JournalEntryId { get; set; }
+}
+
+/// <summary>
+/// Reinstates a returned inventory-issued asset when the return voucher is reversed.
+/// </summary>
+public sealed class ReinstateInventoryIssueFixedAssetDto
+{
+    public Guid ReturnVoucherId { get; set; }
+    public Guid ReturnVoucherLineId { get; set; }
+    public string ReturnVoucherNumber { get; set; } = string.Empty;
+    public DateTime ReversalDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public Guid PostingEventId { get; set; }
+    public Guid JournalEntryId { get; set; }
+}
+
 public class FixedAssetBookValueDto
 {
     public Guid Id { get; set; }

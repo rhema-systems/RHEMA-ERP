@@ -37,6 +37,9 @@ public sealed class InventoryIssueVoucher : TenantEntity
     public DateTime? AcknowledgedAtUtc { get; set; }
     [MaxLength(2000)] public string? Notes { get; set; }
     [MaxLength(1000)] public string? ReceiverComment { get; set; }
+    [Required, MaxLength(50)] public string MovementReasonCode { get; set; } = string.Empty;
+    public Guid? FinancePostingEventId { get; set; }
+    public Guid? FinanceJournalEntryId { get; set; }
     [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [Required, MaxLength(64)] public string PayloadHash { get; set; } = string.Empty;
     [Required, MaxLength(100)] public string CorrelationId { get; set; } = string.Empty;

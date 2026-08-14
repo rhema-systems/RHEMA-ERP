@@ -137,7 +137,7 @@ public sealed class ProcurementRfqControlServiceTests
             .Where(exception => exception.Code == "RFQ_LATE_QUOTE_NOT_ELIGIBLE");
 
         fixture.SodGuard.Setup(service => service.EnforceAsync(
-                It.Is<ProcurementSodGuardRequest>(item => item.ControlCode == "SOD-RFQ-EVALUATOR-CONFLICT"),
+                It.Is<ProcurementSodGuardRequest>(item => item.ControlCode == "SOD-INITIATOR-APPROVER"),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcurementSodGuardDecisionDto { Allowed = false, Message = "Evaluator conflict." });
         await fixture.Service.Invoking(service => service.SaveEvaluationAsync(
@@ -171,7 +171,7 @@ public sealed class ProcurementRfqControlServiceTests
         submitted.WorkflowInstanceId.Should().Be(fixture.WorkflowInstanceId);
 
         fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
-                "RequestForQuotation", fixture.Rfq.Id, fixture.UserId, "reject", It.IsAny<string?>()))
+                "TENDER_EVALUATION", fixture.Rfq.Id, fixture.UserId, "reject", It.IsAny<string?>()))
             .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
         await fixture.Service.Invoking(service => service.DecideEvaluationAsync(fixture.Rfq.Id,
                 new DecideProcurementRfqEvaluationRequest
@@ -183,7 +183,7 @@ public sealed class ProcurementRfqControlServiceTests
             .Where(exception => exception.Code == "RFQ_WORKFLOW_REJECTION_NOT_FINAL");
 
         fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
-                "RequestForQuotation", fixture.Rfq.Id, fixture.UserId, "approve", It.IsAny<string?>()))
+                "TENDER_EVALUATION", fixture.Rfq.Id, fixture.UserId, "approve", It.IsAny<string?>()))
             .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
         var approved = await fixture.Service.DecideEvaluationAsync(fixture.Rfq.Id,
             new DecideProcurementRfqEvaluationRequest
@@ -212,6 +212,42 @@ public sealed class ProcurementRfqControlServiceTests
     }
 
     [Fact]
+    public async Task SubmittedEvaluationAcceptsAdditionalIndependentScoreSheetWithoutStartingAnotherWorkflow()
+    {
+        await using var fixture = new Fixture();
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(
+            fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "trace-save");
+        var evaluation = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        evaluation.RowVersion = [1, 2, 3, 4];
+        await fixture.Context.SaveChangesAsync();
+
+        var submitted = await fixture.Service.SubmitEvaluationAsync(
+            fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest
+            {
+                RowVersion = Convert.ToBase64String(evaluation.RowVersion)
+            },
+            "trace-first-score");
+        var additional = await fixture.Service.SubmitEvaluationAsync(
+            fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest
+            {
+                RowVersion = submitted.RowVersion
+            },
+            "trace-additional-score");
+
+        additional.Status.Should().Be(ProcurementRfqEvaluationStatus.Submitted);
+        additional.WorkflowInstanceId.Should().Be(fixture.WorkflowInstanceId);
+        fixture.Workflow.Verify(service => service.StartApprovalWorkflowAsync(
+            "TENDER_EVALUATION", fixture.Rfq.Id, fixture.WorkflowDefinitionId), Times.Once);
+        fixture.EvaluationCommittee.Verify(service => service.LockScoreSheetAsync(
+            It.Is<LockProcurementEvaluationScoreSheetRequest>(request =>
+                request.ScoreSubjectId == submitted.Id),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task AwardHandoffCannotProceedWhenReusableReadinessGateBlocks()
     {
         await using var fixture = new Fixture();
@@ -229,7 +265,7 @@ public sealed class ProcurementRfqControlServiceTests
             },
             "blocked-submit");
         fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
-                "RequestForQuotation",
+                "TENDER_EVALUATION",
                 fixture.Rfq.Id,
                 fixture.UserId,
                 "approve",
@@ -325,7 +361,7 @@ public sealed class ProcurementRfqControlServiceTests
             .ReturnsAsync(fixture.EligibleScorer(authorizedAttempt: 2));
         var replacementWorkflowInstanceId = Guid.NewGuid();
         fixture.Workflow.Setup(service => service.CancelWorkflowAsync(
-                "RequestForQuotation", fixture.Rfq.Id, It.IsAny<string>()))
+                "TENDER_EVALUATION", fixture.Rfq.Id, It.IsAny<string>()))
             .ReturnsAsync(new WorkflowExecutionResult
             {
                 Success = true,
@@ -333,7 +369,7 @@ public sealed class ProcurementRfqControlServiceTests
                 WorkflowInstanceId = fixture.WorkflowInstanceId
             });
         fixture.Workflow.Setup(service => service.StartApprovalWorkflowAsync(
-                "RequestForQuotation", fixture.Rfq.Id, fixture.WorkflowDefinitionId))
+                "TENDER_EVALUATION", fixture.Rfq.Id, fixture.WorkflowDefinitionId))
             .ReturnsAsync(new WorkflowExecutionResult
             {
                 Success = true,
@@ -352,7 +388,7 @@ public sealed class ProcurementRfqControlServiceTests
         replaced.WorkflowInstanceId.Should().Be(replacementWorkflowInstanceId);
         replaced.WorkflowInstanceId.Should().NotBe(fixture.WorkflowInstanceId);
         fixture.Workflow.Verify(service => service.CancelWorkflowAsync(
-            "RequestForQuotation", fixture.Rfq.Id, It.IsAny<string>()), Times.Once);
+            "TENDER_EVALUATION", fixture.Rfq.Id, It.IsAny<string>()), Times.Once);
         fixture.EvaluationCommittee.Verify(service => service.LockScoreSheetAsync(
             It.Is<LockProcurementEvaluationScoreSheetRequest>(request =>
                 request.ScoreSubjectId == submitted.Id &&
@@ -518,13 +554,13 @@ public sealed class ProcurementRfqControlServiceTests
                     It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementControlEventDto());
             Workflow.Setup(service => service.StartApprovalWorkflowAsync(
-                    "RequestForQuotation", Rfq.Id, WorkflowDefinitionId))
+                    "TENDER_EVALUATION", Rfq.Id, WorkflowDefinitionId))
                 .ReturnsAsync(new WorkflowExecutionResult
                 {
                     Success = true, Status = WorkflowInstanceStatus.InProgress,
                     WorkflowInstanceId = WorkflowInstanceId
                 });
-            Workflow.Setup(service => service.CanUserApproveAsync("RequestForQuotation", Rfq.Id, UserId))
+            Workflow.Setup(service => service.CanUserApproveAsync("TENDER_EVALUATION", Rfq.Id, UserId))
                 .ReturnsAsync(true);
             EvaluationCommittee.Setup(service => service.EnsureScorerEligibleAsync(
                     ProcurementEvaluationSourceType.RequestForQuotation, Rfq.Id,

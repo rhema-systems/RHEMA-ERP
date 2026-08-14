@@ -35,6 +35,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProjectService _projects;
+    private readonly IInventoryIssueFinanceAssetService _issueFinanceAssets;
     private readonly ICurrentUserProvider _currentUser;
 
     public InventoryReturnControlService(
@@ -53,6 +54,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         IWorkflowIntegrationService workflow,
         IProcurementControlEventService controlEvents,
         IProjectService projects,
+        IInventoryIssueFinanceAssetService issueFinanceAssets,
         ICurrentUserProvider currentUser)
     {
         _unitOfWork = unitOfWork;
@@ -70,6 +72,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         _workflow = workflow;
         _controlEvents = controlEvents;
         _projects = projects;
+        _issueFinanceAssets = issueFinanceAssets;
         _currentUser = currentUser;
     }
 
@@ -309,6 +312,10 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 voucher.RejectionReason = Required(request.Comment, "INV_RETURN_REJECTION_REASON_REQUIRED", "A rejection reason is required.", 1000);
             }
             voucher.IntegrityHash = VoucherHash(voucher);
+            // Persist the controlled lifecycle state before appending its immutable action.
+            // SQL validates each action against the durable voucher state; both saves remain
+            // inside this serializable transaction and therefore still commit or roll back together.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             await AddActionAsync(voucher, actionType, key, request.Comment, cancellationToken);
             await AddAuditAsync(request.Approved ? "Approve" : "Reject", voucher, before, Snapshot(voucher), cancellationToken);
             await RecordEventAsync(voucher, request.Approved ? "Approve" : "Reject",
@@ -340,6 +347,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             voucher.PostedById = _currentUser.UserId;
             voucher.PostedAtUtc = DateTime.UtcNow;
             voucher.IntegrityHash = VoucherHash(voucher);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             await AddActionAsync(voucher, InventoryReturnVoucherActionType.Posted, key, "Returned stock posted.", cancellationToken);
             await AddAuditAsync("Post", voucher, before, Snapshot(voucher), cancellationToken);
             await RecordEventAsync(voucher, "Post", ProcurementControlEventResult.Allowed, before, Snapshot(voucher), cancellationToken);
@@ -348,6 +356,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 await ApplyLineAsync(voucher, requisition, line, reverse: false, cancellationToken);
             ApplyRequisitionStatus(requisition);
             await _requisitions.UpdateAsync(requisition);
+            await _issueFinanceAssets.PostReturnAsync(voucher.Id, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             if (requisition.ProjectId.HasValue) await _projects.SyncInventoryRequisitionMaterialCostAsync(requisition.Id);
             return voucher;
@@ -377,6 +386,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             voucher.ReversedAtUtc = DateTime.UtcNow;
             voucher.ReversalReason = reason;
             voucher.IntegrityHash = VoucherHash(voucher);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             await AddActionAsync(voucher, InventoryReturnVoucherActionType.Reversed, key, reason, cancellationToken);
             await AddAuditAsync("Reverse", voucher, before, Snapshot(voucher), cancellationToken);
             await RecordEventAsync(voucher, "Reverse", ProcurementControlEventResult.Allowed, before, Snapshot(voucher), cancellationToken);
@@ -385,6 +395,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 await ApplyLineAsync(voucher, requisition, line, reverse: true, cancellationToken);
             ApplyRequisitionStatus(requisition);
             await _requisitions.UpdateAsync(requisition);
+            await _issueFinanceAssets.ReverseReturnAsync(voucher.Id, reason, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             if (requisition.ProjectId.HasValue) await _projects.SyncInventoryRequisitionMaterialCostAsync(requisition.Id);
             return voucher;
@@ -470,7 +481,8 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 value.InventoryItemId == line.InventoryItemId &&
                 value.LocationId == exactLocationId && !value.IsDeleted)
             .SingleOrDefaultAsync(cancellationToken);
-        if (inventoryLocation is null)
+        var isNewInventoryLocation = inventoryLocation is null;
+        if (isNewInventoryLocation)
         {
             if (reverse)
                 throw Conflict("INV_RETURN_LOCATION_STOCK_MISSING", $"Exact-location stock is missing for {source.ItemCode}.");
@@ -482,7 +494,6 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 AverageCost = line.UnitCost,
                 CreatedById = _currentUser.UserId
             };
-            await inventoryLocationRepository.AddAsync(inventoryLocation);
         }
         if (reverse && inventoryLocation.AvailableQuantity < quantity)
             throw Conflict("INV_RETURN_LOCATION_STOCK_UNAVAILABLE", $"Available exact-location stock is insufficient to reverse {source.ItemCode}.");
@@ -490,7 +501,10 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         inventoryLocation.AvailableQuantity = inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
         inventoryLocation.AverageCost = line.UnitCost;
         inventoryLocation.LastMovementDate = DateTime.UtcNow;
-        await inventoryLocationRepository.UpdateAsync(inventoryLocation);
+        if (isNewInventoryLocation)
+            await inventoryLocationRepository.AddAsync(inventoryLocation);
+        else
+            await inventoryLocationRepository.UpdateAsync(inventoryLocation);
         if (!warehouse.IsConsignmentWarehouse)
         {
             var inventoryItem = await _items.GetByIdAsync(line.InventoryItemId)

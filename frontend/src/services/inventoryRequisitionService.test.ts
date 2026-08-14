@@ -18,6 +18,7 @@ describe('inventoryRequisitionService controlled issue lifecycle', () => {
       receiverUserId: 'receiver-1',
       idempotencyKey: 'issue-key-1',
       rowVersion: 'AQID',
+      movementReasonCode: 'DEPARTMENT_CONSUMPTION',
       items: [{ itemId: 'line-1', issuedQuantity: 2 }],
     };
     mockedAxios.post.mockResolvedValueOnce({ data: { voucher: { id: 'voucher-1' } } });
@@ -29,6 +30,36 @@ describe('inventoryRequisitionService controlled issue lifecycle', () => {
       expect.stringMatching(/\/inventory\/requisitions\/req-1\/issue$/),
       expect.objectContaining(request),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer tenant-token' }) }),
+    );
+  });
+
+  it('loads controlled issue reasons and persists rule selectors without free-text owner IDs', async () => {
+    mockedAxios.get.mockResolvedValueOnce({ data: { applicableMovementReasonCodes: ['ASSET_CUSTODY'] } });
+    mockedAxios.post.mockResolvedValueOnce({ data: { id: 'rule-1', rowVersion: 'AQID' } });
+
+    await inventoryRequisitionService.getIssueAccountingOptions('req-1');
+    await inventoryRequisitionService.createIssueAccountingRule({
+      inventoryCategoryId: 'category-1',
+      itemType: 4,
+      movementReasonCode: 'ASSET_CUSTODY',
+      treatment: 2,
+      fixedAssetCategoryId: 'asset-category-1',
+      isActive: true,
+      effectiveFromUtc: '2026-08-13T00:00:00.000Z',
+    });
+
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      expect.stringMatching(/\/inventory\/issue-accounting\/options$/),
+      expect.objectContaining({ params: { requisitionId: 'req-1' } }),
+    );
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      expect.stringMatching(/\/inventory\/issue-accounting\/rules$/),
+      expect.objectContaining({
+        inventoryCategoryId: 'category-1',
+        fixedAssetCategoryId: 'asset-category-1',
+        movementReasonCode: 'ASSET_CUSTODY',
+      }),
+      expect.anything(),
     );
   });
 

@@ -1,12 +1,13 @@
  
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import { Package, CheckCircle, Download, ClipboardCheck } from 'lucide-react';
 import {
   inventoryRequisitionService,
   InventoryRequisitionDetailDto,
-  InventoryIssueReceiverDto, InventoryIssueVoucherDto,
+  InventoryIssueAccountingOptionsDto, InventoryIssueReceiverDto, InventoryIssueVoucherDto,
   IssueRequisitionDto, RequisitionStatusMap
 } from '@/services/inventoryRequisitionService';
 import { useToast } from '@/hooks/use-toast';
@@ -79,6 +80,8 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   const [notes, setNotes] = useState('');
   const [receivers, setReceivers] = useState<InventoryIssueReceiverDto[]>([]);
   const [receiverUserId, setReceiverUserId] = useState('');
+  const [movementReasonCode, setMovementReasonCode] = useState('');
+  const [accountingOptions, setAccountingOptions] = useState<InventoryIssueAccountingOptionsDto | null>(null);
   const [vouchers, setVouchers] = useState<InventoryIssueVoucherDto[]>([]);
   const [acknowledgementComment, setAcknowledgementComment] = useState('');
   const [voucherActionId, setVoucherActionId] = useState<string | null>(null);
@@ -93,14 +96,21 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
     if (!requisitionId) return;
     try {
       setLoading(true);
-      const [detail, receiverOptions, issueVouchers] = await Promise.all([
+      const [detail, receiverOptions, issueVouchers, governedOptions] = await Promise.all([
         inventoryRequisitionService.getById(requisitionId),
         inventoryRequisitionService.getIssueReceivers(),
         inventoryRequisitionService.getIssueVouchers(requisitionId),
+        inventoryRequisitionService.getIssueAccountingOptions(requisitionId),
       ]);
       setRequisition(detail);
       setReceivers(receiverOptions);
       setVouchers(issueVouchers);
+      setAccountingOptions(governedOptions);
+      setMovementReasonCode(current => governedOptions.applicableMovementReasonCodes.includes(current)
+        ? current
+        : governedOptions.applicableMovementReasonCodes.length === 1
+          ? governedOptions.applicableMovementReasonCodes[0]
+          : '');
       setReceiverUserId(detail.requestedById || '');
       // Initialize issue items from requisition items
       const items: IssueItemState[] = detail.items.map(item => ({
@@ -156,12 +166,17 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       toast({ title: 'Validation Error', description: 'Please enter quantities to issue', variant: 'destructive' });
       return;
     }
+    if (!movementReasonCode) {
+      toast({ title: 'Movement reason required', description: 'Select a configured movement reason before issuing stock.', variant: 'destructive' });
+      return;
+    }
     try {
       setIssuing(true);
       const dto: IssueRequisitionDto = {
         idempotencyKey: crypto.randomUUID(),
         rowVersion: requisition?.rowVersion || '',
         receiverUserId,
+        movementReasonCode,
         items: itemsToIssue.map(item => ({
           itemId: item.itemId,
           issuedQuantity: item.issuingQuantity,
@@ -236,6 +251,18 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
 
   const totalIssuing = issueItems.reduce((sum, item) => sum + item.issuingQuantity, 0);
   const hasItemsToIssue = issueItems.some(item => item.remainingToIssue > 0);
+  const applicableMovementReasons = useMemo(() => {
+    if (!accountingOptions) return [];
+    const selected = issueItems.filter(item => item.issuingQuantity > 0);
+    if (selected.length === 0) return accountingOptions.applicableMovementReasonCodes;
+    return accountingOptions.applicableMovementReasonCodes.filter(reason => selected.every(item =>
+      (accountingOptions.applicableMovementReasonCodesByRequisitionItem[item.itemId] ?? []).includes(reason)));
+  }, [accountingOptions, issueItems]);
+
+  useEffect(() => {
+    if (movementReasonCode && !applicableMovementReasons.includes(movementReasonCode)) setMovementReasonCode('');
+    else if (!movementReasonCode && applicableMovementReasons.length === 1) setMovementReasonCode(applicableMovementReasons[0]);
+  }, [applicableMovementReasons, movementReasonCode]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -276,27 +303,39 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                 <CardTitle className="text-base">Controlled handover</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="issue-receiver">Designated receiver</Label>
-                    <select
-                      id="issue-receiver"
-                      value={receiverUserId}
-                      onChange={event => setReceiverUserId(event.target.value)}
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      <option value="">Select an active internal receiver</option>
-                      {receivers.map(receiver => (
-                        <option key={receiver.userId} value={receiver.userId}>
-                          {receiver.displayName || receiver.username}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={receiverUserId || 'none'} onValueChange={value => setReceiverUserId(value === 'none' ? '' : value)}>
+                      <SelectTrigger id="issue-receiver"><SelectValue placeholder="Select an active internal receiver" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select an active internal receiver</SelectItem>
+                        {receivers.map(receiver => (
+                          <SelectItem key={receiver.userId} value={receiver.userId}>
+                            {receiver.displayName || receiver.username}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
-                    The requester, workflow approver, issuer and receiver are preserved on an immutable Store Issue Voucher. The receiver must acknowledge the physical handover.
+                  <div className="space-y-1">
+                    <Label htmlFor="movement-reason">Movement reason</Label>
+                    <Select value={movementReasonCode || 'none'} onValueChange={value => setMovementReasonCode(value === 'none' ? '' : value)}>
+                      <SelectTrigger id="movement-reason"><SelectValue placeholder="Select configured reason" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select configured reason</SelectItem>
+                        {applicableMovementReasons.map(code => (
+                          <SelectItem key={code} value={code}>{accountingOptions?.movementReasons[code] ?? code}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
+                {accountingOptions && applicableMovementReasons.length === 0 && (
+                  <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                    No active issue-accounting rule covers the selected issue lines. Configure the category, item type and movement reason before issuing.
+                  </p>
+                )}
               </CardContent>
             </Card>
 
@@ -407,7 +446,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                       </div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {voucher.lines.length} line(s) · project/cost object {voucher.projectCode || voucher.costCenter || '-'}
+                      {voucher.lines.length} line(s) · {accountingOptions?.movementReasons[voucher.movementReasonCode] ?? voucher.movementReasonCode} · Finance {voucher.financeJournalEntryId ? 'posted' : 'pending'}
                     </div>
                     {voucher.status === 1 ? (
                       <div className="flex flex-col gap-2 sm:flex-row">
@@ -435,7 +474,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleIssue} disabled={issuing || totalIssuing === 0 || !receiverUserId}>
+          <Button onClick={handleIssue} disabled={issuing || totalIssuing === 0 || !receiverUserId || !movementReasonCode}>
             {issuing ? 'Issuing...' : `Issue ${totalIssuing} Items`}
           </Button>
         </DialogFooter>

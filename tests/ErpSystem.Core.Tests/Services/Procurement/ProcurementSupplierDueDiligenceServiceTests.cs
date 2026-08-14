@@ -119,6 +119,51 @@ public sealed class ProcurementSupplierDueDiligenceServiceTests
     }
 
     [Fact]
+    public async Task CompletedReviewCanBeGovernedlySupersededAfterPolicyReplacement()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(), "create-before-policy-replacement");
+        var updated = await fixture.Service.UpdateAsync(
+            draft.Id,
+            new UpdateProcurementSupplierDueDiligenceRequest
+            {
+                RowVersion = draft.RowVersion,
+                Checks = CompleteChecks()
+            },
+            "update-before-policy-replacement");
+        var submitted = await fixture.Service.SubmitAsync(
+            draft.Id,
+            Lifecycle(updated.RowVersion, "Submit under the original policy."),
+            "submit-before-policy-replacement");
+        fixture.WorkflowInstance!.Status = WorkflowInstanceStatus.Completed;
+        await fixture.Context.SaveChangesAsync();
+        await fixture.PublishReplacementPolicyAsync();
+        fixture.SetUser(Guid.NewGuid());
+
+        var superseded = await fixture.Service.SupersedeStaleAsync(
+            draft.Id,
+            Lifecycle(submitted.RowVersion,
+                "The completed review requires revalidation under replacement DEC-011."),
+            "supersede-replaced-policy");
+        var retry = await fixture.Service.CreateAsync(
+            new CreateProcurementSupplierDueDiligenceRequest
+            {
+                BusinessPartnerId = fixture.Supplier.Id,
+                ReviewType = ProcurementSupplierDueDiligenceReviewType.Annual,
+                WorkflowDefinitionId = fixture.Workflow.Id,
+                Notes = "Governed retry under replacement DEC-011."
+            },
+            "create-after-policy-replacement");
+
+        superseded.Status.Should().Be(ProcurementSupplierDueDiligenceStatus.Superseded);
+        superseded.ReviewComment.Should().Contain("replacement DEC-011");
+        retry.Status.Should().Be(ProcurementSupplierDueDiligenceStatus.Draft);
+        retry.CycleNumber.Should().Be(2);
+        retry.PolicyDecisionId.Should().NotBe(superseded.PolicyDecisionId);
+    }
+
+    [Fact]
     public async Task ReviewReadsDoNotDiscloseAcrossTenants()
     {
         await using var fixture = new Fixture();
@@ -131,6 +176,45 @@ public sealed class ProcurementSupplierDueDiligenceServiceTests
 
         await action.Should()
             .ThrowAsync<ProcurementSupplierDueDiligenceNotFoundException>();
+    }
+
+    [Fact]
+    public async Task RejectedReviewRetryUsesNextRetainedCycleNumber()
+    {
+        await using var fixture = new Fixture();
+        fixture.Context.ProcurementSupplierDueDiligenceReviews.Add(
+            new ProcurementSupplierDueDiligenceReview
+            {
+                Id = Guid.NewGuid(),
+                TenantId = fixture.TenantId,
+                BusinessPartnerId = fixture.Supplier.Id,
+                ReviewReference = "DD-REJECTED-001",
+                CycleNumber = 1,
+                ReviewType = ProcurementSupplierDueDiligenceReviewType.Initial,
+                Status = ProcurementSupplierDueDiligenceStatus.Rejected,
+                Outcome = ProcurementSupplierDueDiligenceOutcome.Adverse,
+                ReviewPeriodStartUtc = DateTime.UtcNow.AddDays(-2),
+                ReviewPeriodEndUtc = DateTime.UtcNow.AddDays(-1),
+                NextReviewDueAtUtc = DateTime.UtcNow.AddDays(-1),
+                PolicyDecisionId = fixture.Policy!.Id,
+                PolicyProfileId = fixture.Policy.ProfileId,
+                PolicyProfileCode = "TDC-PROCUREMENT",
+                PolicyProfileVersion = 1,
+                ReviewFrequencyMonths = 12,
+                PolicySnapshotJson = fixture.Policy.ValueJson,
+                PolicyValueHash = "RETAINED",
+                WorkflowDefinitionId = fixture.Workflow.Id,
+                CreatedAt = DateTime.UtcNow.AddDays(-2),
+                RowVersion = Guid.NewGuid().ToByteArray()
+            });
+        await fixture.Context.SaveChangesAsync();
+
+        var retry = await fixture.Service.CreateAsync(
+            fixture.CreateRequest(),
+            "retry-rejected-review");
+
+        retry.CycleNumber.Should().Be(2);
+        retry.Status.Should().Be(ProcurementSupplierDueDiligenceStatus.Draft);
     }
 
     private static List<SaveProcurementSupplierDueDiligenceCheckRequest> CompleteChecks()
@@ -412,6 +496,48 @@ public sealed class ProcurementSupplierDueDiligenceServiceTests
 
         public void SetTenant(Guid tenantId) => _tenantId = tenantId;
         public void SetUser(Guid userId) => _userId = userId;
+
+        public async Task PublishReplacementPolicyAsync()
+        {
+            var prior = await Context.ProcurementConfigurationProfiles
+                .SingleAsync(item => item.Id == Policy!.ProfileId);
+            prior.LifecycleStatus = ProcurementConfigurationProfileStatus.Retired;
+            prior.EffectiveTo = DateTime.UtcNow.AddSeconds(-1);
+            var profile = new ProcurementConfigurationProfile
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ProfileKey = prior.ProfileKey,
+                ProfileCode = prior.ProfileCode,
+                Name = prior.Name,
+                Version = prior.Version + 1,
+                LifecycleStatus = ProcurementConfigurationProfileStatus.Published,
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                IsDefault = true,
+                PublishedAt = DateTime.UtcNow,
+                PublishedById = Guid.NewGuid()
+            };
+            var decision = new ProcurementConfigurationDecision
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                ProfileId = profile.Id,
+                DecisionKey = "DEC-011",
+                SchemaVersion = Policy.SchemaVersion,
+                OwnerGroup = Policy.OwnerGroup,
+                Status = ProcurementConfigurationDecisionStatus.Approved,
+                ApprovalStatus = ProcurementConfigurationApprovalStatus.Approved,
+                EvidenceStatus = ProcurementConfigurationEvidenceStatus.Verified,
+                ValueJson = Policy.ValueJson,
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                ApprovedById = Guid.NewGuid(),
+                ApprovedAt = DateTime.UtcNow,
+                DecisionDate = DateTime.UtcNow
+            };
+            Context.Update(prior);
+            Context.AddRange(profile, decision);
+            await Context.SaveChangesAsync();
+        }
 
         public async ValueTask DisposeAsync()
         {

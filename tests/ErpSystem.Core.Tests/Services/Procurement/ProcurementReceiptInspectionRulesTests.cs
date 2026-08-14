@@ -1,13 +1,83 @@
+using System.Reflection;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Data.Migrations;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementReceiptInspectionRulesTests
 {
+    [Fact]
+    public void ControlEventEvidenceRetainsRequirementsWithoutDuplicatingOneUpload()
+    {
+        var uploadId = Guid.NewGuid();
+        var evidence = new[]
+        {
+            new ProcurementReceiptInspectionEvidence
+            {
+                ReferenceKind = ProcurementReceiptInspectionEvidenceKind.CentralDocumentUpload,
+                FileUploadRecordId = uploadId,
+                ActionKey = "SubmitReceiptInspection",
+                RequirementKey = "Waybill",
+                EvidenceReference = "WB-001"
+            },
+            new ProcurementReceiptInspectionEvidence
+            {
+                ReferenceKind = ProcurementReceiptInspectionEvidenceKind.CentralDocumentUpload,
+                FileUploadRecordId = uploadId,
+                ActionKey = "SubmitReceiptInspection",
+                RequirementKey = "Delivery note",
+                EvidenceReference = "WB-001"
+            }
+        };
+
+        var result = ProcurementReceiptInspectionService.BuildControlEventEvidence(evidence);
+
+        result.Should().ContainSingle();
+        result[0].ReferenceId.Should().Be(uploadId);
+        result[0].RequirementKey.Should().Contain("Waybill").And.Contain("Delivery note");
+    }
+
+    [Fact]
+    public void LegacyDraftWorkflowRebindRemainsNarrowAndGoverned()
+    {
+        var migration = new INVREQFU004AllowDraftInspectionWorkflowRebind();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+        var sql = string.Join(Environment.NewLine,
+            builder.Operations.OfType<SqlOperation>().Select(item => item.Sql));
+
+        sql.Should().Contain("d.Status = 0");
+        sql.Should().Contain("i.Status = 1");
+        sql.Should().Contain("TDC0502_RECEIPT_INSPECTION_CASE_ID");
+        sql.Should().Contain("TDC0502_RECEIPT_INSPECTION_WORKFLOW_ID");
+        sql.Should().Contain("entityType.Code = N''PROCUREMENT_RECEIPT_INSPECTION''");
+        sql.Should().Contain("workflow.LifecycleStatus = 1");
+        sql.Should().NotContain("DISABLE TRIGGER");
+    }
+
+    [Fact]
+    public void Dec013EvidenceRequirementsAcceptPublishedCamelCaseEnumValues()
+    {
+        const string publishedDecision = """
+            {
+              "documentType": "grnAndMrn",
+              "coexistenceRule": "bothFromSingleReceipt",
+              "evidenceRequirements": ["Delivery note", "Delivery note", "  Waybill  "]
+            }
+            """;
+
+        ProcurementReceiptInspectionService.ParseEvidenceRequirementKeys(publishedDecision)
+            .Should().Equal("Delivery note", "Waybill");
+    }
+
     [Theory]
     [InlineData(10, 10, 0, 0, ProcurementReceiptDisposition.Accepted)]
     [InlineData(10, 0, 10, 0, ProcurementReceiptDisposition.Rejected)]

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using ErpSystem.Api.Controllers.Inventory;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -31,5 +32,27 @@ public sealed class InventoryTransferControllerSecurityTests
         var method = typeof(InventoryTransfersController).GetMethod(methodName)!;
         method.GetCustomAttribute<HttpPostAttribute>()!.Template.Should().Be(template);
         method.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true).Should().BeNull();
+    }
+
+    [Fact]
+    public void Receipt_unexpected_failures_reach_the_central_exception_handler()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "ErpSystem.Api", "Controllers", "Inventory", "InventoryTransfersController.cs"));
+        var start = source.IndexOf("public async Task<ActionResult> Receive", StringComparison.Ordinal);
+        var end = source.IndexOf("public async Task<ActionResult> Cancel", start, StringComparison.Ordinal);
+        var receive = source[start..end];
+
+        receive.Should().Contain("Error receiving transfer {Id}");
+        receive.Should().Contain("throw;");
+        Regex.IsMatch(receive, "return\\s+StatusCode\\(500", RegexOptions.CultureInvariant).Should().BeFalse();
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+            directory = directory.Parent;
+        return directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
     }
 }

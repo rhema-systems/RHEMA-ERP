@@ -2090,6 +2090,316 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<FixedAssetDto> RegisterInventoryIssueAssetAsync(
+        RegisterInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        if (dto.IssueVoucherId == Guid.Empty || dto.IssueVoucherLineId == Guid.Empty ||
+            dto.FixedAssetCategoryId == Guid.Empty || dto.CustodianEmployeeId == Guid.Empty ||
+            dto.PostingEventId == Guid.Empty || dto.JournalEntryId == Guid.Empty)
+            throw new InvalidOperationException("Complete issue, category, custodian and Finance lineage is required to register an inventory-issued asset.");
+
+        var existing = await _context.FixedAssets
+            .Include(asset => asset.Category)
+            .Include(asset => asset.BookValues)
+            .SingleOrDefaultAsync(asset =>
+                asset.TenantId == TenantId &&
+                asset.SourceDocumentType == "InventoryIssueVoucher" &&
+                asset.SourceDocumentLineId == dto.IssueVoucherLineId &&
+                !asset.IsDeleted,
+                cancellationToken);
+        if (existing != null)
+        {
+            if (existing.SourceDocumentId != dto.IssueVoucherId ||
+                existing.PostingEventId != dto.PostingEventId ||
+                existing.JournalEntryId != dto.JournalEntryId ||
+                existing.FixedAssetCategoryId != dto.FixedAssetCategoryId ||
+                existing.CurrentCustodianId != dto.CustodianEmployeeId)
+                throw new InvalidOperationException("The inventory issue line is already linked to a different fixed-asset registration.");
+            return MapToDto(existing);
+        }
+
+        var serialNumber = NormalizeRequiredText(dto.SerialNumber);
+        if (string.IsNullOrWhiteSpace(serialNumber))
+            throw new InvalidOperationException("A serial number is required before a fixed-asset item can be issued into custody.");
+        if (await _context.FixedAssets.AnyAsync(asset =>
+                asset.TenantId == TenantId && asset.SerialNumber == serialNumber && !asset.IsDeleted,
+                cancellationToken))
+            throw new InvalidOperationException($"Serial number '{serialNumber}' is already registered to a fixed asset.");
+
+        var category = await ResolveAssetCategoryAsync(dto.FixedAssetCategoryId);
+        ValidateDepreciationConfiguration(
+            category.DefaultMethod,
+            category.DefaultUsefulLifeMonths,
+            residualValue: 0m,
+            category.DefaultDiminishingBalanceRatePercent,
+            category.DefaultLifetimeProductionCapacity);
+
+        var custodian = await _context.Employees.AsNoTracking().SingleOrDefaultAsync(employee =>
+            employee.TenantId == TenantId && employee.Id == dto.CustodianEmployeeId &&
+            employee.IsActive && employee.EndDate == null && !employee.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The selected receiver is not an active employee of this tenant and cannot hold a fixed asset.");
+
+        var (postingEvent, journal, functionalCost) = await ValidateInventoryAssetJournalAsync(
+            "InventoryIssueVoucher",
+            dto.IssueVoucherId,
+            dto.IssueVoucherLineId,
+            dto.PostingEventId,
+            dto.JournalEntryId,
+            category.AssetAccountId,
+            cancellationToken);
+
+        var asset = new FixedAsset
+        {
+            TenantId = TenantId,
+            AssetCode = await GenerateAssetCodeAsync(category.Id),
+            Name = NormalizeRequiredText(dto.ItemName),
+            Description = NormalizeOptionalText(dto.Description),
+            Location = NormalizeOptionalText(dto.Location),
+            CurrentCustodianId = custodian.Id,
+            FixedAssetCategoryId = category.Id,
+            Category = category,
+            PurchaseDate = dto.IssueDate.Date,
+            PlacedInServiceDate = dto.IssueDate.Date,
+            DepreciationMethod = category.DefaultMethod,
+            DepreciationConvention = DepreciationConvention.FullMonth,
+            UsefulLifeMonths = category.DefaultUsefulLifeMonths,
+            ResidualValue = RoundMoney(functionalCost * category.DefaultResidualValuePercent / 100m),
+            DiminishingBalanceRatePercent = RoundRate(category.DefaultDiminishingBalanceRatePercent),
+            LifetimeProductionCapacity = category.DefaultLifetimeProductionCapacity,
+            AccumulatedProductionUnits = 0m,
+            SerialNumber = serialNumber,
+            Status = FixedAssetStatus.Capitalized,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = UserName,
+            CreatedById = CurrentUserGuid == Guid.Empty ? null : CurrentUserGuid
+        };
+
+        _context.FixedAssets.Add(asset);
+        await ApplyCapitalizationAsync(
+            asset,
+            category,
+            dto.IssueDate.Date,
+            "InventoryIssueVoucher",
+            dto.IssueVoucherId,
+            dto.IssueVoucherLineId,
+            journal.Id,
+            postingEvent.Id,
+            postingEvent.FunctionalCurrencyCode,
+            postingEvent.FunctionalCurrencyCode,
+            exchangeRate: null,
+            exchangeRateId: null,
+            exchangeRateDate: dto.IssueDate.Date,
+            functionalCost,
+            functionalCost,
+            "Inventory issue capitalization and custody registration");
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FixedAssetAcquired,
+            asset,
+            postingEvent.Id,
+            journal.Id,
+            afterValues: new
+            {
+                dto.IssueVoucherId,
+                dto.IssueVoucherLineId,
+                dto.IssueVoucherNumber,
+                dto.ItemCode,
+                CustodianEmployeeId = custodian.Id,
+                asset.SerialNumber,
+                asset.AcquisitionCost
+            },
+            comment: "Fixed asset registered from a governed inventory issue.");
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FixedAssetCapitalized,
+            asset,
+            postingEvent.Id,
+            journal.Id,
+            afterValues: new { asset.Status, asset.CapitalizationDate, asset.CurrentCustodianId },
+            comment: "Inventory-issued fixed asset capitalized without a duplicate Finance journal.");
+
+        return MapToDto(asset);
+    }
+
+    public async Task ReverseInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReverseInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var asset = await LoadAssetForCapitalizationReversalAsync(fixedAssetId, cancellationToken);
+        EnsureInventoryIssueAsset(asset);
+
+        if (asset.CapitalizationReversalPostingEventId.HasValue)
+        {
+            if (asset.CapitalizationReversalPostingEventId == dto.PostingEventId &&
+                asset.CapitalizationReversalJournalEntryId == dto.JournalEntryId)
+                return;
+            throw new InvalidOperationException("The inventory-issued asset is already reversed by a different return posting.");
+        }
+
+        await ValidateInventoryAssetJournalAsync(
+            "InventoryReturnVoucher",
+            dto.ReturnVoucherId,
+            dto.ReturnVoucherLineId,
+            dto.PostingEventId,
+            dto.JournalEntryId,
+            asset.Category.AssetAccountId,
+            cancellationToken,
+            expectCredit: true);
+        await EnsureNoDownstreamAssetAccountingAsync(asset, cancellationToken);
+
+        ApplyCapitalizationReversal(
+            asset,
+            dto.JournalEntryId,
+            dto.PostingEventId,
+            dto.ReturnDate.Date,
+            NormalizeRequiredText(dto.Reason),
+            request: null);
+        asset.CurrentCustodianId = null;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FixedAssetCapitalizationReversed,
+            asset,
+            dto.PostingEventId,
+            dto.JournalEntryId,
+            afterValues: new { dto.ReturnVoucherId, dto.ReturnVoucherLineId, asset.Status, asset.CurrentCustodianId },
+            reason: dto.Reason,
+            comment: "Governed inventory return removed the asset from custody and compensated its register value.");
+    }
+
+    public async Task ReinstateInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReinstateInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var asset = await _context.FixedAssets
+            .Include(value => value.Category)
+            .Include(value => value.BookValues)
+            .SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == fixedAssetId && !value.IsDeleted,
+                cancellationToken)
+            ?? throw new InvalidOperationException("The fixed asset was not found for this tenant.");
+        EnsureInventoryIssueAsset(asset);
+
+        if (!asset.CapitalizationReversalPostingEventId.HasValue || asset.Status != FixedAssetStatus.Draft)
+        {
+            if (asset.PostingEventId == dto.PostingEventId && asset.JournalEntryId == dto.JournalEntryId)
+                return;
+            throw new InvalidOperationException("Only a returned inventory-issued asset can be reinstated.");
+        }
+
+        var issueLineId = asset.SourceDocumentLineId!.Value;
+        var (returnPostingEvent, _, functionalCost) = await ValidateInventoryAssetJournalAsync(
+            "InventoryReturnVoucher",
+            dto.ReturnVoucherId,
+            dto.ReturnVoucherLineId,
+            dto.PostingEventId,
+            dto.JournalEntryId,
+            asset.Category.AssetAccountId,
+            cancellationToken);
+        var originalCapitalization = await _context.AssetTransactions.AsNoTracking()
+            .Where(transaction => transaction.TenantId == TenantId && transaction.FixedAssetId == asset.Id &&
+                transaction.TransactionType == "Capitalization" && transaction.Amount > 0m && !transaction.IsDeleted)
+            .OrderBy(transaction => transaction.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("The original inventory-issue capitalization could not be reconstructed.");
+        if (Math.Abs(originalCapitalization.Amount - functionalCost) > 0.01m)
+            throw new InvalidOperationException("The return reversal value does not reconcile to the original fixed-asset capitalization.");
+
+        var receiverEmployeeId = await (
+            from line in _context.InventoryIssueVoucherLines.AsNoTracking()
+            join voucher in _context.InventoryIssueVouchers.AsNoTracking()
+                on line.InventoryIssueVoucherId equals voucher.Id
+            join user in _context.Users.AsNoTracking()
+                on voucher.ReceiverUserId equals user.Id
+            where line.TenantId == TenantId && line.Id == issueLineId &&
+                  voucher.TenantId == TenantId && user.TenantId == TenantId &&
+                  user.EmployeeId.HasValue && !line.IsDeleted && !voucher.IsDeleted
+            select user.EmployeeId!.Value)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (receiverEmployeeId == Guid.Empty || !await _context.Employees.AsNoTracking().AnyAsync(employee =>
+                employee.TenantId == TenantId && employee.Id == receiverEmployeeId && employee.IsActive &&
+                employee.EndDate == null && !employee.IsDeleted,
+                cancellationToken))
+            throw new InvalidOperationException("The original active employee custodian could not be restored.");
+
+        await ApplyCapitalizationAsync(
+            asset,
+            asset.Category,
+            dto.ReversalDate.Date,
+            "InventoryIssueVoucher",
+            asset.SourceDocumentId!.Value,
+            issueLineId,
+            dto.JournalEntryId,
+            dto.PostingEventId,
+            returnPostingEvent.FunctionalCurrencyCode,
+            returnPostingEvent.FunctionalCurrencyCode,
+            exchangeRate: null,
+            exchangeRateId: null,
+            exchangeRateDate: dto.ReversalDate.Date,
+            originalCapitalization.Amount,
+            originalCapitalization.Amount,
+            "Reinstatement after inventory return reversal");
+        asset.CurrentCustodianId = receiverEmployeeId;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FixedAssetCapitalized,
+            asset,
+            dto.PostingEventId,
+            dto.JournalEntryId,
+            afterValues: new { dto.ReturnVoucherId, dto.ReturnVoucherLineId, asset.Status, asset.CurrentCustodianId },
+            reason: dto.Reason,
+            comment: "Inventory-issued fixed asset reinstated after a governed return reversal.");
+    }
+
+    private async Task<(FinancePostingEvent PostingEvent, JournalEntry Journal, decimal Amount)>
+        ValidateInventoryAssetJournalAsync(
+            string sourceDocumentType,
+            Guid sourceDocumentId,
+            Guid sourceLineId,
+            Guid postingEventId,
+            Guid journalEntryId,
+            Guid assetAccountId,
+            CancellationToken cancellationToken,
+            bool expectCredit = false)
+    {
+        var postingEvent = await _context.FinancePostingEvents.AsNoTracking().SingleOrDefaultAsync(value =>
+            value.TenantId == TenantId && value.Id == postingEventId &&
+            value.SourceDocumentType == sourceDocumentType && value.SourceDocumentId == sourceDocumentId &&
+            value.JournalEntryId == journalEntryId && value.PostingStatus == "Posted" && !value.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The posted Finance event does not match the inventory source document.");
+        var journal = await _context.JournalEntries.AsNoTracking()
+            .Include(value => value.Transactions)
+            .SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == journalEntryId &&
+                value.SourceDocumentType == sourceDocumentType && value.SourceDocumentId == sourceDocumentId &&
+                value.PostingStatus == "Posted" && value.IsBalanced && !value.IsDeleted,
+                cancellationToken)
+            ?? throw new InvalidOperationException("The balanced posted Finance journal does not match the inventory source document.");
+
+        var lineToken = sourceLineId.ToString("N");
+        var taggedLines = journal.Transactions.Where(value =>
+            value.TenantId == TenantId && value.AccountId == assetAccountId && !value.IsDeleted &&
+            (value.Notes?.Contains(lineToken, StringComparison.OrdinalIgnoreCase) == true ||
+             value.TransactionTag?.Contains(lineToken, StringComparison.OrdinalIgnoreCase) == true));
+        var amount = RoundMoney(taggedLines.Sum(value => expectCredit ? value.CreditAmount : value.DebitAmount));
+        if (amount <= 0m)
+            throw new InvalidOperationException("The Finance journal does not contain the tagged fixed-asset value for this inventory line.");
+        return (postingEvent, journal, amount);
+    }
+
+    private static void EnsureInventoryIssueAsset(FixedAsset asset)
+    {
+        if (!string.Equals(asset.SourceDocumentType, "InventoryIssueVoucher", StringComparison.OrdinalIgnoreCase) ||
+            !asset.SourceDocumentId.HasValue || !asset.SourceDocumentLineId.HasValue ||
+            !asset.PostingEventId.HasValue || !asset.JournalEntryId.HasValue)
+            throw new InvalidOperationException("The fixed asset is not governed by inventory-issue lineage.");
+    }
+
     private async Task ApplyCapitalizationAsync(
         FixedAsset asset,
         FixedAssetCategory category,
@@ -2353,6 +2663,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         Guid assetId,
         CancellationToken cancellationToken)
         => await _context.FixedAssets
+            .Include(asset => asset.Category)
             .Include(asset => asset.BookValues)
             .SingleOrDefaultAsync(asset =>
                 asset.TenantId == TenantId && asset.Id == assetId && !asset.IsDeleted,

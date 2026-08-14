@@ -48,6 +48,7 @@
     <Compile Include="Services\Inventory\InventoryNegativeStockControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryReadScopeRegressionTests.cs" />
     <Compile Include="Services\Inventory\InventoryProjectReservationControlTests.cs" />
+    <Compile Include="Services\Inventory\InventoryWorkOrderReservationControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryReplenishmentControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryScanningServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryItemProfileServiceTests.cs" />

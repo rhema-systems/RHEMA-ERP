@@ -284,7 +284,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         {
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception) when (IsUniqueConstraint(exception))
         {
             var winner = await DecisionQuery()
                 .AsNoTracking()
@@ -404,7 +404,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Evaluation,
             "RFQ_EVALUATION_INTEGRITY",
             !string.IsNullOrWhiteSpace(evaluation.SnapshotJson) &&
-            ComputeHash(NormalizeJson(evaluation.SnapshotJson)) == evaluation.IntegrityHash,
+            HashMatches(NormalizeJson(evaluation.SnapshotJson), evaluation.IntegrityHash),
             "The retained RFQ evaluation projection is intact.",
             "Recall and replace the evaluation through the controlled committee workflow.",
             "ProcurementRfqEvaluation", evaluation.Id, evaluation.IntegrityHash);
@@ -2313,6 +2313,11 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             CorrelationId = decision.CorrelationId,
             OccurredAtUtc = decision.EvaluatedAtUtc,
             Evidence = decision.Evidence.Where(item => item.IsAvailable)
+                .OrderByDescending(item => item.ReferenceId.HasValue)
+                .GroupBy(
+                    item => item.Reference?.Trim() ?? $"id:{item.ReferenceId:N}",
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
                 .Select(item => new ProcurementControlEventEvidenceReference
                 {
                     ReferenceKind = ProcurementControlEvidenceReferenceKind.ExternalReference,
@@ -2533,7 +2538,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
     private static bool ProjectionValid(string? snapshot, string? hash) =>
         !string.IsNullOrWhiteSpace(snapshot) &&
         !string.IsNullOrWhiteSpace(hash) &&
-        ComputeHash(NormalizeJson(snapshot)) == hash;
+        HashMatches(NormalizeJson(snapshot), hash);
+
+    private static bool HashMatches(string value, string hash) =>
+        string.Equals(ComputeHash(value), hash, StringComparison.OrdinalIgnoreCase);
 
     private static string ComputeVerificationHash(
         TenderAwardVerification verification,
@@ -2640,6 +2648,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
 
     private static string ComputeHash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool IsUniqueConstraint(DbUpdateException exception) =>
+        exception.InnerException?.Message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) == true ||
+        exception.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true;
 
     private static string NormalizeCorrelation(string correlationId) =>
         string.IsNullOrWhiteSpace(correlationId)

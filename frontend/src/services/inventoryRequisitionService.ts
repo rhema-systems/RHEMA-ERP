@@ -176,6 +176,7 @@ export interface IssueRequisitionDto {
   idempotencyKey: string;
   rowVersion: string;
   receiverUserId: string;
+  movementReasonCode: string;
   items: IssueRequisitionItemDto[];
   notes?: string;
 }
@@ -237,6 +238,9 @@ export interface InventoryIssueVoucherDto {
   issuedByName: string;
   receiverUserId: string;
   receiverName: string;
+  movementReasonCode: string;
+  financePostingEventId?: string;
+  financeJournalEntryId?: string;
   acknowledgedById?: string;
   issuedAtUtc: string;
   acknowledgedAtUtc?: string;
@@ -245,6 +249,68 @@ export interface InventoryIssueVoucherDto {
   rowVersion: string;
   lines: InventoryIssueVoucherLineDto[];
   actions: InventoryIssueVoucherActionDto[];
+}
+
+export interface InventoryIssueAccountingRuleDto {
+  id: string;
+  inventoryCategoryId: string;
+  inventoryCategoryCode: string;
+  inventoryCategoryName: string;
+  itemType: number;
+  movementReasonCode: string;
+  movementReasonName: string;
+  treatment: number;
+  expenseAccountId?: string;
+  expenseAccount?: string;
+  fixedAssetCategoryId?: string;
+  fixedAssetCategory?: string;
+  isActive: boolean;
+  effectiveFromUtc: string;
+  effectiveToUtc?: string;
+  rowVersion: string;
+}
+
+export interface InventoryIssueAccountingRuleRequest {
+  inventoryCategoryId: string;
+  itemType: number;
+  movementReasonCode: string;
+  treatment: number;
+  expenseAccountId?: string;
+  fixedAssetCategoryId?: string;
+  isActive: boolean;
+  effectiveFromUtc: string;
+  effectiveToUtc?: string;
+  rowVersion?: string;
+}
+
+export interface InventoryIssueAccountingOptionDto {
+  id: string;
+  code: string;
+  name: string;
+  type?: string;
+}
+
+export interface InventoryIssueAccountingOptionsDto {
+  inventoryCategories: InventoryIssueAccountingOptionDto[];
+  expenseAccounts: InventoryIssueAccountingOptionDto[];
+  fixedAssetCategories: InventoryIssueAccountingOptionDto[];
+  movementReasons: Record<string, string>;
+  applicableMovementReasonCodes: string[];
+  applicableMovementReasonCodesByRequisitionItem: Record<string, string[]>;
+}
+
+export interface InventoryIssueFinanceLineageDto {
+  id: string;
+  inventoryIssueVoucherLineId: string;
+  treatment: number;
+  movementReasonCode: string;
+  issuedQuantity: number;
+  returnedQuantity: number;
+  issuedValue: number;
+  postingEventId: string;
+  journalEntryId: string;
+  fixedAssetId?: string;
+  status: number;
 }
 
 export interface ReturnRequisitionItemDto {
@@ -392,6 +458,43 @@ export const inventoryRequisitionService = {
 
   getIssueVouchers: async (requisitionId: string): Promise<InventoryIssueVoucherDto[]> => {
     const response = await axios.get(`${API_URL}/inventory/requisitions/${requisitionId}/issue-vouchers`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  getIssueAccountingOptions: async (requisitionId?: string): Promise<InventoryIssueAccountingOptionsDto> => {
+    const response = await axios.get(`${API_URL}/inventory/issue-accounting/options`, {
+      headers: getAuthHeaders(),
+      params: requisitionId ? { requisitionId } : undefined,
+    });
+    return response.data;
+  },
+
+  getIssueAccountingRules: async (): Promise<InventoryIssueAccountingRuleDto[]> => {
+    const response = await axios.get(`${API_URL}/inventory/issue-accounting/rules`, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  createIssueAccountingRule: async (dto: InventoryIssueAccountingRuleRequest): Promise<InventoryIssueAccountingRuleDto> => {
+    const response = await axios.post(`${API_URL}/inventory/issue-accounting/rules`, dto, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  updateIssueAccountingRule: async (id: string, dto: InventoryIssueAccountingRuleRequest): Promise<InventoryIssueAccountingRuleDto> => {
+    const response = await axios.put(`${API_URL}/inventory/issue-accounting/rules/${id}`, dto, { headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  deleteIssueAccountingRule: async (id: string, rowVersion: string): Promise<void> => {
+    await axios.delete(`${API_URL}/inventory/issue-accounting/rules/${id}`, {
+      headers: getAuthHeaders(),
+      params: { rowVersion },
+    });
+  },
+
+  getIssueFinanceLineage: async (issueVoucherId: string): Promise<InventoryIssueFinanceLineageDto[]> => {
+    const response = await axios.get(`${API_URL}/inventory/issue-accounting/issue-vouchers/${issueVoucherId}/lineage`, {
+      headers: getAuthHeaders(),
+    });
     return response.data;
   },
 

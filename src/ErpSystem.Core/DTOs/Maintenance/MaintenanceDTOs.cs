@@ -3014,6 +3014,7 @@ public class WorkOrderPartDto
     // Location and tracking
     public Guid? WarehouseId { get; set; }
     public string? WarehouseName { get; set; }
+    public Guid? WarehouseLocationId { get; set; }
     public string? SerialNumber { get; set; }
     public string? LotNumber { get; set; }
     public string? WarehouseLocationCode { get; set; }

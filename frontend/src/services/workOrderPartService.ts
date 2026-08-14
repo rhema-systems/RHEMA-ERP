@@ -29,6 +29,7 @@ export interface WorkOrderPartDto {
   totalCost: number;
   warehouseId?: string;
   warehouseName?: string;
+  warehouseLocationId?: string;
   serialNumber?: string;
   lotNumber?: string;
   warehouseLocationCode?: string;
@@ -144,7 +145,7 @@ const workOrderPartService = {
     const response = await axios.post(
       `${API_BASE_URL}/maintenance/work-orders/parts`,
       data,
-      { headers: getHeaders() }
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
     );
     return response.data;
   },
@@ -156,7 +157,7 @@ const workOrderPartService = {
     const response = await axios.post(
       `${API_BASE_URL}/maintenance/work-orders/${workOrderId}/parts/bulk`,
       parts,
-      { headers: getHeaders() }
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
     );
     return response.data;
   },
@@ -168,7 +169,7 @@ const workOrderPartService = {
     const response = await axios.put(
       `${API_BASE_URL}/maintenance/work-orders/parts/${id}`,
       data,
-      { headers: getHeaders() }
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
     );
     return response.data;
   },
@@ -179,7 +180,7 @@ const workOrderPartService = {
   deletePart: async (id: string): Promise<void> => {
     await axios.delete(
       `${API_BASE_URL}/maintenance/work-orders/parts/${id}`,
-      { headers: getHeaders() }
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
     );
   },
 
@@ -190,7 +191,7 @@ const workOrderPartService = {
     await axios.post(
       `${API_BASE_URL}/maintenance/work-orders/parts/bulk-delete`,
       ids,
-      { headers: getHeaders() }
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
     );
   },
 
@@ -281,7 +282,16 @@ const workOrderPartService = {
     const response = await axios.post(
       `${API_BASE_URL}/maintenance/work-orders/parts/${partId}/return`,
       {},
-      { headers: getHeaders() }
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
+    );
+    return response.data;
+  },
+
+  retryReservation: async (partId: string): Promise<WorkOrderPartDto> => {
+    const response = await axios.post(
+      `${API_BASE_URL}/maintenance/work-orders/parts/${partId}/reservation/retry`,
+      {},
+      { headers: { ...getHeaders(), 'Idempotency-Key': crypto.randomUUID() } }
     );
     return response.data;
   },
