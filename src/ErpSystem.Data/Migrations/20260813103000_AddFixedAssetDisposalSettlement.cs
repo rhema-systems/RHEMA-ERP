@@ -64,11 +64,11 @@ public class AddFixedAssetDisposalSettlement : Migration
         AddRestrictedForeignKey(migrationBuilder, "BuyerBusinessPartnerId", "BusinessPartners");
         AddRestrictedForeignKey(migrationBuilder, "SaleTaxGroupId", "TaxGroups");
         AddRestrictedForeignKey(migrationBuilder, "SettlementPaymentTermId", "PaymentTerms");
-        AddRestrictedForeignKey(migrationBuilder, "SettlementPaymentMethodId", "PaymentMethods");
+        AddRestrictedForeignKey(migrationBuilder, "SettlementPaymentMethodId", "PaymentMethod");
         AddRestrictedForeignKey(migrationBuilder, "SettlementBankAccountId", "BankAccounts");
         AddRestrictedForeignKey(migrationBuilder, "SettlementLiquidityAccountId", "LiquidityAccounts");
         AddRestrictedForeignKey(migrationBuilder, "CustomerInvoiceId", "Invoices");
-        AddRestrictedForeignKey(migrationBuilder, "CustomerPaymentId", "CustomerPayments");
+        AddRestrictedForeignKey(migrationBuilder, "CustomerPaymentId", "CustomerPayment");
 
         // Persisted state rules prevent direct SQL or a future code path from linking both a bank
         // and a holding account, or from marking a non-sale disposal as settled without an invoice.
@@ -130,11 +130,11 @@ public class AddFixedAssetDisposalSettlement : Migration
         ["BuyerBusinessPartnerId"] = "BusinessPartners",
         ["SaleTaxGroupId"] = "TaxGroups",
         ["SettlementPaymentTermId"] = "PaymentTerms",
-        ["SettlementPaymentMethodId"] = "PaymentMethods",
+        ["SettlementPaymentMethodId"] = "PaymentMethod",
         ["SettlementBankAccountId"] = "BankAccounts",
         ["SettlementLiquidityAccountId"] = "LiquidityAccounts",
         ["CustomerInvoiceId"] = "Invoices",
-        ["CustomerPaymentId"] = "CustomerPayments"
+        ["CustomerPaymentId"] = "CustomerPayment"
     };
 
     private static readonly string[] NewColumns =
