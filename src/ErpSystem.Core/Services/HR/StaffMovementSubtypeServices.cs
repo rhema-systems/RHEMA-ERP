@@ -1,6 +1,9 @@
 ﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -61,6 +64,73 @@ public class StaffPromotionService : IStaffPromotionService
         return entity;
     }
 
+    /// <summary>
+    /// Validates the movement a detail row is being attached to.
+    ///
+    /// Three things none of the subtype services checked. The parent was never tested for tenancy,
+    /// so a detail row could be attached to ANOTHER TENANT'S movement by passing its id — the
+    /// cross-tenant child-attach shape. The parent's type was never tested, so a promotion detail
+    /// could hang off a demotion and the movement would then describe two different things at once.
+    /// And the relationship is one-to-one, so a second detail row for the same movement is not an
+    /// update, it is a contradiction.
+    /// </summary>
+    private async Task<StaffMovement> GetOwnedParentMovementAsync(
+        Guid movementId, StaffMovementType expectedType, bool requireNoExistingDetail)
+    {
+        var tenantId = GetTenantId();
+
+        var movement = await _unitOfWork.Repository<StaffMovement>().GetByIdAsync(movementId);
+        if (movement == null || movement.IsDeleted || movement.TenantId != tenantId)
+            throw new ArgumentException($"Staff movement with ID '{movementId}' was not found.");
+
+        if (movement.MovementType != expectedType)
+            throw new InvalidOperationException(
+                $"That movement is a {movement.MovementType}, so it cannot carry a promotion detail record.");
+
+        if (requireNoExistingDetail)
+        {
+            var existing = await _repo.GetByMovementIdAsync(movementId);
+            if (existing != null && !existing.IsDeleted)
+                throw new InvalidOperationException(
+                    $"Movement {movement.MovementNumber} already has a promotion detail record.");
+        }
+
+        return movement;
+    }
+
+    /// <summary>
+    /// How many salary-grade bands the movement crosses.
+    ///
+    /// The entity documents this as service-computed and it was taken from the request body instead,
+    /// so the number reported to management was whatever the person filling in the form typed.
+    ///
+    /// ⚠ SalaryGrade carries no rank, sequence or level column — only Code, Name and a salary band —
+    /// so the bands are ordered by MinSalary, which is the only orderable thing about them. That is a
+    /// proxy, and it is documented as one: if TDC ever gives grades an explicit order, order by that.
+    /// Grades are payroll's (read-only here).
+    /// </summary>
+    private async Task<int> ComputeGradeBandChangeAsync(StaffMovement movement, CancellationToken cancellationToken)
+    {
+        if (movement.CurrentSalaryGradeId is not Guid fromGradeId ||
+            movement.NewSalaryGradeId is not Guid toGradeId ||
+            fromGradeId == toGradeId)
+            return 0;
+
+        var tenantId = GetTenantId();
+        var grades = await _unitOfWork.Repository<SalaryGrade>()
+            .GetQueryable(g => g.TenantId == tenantId && g.IsActive)
+            .OrderBy(g => g.MinSalary)
+            .Select(g => g.Id)
+            .ToListAsync(cancellationToken);
+
+        var fromIndex = grades.IndexOf(fromGradeId);
+        var toIndex = grades.IndexOf(toGradeId);
+        if (fromIndex < 0 || toIndex < 0)
+            return 0;
+
+        return Math.Abs(toIndex - fromIndex);
+    }
+
     public async Task<StaffPromotionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
@@ -91,7 +161,11 @@ public class StaffPromotionService : IStaffPromotionService
     public async Task<StaffPromotionDto> CreateAsync(CreateStaffPromotionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        var movement = await GetOwnedParentMovementAsync(
+            createDto.MovementId, StaffMovementType.Promotion, requireNoExistingDetail: true);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        entity.GradeLevelIncrease = await ComputeGradeBandChangeAsync(movement, cancellationToken);
 
         await _repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -104,13 +178,19 @@ public class StaffPromotionService : IStaffPromotionService
     public async Task<StaffPromotionDto> UpdateAsync(UpdateStaffPromotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id);
+        var movement = await GetOwnedParentMovementAsync(
+            entity.MovementId, StaffMovementType.Promotion, requireNoExistingDetail: false);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+
+        // Recomputed on every edit, not just on create: the movement's grades can change while the
+        // detail row exists, and a stale band count is worse than none.
+        entity.GradeLevelIncrease = await ComputeGradeBandChangeAsync(movement, cancellationToken);
 
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await _repo.GetByMovementIdAsync(entity.MovementId) ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -178,6 +258,54 @@ public class StaffTransferService : IStaffTransferService
         return entity;
     }
 
+    /// <summary>
+    /// Validates the movement a detail row is being attached to.
+    ///
+    /// Three things none of the subtype services checked. The parent was never tested for tenancy,
+    /// so a detail row could be attached to ANOTHER TENANT'S movement by passing its id — the
+    /// cross-tenant child-attach shape. The parent's type was never tested, so a promotion detail
+    /// could hang off a demotion and the movement would then describe two different things at once.
+    /// And the relationship is one-to-one, so a second detail row for the same movement is not an
+    /// update, it is a contradiction.
+    /// </summary>
+    private async Task<StaffMovement> GetOwnedParentMovementAsync(
+        Guid movementId, StaffMovementType expectedType, bool requireNoExistingDetail)
+    {
+        var tenantId = GetTenantId();
+
+        var movement = await _unitOfWork.Repository<StaffMovement>().GetByIdAsync(movementId);
+        if (movement == null || movement.IsDeleted || movement.TenantId != tenantId)
+            throw new ArgumentException($"Staff movement with ID '{movementId}' was not found.");
+
+        if (movement.MovementType != expectedType)
+            throw new InvalidOperationException(
+                $"That movement is a {movement.MovementType}, so it cannot carry a transfer detail record.");
+
+        if (requireNoExistingDetail)
+        {
+            var existing = await _repo.GetByMovementIdAsync(movementId);
+            if (existing != null && !existing.IsDeleted)
+                throw new InvalidOperationException(
+                    $"Movement {movement.MovementNumber} already has a transfer detail record.");
+        }
+
+        return movement;
+    }
+
+    /// <summary>
+    /// Validates the replacement employee, if one is named. Unvalidated, a bad id reached SQL as an
+    /// FK violation and surfaced as an unexplained 500; the guard also leaves the row tracked, so
+    /// the write response resolves the replacement's name.
+    /// </summary>
+    private async Task ValidateReplacementAsync(Guid? replacementEmployeeId)
+    {
+        if (replacementEmployeeId is not Guid employeeId) return;
+
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The replacement employee with ID '{employeeId}' was not found.");
+    }
+
     public async Task<StaffTransferDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
@@ -229,6 +357,10 @@ public class StaffTransferService : IStaffTransferService
     public async Task<StaffTransferDto> CreateAsync(CreateStaffTransferDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedParentMovementAsync(
+            createDto.MovementId, StaffMovementType.Transfer, requireNoExistingDetail: true);
+        await ValidateReplacementAsync(createDto.ReplacementEmployeeId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _repo.AddAsync(entity);
@@ -242,6 +374,7 @@ public class StaffTransferService : IStaffTransferService
     public async Task<StaffTransferDto> UpdateAsync(UpdateStaffTransferDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id);
+        await ValidateReplacementAsync(updateDto.ReplacementEmployeeId);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -316,6 +449,91 @@ public class StaffDemotionService : IStaffDemotionService
         return entity;
     }
 
+    /// <summary>
+    /// Validates the movement a detail row is being attached to.
+    ///
+    /// Three things none of the subtype services checked. The parent was never tested for tenancy,
+    /// so a detail row could be attached to ANOTHER TENANT'S movement by passing its id — the
+    /// cross-tenant child-attach shape. The parent's type was never tested, so a promotion detail
+    /// could hang off a demotion and the movement would then describe two different things at once.
+    /// And the relationship is one-to-one, so a second detail row for the same movement is not an
+    /// update, it is a contradiction.
+    /// </summary>
+    private async Task<StaffMovement> GetOwnedParentMovementAsync(
+        Guid movementId, StaffMovementType expectedType, bool requireNoExistingDetail)
+    {
+        var tenantId = GetTenantId();
+
+        var movement = await _unitOfWork.Repository<StaffMovement>().GetByIdAsync(movementId);
+        if (movement == null || movement.IsDeleted || movement.TenantId != tenantId)
+            throw new ArgumentException($"Staff movement with ID '{movementId}' was not found.");
+
+        if (movement.MovementType != expectedType)
+            throw new InvalidOperationException(
+                $"That movement is a {movement.MovementType}, so it cannot carry a demotion detail record.");
+
+        if (requireNoExistingDetail)
+        {
+            var existing = await _repo.GetByMovementIdAsync(movementId);
+            if (existing != null && !existing.IsDeleted)
+                throw new InvalidOperationException(
+                    $"Movement {movement.MovementNumber} already has a demotion detail record.");
+        }
+
+        return movement;
+    }
+
+    /// <summary>
+    /// How many salary-grade bands the movement crosses — see the note on the promotion service.
+    /// Bands are ordered by MinSalary because SalaryGrade carries no explicit rank.
+    /// </summary>
+    private async Task<int> ComputeGradeBandChangeAsync(StaffMovement movement, CancellationToken cancellationToken)
+    {
+        if (movement.CurrentSalaryGradeId is not Guid fromGradeId ||
+            movement.NewSalaryGradeId is not Guid toGradeId ||
+            fromGradeId == toGradeId)
+            return 0;
+
+        var tenantId = GetTenantId();
+        var grades = await _unitOfWork.Repository<SalaryGrade>()
+            .GetQueryable(g => g.TenantId == tenantId && g.IsActive)
+            .OrderBy(g => g.MinSalary)
+            .Select(g => g.Id)
+            .ToListAsync(cancellationToken);
+
+        var fromIndex = grades.IndexOf(fromGradeId);
+        var toIndex = grades.IndexOf(toGradeId);
+        if (fromIndex < 0 || toIndex < 0)
+            return 0;
+
+        return Math.Abs(toIndex - fromIndex);
+    }
+
+    /// <summary>
+    /// A demotion may cite a disciplinary action or a PIP as its cause. Both are cross-area links —
+    /// discipline is area 9, the PIP is area 5 — so both are validated for existence and tenancy
+    /// rather than trusted from the body, where a wrong id would silently attribute someone's
+    /// demotion to an unrelated case.
+    /// </summary>
+    private async Task ValidateCausesAsync(Guid? disciplinaryActionId, Guid? pipId)
+    {
+        var tenantId = GetTenantId();
+
+        if (disciplinaryActionId is Guid actionId)
+        {
+            var action = await _unitOfWork.Repository<StaffDisciplinaryAction>().GetByIdAsync(actionId);
+            if (action == null || action.IsDeleted || action.TenantId != tenantId)
+                throw new ArgumentException($"The disciplinary action with ID '{actionId}' was not found.");
+        }
+
+        if (pipId is Guid planId)
+        {
+            var plan = await _unitOfWork.Repository<PerformanceImprovementPlan>().GetByIdAsync(planId);
+            if (plan == null || plan.IsDeleted || plan.TenantId != tenantId)
+                throw new ArgumentException($"The performance improvement plan with ID '{planId}' was not found.");
+        }
+    }
+
     public async Task<StaffDemotionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
@@ -353,7 +571,12 @@ public class StaffDemotionService : IStaffDemotionService
     public async Task<StaffDemotionDto> CreateAsync(CreateStaffDemotionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        var movement = await GetOwnedParentMovementAsync(
+            createDto.MovementId, StaffMovementType.Demotion, requireNoExistingDetail: true);
+        await ValidateCausesAsync(createDto.DisciplinaryActionId, createDto.PerformanceImprovementPlanId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        entity.GradeLevelDecrease = await ComputeGradeBandChangeAsync(movement, cancellationToken);
 
         await _repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -366,8 +589,14 @@ public class StaffDemotionService : IStaffDemotionService
     public async Task<StaffDemotionDto> UpdateAsync(UpdateStaffDemotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id);
+        var movement = await GetOwnedParentMovementAsync(
+            entity.MovementId, StaffMovementType.Demotion, requireNoExistingDetail: false);
 
+        // The cause links (disciplinary action, PIP) are not on the update DTO — they are set when
+        // the demotion detail is raised and are not re-pointed afterwards, so there is nothing to
+        // re-validate here.
         entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.GradeLevelDecrease = await ComputeGradeBandChangeAsync(movement, cancellationToken);
 
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -472,6 +701,41 @@ public class StaffSecondmentService : IStaffSecondmentService
         return entity;
     }
 
+    /// <summary>
+    /// Validates the movement a detail row is being attached to.
+    ///
+    /// Three things none of the subtype services checked. The parent was never tested for tenancy,
+    /// so a detail row could be attached to ANOTHER TENANT'S movement by passing its id — the
+    /// cross-tenant child-attach shape. The parent's type was never tested, so a promotion detail
+    /// could hang off a demotion and the movement would then describe two different things at once.
+    /// And the relationship is one-to-one, so a second detail row for the same movement is not an
+    /// update, it is a contradiction.
+    /// </summary>
+    private async Task<StaffMovement> GetOwnedParentMovementAsync(
+        Guid movementId, StaffMovementType expectedType, bool requireNoExistingDetail)
+    {
+        var tenantId = GetTenantId();
+
+        var movement = await _unitOfWork.Repository<StaffMovement>().GetByIdAsync(movementId);
+        if (movement == null || movement.IsDeleted || movement.TenantId != tenantId)
+            throw new ArgumentException($"Staff movement with ID '{movementId}' was not found.");
+
+        if (movement.MovementType != expectedType)
+            throw new InvalidOperationException(
+                $"That movement is a {movement.MovementType}, so it cannot carry a secondment detail record.");
+
+        if (requireNoExistingDetail)
+        {
+            var existing = await _repo.GetByMovementIdAsync(movementId);
+            if (existing != null && !existing.IsDeleted)
+                throw new InvalidOperationException(
+                    $"Movement {movement.MovementNumber} already has a secondment detail record.");
+        }
+
+        return movement;
+    }
+
+
     public async Task<StaffSecondmentDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
@@ -516,6 +780,12 @@ public class StaffSecondmentService : IStaffSecondmentService
     public async Task<StaffSecondmentDto> CreateAsync(CreateStaffSecondmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedParentMovementAsync(
+            createDto.MovementId, StaffMovementType.Secondment, requireNoExistingDetail: true);
+
+        if (createDto.EndDate.Date <= createDto.StartDate.Date)
+            throw new InvalidOperationException("A secondment must end after it starts.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _repo.AddAsync(entity);
@@ -547,6 +817,18 @@ public class StaffSecondmentService : IStaffSecondmentService
 
         if (entity.MaxExtensionMonths.HasValue && dto.ExtensionMonths > entity.MaxExtensionMonths.Value)
             throw new InvalidOperationException($"Extension cannot exceed {entity.MaxExtensionMonths} months for this secondment.");
+
+        if (dto.NewEndDate.Date <= entity.EndDate.Date)
+            throw new InvalidOperationException("The new end date must be after the current one.");
+
+        // The cap above is checked against ExtensionMonths, but the date being WRITTEN is
+        // NewEndDate, and nothing tied the two together: a request could pass one month — clearing
+        // a one-month cap — and a new end date five years out. The two now have to agree.
+        var impliedEnd = entity.EndDate.AddMonths(dto.ExtensionMonths);
+        if (dto.NewEndDate.Date > impliedEnd.Date)
+            throw new InvalidOperationException(
+                $"An extension of {dto.ExtensionMonths} month(s) ends on {impliedEnd:yyyy-MM-dd}, " +
+                $"not {dto.NewEndDate:yyyy-MM-dd}.");
 
         entity.EndDate = dto.NewEndDate;
 

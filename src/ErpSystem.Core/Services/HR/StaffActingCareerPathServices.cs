@@ -1,6 +1,7 @@
 ﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -163,9 +164,53 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     // ── CRUD & Workflow ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Validates a body-supplied employee id and returns the row.
+    ///
+    /// The guard stops an unknown or another tenant's id reaching the database as an FK violation —
+    /// which surfaced as an unexplained 500 rather than "that employee was not found" — and because
+    /// the row ends up tracked, the write response resolves the name instead of an empty string.
+    /// </summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The {role} employee with ID '{employeeId}' was not found.");
+        return employee;
+    }
+
     public async Task<StaffActingAppointmentDto> CreateAsync(CreateStaffActingAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        await GetOwnedEmployeeAsync(createDto.EmployeeId, "acting");
+        if (createDto.ActingForEmployeeId is Guid actingForId)
+            await GetOwnedEmployeeAsync(actingForId, "acted-for");
+
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetByIdAsync(createDto.ActingPositionId);
+        if (position == null || position.IsDeleted || position.TenantId != tenantId)
+            throw new ArgumentException($"The acting position with ID '{createDto.ActingPositionId}' was not found.");
+
+        if (createDto.EndDate is DateTime end && end.Date <= createDto.StartDate.Date)
+            throw new InvalidOperationException("An acting appointment must end after it starts.");
+
+        // One person cannot be acting in two posts at once. Nothing checked this, so the same
+        // employee could hold overlapping appointments — and each would independently qualify them
+        // for an acting allowance.
+        var overlapping = await _repo
+            .GetQueryable(a => a.TenantId == tenantId
+                            && a.EmployeeId == createDto.EmployeeId
+                            && (a.Status == StaffActingStatus.Active || a.Status == StaffActingStatus.Extended))
+            .ToListAsync(cancellationToken);
+
+        var clash = overlapping.FirstOrDefault(a =>
+            (a.EndDate ?? DateTime.MaxValue).Date >= createDto.StartDate.Date &&
+            a.StartDate.Date <= (createDto.EndDate ?? DateTime.MaxValue).Date);
+
+        if (clash != null)
+            throw new InvalidOperationException(
+                $"That employee is already acting under {clash.AppointmentNumber} over the same period.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.AppointmentNumber = await GenerateAppointmentNumberAsync(cancellationToken);
         entity.Status            = StaffActingStatus.Active;
@@ -175,7 +220,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
         _logger.LogInformation("Acting appointment created: {AppointmentNumber}", entity.AppointmentNumber);
 
-        return entity.ToDto();
+        return (await _repo.GetWithDetailsAsync(entity.Id) ?? entity).ToDto();
     }
 
     public async Task<StaffActingAppointmentDto> UpdateAsync(UpdateStaffActingAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)

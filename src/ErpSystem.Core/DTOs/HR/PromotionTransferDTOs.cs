@@ -907,10 +907,9 @@ public class UpdateStaffDemotionDto : UpdateDtoBase
     public bool RightToAppeal { get; set; }
     public DateTime? AppealDeadline { get; set; }
 
-    [MaxLength(1000)]
-    public string? EmployeeResponse { get; set; }
-
-    public DateTime? EmployeeResponseDate { get; set; }
+    // EmployeeResponse and EmployeeResponseDate are NOT on this DTO. The demoted employee's own
+    // words have a single writer — POST staff-demotions/{id}/respond, which refuses every caller
+    // but them — and accepting them here made an ordinary HR edit a way round that.
 }
 
 #endregion

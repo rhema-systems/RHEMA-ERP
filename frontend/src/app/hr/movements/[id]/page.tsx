@@ -53,6 +53,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { DocumentUploadField } from '@/components/hr/common/DocumentUploadField';
+import { MovementSubtypePanel } from '@/components/hr/movements/MovementSubtypePanel';
 import { movementService } from '@/services/hr/movement.service';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -294,7 +295,7 @@ export default function MovementDetailPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="approvals">Approvals ({m.approvalLevels?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="detail">{m.movementTypeName} detail</TabsTrigger>
           <TabsTrigger value="checklist">Checklist ({m.checklistItems?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="attachments">Documents ({m.attachments?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="history">History ({m.statusHistory?.length ?? 0})</TabsTrigger>
@@ -374,55 +375,9 @@ export default function MovementDetailPage() {
           </Card>
         </TabsContent>
 
-        {/* ── Approvals ────────────────────────────────────────────────────── */}
-        <TabsContent value="approvals">
-          <Card>
-            <CardContent className="p-0">
-              {(m.approvalLevels ?? []).length === 0 ? (
-                <EmptyState
-                  title="No approval chain"
-                  description="A movement with no approval levels cannot be authorised — its chain has to be built first."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Level</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Approver</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actioned</TableHead>
-                      <TableHead>Comments</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(m.approvalLevels ?? [])
-                      .slice()
-                      .sort((a, b) => a.level - b.level)
-                      .map((l) => (
-                        <TableRow key={l.id}>
-                          <TableCell>{l.level}</TableCell>
-                          <TableCell>{l.roleName}</TableCell>
-                          <TableCell>
-                            {l.approverName}
-                            {l.delegatedToName && (
-                              <div className="text-xs text-muted-foreground">
-                                Delegated to {l.delegatedToName}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge status={l.status} />
-                          </TableCell>
-                          <TableCell>{fmtDateTime(l.actionDate)}</TableCell>
-                          <TableCell className="max-w-xs truncate">{l.comments ?? '—'}</TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+        {/* ── Type-specific detail ─────────────────────────────────────────── */}
+        <TabsContent value="detail">
+          <MovementSubtypePanel movementId={id} movementType={m.movementType} />
         </TabsContent>
 
         {/* ── Checklist ────────────────────────────────────────────────────── */}

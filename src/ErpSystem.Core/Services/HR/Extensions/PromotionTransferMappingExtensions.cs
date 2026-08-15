@@ -797,8 +797,10 @@ public static class PromotionTransferMappingExtensions
         entity.NotificationDate = dto.NotificationDate;
         entity.RightToAppeal = dto.RightToAppeal;
         entity.AppealDeadline = dto.AppealDeadline;
-        entity.EmployeeResponse = dto.EmployeeResponse;
-        entity.EmployeeResponseDate = dto.EmployeeResponseDate;
+        // EmployeeResponse and EmployeeResponseDate are deliberately NOT copied. They have one
+        // writer — the employee's own /respond endpoint, which refuses anyone but the demoted
+        // employee — and copying them here made a plain HR edit a way round that guard: someone
+        // else's appeal, in their name, through a different door.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

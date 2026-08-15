@@ -606,6 +606,8 @@ export const navigationItems: NavItem[] = [
         icon: ArrowRightLeft,
         children: [
           { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft },
+          // Standalone: most acting appointments never come from a movement at all.
+          { title: 'Acting Appointments', href: '/hr/movements/acting', icon: UserCheck },
           // Open to every employee: the movements raised about them, and the tasks they owe on
           // someone else's. The register above answers 403 for non-HR.
           { title: 'My Movements', href: '/hr/movements/mine', icon: UserCheck },
