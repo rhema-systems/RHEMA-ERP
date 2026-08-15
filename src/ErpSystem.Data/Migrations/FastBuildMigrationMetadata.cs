@@ -173,3 +173,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260814191316_AddSheKpiComputation")] partial class AddSheKpiComputation { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260814215553_AddSheAuditStopWorkStatutory")] partial class AddSheAuditStopWorkStatutory { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260814230406_AddSheControlledDocumentRegister")] partial class AddSheControlledDocumentRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260815073258_AddSheEnvironmentalCompliance")] partial class AddSheEnvironmentalCompliance { }

@@ -411,6 +411,13 @@ public partial class ApplicationDbContext
     public DbSet<SheStopWorkOrder> SheStopWorkOrders { get; set; } = null!;
     public DbSet<SheStatutoryIncidentSubmission> SheStatutoryIncidentSubmissions { get; set; } = null!;
     public DbSet<SheControlledDocument> SheControlledDocuments { get; set; } = null!;
+    public DbSet<SheEnvironmentalPermit> SheEnvironmentalPermits { get; set; } = null!;
+    public DbSet<SheEnvironmentalMonitoringSchedule> SheEnvironmentalMonitoringSchedules { get; set; } = null!;
+    public DbSet<SheRegulatoryUpdate> SheRegulatoryUpdates { get; set; } = null!;
+    public DbSet<SheSustainabilityInitiative> SheSustainabilityInitiatives { get; set; } = null!;
+    public DbSet<SheEnvironmentalReview> SheEnvironmentalReviews { get; set; } = null!;
+    public DbSet<SheEnvironmentalReviewAction> SheEnvironmentalReviewActions { get; set; } = null!;
+    public DbSet<SheMonthlyEnvironmentalReport> SheMonthlyEnvironmentalReports { get; set; } = null!;
     public DbSet<SuccessionPlan> SuccessionPlans { get; set; } = null!;
     public DbSet<SuccessionCompetencyRequirement> SuccessionCompetencyRequirements { get; set; } = null!;
     public DbSet<SuccessionCandidate> SuccessionCandidates { get; set; } = null!;
@@ -8683,6 +8690,57 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => x.Status);
             // The review sweep's scan: Active documents by review date.
             e.HasIndex(x => new { x.TenantId, x.NextReviewDate });
+        });
+
+        // X. Environmental permit & licence register ──────────────────
+        builder.Entity<SheEnvironmentalPermit>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.RegisterNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // The renewal sweep's scan (FR-ENV-018): live permits by expiry date.
+            e.HasIndex(x => new { x.TenantId, x.ExpiryDate });
+        });
+
+        // Y. Environmental monitoring schedules ───────────────────────
+        builder.Entity<SheEnvironmentalMonitoringSchedule>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ScheduleNumber }).IsUnique();
+            // The monitoring sweep's scan (FR-ENV-024): active schedules by due date.
+            e.HasIndex(x => new { x.TenantId, x.NextDueDate });
+        });
+
+        // Z. Regulatory updates register ──────────────────────────────
+        builder.Entity<SheRegulatoryUpdate>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.UpdateNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.Domain);
+        });
+
+        // AA. Sustainability initiatives ──────────────────────────────
+        builder.Entity<SheSustainabilityInitiative>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.InitiativeNumber }).IsUnique();
+            e.HasIndex(x => x.Category);
+            e.HasIndex(x => x.Status);
+        });
+
+        // AB. Environmental compliance reviews ────────────────────────
+        builder.Entity<SheEnvironmentalReview>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ReviewNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // The project-notification sweep's scan (FR-ENV-014).
+            e.HasIndex(x => new { x.TenantId, x.PlannedStartDate });
+        });
+        builder.Entity<SheEnvironmentalReviewAction>(e => e.HasIndex(x => x.ReviewId));
+
+        // AC. Monthly environmental reports ───────────────────────────
+        builder.Entity<SheMonthlyEnvironmentalReport>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ReportNumber }).IsUnique();
+            // One report per period — regeneration reuses the row.
+            e.HasIndex(x => new { x.TenantId, x.Year, x.Month }).IsUnique();
         });
 
         // ── Force every relationship declared on a HR.Safety entity to Restrict ──

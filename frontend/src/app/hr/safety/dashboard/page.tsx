@@ -20,6 +20,9 @@ import {
   BadgeAlert,
   PowerOff,
   PackageMinus,
+  Leaf,
+  Scale,
+  Sprout,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -180,6 +183,48 @@ export default function SafetyDashboardPage() {
               value: data.ppeBelowReorder,
               icon: PackageMinus,
               tone: data.ppeBelowReorder > 0 ? 'warning' : 'default',
+            },
+          ]}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Environment</h2>
+        <MetricTiles
+          tiles={[
+            {
+              // FR-ENV-019 — expired environmental permits show red and escalate to management.
+              label: 'Expired environmental permits',
+              value: data.expiredEnvironmentalPermits,
+              icon: FileWarning,
+              tone: data.expiredEnvironmentalPermits > 0 ? 'danger' : 'default',
+            },
+            {
+              label: 'Permit renewals due (90 days)',
+              value: data.environmentalPermitsExpiringSoon,
+              icon: CalendarClock,
+              tone: data.environmentalPermitsExpiringSoon > 0 ? 'warning' : 'default',
+            },
+            {
+              label: 'Open environmental incidents',
+              value: data.openEnvironmentalIncidents,
+              icon: Leaf,
+              tone: data.openEnvironmentalIncidents > 0 ? 'warning' : 'default',
+            },
+            {
+              label: 'Monitoring cycles due (30 days)',
+              value: data.monitoringSchedulesDue,
+              icon: ClipboardList,
+            },
+            {
+              label: 'Open regulatory updates',
+              value: data.regulatoryUpdatesOpen,
+              icon: Scale,
+            },
+            {
+              label: 'Active sustainability initiatives',
+              value: data.sustainabilityInitiativesActive,
+              icon: Sprout,
             },
           ]}
         />

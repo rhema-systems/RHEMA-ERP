@@ -29,8 +29,10 @@ namespace ErpSystem.Core.Services.HR;
 //      due date re-arms the ladder by producing fresh keys.
 //
 // Ladder primitives: SheReminderLadder.StatutoryRenewalLadder is the
-// FR-ENV-017–019 180/90/60/30/14/7 sequence; slice 17's environmental permit
-// register is expected to ride the same EvaluateDated mechanics.
+// FR-ENV-017–019 180/90/60/30/14/7 sequence — since slice 17 the environmental
+// permit register rides it (renewal rungs, expiry flip, expired escalation),
+// and the engine also generates the previous month's environmental report when
+// missing (FR-ENV-033).
 //
 // Escalation (FR-SHE-250): overdue items escalate by depth — tier 1 (≤7 days)
 // notifies the HR/SHE audience, tiers 2 (≤30) and 3 (>30) publish the
@@ -56,6 +58,9 @@ public static class SheReminderLadder
     public static readonly int[] FortnightLadder = { 14, 7 };
     public static readonly int[] PermitLadder = { 3, 1 };
 
+    /// <summary>FR-ENV-014's three/two/one-month project-notification rungs.</summary>
+    public static readonly int[] ProjectNotificationLadder = { 90, 60, 30 };
+
     /// <summary>
     /// The rung to fire for a not-yet-due item, or null when the due date is
     /// still beyond the widest rung. Picks the smallest threshold ≥ days
@@ -78,6 +83,7 @@ public class SheReminderService : ISheReminderService
     private readonly IAppEventBus _appEventBus;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ISheCorrectiveActionTrackerService _correctiveActionTracker;
+    private readonly ISheMonthlyEnvironmentalReportService _monthlyReports;
     private readonly ILogger<SheReminderService> _logger;
 
     public SheReminderService(
@@ -85,12 +91,14 @@ public class SheReminderService : ISheReminderService
         IAppEventBus appEventBus,
         ICurrentUserProvider currentUserProvider,
         ISheCorrectiveActionTrackerService correctiveActionTracker,
+        ISheMonthlyEnvironmentalReportService monthlyReports,
         ILogger<SheReminderService> logger)
     {
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
         _currentUserProvider = currentUserProvider;
         _correctiveActionTracker = correctiveActionTracker;
+        _monthlyReports = monthlyReports;
         _logger = logger;
     }
 
@@ -154,6 +162,7 @@ public class SheReminderService : ISheReminderService
         RemindersQueued = r.RemindersQueued,
         PermitsExpired = r.PermitsExpired,
         RiskAssessmentsExpired = r.RiskAssessmentsExpired,
+        EnvironmentalPermitsExpired = r.EnvironmentalPermitsExpired,
     };
 
     // ── the sweep ────────────────────────────────────────────────────────────
@@ -200,6 +209,11 @@ public class SheReminderService : ISheReminderService
         await SweepStopWorkAsync(tenantId, today, pending, cancellationToken);
         await SweepStatutoryPendingAsync(tenantId, today, pending, cancellationToken);
         await SweepControlledDocumentsAsync(tenantId, today, pending, cancellationToken);
+        var envPermitsExpired = await SweepEnvironmentalPermitsAsync(tenantId, now, today, pending, cancellationToken);
+        await SweepMonitoringSchedulesAsync(tenantId, today, pending, cancellationToken);
+        await SweepRegulatoryUpdatesAsync(tenantId, today, pending, cancellationToken);
+        await SweepEnvironmentalReviewsAsync(tenantId, today, pending, cancellationToken);
+        await SweepMonthlyEnvironmentalReportAsync(tenantId, today, pending, cancellationToken);
 
         // Dedupe against everything any earlier run already dispatched. The unique
         // (TenantId, DedupeKey) index backstops the read-then-write race; one retry
@@ -214,6 +228,7 @@ public class SheReminderService : ISheReminderService
             TriggeredByUserId = triggeredByUserId,
             PermitsExpired = permitsExpired,
             RiskAssessmentsExpired = rasExpired,
+            EnvironmentalPermitsExpired = envPermitsExpired,
         };
         await _unitOfWork.Repository<SheReminderRun>().AddAsync(run);
 
@@ -821,6 +836,134 @@ public class SheReminderService : ISheReminderService
         }
     }
 
+    private async Task<int> SweepEnvironmentalPermitsAsync(Guid tenantId, DateTime now, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 17 — FR-ENV-018/019: the statutory 180/90/60/30/14/7 renewal
+        // ladder toward expiry, the expiry status flip (red status), and expired
+        // permits escalating by age to the management audience. Already-Expired
+        // rows stay in scope — an unrenewed permit is still a breach.
+        var scope = new[]
+        {
+            SheEnvironmentalPermitStatus.Active,
+            SheEnvironmentalPermitStatus.RenewalInProgress,
+            SheEnvironmentalPermitStatus.Suspended,
+            SheEnvironmentalPermitStatus.Expired,
+        };
+        var permits = await _unitOfWork.Repository<SheEnvironmentalPermit>()
+            .GetQueryable(p => p.TenantId == tenantId && !p.IsDeleted && scope.Contains(p.Status))
+            .ToListAsync(cancellationToken);
+
+        var expired = 0;
+        foreach (var permit in permits)
+        {
+            var reference = $"{permit.RegisterNumber} — {permit.PermitName}";
+            var actionPath = "/hr/safety/environmental/permits";
+
+            if (permit.ExpiryDate.Date < today)
+            {
+                if (permit.Status != SheEnvironmentalPermitStatus.Expired)
+                {
+                    // FR-ENV-019 — the engine flips the status; screens render Expired red.
+                    permit.Status = SheEnvironmentalPermitStatus.Expired;
+                    permit.UpdatedAt = now;
+                    await _unitOfWork.Repository<SheEnvironmentalPermit>().UpdateAsync(permit);
+                    expired++;
+                }
+                Evaluate(pending, today, "EnvironmentalPermitExpired", "Environmental permit",
+                    SheReminderLadder.StatutoryRenewalLadder, permit.Id, reference,
+                    permit.ExpiryDate, actionPath, fixedActivity: "EnvironmentalPermitExpired");
+            }
+            else
+            {
+                Evaluate(pending, today, "EnvironmentalPermitRenewal", "Environmental permit",
+                    SheReminderLadder.StatutoryRenewalLadder, permit.Id, reference,
+                    permit.ExpiryDate, actionPath, fixedActivity: "EnvironmentalPermitExpiringSoon");
+            }
+        }
+        return expired;
+    }
+
+    private async Task SweepMonitoringSchedulesAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 17 — FR-ENV-024: active monitoring schedules ladder toward their
+        // next due date; a missed cycle escalates like any overdue obligation.
+        var cutoff = today.AddDays(30);
+        var schedules = await _unitOfWork.Repository<SheEnvironmentalMonitoringSchedule>()
+            .GetQueryable(s => s.TenantId == tenantId && !s.IsDeleted && s.IsActive &&
+                               s.NextDueDate <= cutoff)
+            .Select(s => new { s.Id, s.ScheduleNumber, s.MonitoringType, s.NextDueDate })
+            .ToListAsync(cancellationToken);
+        foreach (var s in schedules)
+        {
+            Evaluate(pending, today, "MonitoringDue", "Environmental monitoring",
+                SheReminderLadder.MonthLadder, s.Id, $"{s.ScheduleNumber} — {s.MonitoringType}",
+                s.NextDueDate, "/hr/safety/environmental/monitoring-schedules");
+        }
+    }
+
+    private async Task SweepRegulatoryUpdatesAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 17 — FR-ENV-031's compliance deadline: an unclosed regulatory
+        // update ladders toward its deadline and escalates past it.
+        var cutoff = today.AddDays(30);
+        var updates = await _unitOfWork.Repository<SheRegulatoryUpdate>()
+            .GetQueryable(u => u.TenantId == tenantId && !u.IsDeleted &&
+                               u.Status != SheRegulatoryUpdateStatus.Closed &&
+                               u.ComplianceDeadline != null && u.ComplianceDeadline <= cutoff)
+            .Select(u => new { u.Id, u.UpdateNumber, u.Title, u.ComplianceDeadline })
+            .ToListAsync(cancellationToken);
+        foreach (var u in updates)
+        {
+            Evaluate(pending, today, "RegulatoryUpdateDeadline", "Regulatory update",
+                SheReminderLadder.MonthLadder, u.Id, $"{u.UpdateNumber} — {u.Title}",
+                u.ComplianceDeadline, "/hr/safety/environmental/regulatory-updates");
+        }
+    }
+
+    private async Task SweepEnvironmentalReviewsAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 17 — FR-ENV-014: project-notification reminders at three, two and
+        // one month before the planned start. A start date reached without
+        // clearance goes overdue and escalates — the honest advisory stance while
+        // the FR-ENV-010 hard block awaits the Project module and DR-09.
+        var cutoff = today.AddDays(90);
+        var reviews = await _unitOfWork.Repository<SheEnvironmentalReview>()
+            .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted &&
+                               r.Status != SheEnvironmentalReviewStatus.Rejected &&
+                               r.Status != SheEnvironmentalReviewStatus.ClearanceIssued &&
+                               r.PlannedStartDate != null && r.PlannedStartDate <= cutoff)
+            .Select(r => new { r.Id, r.ReviewNumber, r.ProjectName, r.PlannedStartDate })
+            .ToListAsync(cancellationToken);
+        foreach (var r in reviews)
+        {
+            Evaluate(pending, today, "ProjectReviewDue", "Environmental project review",
+                SheReminderLadder.ProjectNotificationLadder, r.Id, $"{r.ReviewNumber} — {r.ProjectName}",
+                r.PlannedStartDate, $"/hr/safety/environmental/reviews/{r.Id}");
+        }
+    }
+
+    private async Task SweepMonthlyEnvironmentalReportAsync(Guid tenantId, DateTime today, List<PendingReminder> pending, CancellationToken cancellationToken)
+    {
+        // Slice 17 — FR-ENV-033: the engine generates the previous month's
+        // environmental report when missing. The report row rides the run's
+        // single SaveChanges, so it commits atomically with the dedupe claim;
+        // the "ready" notice keys on the period and fires once ever.
+        var prev = today.AddMonths(-1);
+        var generated = await _monthlyReports.EnsureGeneratedForTenantAsync(tenantId, prev.Year, prev.Month, cancellationToken);
+        if (generated == null) return;
+
+        var (reportId, reportNumber) = generated.Value;
+        pending.Add(new PendingReminder(
+            "MonthlyEnvironmentalReport", "Monthly environmental report", reportId, reportNumber,
+            null, 0, 0,
+            $"MonthlyEnvReport:{prev.Year}-{prev.Month:D2}",
+            "EnvironmentalReportReady", $"/hr/safety/environmental/monthly-reports/{reportId}",
+            new Dictionary<string, object>
+            {
+                ["Detail"] = $"generated for {prev.Year}-{prev.Month:D2} and awaiting review",
+            }));
+    }
+
     // ── topic self-healing ───────────────────────────────────────────────────
 
     private sealed record TopicSeed(
@@ -866,6 +1009,29 @@ public class SheReminderService : ISheReminderService
             "System-seeded SHE reminder — a PPE inventory item is at or below its reorder level.",
             "PPE stock low: {{Reference}}",
             "{{Reference}} is at or below its reorder level ({{Stock}} in stock, reorder at {{Reorder}})."),
+        // ── slice 17 — Part D environmental core ──
+        new("EnvironmentalPermitExpiringSoon", "SHE Environmental Permit: Renewal Due",
+            "System-seeded SHE reminder — an environmental permit or licence approaches expiry (FR-ENV-018 renewal ladder).",
+            "Environmental permit renewal: {{Reference}}",
+            "Environmental permit {{Reference}} expires on {{DueDate}} — {{Days}} day(s) remaining."),
+        new("EnvironmentalPermitExpired", "SHE Environmental Permit: Expired",
+            "System-seeded SHE escalation — an environmental permit or licence is past expiry (FR-ENV-019: red dashboard status, management escalation).",
+            "Environmental permit EXPIRED: {{Reference}}",
+            "Environmental permit {{Reference}} expired on {{DueDate}} and is {{Days}} day(s) overdue — escalation tier {{EscalationTier}}.",
+            EscalatesToAdmins: true),
+        new("EnvironmentalIncidentReported", "SHE Environmental Incident: Reported",
+            "System-seeded SHE alert — an employee reported an environmental incident (FR-ENV-025 auto-alert).",
+            "Environmental incident reported: {{Reference}}",
+            "Environmental incident {{Reference}}: {{Detail}}."),
+        new("EnvironmentalReportReady", "SHE Environmental Report: Generated",
+            "System-seeded SHE notice — the reminder engine generated the monthly environmental report (FR-ENV-033).",
+            "Monthly environmental report ready: {{Reference}}",
+            "{{ItemType}} {{Reference}} {{Detail}}."),
+        new("EnvironmentalManagementNotice", "SHE Environmental: Management Notice",
+            "System-seeded SHE escalation — an environmental item communicated to management (FR-ENV-031 regulatory notices, FR-ENV-034 report submissions).",
+            "Environmental notice: {{Reference}}",
+            "{{ItemType}} {{Reference}} — {{Detail}}.",
+            EscalatesToAdmins: true),
     };
 
     /// <summary>

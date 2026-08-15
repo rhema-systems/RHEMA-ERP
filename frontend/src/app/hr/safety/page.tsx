@@ -28,6 +28,9 @@ import {
   OctagonX,
   FileSearch,
   FolderArchive,
+  CalendarClock,
+  Sprout,
+  FileBarChart,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -273,6 +276,55 @@ export default function SafetyHomePage() {
                 'Disposal records and the waste-type catalogue. Manifest-requiring types are gated on their certificate.',
               href: '/hr/safety/waste',
               icon: Recycle,
+            },
+            {
+              title: 'Report Environmental Incident',
+              description:
+                'Open to every employee — report a spill, exceedance or dumping; the SHE team is alerted automatically.',
+              href: '/hr/safety/report-environmental-incident',
+              icon: Megaphone,
+            },
+            {
+              title: 'Environmental Permits',
+              description:
+                'The permit and licence register with the statutory 180/90/60/30/14/7 renewal ladder — expired permits go red and escalate.',
+              href: '/hr/safety/environmental/permits',
+              icon: FileCheck,
+            },
+            {
+              title: 'Monitoring Schedules',
+              description:
+                'Recurring dust, noise, air, water and waste-storage monitoring cycles with reminders and evidencing records.',
+              href: '/hr/safety/environmental/monitoring-schedules',
+              icon: CalendarClock,
+            },
+            {
+              title: 'Regulatory Updates',
+              description:
+                'New LIs and standards from EPA, GSA and ministries — assessed, communicated to management and tracked to compliance closure.',
+              href: '/hr/safety/environmental/regulatory-updates',
+              icon: Scale,
+            },
+            {
+              title: 'Sustainability',
+              description:
+                'Energy, water, paper, tree-planting, recycling and carbon initiatives with their KPIs and cost savings.',
+              href: '/hr/safety/environmental/sustainability',
+              icon: Sprout,
+            },
+            {
+              title: 'Environmental Reviews',
+              description:
+                'Compliance screening and clearance for projects and works — approval, EPA submission and commencement, with a full audit trail.',
+              href: '/hr/safety/environmental/reviews',
+              icon: ClipboardCheck,
+            },
+            {
+              title: 'Monthly Environmental Reports',
+              description:
+                'Auto-generated monthly figures across permits, waste, incidents, regulations and sustainability — submitted to management and retained.',
+              href: '/hr/safety/environmental/monthly-reports',
+              icon: FileBarChart,
             },
           ]}
         />

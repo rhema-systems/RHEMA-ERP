@@ -532,7 +532,10 @@ public enum SheEnvironmentalMonitoringType
     Vibration = 5,
     Emissions = 6,
     SoilQuality = 7,
-    Lighting = 8
+    Lighting = 8,
+    // Slice 17 — the two FR-ENV-023 schedule subjects the original list lacked.
+    WasteStorageInspection = 9,
+    AnnualPerformanceReview = 10
 }
 
 // ── Occupational Health ───────────────────────────────────
@@ -780,4 +783,91 @@ public enum SheControlledDocumentStatus
     Active = 2,
     UnderReview = 3,
     Archived = 4
+}
+
+// ── Part D environmental core (slice 17) ──────────────────
+
+/// <summary>FR-ENV-017 — what kind of authorisation the register row is.</summary>
+public enum SheEnvironmentalPermitType
+{
+    EnvironmentalPermit = 1,
+    EpaRegistration = 2,
+    OperatingLicence = 3,
+    Certificate = 4,
+    Consent = 5,
+    Other = 6
+}
+
+public enum SheEnvironmentalPermitStatus
+{
+    Active = 1,
+    RenewalInProgress = 2,
+    /// <summary>Assigned by the reminder engine when the expiry date passes (FR-ENV-019 red status).</summary>
+    Expired = 3,
+    Suspended = 4,
+    Archived = 5
+}
+
+// FR-ENV-030–032 / FR-SHE-182 — regulatory updates register.
+public enum SheRegulatoryUpdateRiskLevel
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4
+}
+
+public enum SheRegulatoryUpdateStatus
+{
+    Recorded = 1,
+    ActionsInProgress = 2,
+    Closed = 3
+}
+
+// FR-ENV-028 — the spec's eight sustainability initiative families.
+public enum SheSustainabilityCategory
+{
+    EnergySavings = 1,
+    WaterSavings = 2,
+    PaperReduction = 3,
+    TreePlanting = 4,
+    Recycling = 5,
+    WasteRecycled = 6,
+    CarbonReduction = 7,
+    CostSavings = 8,
+    Other = 9
+}
+
+public enum SheSustainabilityStatus
+{
+    Planned = 1,
+    InProgress = 2,
+    Completed = 3,
+    Cancelled = 4
+}
+
+/// <summary>FR-ENV-012's mandatory work-classification taxonomy at project creation.</summary>
+public enum SheEnvironmentalWorkClassification
+{
+    PlannedProject = 1,
+    Upgrade = 2,
+    Maintenance = 3,
+    Construction = 4,
+    Demolition = 5,
+    InfrastructureModification = 6,
+    Other = 7
+}
+
+/// <summary>
+/// FR-ENV-001–016 review lifecycle. Clearance (FR-ENV-016) is a step past
+/// approval: an approved review still needs its clearance issued (and, where
+/// flagged, management approval first) before FR-ENV-010's gate would open.
+/// </summary>
+public enum SheEnvironmentalReviewStatus
+{
+    Submitted = 1,
+    CorrectionsRequested = 2,
+    Approved = 3,
+    Rejected = 4,
+    ClearanceIssued = 5
 }

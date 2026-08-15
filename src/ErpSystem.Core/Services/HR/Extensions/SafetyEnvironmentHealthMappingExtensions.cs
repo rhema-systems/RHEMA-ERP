@@ -77,6 +77,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
         LocationId = e.LocationId,
         LocationName = e.Location?.Name,
         GenerationArea = e.GenerationArea,
+        StorageLocation = e.StorageLocation,
         DisposalDate = e.DisposalDate,
         Quantity = e.Quantity,
         Unit = e.Unit,
@@ -110,6 +111,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
         WasteTypeId = dto.WasteTypeId,
         LocationId = dto.LocationId,
         GenerationArea = dto.GenerationArea,
+        StorageLocation = dto.StorageLocation,
         DisposalDate = dto.DisposalDate,
         Quantity = dto.Quantity,
         Unit = dto.Unit,
@@ -128,6 +130,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
         e.WasteTypeId = dto.WasteTypeId;
         e.LocationId = dto.LocationId;
         e.GenerationArea = dto.GenerationArea;
+        e.StorageLocation = dto.StorageLocation;
         e.DisposalDate = dto.DisposalDate;
         e.Quantity = dto.Quantity;
         e.Unit = dto.Unit;
@@ -183,6 +186,8 @@ public static class SafetyEnvironmentHealthMappingExtensions
         ReportedDate = e.ReportedDate,
         InvestigationFindings = e.InvestigationFindings,
         CorrectiveActions = e.CorrectiveActions,
+        PreventiveActions = e.PreventiveActions,
+        LessonsLearned = e.LessonsLearned,
         ClosedDate = e.ClosedDate,
         ClosedById = e.ClosedById,
         ClosedByName = e.ClosedBy?.FullName,
@@ -241,6 +246,8 @@ public static class SafetyEnvironmentHealthMappingExtensions
         e.Status = dto.Status;
         e.InvestigationFindings = dto.InvestigationFindings;
         e.CorrectiveActions = dto.CorrectiveActions;
+        e.PreventiveActions = dto.PreventiveActions;
+        e.LessonsLearned = dto.LessonsLearned;
         e.UpdatedAt = DateTime.UtcNow;
         e.UpdatedBy = userId.ToString();
     }
@@ -262,6 +269,8 @@ public static class SafetyEnvironmentHealthMappingExtensions
         UpdatedBy = e.UpdatedBy,
         RecordNumber = e.RecordNumber,
         MonitoringType = e.MonitoringType,
+        ScheduleId = e.ScheduleId,
+        ScheduleNumber = e.Schedule?.ScheduleNumber,
         LocationId = e.LocationId,
         LocationName = e.Location?.Name,
         MonitoringPoint = e.MonitoringPoint,
@@ -285,6 +294,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
         TenantId = tenantId,
         RecordNumber = dto.RecordNumber ?? string.Empty,
         MonitoringType = dto.MonitoringType,
+        ScheduleId = dto.ScheduleId,
         LocationId = dto.LocationId,
         MonitoringPoint = dto.MonitoringPoint,
         MeasurementDate = dto.MeasurementDate,
@@ -303,6 +313,7 @@ public static class SafetyEnvironmentHealthMappingExtensions
     public static void UpdateEntity(this SheEnvironmentalMonitoringRecord e, UpdateSheEnvironmentalMonitoringRecordDto dto, Guid userId)
     {
         e.MonitoringType = dto.MonitoringType;
+        e.ScheduleId = dto.ScheduleId;
         e.LocationId = dto.LocationId;
         e.MonitoringPoint = dto.MonitoringPoint;
         e.MeasurementDate = dto.MeasurementDate;

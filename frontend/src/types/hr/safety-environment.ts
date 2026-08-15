@@ -138,7 +138,9 @@ export type SheEnvironmentalMonitoringType =
   | 'Vibration'
   | 'Emissions'
   | 'SoilQuality'
-  | 'Lighting';
+  | 'Lighting'
+  | 'WasteStorageInspection'
+  | 'AnnualPerformanceReview';
 
 export const SHE_ENV_MONITORING_TYPE_OPTIONS = opts<SheEnvironmentalMonitoringType>([
   ['Noise', 'Noise'],
@@ -149,6 +151,8 @@ export const SHE_ENV_MONITORING_TYPE_OPTIONS = opts<SheEnvironmentalMonitoringTy
   ['Emissions', 'Emissions'],
   ['SoilQuality', 'Soil Quality'],
   ['Lighting', 'Lighting'],
+  ['WasteStorageInspection', 'Waste Storage Inspection'],
+  ['AnnualPerformanceReview', 'Annual Performance Review'],
 ]);
 
 // ── Waste types ───────────────────────────────────────────────────────────────
@@ -209,6 +213,8 @@ export interface SheWasteDisposalRecord extends AuditFields {
   locationId?: string | null;
   locationName?: string | null;
   generationArea?: string | null;
+  /** On-site interim storage before disposal (FR-ENV-020). */
+  storageLocation?: string | null;
   disposalDate: string;
   quantity: number;
   unit: SheWasteMeasurementUnit;
@@ -230,6 +236,7 @@ export interface SheWasteDisposalRecordCreateRequest {
   wasteTypeId: string;
   locationId?: string | null;
   generationArea?: string | null;
+  storageLocation?: string | null;
   disposalDate: string;
   quantity: number;
   unit: SheWasteMeasurementUnit;
@@ -247,6 +254,7 @@ export interface SheWasteDisposalRecordUpdateRequest {
   wasteTypeId: string;
   locationId?: string | null;
   generationArea?: string | null;
+  storageLocation?: string | null;
   disposalDate: string;
   quantity: number;
   unit: SheWasteMeasurementUnit;
@@ -302,6 +310,9 @@ export interface SheEnvironmentalIncident extends AuditFields {
   reportedDate: string;
   investigationFindings?: string | null;
   correctiveActions?: string | null;
+  /** FR-ENV-027 (slice 17). */
+  preventiveActions?: string | null;
+  lessonsLearned?: string | null;
   closedDate?: string | null;
   closedById?: string | null;
   closedByName?: string | null;
@@ -345,6 +356,8 @@ export interface SheEnvironmentalIncidentUpdateRequest {
   status: SheEnvironmentalIncidentStatus;
   investigationFindings?: string | null;
   correctiveActions?: string | null;
+  preventiveActions?: string | null;
+  lessonsLearned?: string | null;
 }
 
 export interface SheEnvironmentalIncidentCloseRequest {
@@ -352,6 +365,9 @@ export interface SheEnvironmentalIncidentCloseRequest {
   closedById: string;
   closedDate: string;
   correctiveActions?: string | null;
+  preventiveActions?: string | null;
+  /** FR-ENV-027 — captured at close-out. */
+  lessonsLearned?: string | null;
 }
 
 // ── Monitoring records ────────────────────────────────────────────────────────
@@ -361,6 +377,9 @@ export interface SheEnvironmentalMonitoringRecord extends AuditFields {
   recordNumber: string;
   monitoringType: SheEnvironmentalMonitoringType;
   monitoringTypeName: string;
+  /** Set when the record completed a scheduled monitoring activity (FR-ENV-023). */
+  scheduleId?: string | null;
+  scheduleNumber?: string | null;
   locationId?: string | null;
   locationName?: string | null;
   monitoringPoint?: string | null;
@@ -384,6 +403,7 @@ export interface SheEnvironmentalMonitoringRecordCreateRequest {
   /** Leave blank — the server assigns EM-YYYY-NNNN. */
   recordNumber?: string | null;
   monitoringType: SheEnvironmentalMonitoringType;
+  scheduleId?: string | null;
   locationId?: string | null;
   monitoringPoint?: string | null;
   measurementDate: string;
@@ -402,6 +422,7 @@ export interface SheEnvironmentalMonitoringRecordCreateRequest {
 export interface SheEnvironmentalMonitoringRecordUpdateRequest {
   id: string;
   monitoringType: SheEnvironmentalMonitoringType;
+  scheduleId?: string | null;
   locationId?: string | null;
   monitoringPoint?: string | null;
   measurementDate: string;

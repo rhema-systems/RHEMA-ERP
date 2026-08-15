@@ -547,6 +547,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ISheAuditService, SheAuditService>();
         services.AddScoped<ISheStopWorkService, SheStopWorkService>();
         services.AddScoped<ISheControlledDocumentService, SheControlledDocumentService>();
+        services.AddScoped<ISheEnvironmentalPermitService, SheEnvironmentalPermitService>();
+        services.AddScoped<ISheEnvironmentalGovernanceService, SheEnvironmentalGovernanceService>();
+        services.AddScoped<ISheEnvironmentalReviewService, SheEnvironmentalReviewService>();
+        services.AddScoped<ISheMonthlyEnvironmentalReportService, SheMonthlyEnvironmentalReportService>();
         services.AddScoped<IOrientationCategoryService, OrientationCategoryService>();
         services.AddScoped<IOrientationProgramService, OrientationProgramService>();
         services.AddScoped<IOrientationSessionService, OrientationSessionService>();

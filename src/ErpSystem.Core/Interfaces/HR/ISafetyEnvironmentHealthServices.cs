@@ -44,6 +44,10 @@ public interface ISheEnvironmentalService
     Task<IEnumerable<SheEnvironmentalIncidentSummaryDto>> GetIncidentsByDateRangeAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
     Task<IEnumerable<SheEnvironmentalIncidentSummaryDto>> GetOpenIncidentsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<SheEnvironmentalIncidentSummaryDto>> GetIncidentsReportedToEpaAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The caller's own reported incidents — the slice-17 open self-service read (FR-ENV-025).</summary>
+    Task<IEnumerable<SheEnvironmentalIncidentSummaryDto>> GetMyIncidentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
     Task<SheEnvironmentalIncidentDto> CreateIncidentAsync(CreateSheEnvironmentalIncidentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<SheEnvironmentalIncidentDto> UpdateIncidentAsync(UpdateSheEnvironmentalIncidentDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> CloseIncidentAsync(CloseSheEnvironmentalIncidentDto dto, Guid userId, CancellationToken cancellationToken = default);

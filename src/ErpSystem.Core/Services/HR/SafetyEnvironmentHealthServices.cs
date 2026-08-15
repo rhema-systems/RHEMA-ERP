@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -287,6 +288,7 @@ public class SheEnvironmentalService : ISheEnvironmentalService
     private readonly ISheEnvironmentalMonitoringRecordRepository _monitoringRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAppEventBus _appEventBus;
     private readonly ILogger<SheEnvironmentalService> _logger;
 
     public SheEnvironmentalService(
@@ -294,12 +296,14 @@ public class SheEnvironmentalService : ISheEnvironmentalService
         ISheEnvironmentalMonitoringRecordRepository monitoringRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IAppEventBus appEventBus,
         ILogger<SheEnvironmentalService> logger)
     {
         _incidentRepository = incidentRepository;
         _monitoringRepository = monitoringRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -332,7 +336,7 @@ public class SheEnvironmentalService : ISheEnvironmentalService
 
     private async Task<SheEnvironmentalMonitoringRecord> GetOwnedMonitoringAsync(Guid id)
     {
-        var entity = await _monitoringRepository.GetByIdAsync(id, r => r.Location!, r => r.MeasuredBy);
+        var entity = await _monitoringRepository.GetByIdAsync(id, r => r.Location!, r => r.MeasuredBy, r => r.Schedule!);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Environmental monitoring record with ID '{id}' not found.");
         return entity;
@@ -462,6 +466,17 @@ public class SheEnvironmentalService : ISheEnvironmentalService
         return (await _incidentRepository.GetReportedToEpaAsync()).Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    public async Task<IEnumerable<SheEnvironmentalIncidentSummaryDto>> GetMyIncidentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var incidents = await _incidentRepository
+            .GetQueryable(e => e.TenantId == tenantId && e.ReportedById == employeeId)
+            .Include(e => e.Location)
+            .OrderByDescending(e => e.ReportedDate)
+            .ToListAsync(cancellationToken);
+        return incidents.ToSummaryDtoList();
+    }
+
     public async Task<SheEnvironmentalIncidentDto> CreateIncidentAsync(CreateSheEnvironmentalIncidentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
@@ -485,6 +500,27 @@ public class SheEnvironmentalService : ISheEnvironmentalService
         await _incidentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Environmental incident created: {IncidentNumber}", entity.IncidentNumber);
+
+        // FR-ENV-025 — auto-alert the SHE audience on every report. The topic is
+        // seeded by the reminder engine's self-heal; a publish before the first
+        // sweep is a documented no-op, and the report itself never depends on it.
+        await _appEventBus.PublishAsync(new EntityActivityEvent
+        {
+            TenantId = tenantId,
+            EntityType = "SafetyCompliance",
+            Activity = "EnvironmentalIncidentReported",
+            Audience = "Internal",
+            EntityId = entity.Id,
+            TriggeredByUserId = userId,
+            Data = new Dictionary<string, object>
+            {
+                ["ItemType"] = "Environmental incident",
+                ["Reference"] = entity.IncidentNumber,
+                ["Detail"] = $"{entity.Type} ({entity.Severity}) reported",
+                ["ActionPath"] = "/hr/safety/environmental",
+            },
+        }, cancellationToken);
+
         return entity.ToDto();
     }
 
@@ -516,6 +552,9 @@ public class SheEnvironmentalService : ISheEnvironmentalService
         entity.ClosedById = dto.ClosedById;
         entity.ClosedDate = dto.ClosedDate;
         if (!string.IsNullOrWhiteSpace(dto.CorrectiveActions)) entity.CorrectiveActions = dto.CorrectiveActions;
+        // FR-ENV-027 (slice 17) — preventive actions and lessons learned captured at close-out.
+        if (!string.IsNullOrWhiteSpace(dto.PreventiveActions)) entity.PreventiveActions = dto.PreventiveActions;
+        if (!string.IsNullOrWhiteSpace(dto.LessonsLearned)) entity.LessonsLearned = dto.LessonsLearned;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 
@@ -536,7 +575,7 @@ public class SheEnvironmentalService : ISheEnvironmentalService
     public async Task<SheEnvironmentalMonitoringRecordDto> GetMonitoringRecordAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _monitoringRepository.GetByIdAsync(id, r => r.Location, r => r.MeasuredBy);
+        var entity = await _monitoringRepository.GetByIdAsync(id, r => r.Location, r => r.MeasuredBy, r => r.Schedule!);
         if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Environmental monitoring record with ID '{id}' not found.");
         return entity.ToDto();

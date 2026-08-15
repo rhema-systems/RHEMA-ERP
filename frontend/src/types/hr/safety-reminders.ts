@@ -19,6 +19,8 @@ export interface SheReminderRun {
   remindersQueued: number;
   permitsExpired: number;
   riskAssessmentsExpired: number;
+  /** Environmental permits the sweep flipped to Expired (slice 17, FR-ENV-019). */
+  environmentalPermitsExpired: number;
 }
 
 export interface SheReminderRunResult extends SheReminderRun {
@@ -65,6 +67,19 @@ export const SHE_REMINDER_KIND_LABELS: Record<string, string> = {
   FirstAidInspectionDue: 'First-aid station inspection due',
   PpeIssuanceExpiring: 'Issued PPE expiring',
   PpeStockLow: 'PPE stock at reorder level',
+  // Slices 14–16 (labels backfilled in slice 17).
+  CorrectiveActionDue: 'Corrective action due',
+  AuditDue: 'SHE audit due',
+  StopWorkOpen: 'Stop-work order open',
+  StatutorySubmissionPending: 'Statutory submission pending',
+  DocumentReviewDue: 'Controlled document review due',
+  // Slice 17 — Part D environmental core.
+  EnvironmentalPermitRenewal: 'Environmental permit renewal due',
+  EnvironmentalPermitExpired: 'Environmental permit expired',
+  MonitoringDue: 'Environmental monitoring due',
+  RegulatoryUpdateDeadline: 'Regulatory update deadline',
+  ProjectReviewDue: 'Project environmental review due',
+  MonthlyEnvironmentalReport: 'Monthly environmental report generated',
 };
 
 export const sheReminderKindLabel = (kind: string): string =>

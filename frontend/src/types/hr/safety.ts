@@ -272,6 +272,14 @@ export interface SheDashboard {
   equipmentExpiringCertification: number;
   equipmentOutOfService: number;
   ppeBelowReorder: number;
+  // Environment (slice 17 — Part D core)
+  /** FR-ENV-019 — rendered red. */
+  expiredEnvironmentalPermits: number;
+  environmentalPermitsExpiringSoon: number;
+  openEnvironmentalIncidents: number;
+  monitoringSchedulesDue: number;
+  regulatoryUpdatesOpen: number;
+  sustainabilityInitiativesActive: number;
 }
 
 // ── Performance snapshots ─────────────────────────────────────────────────────

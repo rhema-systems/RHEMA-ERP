@@ -110,6 +110,8 @@ import {
   WalletCards,
   Layers,
   FileStack,
+  FileBarChart,
+  Sprout,
   Library,
   Gauge,
   Lightbulb,
@@ -610,6 +612,8 @@ export const navigationItems: NavItem[] = [
           { title: 'Report a Hazard', href: '/hr/safety/report-hazard', icon: FileWarning },
           // Slice 15: stop-work authority — raising is the area's fourth open employee action.
           { title: 'Raise Stop-Work', href: '/hr/safety/raise-stop-work', icon: OctagonX },
+          // Slice 17: employee environmental-incident reporting — the fifth open action (FR-ENV-025).
+          { title: 'Report Environmental Incident', href: '/hr/safety/report-environmental-incident', icon: Leaf },
           { title: 'Incidents', href: '/hr/safety/incidents', icon: AlertTriangle },
           { title: 'Hazards', href: '/hr/safety/hazards', icon: ShieldAlert },
           { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList },
@@ -629,6 +633,15 @@ export const navigationItems: NavItem[] = [
           { title: 'Return to Work', href: '/hr/safety/return-to-work', icon: HeartPulse },
           { title: 'Environmental', href: '/hr/safety/environmental', icon: Leaf },
           { title: 'Waste Management', href: '/hr/safety/waste', icon: Recycle },
+          // Slice 17 — Part D environmental core (FR-ENV): the permit/licence register with the
+          // statutory renewal ladder, monitoring schedules, the regulatory-updates register,
+          // sustainability, compliance reviews/clearance and the monthly environmental report.
+          { title: 'Environmental Permits', href: '/hr/safety/environmental/permits', icon: FileCheck },
+          { title: 'Monitoring Schedules', href: '/hr/safety/environmental/monitoring-schedules', icon: CalendarClock },
+          { title: 'Regulatory Updates', href: '/hr/safety/environmental/regulatory-updates', icon: Scale },
+          { title: 'Sustainability', href: '/hr/safety/environmental/sustainability', icon: Sprout },
+          { title: 'Environmental Reviews', href: '/hr/safety/environmental/reviews', icon: ClipboardCheck },
+          { title: 'Monthly Env. Reports', href: '/hr/safety/environmental/monthly-reports', icon: FileBarChart },
           { title: 'Safety Committees', href: '/hr/safety/committees', icon: Users },
           { title: 'Regulatory Compliance', href: '/hr/safety/regulatory', icon: Scale },
           { title: 'Safety Signage', href: '/hr/safety/signs', icon: Signpost },

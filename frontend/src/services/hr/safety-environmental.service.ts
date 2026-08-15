@@ -68,6 +68,15 @@ class SafetyEnvironmentalService {
     );
   }
 
+  /** The caller's own reported incidents — open to every employee (FR-ENV-025). */
+  getMyIncidents(): Promise<SheEnvironmentalIncidentSummary[]> {
+    return apiService.get<SheEnvironmentalIncidentSummary[]>(`${this.baseUrl}/incidents/mine`);
+  }
+
+  /**
+   * Open to every authenticated employee (FR-ENV-025) — non-HR reporters always
+   * report as themselves (the token wins over the body's reportedById).
+   */
   createIncident(data: SheEnvironmentalIncidentCreateRequest): Promise<SheEnvironmentalIncident> {
     return apiService.post<SheEnvironmentalIncident>(`${this.baseUrl}/incidents`, data);
   }

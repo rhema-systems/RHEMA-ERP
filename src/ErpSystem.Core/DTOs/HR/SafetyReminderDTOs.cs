@@ -15,6 +15,7 @@ public class SheReminderRunDto
     public int RemindersQueued { get; set; }
     public int PermitsExpired { get; set; }
     public int RiskAssessmentsExpired { get; set; }
+    public int EnvironmentalPermitsExpired { get; set; }
 }
 
 public class SheReminderRunResultDto : SheReminderRunDto
