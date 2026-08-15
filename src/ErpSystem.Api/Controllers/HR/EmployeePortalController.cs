@@ -174,7 +174,7 @@ public class EmployeePortalController : ControllerBase
             Comments   = dto.Comments
         };
 
-        var success = await _movementService.RecordEmployeeResponseAsync(respondDto, ct);
+        var success = await _movementService.RecordEmployeeResponseAsync(respondDto, empId, ct);
         return success ? Ok() : Problem(detail: "Unable to record response.", statusCode: 500);
     }
 

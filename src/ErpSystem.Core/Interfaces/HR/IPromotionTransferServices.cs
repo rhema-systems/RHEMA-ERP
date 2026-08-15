@@ -104,8 +104,12 @@ public interface IStaffMovementService
     /// <summary>Records the final authorisation once all approval levels are cleared.</summary>
     Task<bool> AuthorizeAsync(AuthorizeStaffMovementDto dto, Guid authorizedByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Records the employee's acceptance or rejection of the proposed movement.</summary>
-    Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records the employee's acceptance or rejection of the proposed movement.
+    /// <paramref name="respondingEmployeeId"/> is the token employee and must be the movement's subject —
+    /// acceptance is the employee's own testimony, so nobody, HR included, may record it on their behalf.
+    /// </summary>
+    Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, Guid respondingEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Marks the handover stage as complete.</summary>
     Task<bool> CompleteHandoverAsync(CompleteHandoverDto dto, Guid completedByUserId, CancellationToken cancellationToken = default);
@@ -136,8 +140,10 @@ public interface IStaffMovementService
     /// <summary>Records an approve or reject decision at a specific level.</summary>
     Task<bool> ActionApprovalLevelAsync(ActionApprovalLevelDto dto, Guid actionedByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Delegates an approval level to another person.</summary>
-    Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Delegates an approval level to another person. Only the level's own approver may delegate it.
+    /// </summary>
+    Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, Guid delegatingEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Returns true when all approval levels for the movement are approved.</summary>
     Task<bool> AllLevelsApprovedAsync(Guid movementId, CancellationToken cancellationToken = default);
@@ -181,8 +187,12 @@ public interface IStaffMovementService
     /// <summary>Adds a checklist item to a movement.</summary>
     Task<StaffMovementChecklistItemDto> AddChecklistItemAsync(CreateStaffMovementChecklistItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Marks a checklist item as complete.</summary>
-    Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Marks a checklist item as complete. An item with a named responsible person may only be
+    /// completed by that person, unless <paramref name="actorIsHr"/> — HR closes out items whose
+    /// owner has left, moved on, or never had an account.
+    /// </summary>
+    Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, bool actorIsHr, CancellationToken cancellationToken = default);
 
     /// <summary>Returns true when all required checklist items for the movement are complete.</summary>
     Task<bool> AllRequiredItemsCompletedAsync(Guid movementId, CancellationToken cancellationToken = default);
@@ -262,8 +272,13 @@ public interface IStaffDemotionService
     Task<StaffDemotionDto> CreateAsync(CreateStaffDemotionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffDemotionDto> UpdateAsync(UpdateStaffDemotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Records the employee's response to a demotion notice (appeal / acceptance).</summary>
-    Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, DateTime responseDate, Guid respondedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records the employee's response to a demotion notice (appeal / acceptance).
+    /// <paramref name="respondingEmployeeId"/> is the token employee and must be the demoted employee:
+    /// an appeal is testimony, so it is never recorded on someone's behalf. The response date is
+    /// stamped server-side for the same reason.
+    /// </summary>
+    Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, Guid respondingEmployeeId, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

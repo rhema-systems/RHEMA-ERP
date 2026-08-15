@@ -1,8 +1,10 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,9 +12,12 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-acting-appointments")]
-[Authorize]
+[Authorize(Roles = StaffActingAppointmentsController.HrRoles)]
+[MovementBusinessRules]
 public class StaffActingAppointmentsController : ControllerBase
 {
+    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IStaffActingAppointmentService _service;
     private readonly ICurrentUserService _currentUser;
 

@@ -24,9 +24,18 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
             .FirstOrDefaultAsync(m => m.MovementNumber == movementNumber && !m.IsDeleted);
     }
 
+    /// <remarks>
+    /// AsSplitQuery is load-bearing, not a tuning choice. Thirty-odd includes across four collections
+    /// join into one result row wide enough that SQL Server refuses the plan outright — "a worktable is
+    /// required, and its minimum row size exceeds the maximum allowable of 8060 bytes". Because
+    /// <c>CreateAsync</c> re-reads through this method to populate its response, every attempt to raise
+    /// a staff movement failed with a 500 AFTER the row had been written: the movement existed and the
+    /// caller was told the request had failed.
+    /// </remarks>
     public async Task<StaffMovement?> GetWithFullDetailsAsync(Guid id)
     {
         return await _dbSet
+            .AsSplitQuery()
             .Include(m => m.Employee)
             .Include(m => m.CurrentPosition)
             .Include(m => m.CurrentOrganizationUnit)
@@ -359,11 +368,18 @@ public class StaffMovementApprovalLevelRepository
             .ToListAsync();
     }
 
+    /// <remarks>
+    /// A movement with no approval levels is NOT "all approved" — <c>AllAsync</c> is vacuously true on
+    /// an empty set, which made <c>AuthorizeAsync</c>'s "all levels must be approved" guard pass on any
+    /// movement whose chain had never been built. That let a submitted movement be authorised with
+    /// nobody's approval recorded against it.
+    /// </remarks>
     public async Task<bool> AllLevelsApprovedAsync(Guid movementId)
     {
-        return await _dbSet
-            .Where(al => al.MovementId == movementId && !al.IsDeleted)
-            .AllAsync(al => al.Status == ApprovalStatus.Approved);
+        var levels = _dbSet.Where(al => al.MovementId == movementId && !al.IsDeleted);
+
+        return await levels.AnyAsync()
+            && await levels.AllAsync(al => al.Status == ApprovalStatus.Approved);
     }
 }
 

@@ -1,3 +1,4 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
@@ -6,17 +7,31 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Staff movement records — promotion, transfer, demotion, secondment, acting, lateral move,
+/// redesignation — and their approval chain, status history, attachments and checklist.
+///
+/// Gated per action rather than at class level: a movement carries the subject's salary, grade and
+/// reporting line, so the register and every workflow step are HR-only, but three actions are open to
+/// the employee the movement is about — reading their own movements, reading their own outstanding
+/// checklist tasks, and responding to a move proposed for them. Acceptance is testimony, so the
+/// service refuses it from anyone but the subject, HR included.
+/// </summary>
 [ApiController]
 [Route("api/staff-movements")]
 [Authorize]
+[MovementBusinessRules]
 public class StaffMovementsController : ControllerBase
 {
+    private const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IStaffMovementService _service;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
@@ -40,10 +55,21 @@ public class StaffMovementsController : ControllerBase
         _currentUser = currentUser;
     }
 
+    /// <summary>
+    /// Whether the caller may see and act on any movement, as opposed to only their own.
+    /// "Admin" is included because the seeded administrator account is not in the HR role but is
+    /// expected to be able to administer the module.
+    /// </summary>
+    private bool IsHr =>
+        _currentUser.IsInRole(Constants.Roles.Hr) ||
+        _currentUser.IsInRole(Constants.Roles.SuperAdmin) ||
+        _currentUser.IsInRole("Admin");
+
     // =========================================================================
     // QUERIES
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet]
     public async Task<ActionResult<PagedResult<StaffMovementSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
@@ -53,11 +79,13 @@ public class StaffMovementsController : ControllerBase
         [FromQuery] bool isPendingApproval = false)
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, status, type, isPendingApproval));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("all")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     /// <summary>Returns movement summary rows for many parent movement IDs (subtype list hydration).</summary>
+    [Authorize(Roles = HrRoles)]
     [HttpPost("summaries/by-ids")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetSummariesByIds(
         [FromBody] StaffMovementSummariesByIdsRequest request)
@@ -68,26 +96,52 @@ public class StaffMovementsController : ControllerBase
         return Ok(await _service.GetSummariesByIdsAsync(request.Ids));
     }
 
+    /// <summary>
+    /// Open to the movement's subject as well as HR — an employee can read the move proposed for
+    /// them, which is the record they are asked to accept or decline.
+    /// </summary>
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<StaffMovementDto>> GetById(Guid id)
-        => Ok(await _service.GetByIdAsync(id));
+    {
+        var movement = await _service.GetByIdAsync(id);
 
+        if (!IsHr && movement.EmployeeId != _currentUser.EmployeeId)
+            return Forbid();
+
+        return Ok(movement);
+    }
+
+    /// <summary>The caller's own movement history. The token supplies the employee — see GetByEmployee.</summary>
+    [HttpGet("employee/me")]
+    public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetMine()
+    {
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return Forbid();
+
+        return Ok(await _service.GetByEmployeeAsync(employeeId));
+    }
+
+    [Authorize(Roles = HrRoles)]
     [HttpGet("number/{movementNumber}")]
     public async Task<ActionResult<StaffMovementDto?>> GetByMovementNumber(string movementNumber)
         => Ok(await _service.GetByMovementNumberAsync(movementNumber));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("employee/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByEmployee(Guid employeeId)
         => Ok(await _service.GetByEmployeeAsync(employeeId));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("employee/{employeeId:guid}/latest")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetLatestForEmployee(Guid employeeId)
         => Ok(await _service.GetLatestMovementsForEmployeeAsync(employeeId));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("status/{status}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByStatus(StaffMovementStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("type/{type}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByType(
         StaffMovementType type,
@@ -95,54 +149,66 @@ public class StaffMovementsController : ControllerBase
         [FromQuery] DateTime? to = null)
         => Ok(await _service.GetByTypeAsync(type, from, to));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("type/{type}/status/{status}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByTypeAndStatus(
         StaffMovementType type, StaffMovementStatus status)
         => Ok(await _service.GetByTypeAndStatusAsync(type, status));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("org-unit/current/{organizationUnitId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByCurrentOrgUnit(Guid organizationUnitId)
         => Ok(await _service.GetByCurrentOrganizationUnitAsync(organizationUnitId));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("org-unit/new/{organizationUnitId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByNewOrgUnit(Guid organizationUnitId)
         => Ok(await _service.GetByNewOrganizationUnitAsync(organizationUnitId));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("pending-approval")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetPendingApproval()
         => Ok(await _service.GetPendingApprovalAsync());
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("pending-employee-acceptance")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetPendingEmployeeAcceptance()
         => Ok(await _service.GetPendingEmployeeAcceptanceAsync());
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("pending-handover")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetPendingHandover()
         => Ok(await _service.GetPendingHandoverAsync());
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("temporary/active")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetActiveTemporary()
         => Ok(await _service.GetActiveTemporaryAssignmentsAsync());
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("temporary/expiring")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetExpiringTemporary(
         [FromQuery] int daysAhead = 30)
         => Ok(await _service.GetExpiringTemporaryAssignmentsAsync(daysAhead));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("date-range")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByDateRange(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to)
         => Ok(await _service.GetByEffectiveDateRangeAsync(from, to));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("requested-by/{requestedByEmployeeId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetByRequestedBy(Guid requestedByEmployeeId)
         => Ok(await _service.GetByRequestedByAsync(requestedByEmployeeId));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("succession-plan/{successionPlanId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetBySuccessionPlan(Guid successionPlanId)
         => Ok(await _service.GetBySuccessionPlanAsync(successionPlanId));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("dashboard")]
     public async Task<ActionResult<StaffMovementDashboardDto>> GetDashboard(
         [FromQuery] int?      filterYear = null,
@@ -154,6 +220,7 @@ public class StaffMovementsController : ControllerBase
     // CRUD
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost]
     public async Task<ActionResult<StaffMovementDto>> Create([FromBody] CreateStaffMovementDto dto)
     {
@@ -169,6 +236,7 @@ public class StaffMovementsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffMovementDto>> Update(Guid id, [FromBody] UpdateStaffMovementDto dto)
     {
@@ -181,6 +249,7 @@ public class StaffMovementsController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -192,6 +261,7 @@ public class StaffMovementsController : ControllerBase
     // WORKFLOW
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/submit")]
     public async Task<IActionResult> Submit(Guid id, [FromBody] SubmitStaffMovementDto dto)
     {
@@ -205,6 +275,7 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Movement submitted for approval." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/authorize")]
     public async Task<IActionResult> Authorize(Guid id, [FromBody] AuthorizeStaffMovementDto dto)
     {
@@ -218,16 +289,24 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Movement authorised." });
     }
 
+    /// <summary>
+    /// The subject's own acceptance or refusal of the move proposed for them. Open by design, and the
+    /// service refuses any caller who is not the subject — HR included, since this is testimony.
+    /// </summary>
     [HttpPost("{id:guid}/respond")]
     public async Task<IActionResult> RecordEmployeeResponse(Guid id, [FromBody] RespondToStaffMovementDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.MovementId = id;
-        await _service.RecordEmployeeResponseAsync(dto);
+        await _service.RecordEmployeeResponseAsync(dto, employeeId.Value);
         return Ok(new { message = "Employee response recorded." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/handover")]
     public async Task<IActionResult> CompleteHandover(Guid id, [FromBody] CompleteHandoverDto dto)
     {
@@ -241,6 +320,7 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Handover completed." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectStaffMovementDto dto)
     {
@@ -254,6 +334,7 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Movement rejected." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelStaffMovementDto dto)
     {
@@ -267,6 +348,7 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Movement cancelled." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/return")]
     public async Task<IActionResult> ProcessReturn(Guid id, [FromBody] ProcessReturnFromTemporaryDto dto)
     {
@@ -280,6 +362,7 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Return from temporary assignment processed." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/implement")]
     public async Task<IActionResult> Implement(Guid id)
     {
@@ -294,18 +377,22 @@ public class StaffMovementsController : ControllerBase
     // APPROVAL LEVELS
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/approval-levels")]
     public async Task<ActionResult<IEnumerable<StaffMovementApprovalLevelDto>>> GetApprovalLevels(Guid id)
         => Ok(await _service.GetApprovalLevelsAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/approval-levels/current-pending")]
     public async Task<ActionResult<StaffMovementApprovalLevelDto?>> GetCurrentPendingApprovalLevel(Guid id)
         => Ok(await _service.GetCurrentPendingApprovalLevelAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/approval-levels/all-approved")]
     public async Task<ActionResult<bool>> AllLevelsApproved(Guid id)
         => Ok(await _service.AllLevelsApprovedAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/approval-levels")]
     public async Task<ActionResult<StaffMovementApprovalLevelDto>> AddApprovalLevel(
         Guid id, [FromBody] CreateStaffMovementApprovalLevelDto dto)
@@ -343,8 +430,11 @@ public class StaffMovementsController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.ApprovalLevelId = approvalLevelId;
-        await _service.DelegateApprovalLevelAsync(dto);
+        await _service.DelegateApprovalLevelAsync(dto, employeeId.Value);
         return Ok(new { message = "Approval level delegated." });
     }
 
@@ -352,10 +442,12 @@ public class StaffMovementsController : ControllerBase
     // STATUS HISTORY
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/status-history")]
     public async Task<ActionResult<IEnumerable<StaffMovementStatusHistoryDto>>> GetStatusHistory(Guid id)
         => Ok(await _service.GetStatusHistoryAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/status-history/latest")]
     public async Task<ActionResult<StaffMovementStatusHistoryDto?>> GetLatestStatus(Guid id)
         => Ok(await _service.GetLatestStatusAsync(id));
@@ -364,15 +456,18 @@ public class StaffMovementsController : ControllerBase
     // ATTACHMENTS
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/attachments")]
     public async Task<ActionResult<IEnumerable<StaffMovementAttachmentDto>>> GetAttachments(Guid id)
         => Ok(await _service.GetAttachmentsAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/attachments/type/{type}")]
     public async Task<ActionResult<IEnumerable<StaffMovementAttachmentDto>>> GetAttachmentsByType(
         Guid id, StaffMovementAttachmentType type)
         => Ok(await _service.GetAttachmentsByTypeAsync(id, type));
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/attachments")]
     public async Task<ActionResult<StaffMovementAttachmentDto>> AddAttachment(
         Guid id, [FromBody] CreateStaffMovementAttachmentDto dto)
@@ -402,6 +497,7 @@ public class StaffMovementsController : ControllerBase
         return CreatedAtAction(nameof(GetAttachments), new { id }, created);
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/attachments/upload")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(10 * 1024 * 1024)]
@@ -494,10 +590,7 @@ public class StaffMovementsController : ControllerBase
 
         var isSubject = _currentUser.EmployeeId is Guid employeeId &&
                         attachment.Movement.EmployeeId == employeeId;
-        var isHr = _currentUser.IsInRole("HR") ||
-                   _currentUser.IsInRole("Admin") ||
-                   _currentUser.IsInRole("SuperAdmin");
-        if (!isSubject && !isHr)
+        if (!isSubject && !IsHr)
             return Forbid();
 
         return await HrDocumentDownload.ServeAsync(
@@ -508,6 +601,7 @@ public class StaffMovementsController : ControllerBase
             inline: false, ct);
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpDelete("attachments/{attachmentId:guid}")]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
     {
@@ -519,30 +613,50 @@ public class StaffMovementsController : ControllerBase
     // CHECKLIST
     // =========================================================================
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/checklist")]
     public async Task<ActionResult<IEnumerable<StaffMovementChecklistItemDto>>> GetChecklistItems(Guid id)
         => Ok(await _service.GetChecklistItemsAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/checklist/pending")]
     public async Task<ActionResult<IEnumerable<StaffMovementChecklistItemDto>>> GetPendingChecklistItems(Guid id)
         => Ok(await _service.GetPendingChecklistItemsAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/checklist/overdue")]
     public async Task<ActionResult<IEnumerable<StaffMovementChecklistItemDto>>> GetOverdueChecklistItemsForMovement(Guid id)
         => Ok(await _service.GetOverdueChecklistItemsAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("checklist/overdue")]
     public async Task<ActionResult<IEnumerable<StaffMovementChecklistItemDto>>> GetAllOverdueChecklistItems()
         => Ok(await _service.GetOverdueChecklistItemsAsync());
 
+    [Authorize(Roles = HrRoles)]
     [HttpGet("checklist/responsible/{employeeId:guid}")]
     public async Task<ActionResult<IEnumerable<StaffMovementChecklistItemDto>>> GetChecklistByResponsiblePerson(Guid employeeId)
         => Ok(await _service.GetChecklistItemsByResponsiblePersonAsync(employeeId));
 
+    /// <summary>
+    /// The caller's own outstanding movement tasks. Without this the open completion endpoint below
+    /// would be unusable by the people who owe the tasks — they have no way to learn their own id.
+    /// </summary>
+    [HttpGet("checklist/mine")]
+    public async Task<ActionResult<IEnumerable<StaffMovementChecklistItemDto>>> GetMyChecklistItems()
+    {
+        if (_currentUser.EmployeeId is not Guid employeeId)
+            return Forbid();
+
+        return Ok(await _service.GetChecklistItemsByResponsiblePersonAsync(employeeId));
+    }
+
+    [Authorize(Roles = HrRoles)]
     [HttpGet("{id:guid}/checklist/all-required-complete")]
     public async Task<ActionResult<bool>> AllRequiredItemsCompleted(Guid id)
         => Ok(await _service.AllRequiredItemsCompletedAsync(id));
 
+    [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/checklist")]
     public async Task<ActionResult<StaffMovementChecklistItemDto>> AddChecklistItem(
         Guid id, [FromBody] CreateStaffMovementChecklistItemDto dto)
@@ -569,10 +683,11 @@ public class StaffMovementsController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         dto.ItemId = itemId;
-        await _service.CompleteChecklistItemAsync(dto, employeeId.Value);
+        await _service.CompleteChecklistItemAsync(dto, employeeId.Value, IsHr);
         return Ok(new { message = "Checklist item marked as complete." });
     }
 
+    [Authorize(Roles = HrRoles)]
     [HttpDelete("checklist/{itemId:guid}")]
     public async Task<IActionResult> DeleteChecklistItem(Guid itemId)
     {

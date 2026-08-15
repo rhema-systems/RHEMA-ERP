@@ -1,7 +1,9 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,9 +11,12 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-secondments")]
-[Authorize]
+[Authorize(Roles = StaffSecondmentsController.HrRoles)]
+[MovementBusinessRules]
 public class StaffSecondmentsController : ControllerBase
 {
+    internal const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+
     private readonly IStaffSecondmentService _service;
     private readonly ICurrentUserService _currentUser;
 

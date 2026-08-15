@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
@@ -45,7 +45,7 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -296,15 +296,27 @@ public class StaffActingAppointmentService : IStaffActingAppointmentService
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// Highest issued suffix, over rows INCLUDING soft-deleted ones — see the note on
+    /// <c>StaffMovementService.GenerateMovementNumberAsync</c>. Counting live rows re-issues a number
+    /// as soon as one is deleted, and the unique index then rejects the next appointment.
+    /// </remarks>
     private async Task<string> GenerateAppointmentNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var prefix     = $"ACT-{DateTime.UtcNow:yyyyMMdd}";
-        var countToday = await _repo.GetQueryable()
-            .Where(a => a.TenantId == tenantId && a.AppointmentNumber.StartsWith(prefix))
-            .CountAsync(cancellationToken);
+        var prefix   = $"ACT-{DateTime.UtcNow:yyyyMMdd}-";
 
-        return $"{prefix}-{(countToday + 1):D4}";
+        var issued = await _repo
+            .GetQueryableIncludingDeleted(a => a.TenantId == tenantId && a.AppointmentNumber.StartsWith(prefix))
+            .Select(a => a.AppointmentNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D4}";
     }
 }
 
@@ -342,7 +354,7 @@ public class EmployeeCareerPathService : IEmployeeCareerPathService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 

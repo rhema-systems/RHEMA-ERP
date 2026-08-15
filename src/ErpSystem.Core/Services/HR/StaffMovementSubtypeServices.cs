@@ -1,9 +1,10 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -40,7 +41,7 @@ public class StaffPromotionService : IStaffPromotionService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -157,7 +158,7 @@ public class StaffTransferService : IStaffTransferService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -295,7 +296,7 @@ public class StaffDemotionService : IStaffDemotionService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -374,13 +375,29 @@ public class StaffDemotionService : IStaffDemotionService
         return entity.ToDto();
     }
 
-    public async Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, DateTime responseDate, Guid respondedByUserId, CancellationToken cancellationToken = default)
+    public async Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, Guid respondingEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(demotionId);
 
+        // The demoted employee's own words. The actor was accepted and discarded before, so anyone
+        // could file an appeal — or an acceptance — in someone else's name, on the one record where
+        // that testimony decides whether the demotion is contested.
+        var tenantId = GetTenantId();
+        var subjectEmployeeId = await _repo.GetQueryable()
+            .Where(d => d.Id == demotionId && d.TenantId == tenantId)
+            .Select(d => (Guid?)d.Movement.EmployeeId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (subjectEmployeeId != respondingEmployeeId)
+            throw new UnauthorizedAccessException("Only the demoted employee can respond to this demotion notice.");
+
+        if (!string.IsNullOrWhiteSpace(entity.EmployeeResponse))
+            throw new InvalidOperationException("A response to this demotion notice has already been recorded.");
+
         entity.EmployeeResponse     = response;
-        entity.EmployeeResponseDate = responseDate;
+        entity.EmployeeResponseDate = DateTime.UtcNow;
         entity.EmployeeNotified     = true;
+        entity.NotificationDate   ??= DateTime.UtcNow;
 
         await _repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -435,7 +452,7 @@ public class StaffSecondmentService : IStaffSecondmentService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 

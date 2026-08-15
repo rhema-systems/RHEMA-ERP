@@ -50,11 +50,15 @@ public class StaffMovementService : IStaffMovementService
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
     // mutation to the authenticated tenant explicitly and passes it into the repository predicate.
+    // UnauthorizedAccessException, not InvalidOperationException: this is a refusal, not a broken rule.
+    // Under MovementBusinessRulesAttribute the latter would read as 422 "unprocessable" on every endpoint
+    // for a tenant-less token; both the filter and GlobalExceptionHandlingMiddleware map this to 403 with
+    // its own message, so the behaviour no longer depends on the filter being present.
     private Guid GetTenantId()
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -412,7 +416,9 @@ public class StaffMovementService : IStaffMovementService
 
         var allLevelsApproved = await _approvalRepo.AllLevelsApprovedAsync(dto.MovementId);
         if (!allLevelsApproved)
-            throw new InvalidOperationException("All approval levels must be approved before the movement can be authorized.");
+            throw new InvalidOperationException(
+                "All approval levels must be approved before the movement can be authorized. " +
+                "A movement with no approval levels cannot be authorised at all — add its approval chain first.");
 
         var previousStatus        = entity.Status;
         entity.Status             = StaffMovementStatus.Approved;
@@ -428,9 +434,15 @@ public class StaffMovementService : IStaffMovementService
         return true;
     }
 
-    public async Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, Guid respondingEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMovementAsync(dto.MovementId);
+
+        // The endpoint took no actor at all before this: any authenticated caller could accept or
+        // decline a move on someone else's behalf. Acceptance is the employee's own testimony, so the
+        // subject test is absolute — HR cannot answer for them either.
+        if (entity.EmployeeId != respondingEmployeeId)
+            throw new UnauthorizedAccessException("Only the employee being moved can respond to this movement.");
 
         if (!entity.RequiresEmployeeAcceptance)
             throw new InvalidOperationException("This movement does not require employee acceptance.");
@@ -605,6 +617,13 @@ public class StaffMovementService : IStaffMovementService
     {
         var level = await GetOwnedApprovalLevelAsync(dto.ApprovalLevelId);
 
+        // The level records who must approve it, and nothing checked that against the caller: any
+        // authenticated employee could clear anyone's level and, through the auto-advance below,
+        // authorise the whole movement.
+        if (level.ApproverId != actionedByUserId && level.DelegatedToId != actionedByUserId)
+            throw new UnauthorizedAccessException(
+                "This approval level is assigned to another approver. Ask them to action it, or to delegate it to you.");
+
         if (level.Status != ApprovalStatus.Pending)
             throw new InvalidOperationException("This approval level has already been actioned.");
 
@@ -615,10 +634,20 @@ public class StaffMovementService : IStaffMovementService
         await _approvalRepo.UpdateAsync(level);
 
         // Auto-advance to Authorized when all levels are approved.
+        //
+        // The sibling levels are what decides it, NOT AllLevelsApprovedAsync: that runs its check in
+        // SQL, and this level's approval has not been saved yet, so the database still reports it as
+        // Pending. The last approver in a chain therefore never triggered the advance — the branch
+        // could not fire at all, and the movement sat Submitted with every level cleared until someone
+        // noticed and called /authorize by hand.
         if (dto.Decision == ApprovalStatus.Approved)
         {
-            var allApproved = await _approvalRepo.AllLevelsApprovedAsync(level.MovementId);
-            if (allApproved)
+            var tenantId = GetTenantId();
+            var siblings = (await _approvalRepo.GetByMovementIdAsync(level.MovementId))
+                .Where(other => other.TenantId == tenantId && other.Id != level.Id)
+                .ToList();
+
+            if (siblings.All(other => other.Status == ApprovalStatus.Approved))
             {
                 var movement = await GetOwnedMovementAsync(level.MovementId);
                 var previousStatus      = movement.Status;
@@ -650,9 +679,17 @@ public class StaffMovementService : IStaffMovementService
         return true;
     }
 
-    public async Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, Guid delegatingEmployeeId, CancellationToken cancellationToken = default)
     {
         var level = await GetOwnedApprovalLevelAsync(dto.ApprovalLevelId);
+
+        // Delegation transfers authority, so only the holder of that authority may do it — this took
+        // no actor at all before, so anyone could hand anyone's approval to anyone.
+        if (level.ApproverId != delegatingEmployeeId)
+            throw new UnauthorizedAccessException("Only the assigned approver can delegate this approval level.");
+
+        if (dto.DelegatedToId == level.ApproverId)
+            throw new InvalidOperationException("An approval level cannot be delegated to its own approver.");
 
         if (level.Status != ApprovalStatus.Pending)
             throw new InvalidOperationException("Only pending approval levels can be delegated.");
@@ -780,9 +817,20 @@ public class StaffMovementService : IStaffMovementService
         return entity.ToDto();
     }
 
-    public async Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, CancellationToken cancellationToken = default)
+    public async Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, bool actorIsHr, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedChecklistItemAsync(dto.ItemId);
+
+        // A checklist item names who owes it (IT access revoked, assets returned, payroll updated).
+        // That was recorded and never enforced, so anyone could sign off anyone's task. HR keeps an
+        // override because items outlive their owners.
+        if (entity.ResponsiblePersonId.HasValue &&
+            entity.ResponsiblePersonId.Value != completedByUserId &&
+            !actorIsHr)
+            throw new UnauthorizedAccessException("This checklist item is assigned to someone else.");
+
+        if (entity.IsCompleted)
+            throw new InvalidOperationException("This checklist item is already complete.");
 
         entity.IsCompleted      = true;
         entity.CompletionDate   = DateTime.UtcNow;
@@ -1035,15 +1083,29 @@ public class StaffMovementService : IStaffMovementService
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// Numbers come from the highest suffix already issued, over rows INCLUDING soft-deleted ones —
+    /// not from a count of live rows. Counting re-issues a number the moment anything is deleted: the
+    /// count drops back, and the next movement collides with a number still held by the deleted row's
+    /// unique index. Soft-deleted rows keep their numbers, so they have to keep their place in the
+    /// sequence too. The same shape was fixed across the SHE generators.
+    /// </remarks>
     private async Task<string> GenerateMovementNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var prefix  = $"MOV-{DateTime.UtcNow:yyyyMMdd}";
-        var countToday = await _movementRepo.GetQueryable()
-            .Where(m => m.TenantId == tenantId && m.MovementNumber.StartsWith(prefix))
-            .CountAsync(cancellationToken);
+        var prefix   = $"MOV-{DateTime.UtcNow:yyyyMMdd}-";
 
-        return $"{prefix}-{(countToday + 1):D4}";
+        var issued = await _movementRepo
+            .GetQueryableIncludingDeleted(m => m.TenantId == tenantId && m.MovementNumber.StartsWith(prefix))
+            .Select(m => m.MovementNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D4}";
     }
 
     private async Task RecordStatusHistoryAsync(
