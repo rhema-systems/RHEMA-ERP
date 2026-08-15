@@ -130,6 +130,9 @@
          This project disables implicit compile items, so keep the evaluator and health-output
          regression coverage explicitly discoverable in the default Finance suite. -->
     <Compile Include="Services\Finance\FinanceOperationalResilienceReadinessTests.cs" />
+    <!-- The project disables implicit compile items. Keep the demo-prerequisite and
+         deterministic bank-liquidity regression tests visible to the default CI suite. -->
+    <Compile Include="Services\Finance\FinanceDemoPrerequisiteSeederTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSpreadsheetServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
