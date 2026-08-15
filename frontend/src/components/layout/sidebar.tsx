@@ -598,6 +598,20 @@ export const navigationItems: NavItem[] = [
         icon: HandCoins,
       },
       {
+        // Area 8. One record covers promotion, transfer, demotion, secondment, acting appointment,
+        // lateral move and redesignation — they share an approval route, a checklist and a set of
+        // documents, and differ only in their subtype detail.
+        title: 'Staff Movements',
+        href: '/hr/movements',
+        icon: ArrowRightLeft,
+        children: [
+          { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft },
+          // Open to every employee: the movements raised about them, and the tasks they owe on
+          // someone else's. The register above answers 403 for non-HR.
+          { title: 'My Movements', href: '/hr/movements/mine', icon: UserCheck },
+        ],
+      },
+      {
         // Slice 1 of area 10: the live dashboard and the hand-reported KPI snapshots. Each later
         // slice adds its register here in lifecycle order (incidents, hazards, inspections,
         // permits, PPE, …). Reference data lives under Administration → HR → Safety.

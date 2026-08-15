@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.PromotionTransfer;
+﻿using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -15,13 +15,30 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
 {
     public StaffMovementRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<StaffMovement?> GetByMovementNumberAsync(string movementNumber)
-    {
-        return await _dbSet
+    /// <summary>
+    /// The navigations every summary row reads (see <c>ToSummaryDto</c>), plus the tenant predicate.
+    ///
+    /// Applied through one helper because the reads used to carry different subsets of it — by-employee
+    /// had no Employee, by-type-and-status had no NewOrganizationUnit, none of them had Promotion or
+    /// Transfer — so which columns rendered blank depended on which list you happened to open. The
+    /// tenant predicate was missing entirely: every read fetched all tenants' rows and the service
+    /// filtered them in memory afterwards.
+    /// </summary>
+    private IQueryable<StaffMovement> SummaryQuery(Guid tenantId)
+        => _dbSet
+            .Where(m => m.TenantId == tenantId && !m.IsDeleted)
             .Include(m => m.Employee)
             .Include(m => m.CurrentPosition)
             .Include(m => m.CurrentOrganizationUnit)
-            .FirstOrDefaultAsync(m => m.MovementNumber == movementNumber && !m.IsDeleted);
+            .Include(m => m.NewPosition)
+            .Include(m => m.NewOrganizationUnit)
+            .Include(m => m.Promotion)
+            .Include(m => m.Transfer);
+
+    public async Task<StaffMovement?> GetByMovementNumberAsync(Guid tenantId, string movementNumber)
+    {
+        return await SummaryQuery(tenantId)
+            .FirstOrDefaultAsync(m => m.MovementNumber == movementNumber);
     }
 
     /// <remarks>
@@ -32,10 +49,11 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
     /// a staff movement failed with a 500 AFTER the row had been written: the movement existed and the
     /// caller was told the request had failed.
     /// </remarks>
-    public async Task<StaffMovement?> GetWithFullDetailsAsync(Guid id)
+    public async Task<StaffMovement?> GetWithFullDetailsAsync(Guid tenantId, Guid id)
     {
         return await _dbSet
             .AsSplitQuery()
+            .Where(m => m.TenantId == tenantId && !m.IsDeleted)
             .Include(m => m.Employee)
             .Include(m => m.CurrentPosition)
             .Include(m => m.CurrentOrganizationUnit)
@@ -76,62 +94,40 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
             .Include(m => m.Transfer)
             .Include(m => m.Demotion)
             .Include(m => m.Secondment)
-            .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
+            .FirstOrDefaultAsync(m => m.Id == id);
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetSummariesByIdsAsync(IEnumerable<Guid> ids)
+    public async Task<IEnumerable<StaffMovement>> GetSummariesByIdsAsync(Guid tenantId, IEnumerable<Guid> ids)
     {
         var idList = ids.Distinct().ToList();
         if (idList.Count == 0)
             return [];
 
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Include(m => m.Promotion)
-            .Include(m => m.Transfer)
-            .Where(m => idList.Contains(m.Id) && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => idList.Contains(m.Id))
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetByEmployeeAsync(Guid employeeId)
+    public async Task<IEnumerable<StaffMovement>> GetByEmployeeAsync(Guid tenantId, Guid employeeId)
     {
-        return await _dbSet
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => m.EmployeeId == employeeId && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.EmployeeId == employeeId)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetByStatusAsync(StaffMovementStatus status)
+    public async Task<IEnumerable<StaffMovement>> GetByStatusAsync(Guid tenantId, StaffMovementStatus status)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => m.Status == status && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.Status == status)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<StaffMovement>> GetByTypeAsync(
-        StaffMovementType type, DateTime? from = null, DateTime? to = null)
+        Guid tenantId, StaffMovementType type, DateTime? from = null, DateTime? to = null)
     {
-        var query = _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => m.MovementType == type && !m.IsDeleted);
+        var query = SummaryQuery(tenantId).Where(m => m.MovementType == type);
 
         if (from.HasValue) query = query.Where(m => m.EffectiveDate >= from.Value);
         if (to.HasValue)   query = query.Where(m => m.EffectiveDate <= to.Value);
@@ -140,109 +136,78 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
     }
 
     public async Task<IEnumerable<StaffMovement>> GetByTypeAndStatusAsync(
-        StaffMovementType type, StaffMovementStatus status)
+        Guid tenantId, StaffMovementType type, StaffMovementStatus status)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Where(m => m.MovementType == type && m.Status == status && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.MovementType == type && m.Status == status)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetByCurrentOrganizationUnitAsync(Guid organizationUnitId)
+    public async Task<IEnumerable<StaffMovement>> GetByCurrentOrganizationUnitAsync(Guid tenantId, Guid organizationUnitId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Where(m => m.CurrentOrganizationUnitId == organizationUnitId && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.CurrentOrganizationUnitId == organizationUnitId)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetByNewOrganizationUnitAsync(Guid organizationUnitId)
+    public async Task<IEnumerable<StaffMovement>> GetByNewOrganizationUnitAsync(Guid tenantId, Guid organizationUnitId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => m.NewOrganizationUnitId == organizationUnitId && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.NewOrganizationUnitId == organizationUnitId)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetPendingApprovalAsync()
+    /// <remarks>
+    /// The dashboard reads the pending approver's name off ApprovalLevels.Approver, so the filtered
+    /// collection include is what makes that column render at all.
+    /// </remarks>
+    public async Task<IEnumerable<StaffMovement>> GetPendingApprovalAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewPosition)
+        return await SummaryQuery(tenantId)
             .Include(m => m.ApprovalLevels.Where(al => al.Status == ApprovalStatus.Pending))
                 .ThenInclude(al => al.Approver)
-            .Where(m => !m.IsDeleted
-                     && m.ApprovalLevels.Any(al => al.Status == ApprovalStatus.Pending))
+            .Where(m => m.ApprovalLevels.Any(al => al.Status == ApprovalStatus.Pending))
             .OrderBy(m => m.RequestSubmissionDate)
             .ThenBy(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetPendingEmployeeAcceptanceAsync()
+    public async Task<IEnumerable<StaffMovement>> GetPendingEmployeeAcceptanceAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => !m.IsDeleted
-                     && m.RequiresEmployeeAcceptance
-                     && m.EmployeeAccepted == null)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.RequiresEmployeeAcceptance && m.EmployeeAccepted == null)
             .OrderBy(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetPendingHandoverAsync()
+    public async Task<IEnumerable<StaffMovement>> GetPendingHandoverAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Where(m => !m.IsDeleted
-                     && m.RequiresHandover
-                     && m.HandoverCompletionDate == null)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.RequiresHandover && m.HandoverCompletionDate == null)
             .OrderBy(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetActiveTemporaryAssignmentsAsync()
+    public async Task<IEnumerable<StaffMovement>> GetActiveTemporaryAssignmentsAsync(Guid tenantId)
     {
         var today = DateTime.UtcNow;
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => !m.IsDeleted
-                     && m.IsTemporary
+        return await SummaryQuery(tenantId)
+            .Where(m => m.IsTemporary
                      && !m.ReturnProcessed
                      && (m.TemporaryEndDate == null || m.TemporaryEndDate >= today))
             .OrderBy(m => m.TemporaryEndDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetExpiringTemporaryAssignmentsAsync(int daysAhead = 30)
+    public async Task<IEnumerable<StaffMovement>> GetExpiringTemporaryAssignmentsAsync(Guid tenantId, int daysAhead = 30)
     {
         var today  = DateTime.UtcNow;
         var cutoff = today.AddDays(daysAhead);
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => !m.IsDeleted
-                     && m.IsTemporary
+        return await SummaryQuery(tenantId)
+            .Where(m => m.IsTemporary
                      && !m.ReturnProcessed
                      && m.TemporaryEndDate != null
                      && m.TemporaryEndDate >= today
@@ -251,40 +216,28 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetByEffectiveDateRangeAsync(DateTime from, DateTime to)
+    public async Task<IEnumerable<StaffMovement>> GetByEffectiveDateRangeAsync(Guid tenantId, DateTime from, DateTime to)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => !m.IsDeleted
-                     && m.EffectiveDate >= from
-                     && m.EffectiveDate <= to)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.EffectiveDate >= from && m.EffectiveDate <= to)
             .OrderBy(m => m.EffectiveDate)
             .ThenBy(m => m.Employee.LastName)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetByRequestedByAsync(Guid requestedByEmployeeId)
+    public async Task<IEnumerable<StaffMovement>> GetByRequestedByAsync(Guid tenantId, Guid requestedByEmployeeId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.NewPosition)
-            .Where(m => m.RequestedById == requestedByEmployeeId && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.RequestedById == requestedByEmployeeId)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetLatestMovementsForEmployeeAsync(Guid employeeId)
+    public async Task<IEnumerable<StaffMovement>> GetLatestMovementsForEmployeeAsync(Guid tenantId, Guid employeeId)
     {
         // GroupBy + Include cannot be translated to SQL — materialise first, then group in memory.
-        var movements = await _dbSet
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.CurrentOrganizationUnit)
-            .Include(m => m.NewPosition)
-            .Include(m => m.NewOrganizationUnit)
-            .Where(m => m.EmployeeId == employeeId && !m.IsDeleted)
+        var movements = await SummaryQuery(tenantId)
+            .Where(m => m.EmployeeId == employeeId)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
 
@@ -294,13 +247,10 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
             .ToList();
     }
 
-    public async Task<IEnumerable<StaffMovement>> GetBySuccessionPlanAsync(Guid successionPlanId)
+    public async Task<IEnumerable<StaffMovement>> GetBySuccessionPlanAsync(Guid tenantId, Guid successionPlanId)
     {
-        return await _dbSet
-            .Include(m => m.Employee)
-            .Include(m => m.CurrentPosition)
-            .Include(m => m.NewPosition)
-            .Where(m => m.SuccessionPlanId == successionPlanId && !m.IsDeleted)
+        return await SummaryQuery(tenantId)
+            .Where(m => m.SuccessionPlanId == successionPlanId)
             .OrderByDescending(m => m.EffectiveDate)
             .ToListAsync();
     }
@@ -499,13 +449,17 @@ public class StaffMovementChecklistItemRepository
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovementChecklistItem>> GetOverdueItemsAsync(Guid? movementId = null)
+    // These two are the only checklist reads not scoped by a movement the service has already
+    // proved ownership of, so they take the tenant themselves rather than fetching every tenant's
+    // rows for the service to discard.
+    public async Task<IEnumerable<StaffMovementChecklistItem>> GetOverdueItemsAsync(Guid tenantId, Guid? movementId = null)
     {
         var today = DateTime.UtcNow;
         var query = _dbSet
             .Include(ci => ci.ResponsiblePerson)
             .Include(ci => ci.Movement).ThenInclude(m => m.Employee)
-            .Where(ci => !ci.IsDeleted
+            .Where(ci => ci.TenantId == tenantId
+                      && !ci.IsDeleted
                       && !ci.IsCompleted
                       && ci.DueDate != null
                       && ci.DueDate < today);
@@ -516,12 +470,13 @@ public class StaffMovementChecklistItemRepository
         return await query.OrderBy(ci => ci.DueDate).ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffMovementChecklistItem>> GetByResponsiblePersonAsync(Guid employeeId)
+    public async Task<IEnumerable<StaffMovementChecklistItem>> GetByResponsiblePersonAsync(Guid tenantId, Guid employeeId)
     {
         return await _dbSet
             .Include(ci => ci.Movement).ThenInclude(m => m.Employee)
             .Include(ci => ci.ResponsiblePerson)
-            .Where(ci => ci.ResponsiblePersonId == employeeId
+            .Where(ci => ci.TenantId == tenantId
+                      && ci.ResponsiblePersonId == employeeId
                       && !ci.IsCompleted
                       && !ci.IsDeleted)
             .OrderBy(ci => ci.DueDate)

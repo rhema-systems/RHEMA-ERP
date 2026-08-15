@@ -1,6 +1,7 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -104,14 +105,31 @@ public class StaffMovementService : IStaffMovementService
         return entity;
     }
 
+    /// <summary>
+    /// Validates a body-supplied Employee id and returns the row.
+    ///
+    /// Two jobs in one call, as in the SHE services. It stops an unknown or another tenant's id
+    /// reaching the database as an FK violation (SQL 547, surfacing as an unexplained 500 rather than
+    /// "that employee was not found"), and because the row ends up tracked, EF fixes up the navigation
+    /// on the entity being written — so the write response carries the approver's or responsible
+    /// person's name instead of an empty string, with no second read.
+    /// </summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The {role} employee with ID '{employeeId}' was not found.");
+        return employee;
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<StaffMovementDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _movementRepo.GetWithFullDetailsAsync(id);
+        var entity = await _movementRepo.GetWithFullDetailsAsync(tenantId, id);
 
-        if (entity == null || entity.TenantId != tenantId)
+        if (entity == null)
             throw new ArgumentException($"Staff movement with ID '{id}' was not found.");
 
         return entity.ToDetailDto();
@@ -120,20 +138,17 @@ public class StaffMovementService : IStaffMovementService
     public async Task<StaffMovementDto?> GetByMovementNumberAsync(string movementNumber, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _movementRepo.GetByMovementNumberAsync(movementNumber);
-        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
+        var entity = await _movementRepo.GetByMovementNumberAsync(tenantId, movementNumber);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetAllAsync(
-            m => m.Employee,
-            m => m.CurrentPosition,
-            m => m.CurrentOrganizationUnit,
-            m => m.NewPosition,
-            m => m.NewOrganizationUnit);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        // Not the generic GetAllAsync: it reads every tenant's rows for this one to discard, and its
+        // include list is missing Promotion and Transfer, which the summary row renders.
+        var entities = await _movementRepo.GetByEffectiveDateRangeAsync(tenantId, DateTime.MinValue, DateTime.MaxValue);
+        return entities.ToSummaryDtoList();
     }
 
     public const int MaxSummariesByIdsBatchSize = 500;
@@ -152,8 +167,8 @@ public class StaffMovementService : IStaffMovementService
                 nameof(ids));
 
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetSummariesByIdsAsync(idList);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetSummariesByIdsAsync(tenantId, idList);
+        return entities.ToSummaryDtoList();
     }
 
     private static readonly StaffMovementStatus[] _pendingApprovalStatuses =
@@ -213,15 +228,15 @@ public class StaffMovementService : IStaffMovementService
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByEmployeeAsync(employeeId);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByStatusAsync(StaffMovementStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByStatusAsync(status);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByStatusAsync(tenantId, status);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByTypeAsync(
@@ -229,8 +244,8 @@ public class StaffMovementService : IStaffMovementService
         CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByTypeAsync(type, from, to);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByTypeAsync(tenantId, type, from, to);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByTypeAndStatusAsync(
@@ -238,85 +253,85 @@ public class StaffMovementService : IStaffMovementService
         CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByTypeAndStatusAsync(type, status);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByTypeAndStatusAsync(tenantId, type, status);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByCurrentOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByCurrentOrganizationUnitAsync(organizationUnitId);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByCurrentOrganizationUnitAsync(tenantId, organizationUnitId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByNewOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByNewOrganizationUnitAsync(organizationUnitId);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByNewOrganizationUnitAsync(tenantId, organizationUnitId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetPendingApprovalAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetPendingApprovalAsync();
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetPendingApprovalAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetPendingEmployeeAcceptanceAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetPendingEmployeeAcceptanceAsync();
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetPendingEmployeeAcceptanceAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetPendingHandoverAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetPendingHandoverAsync();
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetPendingHandoverAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetActiveTemporaryAssignmentsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetActiveTemporaryAssignmentsAsync();
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetActiveTemporaryAssignmentsAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetExpiringTemporaryAssignmentsAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetExpiringTemporaryAssignmentsAsync(daysAhead);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetExpiringTemporaryAssignmentsAsync(tenantId, daysAhead);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByEffectiveDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByEffectiveDateRangeAsync(from, to);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByEffectiveDateRangeAsync(tenantId, from, to);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetByRequestedByAsync(Guid requestedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetByRequestedByAsync(requestedByEmployeeId);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetByRequestedByAsync(tenantId, requestedByEmployeeId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetLatestMovementsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetLatestMovementsForEmployeeAsync(employeeId);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetLatestMovementsForEmployeeAsync(tenantId, employeeId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffMovementSummaryDto>> GetBySuccessionPlanAsync(Guid successionPlanId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _movementRepo.GetBySuccessionPlanAsync(successionPlanId);
-        return entities.Where(m => m.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _movementRepo.GetBySuccessionPlanAsync(tenantId, successionPlanId);
+        return entities.ToSummaryDtoList();
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -336,9 +351,7 @@ public class StaffMovementService : IStaffMovementService
         _logger.LogInformation("Staff movement created: {MovementNumber}", entity.MovementNumber);
 
         // Reload with all nav-prop includes so the returned DTO has display names populated
-        var loaded = await _movementRepo.GetWithFullDetailsAsync(entity.Id);
-        if (loaded != null && loaded.TenantId != tenantId)
-            loaded = null;
+        var loaded = await _movementRepo.GetWithFullDetailsAsync(tenantId, entity.Id);
         return (loaded ?? entity).ToDetailDto();
     }
 
@@ -356,7 +369,11 @@ public class StaffMovementService : IStaffMovementService
 
         _logger.LogInformation("Staff movement updated: {MovementNumber}", entity.MovementNumber);
 
-        return entity.ToDto();
+        // Re-read through the include path: the edited entity was loaded by id with no navigations, so
+        // mapping it directly returns the new position and unit IDS with their NAMES blank — and the
+        // screen renders the response, so the row it just saved appears to have lost its labels.
+        var loaded = await _movementRepo.GetWithFullDetailsAsync(entity.TenantId, entity.Id);
+        return (loaded ?? entity).ToDetailDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -604,6 +621,8 @@ public class StaffMovementService : IStaffMovementService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedMovementAsync(createDto.MovementId);
+        await GetOwnedEmployeeAsync(createDto.ApproverId, "approver");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.Status = ApprovalStatus.Pending;
 
@@ -694,6 +713,8 @@ public class StaffMovementService : IStaffMovementService
         if (level.Status != ApprovalStatus.Pending)
             throw new InvalidOperationException("Only pending approval levels can be delegated.");
 
+        await GetOwnedEmployeeAsync(dto.DelegatedToId, "delegate");
+
         level.DelegatedToId    = dto.DelegatedToId;
         level.DelegationDate   = DateTime.UtcNow;
         level.DelegationReason = dto.DelegationReason;
@@ -734,6 +755,8 @@ public class StaffMovementService : IStaffMovementService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedMovementAsync(createDto.MovementId);
+        await GetOwnedEmployeeAsync(createdByUserId, "uploading");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.UploadDate     = DateTime.UtcNow;
         entity.UploadedById   = createdByUserId;
@@ -794,21 +817,25 @@ public class StaffMovementService : IStaffMovementService
         if (movementId.HasValue)
             await GetOwnedMovementAsync(movementId.Value);
 
-        var entities = await _checklistRepo.GetOverdueItemsAsync(movementId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _checklistRepo.GetOverdueItemsAsync(tenantId, movementId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffMovementChecklistItemDto>> GetChecklistItemsByResponsiblePersonAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _checklistRepo.GetByResponsiblePersonAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _checklistRepo.GetByResponsiblePersonAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffMovementChecklistItemDto> AddChecklistItemAsync(CreateStaffMovementChecklistItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedMovementAsync(createDto.MovementId);
+
+        if (createDto.ResponsiblePersonId.HasValue)
+            await GetOwnedEmployeeAsync(createDto.ResponsiblePersonId.Value, "responsible");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         await _checklistRepo.AddAsync(entity);
@@ -903,9 +930,9 @@ public class StaffMovementService : IStaffMovementService
             StaffMovementStatus.Cancelled
         };
 
-        var pendingApprovals    = (await _movementRepo.GetPendingApprovalAsync()).Where(m => m.TenantId == tenantId).ToList();
-        var pendingHandover     = (await _movementRepo.GetPendingHandoverAsync()).Where(m => m.TenantId == tenantId).ToList();
-        var expiringAssignments = (await _movementRepo.GetExpiringTemporaryAssignmentsAsync(60)).Where(m => m.TenantId == tenantId).ToList();
+        var pendingApprovals    = (await _movementRepo.GetPendingApprovalAsync(tenantId)).ToList();
+        var pendingHandover     = (await _movementRepo.GetPendingHandoverAsync(tenantId)).ToList();
+        var expiringAssignments = (await _movementRepo.GetExpiringTemporaryAssignmentsAsync(tenantId, 60)).ToList();
 
         // ── Scalar KPIs ───────────────────────────────────────────────────────
 

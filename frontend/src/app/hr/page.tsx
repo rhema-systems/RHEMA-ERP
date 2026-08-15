@@ -13,6 +13,7 @@ import {
   ShieldPlus,
   Target,
   HandCoins,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -143,6 +144,13 @@ export default function HrHomePage() {
                 'Service obligations from sponsored training — who owes time, who owes money, and what has been settled.',
               href: '/hr/service-bonds',
               icon: HandCoins,
+            },
+            {
+              title: 'Staff Movements',
+              description:
+                'Promotions, transfers, demotions, secondments and acting appointments — from request through approval to the change taking effect.',
+              href: '/hr/movements',
+              icon: ArrowRightLeft,
             },
             {
               title: 'Payroll',
