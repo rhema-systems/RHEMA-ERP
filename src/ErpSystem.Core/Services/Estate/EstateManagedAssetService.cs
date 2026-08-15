@@ -851,6 +851,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             }
         }
 
+        var hasSignedAgreementReference = !string.IsNullOrWhiteSpace(request.PropertyFileReference);
+        var hasBillingStartDate = request.DateOfTenancy.HasValue || request.RightOfEntryDate.HasValue;
+        if (hasSignedAgreementReference && !hasBillingStartDate)
+        {
+            throw new InvalidOperationException(
+                "Record the agreement start date or right-of-entry / move-in date with the signed agreement reference.");
+        }
+
         asset.DateOfTenancy = request.DateOfTenancy;
         asset.RightOfEntryDate = request.RightOfEntryDate;
         asset.LeaseTermYears = request.LeaseTermYears;
@@ -861,9 +869,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ?? TrimOrNull(customer?.PhysicalAddress);
         asset.PropertyFileReference = TrimOrNull(request.PropertyFileReference);
         if (request.CustomerBusinessPartnerId.HasValue
-            && asset.Status == EstateManagedAssetStatus.Available)
+            && asset.Status is EstateManagedAssetStatus.Available
+                or EstateManagedAssetStatus.Reserved
+                or EstateManagedAssetStatus.Leased)
         {
-            asset.Status = EstateManagedAssetStatus.Reserved;
+            asset.Status = hasSignedAgreementReference && hasBillingStartDate
+                ? EstateManagedAssetStatus.Leased
+                : EstateManagedAssetStatus.Reserved;
         }
 
         if (request.CustomerBusinessPartnerId.HasValue)
@@ -922,6 +934,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 "Reserve, lease, or occupy the asset only after a customer or occupant is linked in Lease Management.");
         }
 
+        if (request.Status is EstateManagedAssetStatus.Leased
+                or EstateManagedAssetStatus.Occupied
+            && (string.IsNullOrWhiteSpace(asset.PropertyFileReference)
+                || (!asset.DateOfTenancy.HasValue && !asset.RightOfEntryDate.HasValue)))
+        {
+            throw new InvalidOperationException(
+                "Record the signed agreement reference and agreement start or move-in date in Lease Management before marking this asset leased or occupied.");
+        }
+
         if (request.Status == EstateManagedAssetStatus.Available && hasOccupant)
         {
             throw new InvalidOperationException(
@@ -941,10 +962,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         {
             asset.IsAvailableForLease = request.IsAvailableForLease ?? asset.IsAvailableForLease;
             asset.IsAvailableForSale = request.IsAvailableForSale ?? asset.IsAvailableForSale;
-            if (request.IsPublishedToExternalPortal == false)
+            if (request.IsPublishedToExternalPortal == false
+                || (!asset.IsAvailableForLease && !asset.IsAvailableForSale))
             {
                 asset.IsPublishedToExternalPortal = false;
-                asset.ExternalListingStatus = "Withdrawn";
+                asset.ExternalListingStatus = !asset.IsAvailableForLease && !asset.IsAvailableForSale
+                    ? "Draft"
+                    : "Withdrawn";
                 asset.ExternalPublishedAt = null;
             }
         }
@@ -1086,6 +1110,11 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 throw new InvalidOperationException(
                     "Enter a rental duration between 1 and 1,200 months before publishing.");
             }
+        }
+
+        if (request.IsPublishedToExternalPortal && includesSale && !salePrice.HasValue)
+        {
+            throw new InvalidOperationException("Enter the sale price before publishing a sale listing.");
         }
 
         asset.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;

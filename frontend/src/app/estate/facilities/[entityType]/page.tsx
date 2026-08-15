@@ -29,6 +29,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/hooks/use-auth';
 import {
   estateFacilitiesService,
   type CreateFacilitiesArInvoiceRequest,
@@ -884,6 +885,7 @@ function getOperationalHandoff(entityType: string): OperationalHandoff | null {
 
 export default function FacilitiesProcedureWorkspacePage() {
   const router = useRouter();
+  const { hasAnyPermission } = useAuth();
   const params = useParams<{ entityType?: string | string[] }>();
   const routeValue = Array.isArray(params?.entityType)
     ? params.entityType[0]
@@ -1275,6 +1277,9 @@ export default function FacilitiesProcedureWorkspacePage() {
   const { procedure } = workspace;
   const operationalHandoff = getOperationalHandoff(procedure.entityType);
   const OperationalHandoffIcon = operationalHandoff?.icon;
+  const canOpenOperationalHandoff =
+    procedure.entityType !== 'EstateFacilityMaintenance' ||
+    hasAnyPermission(['maintenance.access']);
   const hasConfiguredWorkflow = workspace.stages.length > 0;
   const showServiceProviderRegister =
     hasConfiguredWorkflow && procedure.entityType === 'EstateFacilityServiceProvider';
@@ -1339,22 +1344,52 @@ export default function FacilitiesProcedureWorkspacePage() {
                   </Badge>
                 </div>
               </div>
-              <Button asChild>
-                <Link href={operationalHandoff.primaryAction.href}>
+              {canOpenOperationalHandoff ? (
+                <Button asChild>
+                  <Link href={operationalHandoff.primaryAction.href}>
+                    {operationalHandoff.primaryAction.label}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              ) : (
+                <Button disabled title="Requires Maintenance module access">
                   {operationalHandoff.primaryAction.label}
                   <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {!canOpenOperationalHandoff ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                This handoff opens the Maintenance Management module. Your
+                current user does not have Maintenance access, so the
+                Maintenance route would redirect to the main dashboard. Ask an
+                administrator to grant <code>maintenance.access</code>, or use
+                a Maintenance-authorized user to continue the job card/work
+                order flow.
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {operationalHandoff.secondaryActions.map((action) => (
-                <Button key={action.href} asChild variant="outline" size="sm">
-                  <Link href={action.href}>
+                <Button
+                  key={action.href}
+                  asChild={canOpenOperationalHandoff}
+                  disabled={!canOpenOperationalHandoff}
+                  variant="outline"
+                  size="sm"
+                >
+                  {canOpenOperationalHandoff ? (
+                    <Link href={action.href}>
+                      {action.label}
+                      <ExternalLink className="ml-2 h-3.5 w-3.5" />
+                    </Link>
+                  ) : (
+                    <span>
                     {action.label}
                     <ExternalLink className="ml-2 h-3.5 w-3.5" />
-                  </Link>
+                    </span>
+                  )}
                 </Button>
               ))}
             </div>

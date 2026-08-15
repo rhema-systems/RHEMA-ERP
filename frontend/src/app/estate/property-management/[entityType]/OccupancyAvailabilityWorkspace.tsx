@@ -171,6 +171,10 @@ function buildBillingHref(asset: EstateManagedAsset) {
   return `/estate/property-management/EstatePropertyManagementBillingServiceCharge?${params.toString()}`;
 }
 
+function hasLeaseStartEvidence(asset: EstateManagedAsset) {
+  return Boolean(asset.propertyFileReference && (asset.rightOfEntryDate || asset.dateOfTenancy));
+}
+
 export function OccupancyAvailabilityWorkspace() {
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [searchDraft, setSearchDraft] = React.useState('');
@@ -233,6 +237,11 @@ export function OccupancyAvailabilityWorkspace() {
   }, [assets, statusFilter]);
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
+  const selectedNeedsLeaseEvidence =
+    Boolean(selectedAsset) &&
+    (nextStatus === EstateManagedAssetStatus.Leased ||
+      nextStatus === EstateManagedAssetStatus.Occupied) &&
+    !hasLeaseStartEvidence(selectedAsset!);
 
   const summary = React.useMemo(
     () => ({
@@ -272,6 +281,13 @@ export function OccupancyAvailabilityWorkspace() {
   const saveOccupancy = async () => {
     if (!selectedAsset) {
       toast.error('Select a property or unit first.');
+      return;
+    }
+
+    if (selectedNeedsLeaseEvidence) {
+      toast.error(
+        'Record the signed agreement reference and agreement start / move-in date in Lease Management first.'
+      );
       return;
     }
 
@@ -593,6 +609,24 @@ export function OccupancyAvailabilityWorkspace() {
               </div>
             )}
 
+            {selectedNeedsLeaseEvidence ? (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-900">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <div>
+                  Marking as leased or occupied requires the signed agreement
+                  reference plus the agreement start / move-in date from Lease
+                  Management.
+                  {selectedAsset ? (
+                    <Button asChild variant="link" size="sm" className="h-auto px-0 py-0 text-xs text-amber-900">
+                      <Link href="/estate/property-management/EstatePropertyManagementLease">
+                        Open Lease Management
+                      </Link>
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             <div className="space-y-2">
               <Label htmlFor="occupancy-notes">Notes</Label>
               <Textarea
@@ -608,7 +642,7 @@ export function OccupancyAvailabilityWorkspace() {
             <Button
               type="button"
               className="w-full"
-              disabled={!selectedAsset || isSaving}
+              disabled={!selectedAsset || isSaving || selectedNeedsLeaseEvidence}
               onClick={() => void saveOccupancy()}
             >
               {isSaving ? (

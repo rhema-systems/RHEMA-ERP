@@ -92,8 +92,22 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
     { key: 'declarationReference', label: 'Statutory declaration reference' },
   ],
   transfer: [
+    {
+      key: 'transferProcessType',
+      label: 'Transfer process type',
+      type: 'select',
+      options: ['Transfer of interest', 'Portion transfer', 'Assignment', 'Rental transfer', 'Rental-to-HOS conversion'],
+    },
+    { key: 'housePlotShopNumber', label: 'House / plot / shop number' },
     { key: 'transferorName', label: 'Transferor' },
     { key: 'transfereeName', label: 'Transferee' },
+    { key: 'newLesseeAddress', label: 'New lessee / transferee address', type: 'textarea' },
+    { key: 'transferEffectiveDate', label: 'Transfer effective date', type: 'date' },
+    { key: 'transferDeclarationReference', label: 'Transfer Declaration form reference' },
+    { key: 'voluntaryVacationReference', label: 'Voluntary vacation evidence reference' },
+    { key: 'hosFormReference', label: 'HOS form reference, if rental changes to HOS' },
+    { key: 'houseType', label: 'House type, if HOS applies' },
+    { key: 'purchaseAmount', label: 'Purchase amount / amount bought', type: 'number' },
     { key: 'considerationAmount', label: 'Consideration amount', type: 'number' },
   ],
   assignment: [
@@ -134,16 +148,25 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
   leaseRenewal: [
     { key: 'existingLeaseExpiryDate', label: 'Existing lease expiry date', type: 'date' },
     { key: 'yearsToExpiry', label: 'Years to expiry', type: 'number' },
+    {
+      key: 'surrenderOptionStatus',
+      label: 'Surrender option',
+      type: 'select',
+      options: ['Not required', 'Surrender requested'],
+    },
     { key: 'developmentStatus', label: 'Development proposal / status' },
   ],
   landApplication: [
     { key: 'landUse', label: 'Intended land use', type: 'select', options: landUseOptions },
     { key: 'plotSizeAcres', label: 'Preferred plot size (acres)', type: 'number' },
+    { key: 'approvedFeeScheduleReference', label: 'Known approved fee / appendix reference, if any' },
   ],
   traditionalLand: [
     { key: 'landUse', label: 'Land use', type: 'select', options: landUseOptions },
     { key: 'plotSizeAcres', label: 'Plot size (acres)', type: 'number' },
     { key: 'traditionalCouncil', label: 'Traditional Council / Stool' },
+    { key: 'allocationLetterReference', label: 'Traditional Council allocation letter reference' },
+    { key: 'sitePlanReference', label: 'Traditional Council site plan reference' },
   ],
   tenancyRecognition: [
     { key: 'declarationReference', label: 'Statutory declaration reference' },
@@ -151,9 +174,15 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
     { key: 'arrearsStatus', label: 'Rent / arrears position' },
   ],
   hosConversion: [
+    { key: 'hosFormReference', label: 'House Ownership Scheme form reference' },
+    { key: 'tenantNamesChangingToHos', label: 'Tenant names changing to HOS', type: 'textarea' },
     { key: 'houseType', label: 'House type' },
     { key: 'sellingPrice', label: 'Selling price', type: 'number' },
+    { key: 'purchaseAmount', label: 'Purchase amount / amount bought', type: 'number' },
+    { key: 'purchaseDate', label: 'Date property was purchased', type: 'date' },
     { key: 'dateOfTenancy', label: 'Date of tenancy', type: 'date' },
+    { key: 'rentCardNumber', label: 'Rent card number' },
+    { key: 'rentRegisterReference', label: 'Rent register reference' },
   ],
   regularisation: [
     {
@@ -163,6 +192,7 @@ const extraFieldsByRequestType: Record<string, PortalExtraField[]> = {
       options: ['Direct approach', 'Indirect approach'],
     },
     { key: 'plotSizeAcres', label: 'Plot size (acres)', type: 'number' },
+    { key: 'communityRegularised', label: 'Community / area being regularised' },
     { key: 'planLayoutStatus', label: 'Planning layout status' },
   ],
   rightOfEntry: [

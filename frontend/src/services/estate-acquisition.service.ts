@@ -619,8 +619,8 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
 
 function requirementsFor(stageDefinition: LandAcquisitionStageDefinition): StageWorkflowRequirement {
   return STAGE_WORKFLOW_REQUIREMENTS[stageDefinition.order] || {
-    documents: [{ key: `${stageDefinition.workspaceKind}-document`, name: `${stageDefinition.title} Document`, type: stageDefinition.title }],
-    checklist: [{ name: `${stageDefinition.title} reviewed`, description: stageDefinition.description }],
+    documents: [],
+    checklist: [],
     fields: [],
   };
 }
@@ -640,12 +640,6 @@ function normalizeStage(raw: Partial<LandAcquisitionStage>, definition: LandAcqu
     rejectAction: raw.rejectAction || definition.rejectAction,
     count: raw.count ?? items.length,
     items,
-  };
-}
-
-function buildFallbackBoard(): LandAcquisitionBoard {
-  return {
-    stages: ACQUISITION_STAGES.map((definition) => normalizeStage({ items: [], count: 0 }, definition)),
   };
 }
 

@@ -2035,6 +2035,35 @@ export default function LandAcquisitionPage() {
         />
       </div>
 
+      {stages.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Workflow not configured</CardTitle>
+            <CardDescription>
+              Configure and publish the Land Acquisition workflow in
+              Administration &gt; Workflow Setup. The acquisition board will
+              show the stages, documents, checklist items, roles, and
+              assignments returned by that workflow.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  '/administration/workflow?entityType=LandAcquisition'
+                )
+              }
+            >
+              <FolderOpen className="mr-2 h-4 w-4" />
+              Open Workflow Setup
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {stages.length > 0 ? (
+        <>
       <div className="rounded-lg border bg-card p-2 text-card-foreground shadow-sm">
         <ScrollArea className="w-full whitespace-nowrap">
           <div className="flex gap-2 pb-2">
@@ -2105,6 +2134,7 @@ export default function LandAcquisitionPage() {
             <AcquisitionDetail
               item={selectedItem}
               stage={selectedItemStage}
+              stages={stages}
               onOpenWorkspace={() => openWorkspace(selectedItem)}
               onPrimary={(comments) =>
                 runAction(selectedItem, selectedItemStage, 'primary', comments)
@@ -2135,6 +2165,8 @@ export default function LandAcquisitionPage() {
           )}
         </section>
       </div>
+        </>
+      ) : null}
 
       {(draftItem || selectedItem) && workspaceStage && (
         <WorkspaceDialog
@@ -2288,6 +2320,7 @@ function AcquisitionCard({
 function AcquisitionDetail({
   item,
   stage,
+  stages,
   onOpenWorkspace,
   onPrimary,
   onReject,
@@ -2299,6 +2332,7 @@ function AcquisitionDetail({
 }: {
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
+  stages: LandAcquisitionStage[];
   onOpenWorkspace: () => void;
   onPrimary: (comments?: string) => Promise<void>;
   onReject: (comments?: string) => Promise<void>;
@@ -2352,6 +2386,7 @@ function AcquisitionDetail({
     stage.order > 0 &&
     !ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id) &&
     ['Pending Approval', 'Submitted', 'Rejected'].includes(item.status);
+  const timelineStages = stages.length > 0 ? stages : [stage];
 
   const openSummary = async () => {
     setSummaryOpen(true);
@@ -2587,7 +2622,7 @@ function AcquisitionDetail({
               Procedure Timeline
             </h3>
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              {ACQUISITION_STAGES.map((candidate) => {
+              {timelineStages.map((candidate) => {
                 const done =
                   candidate.order < stage.order ||
                   (hasPublishedLandAsset && candidate.order <= stage.order);
@@ -2743,8 +2778,10 @@ function AcquisitionDetail({
           ) : summary?.stages.length ? (
             <div className="space-y-4">
               {summary.stages.map((savedStage) => {
-                const definition = ACQUISITION_STAGES.find(
-                  (candidate) => candidate.id === savedStage.procedureId
+                const definition = timelineStages.find(
+                  (candidate) =>
+                    candidate.id === savedStage.procedureId ||
+                    candidate.order === savedStage.procedureId
                 );
                 const labels = new Map(
                   (definition

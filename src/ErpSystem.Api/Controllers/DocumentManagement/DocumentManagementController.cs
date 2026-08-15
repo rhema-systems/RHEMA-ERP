@@ -2677,6 +2677,139 @@ public sealed class DocumentManagementController : ControllerBase
             Source: Estate / Facility -> Central DMS
             """),
         Template(
+            "EST-TRANSFER-DECLARATION",
+            "Transfer Declaration Form",
+            "Transfer Declaration - {{PropertyNumber}}",
+            "EST-REC-AMD",
+            ["TransferorName", "TransfereeName", "CaseReference", "PropertyNumber", "TransferEffectiveDate", "NewLesseeAddress", "VoluntaryVacationReference"],
+            """
+            TRANSFER DECLARATION FORM
+
+            Estate reference: {{CaseReference}}
+            House / plot / shop number: {{PropertyNumber}}
+
+            Transferor: {{TransferorName}}
+            Transferee / new lessee: {{TransfereeName}}
+            New lessee address: {{NewLesseeAddress}}
+            Effective transfer date: {{TransferEffectiveDate}}
+            Voluntary vacation / tenancy vacation reference: {{VoluntaryVacationReference}}
+
+            Declaration:
+            The transferor and transferee confirm that the transfer particulars stated above are true and may be used by the Estate Records Section to amend the relevant registers and ledgers after approval.
+
+            Transferor signature: ____________________
+            Transferee signature: ____________________
+            Witness / Estate Officer: ____________________
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-HOS-CONVERSION",
+            "House Ownership Scheme Form",
+            "HOS Conversion - {{PropertyNumber}}",
+            "EST-REC-AMD",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "HouseType", "PurchaseAmount", "PurchaseDate", "TransferEffectiveDate"],
+            """
+            HOUSE OWNERSHIP SCHEME FORM
+
+            Estate reference: {{CaseReference}}
+            Tenant / purchaser: {{ApplicantName}}
+            House / unit number: {{PropertyNumber}}
+            House type: {{HouseType}}
+            Purchase amount: {{PurchaseAmount}}
+            Purchase date: {{PurchaseDate}}
+            Effective conversion date: {{TransferEffectiveDate}}
+
+            Records instruction:
+            Upon approval, update the rental register, H.O.S register, ledger records, and property file to reflect the conversion from rental tenancy to House Ownership Scheme.
+
+            Applicant signature: ____________________
+            Estate Records confirmation: ____________________
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-LEASE-AGREEMENT",
+            "Lease Agreement",
+            "Lease Agreement - {{ApplicantName}}",
+            "EST-LEASE-XFER",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "LandUse", "LeaseTerm", "MoveInDate", "GroundRent", "PaymentFrequency"],
+            """
+            LEASE AGREEMENT
+
+            Estate reference: {{CaseReference}}
+            Lessee: {{ApplicantName}}
+            Property / plot number: {{PropertyNumber}}
+            Permitted use: {{LandUse}}
+            Lease term: {{LeaseTerm}}
+            Move-in / commencement date: {{MoveInDate}}
+            Ground rent payable: {{GroundRent}}
+            Payment frequency: {{PaymentFrequency}}
+
+            This draft lease agreement is prepared from approved Estate records and is subject to legal review, execution by the parties, upload of signed copies, and registration where applicable.
+
+            Lessee signature: ____________________
+            Authorised signatory: ____________________
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-DEED-VARIATION",
+            "Deed of Variation",
+            "Deed of Variation - {{PropertyNumber}}",
+            "EST-LEASE-XFER",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "OriginalLeaseReference", "VariationReason", "Premium", "GroundRent"],
+            """
+            DEED OF VARIATION
+
+            Estate reference: {{CaseReference}}
+            Lessee: {{ApplicantName}}
+            Property / plot number: {{PropertyNumber}}
+            Original lease reference: {{OriginalLeaseReference}}
+            Variation reason: {{VariationReason}}
+            Approved premium: {{Premium}}
+            Improved ground rent: {{GroundRent}}
+
+            This deed is prepared following Estate and approval controls and is subject to legal review, execution, and registration.
+
+            Lessee signature: ____________________
+            Authorised signatory: ____________________
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
+            "EST-VENDOR-PAYMENT",
+            "Vendor Payment Request",
+            "Vendor Payment Request - {{PropertyNumber}}",
+            "EST-REGULAR",
+            ["VendorName", "CaseReference", "PropertyNumber", "AgreedAmount", "PaymentBasis", "ApprovalReference", "FinanceReference"],
+            """
+            VENDOR PAYMENT REQUEST
+
+            Estate acquisition reference: {{CaseReference}}
+            Vendor: {{VendorName}}
+            Property / parcel number: {{PropertyNumber}}
+            Agreed amount: {{AgreedAmount}}
+            Payment basis: {{PaymentBasis}}
+            Approval reference: {{ApprovalReference}}
+            Finance reference: {{FinanceReference}}
+
+            Request:
+            Kindly process payment to the vendor only after acquisition approval, supporting documents, and finance controls have been verified.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Estate / Facility -> Central DMS
+            """),
+        Template(
             "EST-RENT-CARD",
             "Rent Card",
             "Rent Card - {{ApplicantName}}",
@@ -2716,6 +2849,180 @@ public sealed class DocumentManagementController : ControllerBase
 
             Prepared by: {{PreparedBy}}
             Source: Estate / Facility -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-LEASE-INSTRUMENT",
+            "Legal Lease / Variation Instrument",
+            "Legal Instrument - {{PropertyNumber}}",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "InstrumentType", "LeaseTerm", "ScheduleReference", "ClientExecutionDate"],
+            """
+            LEGAL LEASE / VARIATION INSTRUMENT
+
+            Legal reference: {{CaseReference}}
+            Instrument type: {{InstrumentType}}
+            Lessee / client: {{ApplicantName}}
+            Property / plot number: {{PropertyNumber}}
+            Lease term: {{LeaseTerm}}
+            Schedule reference: {{ScheduleReference}}
+            Client execution date: {{ClientExecutionDate}}
+
+            This draft has been prepared for legal vetting, execution, sealing, Head of Legal signature, Managing Director signature where applicable, and registration handoff where required.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-MORTGAGE-CONSENT",
+            "Legal Mortgage Consent Letter",
+            "Mortgage Consent - {{PropertyNumber}}",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "MortgageeName", "PaymentReceiptReference", "MortgageLetterReference"],
+            """
+            MORTGAGE CONSENT LETTER
+
+            Legal reference: {{CaseReference}}
+            Lessee / client: {{ApplicantName}}
+            Property / plot number: {{PropertyNumber}}
+            Mortgagee / financial institution: {{MortgageeName}}
+            Payment receipt reference: {{PaymentReceiptReference}}
+            Mortgage letter reference: {{MortgageLetterReference}}
+
+            The Legal Department confirms that this consent is prepared subject to due diligence, approved payment evidence, Head of Legal signature, Managing Director signature where required, and return of the property file to Estate.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-MORTGAGE-IN-PRINCIPLE",
+            "Mortgage In Principle Letter",
+            "Mortgage In Principle - {{PropertyNumber}}",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "MortgageeName", "PaymentReceiptReference", "MortgageLetterReference"],
+            """
+            MORTGAGE IN PRINCIPLE LETTER
+
+            Legal reference: {{CaseReference}}
+            Lessee / client: {{ApplicantName}}
+            Property / plot number: {{PropertyNumber}}
+            Mortgagee / financial institution: {{MortgageeName}}
+            Payment receipt reference: {{PaymentReceiptReference}}
+            Letter reference: {{MortgageLetterReference}}
+
+            This in-principle response is prepared after Legal intake, payment confirmation, draft vetting, and Head of Legal approval.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-TRANSFER-FORM",
+            "Legal Transfer Form",
+            "Legal Transfer - {{PropertyNumber}}",
+            ["TransferorName", "TransfereeName", "CaseReference", "PropertyNumber", "TransferFeeReceipt", "MdApprovalReference", "TransferDeclarationReference"],
+            """
+            LEGAL TRANSFER FORM
+
+            Legal reference: {{CaseReference}}
+            Property / plot / house number: {{PropertyNumber}}
+            Transferor: {{TransferorName}}
+            Transferee: {{TransfereeName}}
+            Transfer fee receipt: {{TransferFeeReceipt}}
+            MD approval reference: {{MdApprovalReference}}
+            Transfer declaration reference: {{TransferDeclarationReference}}
+
+            Execution routing:
+            Client signature, Legal Officer signature, Legal Admin Assistant signature, and Head of Legal signature must be captured before distribution and return to Estate Records.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-TERMINATION-NOTICE",
+            "Termination Notice",
+            "Termination Notice - {{PropertyNumber}}",
+            ["ApplicantName", "CaseReference", "PropertyNumber", "TerminationReason", "SiteReportReference", "NoticePostingStartDate", "NoticePostingEndDate"],
+            """
+            TERMINATION NOTICE
+
+            Legal reference: {{CaseReference}}
+            Property / unit: {{PropertyNumber}}
+            Party concerned: {{ApplicantName}}
+            Termination reason: {{TerminationReason}}
+            Site report reference: {{SiteReportReference}}
+            Notice posting start date: {{NoticePostingStartDate}}
+            Notice posting end date: {{NoticePostingEndDate}}
+
+            This notice is prepared for approval, signature, and controlled posting for the required 21-day period before any recognition process proceeds.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-TENANCY-RECOGNITION",
+            "Recognition of Tenancy Document",
+            "Recognition of Tenancy - {{PropertyNumber}}",
+            ["RecognitionApplicantName", "CaseReference", "PropertyNumber", "RecognitionPaymentStatus", "RecognitionDocumentReference", "SignatureStatus"],
+            """
+            RECOGNITION OF TENANCY
+
+            Legal reference: {{CaseReference}}
+            Property / unit: {{PropertyNumber}}
+            Recognition applicant: {{RecognitionApplicantName}}
+            Recognition payment status: {{RecognitionPaymentStatus}}
+            Recognition document reference: {{RecognitionDocumentReference}}
+            Signature status: {{SignatureStatus}}
+
+            The recognition document is prepared after termination notice controls, payment approval where applicable, legal vetting, client execution, and Legal signatures.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-CONSENT-ASSIGN-VESTING",
+            "Consent to Assign / Vesting Recognition",
+            "Consent / Vesting - {{PropertyNumber}}",
+            ["InstrumentType", "AssignorName", "AssigneeName", "CaseReference", "PropertyNumber", "VestingInstrumentReference", "ConsentDecision"],
+            """
+            CONSENT TO ASSIGN / RECOGNITION OF VESTING
+
+            Legal reference: {{CaseReference}}
+            Instrument type: {{InstrumentType}}
+            Property / plot number: {{PropertyNumber}}
+            Assignor / current lessee: {{AssignorName}}
+            Assignee / incoming party: {{AssigneeName}}
+            Vesting instrument reference: {{VestingInstrumentReference}}
+            Consent / recognition decision: {{ConsentDecision}}
+
+            This document is prepared for Legal Officer vetting, Head of Legal approval, executive signature where required, sealing/dating, and return to Estate.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
+            """),
+        LegalTemplate(
+            "LEG-COURT-FILING-MEMO",
+            "Court Filing Memo",
+            "Court Filing Memo - {{CaseNumber}}",
+            ["CaseReference", "CourtName", "CaseNumber", "CourtProcessType", "ServiceDate", "ResponseDeadline", "FilingReference"],
+            """
+            COURT FILING MEMO
+
+            Legal reference: {{CaseReference}}
+            Court: {{CourtName}}
+            Court case number: {{CaseNumber}}
+            Process type: {{CourtProcessType}}
+            Service date: {{ServiceDate}}
+            Response / filing deadline: {{ResponseDeadline}}
+            Filing reference: {{FilingReference}}
+
+            Registry receipt, Legal Admin recording, Legal Officer preparation, and filing evidence must be retained in the court jacket.
+
+            Prepared by: {{PreparedBy}}
+            Date: {{Today}}
+            Source: Legal Department -> Central DMS
             """)
     ];
 
@@ -2739,6 +3046,28 @@ public sealed class DocumentManagementController : ControllerBase
             body.Trim(),
             true,
             "Head of Estate",
+            "Authorised Signatory",
+            "Email / Print");
+
+    private static GeneratedDocumentTemplateDefinition LegalTemplate(
+        string templateCode,
+        string title,
+        string titleTemplate,
+        IReadOnlyList<string> mergeFields,
+        string body) =>
+        new(
+            templateCode,
+            title,
+            titleTemplate,
+            "Legal",
+            "Source: Legal Department -> Central DMS",
+            title,
+            "LEGAL-MATTER",
+            "Legal + Estate Records",
+            mergeFields,
+            body.Trim(),
+            true,
+            "Head of Legal",
             "Authorised Signatory",
             "Email / Print");
 

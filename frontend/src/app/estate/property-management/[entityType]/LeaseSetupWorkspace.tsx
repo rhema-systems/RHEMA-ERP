@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import React from 'react';
 import {
+  AlertTriangle,
   ClipboardCheck,
   CreditCard,
   FileText,
@@ -296,6 +297,13 @@ export function LeaseSetupWorkspace() {
   );
   const currency = selectedAsset?.currency || 'GHS';
   const plotSizeAcres = getPlotSizeAcres(selectedAsset);
+  const signedAgreementReference = propertyFileReference.trim();
+  const leaseStartDate = rightOfEntryDate || dateOfTenancy;
+  const signedReferenceNeedsDate =
+    Boolean(signedAgreementReference) && !leaseStartDate;
+  const leaseStatusPreview = signedAgreementReference && leaseStartDate
+    ? 'Leased - signed agreement and start / move-in date recorded'
+    : 'Reserved - customer selected, agreement/signature or start date pending';
   const billingAccountByAssetId = React.useMemo(
     () =>
       new Map(
@@ -335,6 +343,13 @@ export function LeaseSetupWorkspace() {
   const saveLeaseSetup = async () => {
     if (!selectedAsset || !selectedCustomer) {
       toast.error('Select an available property or unit and a customer.');
+      return;
+    }
+
+    if (signedReferenceNeedsDate) {
+      toast.error(
+        'Record the agreement start date or right-of-entry / move-in date with the signed agreement reference.'
+      );
       return;
     }
 
@@ -526,6 +541,32 @@ export function LeaseSetupWorkspace() {
           </div>
         </div>
 
+        {selectedAsset && selectedCustomer ? (
+          <div
+            className={`flex items-start gap-3 rounded-md border p-3 text-sm ${
+              signedReferenceNeedsDate
+                ? 'border-amber-500/30 bg-amber-500/5 text-amber-900'
+                : 'bg-muted/20 text-muted-foreground'
+            }`}
+          >
+            {signedReferenceNeedsDate ? (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            )}
+            <div>
+              <div className="font-medium text-foreground">
+                Status after save: {leaseStatusPreview}
+              </div>
+              <p className="mt-1">
+                Ground-rent or rent billing remains held until there is a
+                signed agreement reference and an agreement start / move-in
+                date. Move-in / Handover then marks the unit occupied.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
           <div>
             <div className="flex items-center gap-2 font-medium">
@@ -630,7 +671,7 @@ export function LeaseSetupWorkspace() {
           </Button>
           <Button
             type="button"
-            disabled={isSaving || isLoading}
+            disabled={isSaving || isLoading || signedReferenceNeedsDate}
             onClick={() => void saveLeaseSetup()}
           >
             {isSaving ? (
