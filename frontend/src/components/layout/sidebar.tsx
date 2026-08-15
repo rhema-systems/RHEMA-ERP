@@ -88,6 +88,7 @@ import {
   ShieldPlus,
   ScanLine,
   WalletCards,
+  Layers3,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -148,6 +149,16 @@ export const navigationItems: NavItem[] = [
             title: 'Journal Entries',
             href: '/finance/journal-entries',
             icon: FileText,
+          },
+          {
+            // Journal batches were delivered as a complete controlled workspace, but the
+            // route was previously absent from navigation. Keep this operational feature
+            // beside individual journals and let the existing permission filter hide it
+            // from users who are not authorised to view Finance batch controls.
+            title: 'Journal Batches',
+            href: '/finance/journal-batches',
+            icon: Layers3,
+            permissions: ['Finance.JournalBatches.View'],
           },
           {
             title: 'Recurring Journals',
