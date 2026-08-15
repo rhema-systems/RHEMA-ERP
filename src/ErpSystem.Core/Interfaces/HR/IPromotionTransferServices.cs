@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -98,11 +98,26 @@ public interface IStaffMovementService
 
     // ── Workflow ──────────────────────────────────────────────────────────────
 
-    /// <summary>Submits a Draft movement into the approval workflow.</summary>
-    Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Submits a Draft movement into the approval workflow. Inoperable until a StaffMovement
+    /// workflow definition is published for the tenant.
+    /// </summary>
+    Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByEmployeeId, CancellationToken cancellationToken = default);
 
-    /// <summary>Records the final authorisation once all approval levels are cleared.</summary>
-    Task<bool> AuthorizeAsync(AuthorizeStaffMovementDto dto, Guid authorizedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Returns the movements the caller can currently approve. Token-derived: an approver is normally
+    /// a line manager, not HR, and the register is HR-only, so without this they have no queue.
+    /// </summary>
+    Task<IEnumerable<StaffMovementSummaryDto>> GetAwaitingMyApprovalAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the caller's approval of the current workflow step. Refused unless the engine has
+    /// them assigned to it — authority comes from the published definition, not from a role.
+    /// </summary>
+    Task<bool> ApproveAsync(Guid movementId, Guid approvingEmployeeId, string? comments = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Withdraws a submitted movement from approval and returns it to the requester as a Draft.</summary>
+    Task<bool> RecallAsync(Guid movementId, Guid recallingEmployeeId, string? reason = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records the employee's acceptance or rejection of the proposed movement.
@@ -126,7 +141,13 @@ public interface IStaffMovementService
     /// <summary>Marks an approved movement as Implemented (physically actioned in the system).</summary>
     Task<bool> ImplementAsync(Guid movementId, Guid implementedByUserId, CancellationToken cancellationToken = default);
 
-    // ── Approval Level Operations ─────────────────────────────────────────────
+    // ── Approval Level Operations (legacy, read-only) ─────────────────────────
+    //
+    // The bespoke approval chain has been retired in favour of the generic workflow engine, which
+    // does everything it did — ordered steps, named approvers, delegation — and adds conditional
+    // routing and a queue the approver can actually find their work in. Two parallel paths to
+    // Approved is the dangerous shape, so the WRITES are gone; the reads stay so any chain a
+    // previous build recorded is still visible on the movement.
 
     /// <summary>Returns all approval levels for a movement, ordered by level number.</summary>
     Task<IEnumerable<StaffMovementApprovalLevelDto>> GetApprovalLevelsAsync(Guid movementId, CancellationToken cancellationToken = default);
@@ -134,18 +155,8 @@ public interface IStaffMovementService
     /// <summary>Returns the current pending approval level for a movement, or null if all are actioned.</summary>
     Task<StaffMovementApprovalLevelDto?> GetCurrentPendingApprovalLevelAsync(Guid movementId, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds an approval level to the movement's approval chain.</summary>
-    Task<StaffMovementApprovalLevelDto> AddApprovalLevelAsync(CreateStaffMovementApprovalLevelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-
-    /// <summary>Records an approve or reject decision at a specific level.</summary>
-    Task<bool> ActionApprovalLevelAsync(ActionApprovalLevelDto dto, Guid actionedByUserId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Delegates an approval level to another person. Only the level's own approver may delegate it.
-    /// </summary>
-    Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, Guid delegatingEmployeeId, CancellationToken cancellationToken = default);
-
     /// <summary>Returns true when all approval levels for the movement are approved.</summary>
+    /// <remarks>Legacy rows only — see the note on the read above.</remarks>
     Task<bool> AllLevelsApprovedAsync(Guid movementId, CancellationToken cancellationToken = default);
 
     // ── Status History Operations ─────────────────────────────────────────────

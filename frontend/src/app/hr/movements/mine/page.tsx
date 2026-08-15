@@ -57,6 +57,13 @@ export default function MyMovementsPage() {
     queryFn: () => movementService.getMyChecklistItems(),
   });
 
+  // Movements this caller is an approver for. Approving a report's transfer is an ordinary
+  // line-manager job, and the HR register is closed to them, so this is where that work lives.
+  const { data: toApprove = [] } = useQuery({
+    queryKey: ['hr', 'movements', 'awaiting-my-approval'],
+    queryFn: () => movementService.getAwaitingMyApproval(),
+  });
+
   const respond = useMutation({
     mutationFn: () => {
       if (!responding) throw new Error('No movement selected.');
@@ -126,6 +133,44 @@ export default function MyMovementsPage() {
                 </div>
               </div>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {toApprove.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Waiting for my approval</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Number</TableHead>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Effective</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {toApprove.map((m) => (
+                  <TableRow key={m.id}>
+                    <TableCell className="font-medium">
+                      <Link href={`/hr/movements/${m.id}`} className="hover:underline">
+                        {m.movementNumber}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{m.employeeName}</TableCell>
+                    <TableCell>{m.movementTypeName}</TableCell>
+                    <TableCell>{fmtDate(m.effectiveDate)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+          <CardContent className="pt-0 text-xs text-muted-foreground">
+            Approve or refuse from the movement itself — the approval actions there come from the
+            workflow, which knows whether the step is yours.
           </CardContent>
         </Card>
       )}

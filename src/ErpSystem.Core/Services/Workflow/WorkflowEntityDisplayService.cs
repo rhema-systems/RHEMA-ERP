@@ -227,6 +227,21 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("StaffMovement") || key == Normalize("STAFF_MOVEMENT") || key == Normalize("Staff Movement"))
+            {
+                var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffMovement";
+                info.EntityNumber = movement?.MovementNumber;
+                // An approver needs to know what kind of move it is and when it lands before they
+                // open it — those two decide whether it is theirs to worry about today.
+                info.EntityName = movement == null
+                    ? null
+                    : $"{movement.MovementType} effective {movement.EffectiveDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/movements/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("AppraisalTemplate") || key == Normalize("APPRAISAL_TEMPLATE") || key == Normalize("Appraisal Template"))
             {
                 var template = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.AppraisalTemplate>()

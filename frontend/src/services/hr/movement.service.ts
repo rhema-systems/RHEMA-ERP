@@ -57,6 +57,14 @@ class MovementService {
     return apiService.get<StaffMovementSummary[]>(`${this.baseUrl}/employee/${employeeId}`);
   }
 
+  /**
+   * The movements the caller can approve right now — the engine decides what is in it. An approver
+   * is normally a line manager, and the register answers 403 for them, so this is their queue.
+   */
+  getAwaitingMyApproval(): Promise<StaffMovementSummary[]> {
+    return apiService.get<StaffMovementSummary[]>(`${this.baseUrl}/awaiting-my-approval`);
+  }
+
   /** The caller's own movements — the token supplies the employee. */
   getMine(): Promise<StaffMovementSummary[]> {
     return apiService.get<StaffMovementSummary[]>(`${this.baseUrl}/employee/me`);
@@ -117,15 +125,32 @@ class MovementService {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
   }
 
+  /** Refused unless every gate has been cleared: acceptance, handover and required checklist tasks. */
+  implementMovement(id: string): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/${id}/implement`, {});
+  }
+
   // ── Workflow ───────────────────────────────────────────────────────────────
 
+  /**
+   * Hands the movement to the workflow engine. Inoperable until a StaffMovement definition is
+   * published for the tenant — approval authority comes from the definition, not from a role.
+   */
   submit(id: string, submissionNotes?: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${id}/submit`, { movementId: id, submissionNotes });
   }
 
-  /** Refused until every approval level is cleared — and a movement with no levels cannot be authorised at all. */
-  authorize(id: string, comments?: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${id}/authorize`, { movementId: id, comments });
+  /**
+   * Approves the current workflow step. Refused unless the engine has the caller assigned to it —
+   * which is usually a line manager or head of department, not HR.
+   */
+  approve(id: string, comments?: string | null): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/${id}/approve`, { movementId: id, comments });
+  }
+
+  /** Withdraws a submitted movement from approval, back to the requester as a draft. */
+  recall(id: string, comments?: string | null): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/${id}/recall`, { movementId: id, comments });
   }
 
   /** The subject's own acceptance or refusal. Refused for anyone else, HR included. */
@@ -153,51 +178,14 @@ class MovementService {
     });
   }
 
-  implement(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${id}/implement`, {});
-  }
-
   // ── Approval levels ────────────────────────────────────────────────────────
 
   getApprovalLevels(id: string): Promise<StaffMovementApprovalLevel[]> {
     return apiService.get<StaffMovementApprovalLevel[]>(`${this.baseUrl}/${id}/approval-levels`);
   }
 
-  addApprovalLevel(
-    id: string,
-    request: { level: number; roleName: string; approverId: string },
-  ): Promise<StaffMovementApprovalLevel> {
-    return apiService.post<StaffMovementApprovalLevel>(`${this.baseUrl}/${id}/approval-levels`, {
-      movementId: id,
-      ...request,
-    });
-  }
-
-  /** Only the named approver or their delegate may action a level — not HR. */
-  actionApprovalLevel(
-    approvalLevelId: string,
-    decision: 'Approved' | 'Rejected',
-    comments?: string,
-  ): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/approval-levels/${approvalLevelId}/action`, {
-      approvalLevelId,
-      decision,
-      comments,
-    });
-  }
-
-  /** Only the assigned approver may delegate their own level. */
-  delegateApprovalLevel(
-    approvalLevelId: string,
-    delegatedToId: string,
-    delegationReason?: string,
-  ): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/approval-levels/${approvalLevelId}/delegate`, {
-      approvalLevelId,
-      delegatedToId,
-      delegationReason,
-    });
-  }
+  // The add / action / delegate calls are gone — the workflow engine owns approval now. The read
+  // above stays so a chain recorded by an earlier build is still visible on the movement.
 
   // ── Status history ─────────────────────────────────────────────────────────
 

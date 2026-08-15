@@ -111,6 +111,15 @@ public class StaffMovementsController : ControllerBase
         return Ok(movement);
     }
 
+    /// <summary>
+    /// The movements the caller can approve right now. Open by design: the approver of a movement is
+    /// normally a line manager or head of department, and the register above answers 403 for them,
+    /// so this is the only place their work is visible. The engine decides what is in it.
+    /// </summary>
+    [HttpGet("awaiting-my-approval")]
+    public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetAwaitingMyApproval()
+        => Ok(await _service.GetAwaitingMyApprovalAsync());
+
     /// <summary>The caller's own movement history. The token supplies the employee — see GetByEmployee.</summary>
     [HttpGet("employee/me")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetMine()
@@ -275,18 +284,36 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Movement submitted for approval." });
     }
 
-    [Authorize(Roles = HrRoles)]
-    [HttpPost("{id:guid}/authorize")]
-    public async Task<IActionResult> Authorize(Guid id, [FromBody] AuthorizeStaffMovementDto dto)
+    /// <summary>
+    /// Approves the movement's current workflow step.
+    ///
+    /// NOT role-gated, deliberately: the approver of a movement is normally the employee's line
+    /// manager or a head of department, not HR. The engine refuses anyone the published definition
+    /// has not assigned to the current step, which is a stronger test than a role could be — it is
+    /// per-movement and per-step, and it knows about delegation.
+    /// </summary>
+    [HttpPost("{id:guid}/approve")]
+    public async Task<IActionResult> Approve(Guid id, [FromBody] AuthorizeStaffMovementDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        dto.MovementId = id;
-        await _service.AuthorizeAsync(dto, employeeId.Value);
-        return Ok(new { message = "Movement authorised." });
+        await _service.ApproveAsync(id, employeeId.Value, dto.Comments);
+        return Ok(new { message = "Approval recorded." });
+    }
+
+    /// <summary>Withdraws a submitted movement from approval, back to the requester as a draft.</summary>
+    [Authorize(Roles = HrRoles)]
+    [HttpPost("{id:guid}/recall")]
+    public async Task<IActionResult> Recall(Guid id, [FromBody] AuthorizeStaffMovementDto dto)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _service.RecallAsync(id, employeeId.Value, dto?.Comments);
+        return Ok(new { message = "Movement recalled." });
     }
 
     /// <summary>
@@ -320,7 +347,10 @@ public class StaffMovementsController : ControllerBase
         return Ok(new { message = "Handover completed." });
     }
 
-    [Authorize(Roles = HrRoles)]
+    /// <summary>
+    /// Refuses the movement. Ungated for the same reason as approve — the engine checks the caller
+    /// against the current step, which a role attribute cannot do.
+    /// </summary>
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectStaffMovementDto dto)
     {
@@ -392,51 +422,10 @@ public class StaffMovementsController : ControllerBase
     public async Task<ActionResult<bool>> AllLevelsApproved(Guid id)
         => Ok(await _service.AllLevelsApprovedAsync(id));
 
-    [Authorize(Roles = HrRoles)]
-    [HttpPost("{id:guid}/approval-levels")]
-    public async Task<ActionResult<StaffMovementApprovalLevelDto>> AddApprovalLevel(
-        Guid id, [FromBody] CreateStaffMovementApprovalLevelDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-
-        var tenantId   = _currentUser.TenantId;
-        var employeeId = _currentUser.EmployeeId;
-
-        if (tenantId == null)   return BadRequest("Tenant context could not be resolved.");
-        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        dto.MovementId = id;
-        var created = await _service.AddApprovalLevelAsync(dto, tenantId.Value, employeeId.Value);
-        return CreatedAtAction(nameof(GetApprovalLevels), new { id }, created);
-    }
-
-    [HttpPost("approval-levels/{approvalLevelId:guid}/action")]
-    public async Task<IActionResult> ActionApprovalLevel(
-        Guid approvalLevelId, [FromBody] ActionApprovalLevelDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-
-        var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        dto.ApprovalLevelId = approvalLevelId;
-        await _service.ActionApprovalLevelAsync(dto, employeeId.Value);
-        return Ok(new { message = "Approval level actioned." });
-    }
-
-    [HttpPost("approval-levels/{approvalLevelId:guid}/delegate")]
-    public async Task<IActionResult> DelegateApprovalLevel(
-        Guid approvalLevelId, [FromBody] DelegateApprovalLevelDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-
-        var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        dto.ApprovalLevelId = approvalLevelId;
-        await _service.DelegateApprovalLevelAsync(dto, employeeId.Value);
-        return Ok(new { message = "Approval level delegated." });
-    }
+    // The add / action / delegate endpoints are gone: the generic workflow engine owns approval
+    // now, and two parallel routes to Approved is exactly the shape that lets a movement be
+    // authorised twice, by different people, with two different audit trails. The reads above stay
+    // so any chain a previous build recorded is still visible.
 
     // =========================================================================
     // STATUS HISTORY

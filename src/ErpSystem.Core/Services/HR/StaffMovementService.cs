@@ -24,9 +24,18 @@ public class StaffMovementService : IStaffMovementService
     private readonly IStaffMovementStatusHistoryRepository _historyRepo;
     private readonly IStaffMovementAttachmentRepository _attachmentRepo;
     private readonly IStaffMovementChecklistItemRepository _checklistRepo;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffMovementService> _logger;
+
+    /// <summary>
+    /// The workflow entity type. Approval authority comes from the published definition, not from a
+    /// role attribute — which is the whole reason a movement is on the engine: an approver here is
+    /// usually a line manager or a head of department, not HR.
+    /// </summary>
+    private const string EntityType = "StaffMovement";
 
     public StaffMovementService(
         IStaffMovementRepository movementRepo,
@@ -34,6 +43,8 @@ public class StaffMovementService : IStaffMovementService
         IStaffMovementStatusHistoryRepository historyRepo,
         IStaffMovementAttachmentRepository attachmentRepo,
         IStaffMovementChecklistItemRepository checklistRepo,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffMovementService> logger)
@@ -43,9 +54,24 @@ public class StaffMovementService : IStaffMovementService
         _historyRepo    = historyRepo;
         _attachmentRepo = attachmentRepo;
         _checklistRepo  = checklistRepo;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
         _unitOfWork     = unitOfWork;
         _logger         = logger;
+    }
+
+    /// <summary>
+    /// The engine identifies approvers by ApplicationUser id, not Employee id — see the actor split
+    /// in the attendance services. The entity's own AuthorizedById / RejectedById are Employee FKs
+    /// and are set from the caller's employee separately.
+    /// </summary>
+    private Guid RequireUserId()
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("No user is associated with the current request.");
+        return userId;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -376,12 +402,23 @@ public class StaffMovementService : IStaffMovementService
         return (loaded ?? entity).ToDetailDto();
     }
 
+    /// <summary>
+    /// Soft-deletes a movement nobody has been asked to act on yet.
+    ///
+    /// Once it has gone out for approval it can only be cancelled or recalled: deleting it would
+    /// leave the workflow instance running and a task sitting in an approver's queue pointing at a
+    /// record that no longer exists.
+    /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMovementAsync(id);
 
         if (entity.Status == StaffMovementStatus.Approved || entity.Status == StaffMovementStatus.Implemented)
             throw new InvalidOperationException("An authorised or completed movement cannot be deleted.");
+
+        if (entity.Status == StaffMovementStatus.Submitted)
+            throw new InvalidOperationException(
+                "A movement that is out for approval cannot be deleted. Recall it first, or cancel it.");
 
         await _movementRepo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -393,19 +430,47 @@ public class StaffMovementService : IStaffMovementService
 
     // ── Workflow ──────────────────────────────────────────────────────────────
 
-    public async Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default)
+    // ── Approval workflow ────────────────────────────────────────────────────
+    // Submit / approve / reject / recall all run through the generic workflow engine; this service
+    // never sets an approval status itself. StaffMovementWorkflowStatusAdapter maps the engine's
+    // outcome onto the entity.
+    //
+    // ⚠ Like every other entity on the engine, this is inoperable until a StaffMovement workflow
+    // definition has been published for the tenant — the authority to approve comes from the
+    // definition, not from a role attribute. A single-step definition approves on submission.
+
+    public async Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMovementAsync(dto.MovementId);
 
         if (entity.Status != StaffMovementStatus.Draft)
             throw new InvalidOperationException("Only Draft movements can be submitted for approval.");
 
+        // A movement with no destination is not something an approver can weigh. The create DTO
+        // requires both, but an edit could have cleared the salary, and approving a promotion to
+        // nowhere is worse than refusing to send it.
+        if (entity.NewPositionId == Guid.Empty || entity.NewOrganizationUnitId == Guid.Empty)
+            throw new InvalidOperationException(
+                "Set the position and organisation unit the employee is moving into before submitting this movement.");
+
         var previousStatus = entity.Status;
-        entity.Status               = StaffMovementStatus.Submitted;
         entity.RequestSubmissionDate = DateTime.UtcNow;
 
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the movement approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+
+        // A definition with one step approves on submission, so the authoriser has to be stamped
+        // here too — the adapter only knows the ApplicationUser id, and this column is an Employee FK.
+        if (entity.Status == StaffMovementStatus.Approved)
+            entity.AuthorizedById = submittedByEmployeeId;
+
         await _movementRepo.UpdateAsync(entity);
-        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.SubmissionNotes, submittedByUserId, cancellationToken);
+        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.SubmissionNotes, submittedByEmployeeId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff movement submitted: {MovementNumber}", entity.MovementNumber);
@@ -413,40 +478,87 @@ public class StaffMovementService : IStaffMovementService
         return true;
     }
 
-    public async Task<bool> AuthorizeAsync(AuthorizeStaffMovementDto dto, Guid authorizedByUserId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The movements the caller is currently able to approve.
+    ///
+    /// Without this an approver has nowhere to find their work: the register is HR-only, and the
+    /// approver of a movement is normally a line manager or head of department. It is the same
+    /// token-derived shape as the checklist and movement `/mine` reads — no id is accepted, so it
+    /// cannot become "read anyone's queue by passing their id".
+    ///
+    /// The engine answers per movement rather than per user, so this asks it about each submitted
+    /// movement in turn. That set is small by nature — anything sitting in it is, by definition,
+    /// work nobody has done yet.
+    /// </summary>
+    public async Task<IEnumerable<StaffMovementSummaryDto>> GetAwaitingMyApprovalAsync(CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedMovementAsync(dto.MovementId);
+        var tenantId = GetTenantId();
+        var userId = RequireUserId();
 
-        var approvalStatuses = new[]
+        var submitted = await _movementRepo.GetPendingApprovalAsync(tenantId);
+
+        var mine = new List<StaffMovement>();
+        foreach (var movement in submitted)
         {
-            StaffMovementStatus.Submitted,
-            StaffMovementStatus.CurrentSupervisorApproval,
-            StaffMovementStatus.NewSupervisorApproval,
-            StaffMovementStatus.CurrentHodApproval,
-            StaffMovementStatus.NewHodApproval,
-            StaffMovementStatus.HrReview,
-            StaffMovementStatus.ManagementApproval,
-        };
+            if (await _workflowIntegrationService.CanUserApproveAsync(EntityType, movement.Id, userId))
+                mine.Add(movement);
+        }
 
-        if (!approvalStatuses.Contains(entity.Status))
-            throw new InvalidOperationException($"Movement cannot be authorized in its current status: {entity.Status}.");
+        return mine.ToSummaryDtoList();
+    }
 
-        var allLevelsApproved = await _approvalRepo.AllLevelsApprovedAsync(dto.MovementId);
-        if (!allLevelsApproved)
-            throw new InvalidOperationException(
-                "All approval levels must be approved before the movement can be authorized. " +
-                "A movement with no approval levels cannot be authorised at all — add its approval chain first.");
+    public async Task<bool> ApproveAsync(Guid movementId, Guid approvingEmployeeId, string? comments = null, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedMovementAsync(movementId);
+        var userId = RequireUserId();
 
-        var previousStatus        = entity.Status;
-        entity.Status             = StaffMovementStatus.Approved;
-        entity.AuthorizedById     = authorizedByUserId;
-        entity.AuthorizationDate  = DateTime.UtcNow;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, movementId, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var previousStatus = entity.Status;
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, movementId, userId, "Approve", comments);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+
+        if (entity.Status == StaffMovementStatus.Approved)
+            entity.AuthorizedById = approvingEmployeeId;
 
         await _movementRepo.UpdateAsync(entity);
-        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.Comments, authorizedByUserId, cancellationToken);
+        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status,
+            comments ?? "Approval step processed", approvingEmployeeId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Staff movement authorised: {MovementNumber}", entity.MovementNumber);
+        _logger.LogInformation("Staff movement approval step processed: {MovementNumber}", entity.MovementNumber);
+
+        return true;
+    }
+
+    public async Task<bool> RecallAsync(Guid movementId, Guid recallingEmployeeId, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedMovementAsync(movementId);
+        var userId = RequireUserId();
+
+        if (entity.Status != StaffMovementStatus.Submitted)
+            throw new InvalidOperationException("Only a movement still awaiting approval can be recalled.");
+
+        var previousStatus = entity.Status;
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, movementId, userId, reason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the movement.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId, reason);
+
+        await _movementRepo.UpdateAsync(entity);
+        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status,
+            reason ?? "Recalled by the requester", recallingEmployeeId, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Staff movement recalled: {MovementNumber}", entity.MovementNumber);
 
         return true;
     }
@@ -511,21 +623,43 @@ public class StaffMovementService : IStaffMovementService
         return true;
     }
 
-    public async Task<bool> RejectAsync(RejectStaffMovementDto dto, Guid rejectedByUserId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Refuses the movement, as the approver the engine currently has it with.
+    ///
+    /// Rejection is only meaningful once somebody has been ASKED to approve it: a draft nobody has
+    /// seen is deleted or cancelled, not refused. Requiring Submitted also means every rejection
+    /// goes through the engine, so the instance is closed and the approval history records who
+    /// refused it — a direct status write would leave a live workflow instance, and a task in
+    /// somebody's queue, pointing at a rejected movement.
+    /// </summary>
+    public async Task<bool> RejectAsync(RejectStaffMovementDto dto, Guid rejectedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMovementAsync(dto.MovementId);
 
-        if (entity.Status == StaffMovementStatus.Approved || entity.Status == StaffMovementStatus.Implemented)
-            throw new InvalidOperationException("An authorised or completed movement cannot be rejected.");
+        if (entity.Status != StaffMovementStatus.Submitted)
+            throw new InvalidOperationException(
+                $"Only a movement awaiting approval can be rejected. This one is {entity.Status} — " +
+                "a draft is deleted or cancelled instead.");
 
         var previousStatus = entity.Status;
-        entity.Status          = StaffMovementStatus.Rejected;
-        entity.RejectedById    = rejectedByUserId;
-        entity.RejectionDate   = DateTime.UtcNow;
+        var userId = RequireUserId();
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, dto.MovementId, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, dto.MovementId, userId, "Reject", dto.RejectionReason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, dto.RejectionReason);
+
+        entity.RejectedById    = rejectedByEmployeeId;
         entity.RejectionReason = dto.RejectionReason;
 
         await _movementRepo.UpdateAsync(entity);
-        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.RejectionReason, rejectedByUserId, cancellationToken);
+        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.RejectionReason, rejectedByEmployeeId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff movement rejected: {MovementNumber}", entity.MovementNumber);
@@ -539,6 +673,12 @@ public class StaffMovementService : IStaffMovementService
 
         if (entity.Status == StaffMovementStatus.Implemented)
             throw new InvalidOperationException("A completed movement cannot be cancelled.");
+
+        // Cancelling a movement that is out for approval must take its workflow instance with it,
+        // or the approvers keep a live task pointing at a cancelled record.
+        if (entity.Status == StaffMovementStatus.Submitted)
+            await _workflowIntegrationService.CancelWorkflowAsync(
+                EntityType, entity.Id, dto.CancellationReason ?? "Movement cancelled");
 
         var previousStatus = entity.Status;
         entity.Status              = StaffMovementStatus.Cancelled;
@@ -580,12 +720,33 @@ public class StaffMovementService : IStaffMovementService
         return true;
     }
 
+    /// <summary>
+    /// Marks the movement as carried out.
+    ///
+    /// The three gates below were all modelled and none was enforced: RequiresEmployeeAcceptance,
+    /// RequiresHandover and the required checklist items existed as flags and a helper that nothing
+    /// called. A movement could be implemented over an employee who had declined it, with the
+    /// outgoing duties un-handed-over and the access-revocation tasks still open.
+    /// </summary>
     public async Task<bool> ImplementAsync(Guid movementId, Guid implementedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMovementAsync(movementId);
 
         if (entity.Status != StaffMovementStatus.Approved)
             throw new InvalidOperationException($"Only approved movements can be implemented. Current status: {entity.Status}.");
+
+        if (entity.RequiresEmployeeAcceptance && entity.EmployeeAccepted != true)
+            throw new InvalidOperationException(
+                entity.EmployeeAccepted == false
+                    ? "The employee declined this movement, so it cannot be implemented."
+                    : "This movement is waiting for the employee to accept it.");
+
+        if (entity.RequiresHandover && entity.HandoverCompletionDate == null)
+            throw new InvalidOperationException("Record the handover before implementing this movement.");
+
+        if (!await _checklistRepo.AllRequiredItemsCompletedAsync(movementId))
+            throw new InvalidOperationException(
+                "Every required checklist task must be complete before this movement can be implemented.");
 
         var previousStatus = entity.Status;
         entity.Status = StaffMovementStatus.Implemented;
@@ -615,114 +776,6 @@ public class StaffMovementService : IStaffMovementService
         var tenantId = GetTenantId();
         var entity = await _approvalRepo.GetCurrentPendingLevelAsync(movementId);
         return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
-    }
-
-    public async Task<StaffMovementApprovalLevelDto> AddApprovalLevelAsync(CreateStaffMovementApprovalLevelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
-    {
-        tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedMovementAsync(createDto.MovementId);
-        await GetOwnedEmployeeAsync(createDto.ApproverId, "approver");
-
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
-        entity.Status = ApprovalStatus.Pending;
-
-        await _approvalRepo.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return entity.ToDto();
-    }
-
-    public async Task<bool> ActionApprovalLevelAsync(ActionApprovalLevelDto dto, Guid actionedByUserId, CancellationToken cancellationToken = default)
-    {
-        var level = await GetOwnedApprovalLevelAsync(dto.ApprovalLevelId);
-
-        // The level records who must approve it, and nothing checked that against the caller: any
-        // authenticated employee could clear anyone's level and, through the auto-advance below,
-        // authorise the whole movement.
-        if (level.ApproverId != actionedByUserId && level.DelegatedToId != actionedByUserId)
-            throw new UnauthorizedAccessException(
-                "This approval level is assigned to another approver. Ask them to action it, or to delegate it to you.");
-
-        if (level.Status != ApprovalStatus.Pending)
-            throw new InvalidOperationException("This approval level has already been actioned.");
-
-        level.Status     = dto.Decision;
-        level.ActionDate = DateTime.UtcNow;
-        level.Comments   = dto.Comments;
-
-        await _approvalRepo.UpdateAsync(level);
-
-        // Auto-advance to Authorized when all levels are approved.
-        //
-        // The sibling levels are what decides it, NOT AllLevelsApprovedAsync: that runs its check in
-        // SQL, and this level's approval has not been saved yet, so the database still reports it as
-        // Pending. The last approver in a chain therefore never triggered the advance — the branch
-        // could not fire at all, and the movement sat Submitted with every level cleared until someone
-        // noticed and called /authorize by hand.
-        if (dto.Decision == ApprovalStatus.Approved)
-        {
-            var tenantId = GetTenantId();
-            var siblings = (await _approvalRepo.GetByMovementIdAsync(level.MovementId))
-                .Where(other => other.TenantId == tenantId && other.Id != level.Id)
-                .ToList();
-
-            if (siblings.All(other => other.Status == ApprovalStatus.Approved))
-            {
-                var movement = await GetOwnedMovementAsync(level.MovementId);
-                var previousStatus      = movement.Status;
-                movement.Status         = StaffMovementStatus.Approved;
-                movement.AuthorizedById = actionedByUserId;
-                movement.AuthorizationDate = DateTime.UtcNow;
-
-                await _movementRepo.UpdateAsync(movement);
-                await RecordStatusHistoryAsync(movement.TenantId, movement.Id, previousStatus, movement.Status,
-                    "All approval levels cleared — movement authorised", actionedByUserId, cancellationToken);
-            }
-        }
-        else if (dto.Decision == ApprovalStatus.Rejected)
-        {
-            var movement = await GetOwnedMovementAsync(level.MovementId);
-            var previousStatus     = movement.Status;
-            movement.Status        = StaffMovementStatus.Rejected;
-            movement.RejectedById  = actionedByUserId;
-            movement.RejectionDate = DateTime.UtcNow;
-            movement.RejectionReason = dto.Comments;
-
-            await _movementRepo.UpdateAsync(movement);
-            await RecordStatusHistoryAsync(movement.TenantId, movement.Id, previousStatus, movement.Status,
-                dto.Comments ?? "Rejected at approval level", actionedByUserId, cancellationToken);
-        }
-
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return true;
-    }
-
-    public async Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, Guid delegatingEmployeeId, CancellationToken cancellationToken = default)
-    {
-        var level = await GetOwnedApprovalLevelAsync(dto.ApprovalLevelId);
-
-        // Delegation transfers authority, so only the holder of that authority may do it — this took
-        // no actor at all before, so anyone could hand anyone's approval to anyone.
-        if (level.ApproverId != delegatingEmployeeId)
-            throw new UnauthorizedAccessException("Only the assigned approver can delegate this approval level.");
-
-        if (dto.DelegatedToId == level.ApproverId)
-            throw new InvalidOperationException("An approval level cannot be delegated to its own approver.");
-
-        if (level.Status != ApprovalStatus.Pending)
-            throw new InvalidOperationException("Only pending approval levels can be delegated.");
-
-        await GetOwnedEmployeeAsync(dto.DelegatedToId, "delegate");
-
-        level.DelegatedToId    = dto.DelegatedToId;
-        level.DelegationDate   = DateTime.UtcNow;
-        level.DelegationReason = dto.DelegationReason;
-
-        await _approvalRepo.UpdateAsync(level);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return true;
     }
 
     public async Task<bool> AllLevelsApprovedAsync(Guid movementId, CancellationToken cancellationToken = default)

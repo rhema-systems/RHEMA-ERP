@@ -161,15 +161,33 @@ public class StaffMovementRepository : GenericRepository<StaffMovement>, IStaffM
     }
 
     /// <remarks>
-    /// The dashboard reads the pending approver's name off ApprovalLevels.Approver, so the filtered
-    /// collection include is what makes that column render at all.
+    /// "Awaiting approval" is a STATUS, not the presence of a pending row in the retired bespoke
+    /// chain. This query used to ask whether the movement had an unactioned approval level, which
+    /// stopped being a question about approval the moment the workflow engine took the route over:
+    /// no new movement has approval levels at all, so the queue would have gone quietly empty — the
+    /// same way it was empty before, for the opposite reason.
+    ///
+    /// The legacy include stays so a chain recorded by an earlier build still renders on the rows it
+    /// belongs to; for everything since, the live step and its approver come from the workflow
+    /// instance, which is what the movement page shows.
     /// </remarks>
     public async Task<IEnumerable<StaffMovement>> GetPendingApprovalAsync(Guid tenantId)
     {
+        var awaitingApproval = new[]
+        {
+            StaffMovementStatus.Submitted,
+            StaffMovementStatus.CurrentSupervisorApproval,
+            StaffMovementStatus.NewSupervisorApproval,
+            StaffMovementStatus.CurrentHodApproval,
+            StaffMovementStatus.NewHodApproval,
+            StaffMovementStatus.HrReview,
+            StaffMovementStatus.ManagementApproval,
+        };
+
         return await SummaryQuery(tenantId)
             .Include(m => m.ApprovalLevels.Where(al => al.Status == ApprovalStatus.Pending))
                 .ThenInclude(al => al.Approver)
-            .Where(m => m.ApprovalLevels.Any(al => al.Status == ApprovalStatus.Pending))
+            .Where(m => awaitingApproval.Contains(m.Status))
             .OrderBy(m => m.RequestSubmissionDate)
             .ThenBy(m => m.EffectiveDate)
             .ToListAsync();
@@ -320,9 +338,10 @@ public class StaffMovementApprovalLevelRepository
 
     /// <remarks>
     /// A movement with no approval levels is NOT "all approved" — <c>AllAsync</c> is vacuously true on
-    /// an empty set, which made <c>AuthorizeAsync</c>'s "all levels must be approved" guard pass on any
-    /// movement whose chain had never been built. That let a submitted movement be authorised with
-    /// nobody's approval recorded against it.
+    /// an empty set, which made the old authorisation guard's "all levels must be approved" test pass
+    /// on any movement whose chain had never been built, letting it be authorised with nobody's
+    /// approval recorded against it. That guard is gone with the bespoke chain, but the method is
+    /// kept honest for the legacy rows that still read it.
     /// </remarks>
     public async Task<bool> AllLevelsApprovedAsync(Guid movementId)
     {

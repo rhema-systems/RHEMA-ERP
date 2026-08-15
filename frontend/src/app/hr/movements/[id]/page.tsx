@@ -46,6 +46,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -64,7 +67,7 @@ const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '
 const money = (v?: number | null) =>
   v === null || v === undefined ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: 2 });
 
-type ActionKind = 'submit' | 'authorize' | 'reject' | 'cancel' | 'handover' | 'return' | null;
+type ActionKind = 'submit' | 'cancel' | 'handover' | 'return' | null;
 
 /**
  * A single movement: the before/after comparison, the workflow actions available in its current
@@ -89,15 +92,36 @@ export default function MovementDetailPage() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'movement', id] });
 
+  /**
+   * Approval runs on the generic workflow engine. Approve and reject are NOT rendered from the
+   * movement's own status — they come from the engine, which knows whether this caller is on the
+   * current step. A line manager approving their report's transfer is the normal case, and no role
+   * gate could express it.
+   */
+  const workflow = useWorkflowRecord({
+    entityType: 'StaffMovement',
+    entityId: id,
+    entityLabel: 'Staff Movement',
+    entityNumber: movement?.movementNumber,
+    status: movement?.status ?? 'Draft',
+    canSubmit: false, // submission has its own dialog below, so it can carry submission notes
+    canApproveReject: movement?.status === 'Submitted',
+    enabled: !!movement,
+    commands: {
+      approve: (ctx) => movementService.approve(id, ctx.comments || null),
+      reject: (ctx) => movementService.reject(id, ctx.comments || 'Rejected'),
+      afterAction: async () => {
+        refresh();
+      },
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
   const run = useMutation({
     mutationFn: async (kind: Exclude<ActionKind, null>) => {
       switch (kind) {
         case 'submit':
           return movementService.submit(id, note || undefined);
-        case 'authorize':
-          return movementService.authorize(id, note || undefined);
-        case 'reject':
-          return movementService.reject(id, note);
         case 'cancel':
           return movementService.cancel(id, note);
         case 'handover':
@@ -118,9 +142,19 @@ export default function MovementDetailPage() {
   });
 
   const implement = useMutation({
-    mutationFn: () => movementService.implement(id),
+    mutationFn: () => movementService.implementMovement(id),
     onSuccess: () => {
       toast({ title: 'Movement implemented' });
+      refresh();
+    },
+    onError: (error: any) =>
+      toast({ title: 'Refused', description: error?.message ?? 'Unexpected error.', variant: 'destructive' }),
+  });
+
+  const recall = useMutation({
+    mutationFn: () => movementService.recall(id),
+    onSuccess: () => {
+      toast({ title: 'Movement recalled', description: 'It is back with you as a draft.' });
       refresh();
     },
     onError: (error: any) =>
@@ -192,16 +226,11 @@ export default function MovementDetailPage() {
                 Submit for approval
               </Button>
             )}
+            <WorkflowApprovalActions {...workflow.actionProps} />
             {inApproval && (
-              <Button onClick={() => setAction('authorize')}>
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Authorise
-              </Button>
-            )}
-            {!isTerminal && !isApproved && (
-              <Button variant="outline" onClick={() => setAction('reject')}>
-                <XCircle className="mr-2 h-4 w-4" />
-                Reject
+              <Button variant="outline" onClick={() => recall.mutate()} disabled={recall.isPending}>
+                <Undo2 className="mr-2 h-4 w-4" />
+                Recall
               </Button>
             )}
             {m.requiresHandover && isApproved && !m.handoverCompletionDate && (
@@ -269,6 +298,7 @@ export default function MovementDetailPage() {
           <TabsTrigger value="checklist">Checklist ({m.checklistItems?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="attachments">Documents ({m.attachments?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="history">History ({m.statusHistory?.length ?? 0})</TabsTrigger>
+          <WorkflowTabTrigger value="workflow" />
         </TabsList>
 
         {/* ── Overview ─────────────────────────────────────────────────────── */}
@@ -518,6 +548,22 @@ export default function MovementDetailPage() {
           </Card>
         </TabsContent>
 
+        {/* ── Workflow ─────────────────────────────────────────────────────── */}
+        <WorkflowTabContent
+          value="workflow"
+          entityType="StaffMovement"
+          entityId={id}
+          entityLabel="Staff Movement"
+          entityNumber={m.movementNumber}
+          status={m.status}
+          workflowSummary={workflow.summary}
+          canApproveReject={m.status === 'Submitted'}
+          onAfterAction={async () => {
+            refresh();
+            await workflow.refresh();
+          }}
+        />
+
         {/* ── History ──────────────────────────────────────────────────────── */}
         <TabsContent value="history">
           <Card>
@@ -559,17 +605,15 @@ export default function MovementDetailPage() {
           <DialogHeader>
             <DialogTitle>
               {action === 'submit' && 'Submit for approval'}
-              {action === 'authorize' && 'Authorise this movement'}
-              {action === 'reject' && 'Reject this movement'}
               {action === 'cancel' && 'Cancel this movement'}
               {action === 'handover' && 'Record handover'}
               {action === 'return' && 'Process return from the temporary assignment'}
             </DialogTitle>
             <DialogDescription>
-              {action === 'authorize' &&
-                'Every approval level must be cleared first, and a movement with no approval chain cannot be authorised at all.'}
-              {action === 'reject' && 'The reason is recorded on the movement and in its history.'}
-              {action === 'cancel' && 'The reason is recorded on the movement and in its history.'}
+              {action === 'submit' &&
+                'The movement goes to whoever the published approval workflow routes it to. It cannot be submitted until a StaffMovement workflow definition exists for your tenant.'}
+              {action === 'cancel' &&
+                'The reason is recorded on the movement and in its history, and any approval still in flight is closed.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -587,10 +631,8 @@ export default function MovementDetailPage() {
 
           <div className="space-y-2">
             <Label htmlFor="note">
-              {action === 'reject' || action === 'cancel' ? 'Reason' : 'Notes'}
-              {(action === 'reject' || action === 'cancel') && (
-                <span className="ml-0.5 text-red-500">*</span>
-              )}
+              {action === 'cancel' ? 'Reason' : 'Notes'}
+              {action === 'cancel' && <span className="ml-0.5 text-red-500">*</span>}
             </Label>
             <Textarea id="note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
@@ -603,7 +645,7 @@ export default function MovementDetailPage() {
               onClick={() => action && run.mutate(action)}
               disabled={
                 run.isPending ||
-                ((action === 'reject' || action === 'cancel') && !note.trim()) ||
+                (action === 'cancel' && !note.trim()) ||
                 (action === 'return' && !returnDate)
               }
             >

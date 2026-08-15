@@ -1484,6 +1484,39 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = plan.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "STAFF_MOVEMENT", "StaffMovement", "Staff Movement"))
+        {
+            var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()
+                .FirstOrDefaultAsync(m => m.Id == entityId)
+                ?? throw new InvalidOperationException("Staff movement not found");
+
+            // A movement has an ORIGIN and a DESTINATION, and both sides have to agree to it — which
+            // is the thing a role-based chain could not express and the reason both supervisors and
+            // both org units are here. The size of the pay change and whether the move is permanent
+            // are the routing thresholds on top of that: a lateral move inside one department and a
+            // promotion across two with a 30% rise are not the same decision.
+            context["movementNumber"] = movement.MovementNumber;
+            context["employeeId"] = movement.EmployeeId;
+            context["movementType"] = movement.MovementType.ToString();
+            context["category"] = movement.Category.ToString();
+            context["currentOrganizationUnitId"] = movement.CurrentOrganizationUnitId;
+            context["newOrganizationUnitId"] = movement.NewOrganizationUnitId;
+            context["currentSupervisorId"] = movement.CurrentSupervisorId;
+            context["newSupervisorId"] = movement.NewSupervisorId;
+            context["currentSalary"] = movement.CurrentSalary;
+            context["newSalary"] = movement.NewSalary;
+            context["salaryIncreaseAmount"] = movement.SalaryIncreaseAmount;
+            context["salaryIncreasePercentage"] = movement.SalaryIncreasePercentage;
+            context["isTemporary"] = movement.IsTemporary;
+            context["isReorganization"] = movement.IsReorganization;
+            context["isSuccessionPlan"] = movement.IsSuccessionPlan;
+            context["requestedById"] = movement.RequestedById;
+            context["effectiveDate"] = movement.EffectiveDate;
+            context["crossesOrganizationUnit"] =
+                movement.CurrentOrganizationUnitId != movement.NewOrganizationUnitId;
+            context["status"] = movement.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_REQUISITION", "StaffRequisition", "Staff Requisition"))
         {
             var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Requisition.StaffRequisition>()
