@@ -2717,6 +2717,78 @@ public enum DisciplinaryActionAuthority
     Management = 3
 }
 
+/// <summary>
+/// FR-HR-181's escalation ladder: Employee → Supervisor → HOD → HR → GM Finance &amp; Administration →
+/// Managing Director → Board.
+/// </summary>
+/// <remarks>
+/// The employee is the origin, not a rung — these are the levels a grievance is answered AT, in the
+/// order the requirement names them. Ordered so <c>next = current + 1</c> is the escalation, and
+/// Board is the ceiling.
+///
+/// ⚠ These rungs are NOT resolved to people by the system. TDC's org data cannot support it: on
+/// 2026-08-16, 0 of 41 organisation units had a head recorded and 175 of 1,486 active employees had a
+/// manager, so deriving "this employee's HOD" would resolve to nobody for almost everyone. A
+/// grievance therefore sits AT a rung and whoever answers it is recorded from their own token, with
+/// HR able to name a responder explicitly per step. When an org-authority model exists it can add
+/// routing on top; the ladder and the record work without it. See [[hr-deferred-modules]] #3.
+/// </remarks>
+public enum GrievanceEscalationLevel
+{
+    [Description("Supervisor")]
+    Supervisor = 1,
+
+    [Description("Head of Department")]
+    HeadOfDepartment = 2,
+
+    [Description("Human Resources")]
+    HumanResources = 3,
+
+    [Description("GM Finance & Administration")]
+    GeneralManagerFinanceAdmin = 4,
+
+    [Description("Managing Director")]
+    ManagingDirector = 5,
+
+    [Description("Board")]
+    Board = 6
+}
+
+public enum GrievanceStatus
+{
+    [Description("Filed")]
+    Filed = 1,
+
+    [Description("Under Review")]
+    UnderReview = 2,
+
+    [Description("Escalated")]
+    Escalated = 3,
+
+    [Description("Resolved")]
+    Resolved = 4,
+
+    [Description("Withdrawn")]
+    Withdrawn = 5,
+
+    /// <summary>Closed without resolution — the ladder was exhausted at Board level.</summary>
+    [Description("Closed")]
+    Closed = 6
+}
+
+/// <summary>What the responder at a rung decided to do with the grievance.</summary>
+public enum GrievanceStepOutcome
+{
+    [Description("Awaiting Response")]
+    AwaitingResponse = 1,
+
+    [Description("Resolved At This Level")]
+    Resolved = 2,
+
+    [Description("Escalated")]
+    Escalated = 3
+}
+
 public enum EmployeeTerminationType
 {
     [Description("Involuntary For Cause")]

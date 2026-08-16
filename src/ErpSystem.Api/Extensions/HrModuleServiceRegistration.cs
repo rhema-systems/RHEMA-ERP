@@ -609,6 +609,10 @@ public static class HrModuleServiceRegistration
         // roster, or the same deadline would fall on different dates for different people.
         services.AddScoped<IHrWorkingDayCalculator, HrWorkingDayCalculator>();
 
+        // FR-HR-181's grievance ladder. Separate from the disciplinary case on purpose: a grievance
+        // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.
+        services.AddScoped<IStaffGrievanceService, StaffGrievanceService>();
+
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();
         services.AddScoped<IStaffDisciplinaryCaseService, StaffDisciplinaryCaseService>();

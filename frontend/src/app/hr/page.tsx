@@ -15,6 +15,7 @@ import {
   HandCoins,
   ArrowRightLeft,
   Gavel,
+  MessagesSquare,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -159,6 +160,13 @@ export default function HrHomePage() {
                 'Misconduct cases from report through investigation and hearing to decision, sanction and appeal.',
               href: '/hr/discipline',
               icon: Gavel,
+            },
+            {
+              title: 'Grievances',
+              description:
+                'Raise a grievance and follow it up the escalation route, or answer one you have been asked about.',
+              href: '/hr/grievances/mine',
+              icon: MessagesSquare,
             },
             {
               title: 'Payroll',

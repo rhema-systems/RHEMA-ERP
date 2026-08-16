@@ -635,6 +635,20 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // Area 9 slice 7, FR-HR-181. Separate from Discipline on purpose: a disciplinary case is
+        // raised ABOUT an employee and a grievance BY one, which gives them opposite permissions —
+        // HR cannot file, escalate or withdraw a grievance at all.
+        title: 'Grievances',
+        href: '/hr/grievances/mine',
+        icon: MessagesSquare,
+        children: [
+          // The employee's own page first: it is the one most people will use, and the register
+          // below answers 403 for anyone outside HR.
+          { title: 'My Grievances', href: '/hr/grievances/mine', icon: MessagesSquare },
+          { title: 'Register', href: '/hr/grievances', icon: ClipboardList },
+        ],
+      },
+      {
         // Slice 1 of area 10: the live dashboard and the hand-reported KPI snapshots. Each later
         // slice adds its register here in lifecycle order (incidents, hazards, inspections,
         // permits, PPE, …). Reference data lives under Administration → HR → Safety.

@@ -30,6 +30,7 @@ using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
+using ErpSystem.Core.Entities.HR.StaffGrievance;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
@@ -332,6 +333,12 @@ public partial class ApplicationDbContext
     public DbSet<StaffDisciplineCorrectiveAction> StaffDisciplineCorrectiveActions { get; set; } = null!;
     public DbSet<StaffDisciplineCorrectiveActionItem> StaffDisciplineCorrectiveActionItems { get; set; } = null!;
     public DbSet<StaffDisciplineLegalReview> StaffDisciplineLegalReviews { get; set; } = null!;
+
+    // Area 9 slice 7 — FR-HR-181's grievance ladder. Deliberately separate from the disciplinary
+    // case: a grievance is raised BY an employee, a disciplinary case is raised ABOUT one, and
+    // conflating them would put the two under one set of read rules.
+    public DbSet<StaffGrievance> StaffGrievances { get; set; } = null!;
+    public DbSet<StaffGrievanceStep> StaffGrievanceSteps { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
     public DbSet<SheIncidentTypeCorrectiveAction> SheIncidentTypeCorrectiveActions { get; set; } = null!;
     public DbSet<SheInjuryType> SheInjuryTypes { get; set; } = null!;
@@ -8452,6 +8459,52 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.ExternalCounsel)
                 .WithMany()
                 .HasForeignKey(x => x.ExternalCounselId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievance (FR-HR-181) ----
+        builder.Entity<StaffGrievance>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.GrievanceNumber }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.CurrentLevel);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.CurrentLevel).HasConversion<int>();
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceStep ----
+        builder.Entity<StaffGrievanceStep>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.AssignedToId);
+            entity.HasIndex(x => x.Outcome);
+
+            entity.Property(x => x.Level).HasConversion<int>();
+            entity.Property(x => x.Outcome).HasConversion<int>();
+
+            // Cascade from the grievance is deliberate here, unlike the Restrict used across the
+            // disciplinary case: a step has no meaning apart from its grievance, whereas a
+            // disciplinary sub-entity is a record in its own right that must survive.
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Steps)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.AssignedTo)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RespondedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RespondedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
