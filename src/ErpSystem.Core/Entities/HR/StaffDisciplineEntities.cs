@@ -65,10 +65,17 @@ public class StaffDisciplinaryActionType : TenantEntity
     public string Description { get; set; } = string.Empty;
 	
 	public bool IsActive { get; set; } = true;
-	
+
 	public int? DefaultSuspensionDays { get; set; }
-    
+
 	public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>
+    /// Who may issue this action, per FR-HR-080 (HODs limited to verbal warnings) and FR-HR-092
+    /// (the MD signs terminations). Defaults to <see cref="DisciplinaryActionAuthority.Hr"/> so an
+    /// unmaintained catalog row is restrictive rather than permissive.
+    /// </summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
 }
 
 /// <summary>

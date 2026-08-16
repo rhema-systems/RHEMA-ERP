@@ -141,6 +141,10 @@ public class StaffDisciplinaryActionTypeDto : BaseDto
     public bool IsActive { get; set; }
     public int? DefaultSuspensionDays { get; set; }
     public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>Who may issue this action — FR-HR-080 / FR-HR-092.</summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
+    public string MinimumAuthorityName => MinimumAuthority.ToString();
 }
 
 public class StaffDisciplinaryActionTypeSummaryDto
@@ -149,6 +153,13 @@ public class StaffDisciplinaryActionTypeSummaryDto
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Carried on the summary as well as the detail: the decision dialog picks from summaries, and
+    /// it needs to know which sanctions the caller is entitled to offer.
+    /// </summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; }
+    public string MinimumAuthorityName => MinimumAuthority.ToString();
 }
 
 public class CreateStaffDisciplinaryActionTypeDto : CreateDtoBase
@@ -168,6 +179,9 @@ public class CreateStaffDisciplinaryActionTypeDto : CreateDtoBase
 
     [Range(0, double.MaxValue)]
     public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>Who may issue this action. Defaults to HR — restrictive rather than permissive.</summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
 }
 
 public class UpdateStaffDisciplinaryActionTypeDto : UpdateDtoBase
@@ -187,6 +201,9 @@ public class UpdateStaffDisciplinaryActionTypeDto : UpdateDtoBase
 
     [Range(0, double.MaxValue)]
     public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>Who may issue this action — FR-HR-080 / FR-HR-092.</summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
 }
 
 #endregion
@@ -389,6 +406,20 @@ public class RecordDisciplinaryDecisionDto
     public string? DecisionRationale { get; set; }
 
     public DateTime DecisionDate { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Comments carried with an approve, refuse or recall of a proposed decision.
+/// </summary>
+/// <remarks>
+/// The actor is not on here for the same reason it is not on the decision payload: the engine takes
+/// it from the token, and it is the engine — not the caller — that decides whether they are assigned
+/// to the current step.
+/// </remarks>
+public class DisciplinaryDecisionActionDto
+{
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 /// <summary>

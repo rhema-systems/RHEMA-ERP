@@ -127,11 +127,37 @@ export interface StaffOffense extends StaffOffenseSummary {
   offenseProcedures: StaffOffenseProcedure[];
 }
 
+/**
+ * Who may issue a given sanction — FR-HR-080 (heads of department are limited to verbal warnings)
+ * and FR-HR-092 (the MD signs terminations). Ordered by increasing authority.
+ */
+export type DisciplinaryActionAuthority = 'HeadOfDepartment' | 'Hr' | 'Management';
+
+export const ACTION_AUTHORITY_OPTIONS: { value: DisciplinaryActionAuthority; label: string; hint: string }[] = [
+  {
+    value: 'HeadOfDepartment',
+    label: 'Head of department',
+    hint: 'A head of department may issue this directly. FR-HR-080 puts verbal warnings here.',
+  },
+  {
+    value: 'Hr',
+    label: 'HR',
+    hint: 'HR issues it. The default, and the safe setting for a catalog entry nobody has reviewed.',
+  },
+  {
+    value: 'Management',
+    label: 'Management',
+    hint: 'Requires management sign-off. FR-HR-092 puts terminations here.',
+  },
+];
+
 export interface DisciplinaryActionTypeSummary {
   id: string;
   code: string;
   name: string;
   isActive: boolean;
+  minimumAuthority: DisciplinaryActionAuthority;
+  minimumAuthorityName: string;
 }
 
 // ── Case ─────────────────────────────────────────────────────────────────────

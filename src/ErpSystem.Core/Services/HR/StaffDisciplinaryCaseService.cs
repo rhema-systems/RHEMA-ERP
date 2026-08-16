@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -19,10 +20,18 @@ namespace ErpSystem.Core.Services.HR;
 
 public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 {
+    /// <summary>
+    /// The workflow entity type. Must match the catalog entry and the adapter's alias list — a
+    /// mismatch resolves no adapter and the case silently never changes status on approval.
+    /// </summary>
+    private const string EntityType = "StaffDisciplinaryAction";
+
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
     private readonly IStaffDisciplineActionStepRepository _actionStepRepository;
     private readonly IStaffDisciplineCorrectiveActionItemRepository _correctiveItemRepository;
     private readonly IStaffDisciplineFineRepository _fineRepository;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplinaryCaseService> _logger;
@@ -32,6 +41,8 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         IStaffDisciplineActionStepRepository actionStepRepository,
         IStaffDisciplineCorrectiveActionItemRepository correctiveItemRepository,
         IStaffDisciplineFineRepository fineRepository,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplinaryCaseService> logger)
@@ -40,9 +51,24 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         _actionStepRepository = actionStepRepository;
         _correctiveItemRepository = correctiveItemRepository;
         _fineRepository = fineRepository;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    /// <remarks>
+    /// <c>ICurrentUserProvider.UserId</c> is the ApplicationUser id the engine works in, which is a
+    /// different id from the Employee id the case's own columns hold. Both are needed on every
+    /// approval path — see [[hr-attendance-actor-conventions]] for where that first bit.
+    /// </remarks>
+    private Guid RequireUserId()
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("No user is associated with the current request.");
+        return userId;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -379,6 +405,23 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         return true;
     }
 
+    /// <summary>
+    /// Proposes a sanction and sends it for confirmation.
+    /// </summary>
+    /// <remarks>
+    /// This is the segment of the case that sits on the generic workflow engine. Recording a
+    /// decision does not make it final: it stamps what is proposed, by whom, and starts the approval
+    /// instance. The case sits at <c>AwaitingDecision</c> — which is what that status has always
+    /// meant — until an approver confirms it, at which point the adapter moves it to
+    /// <c>DecisionMade</c>.
+    ///
+    /// <para><b>FR-HR-080 is enforced here, not only routed.</b> The action type carries the
+    /// authority its issuance requires, and a caller who is not HR may only issue one at
+    /// head-of-department level. Routing decides who *confirms* a sanction; this decides who may
+    /// *propose* one, and the two are different questions. The rule is enforced even though the
+    /// controller currently gates this endpoint to HR anyway — so that opening it to heads of
+    /// department later is a gate change, not a rule change.</para>
+    /// </remarks>
     public async Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCaseAsync(dto.CaseId);
@@ -393,21 +436,155 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (!allowedStatuses.Contains(entity.Status))
             throw new InvalidOperationException($"Cannot record a decision for a case in '{entity.Status}' status.");
 
-        await GetOwnedActionTypeAsync(dto.ActionTypeId);
+        var actionType = await GetOwnedActionTypeAsync(dto.ActionTypeId);
+
+        if (!_currentUserProvider.HasRole(Constants.Roles.Hr)
+            && !_currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
+            && !_currentUserProvider.HasRole("Admin")
+            && actionType.MinimumAuthority > DisciplinaryActionAuthority.HeadOfDepartment)
+        {
+            throw new UnauthorizedAccessException(
+                $"'{actionType.Name}' requires {actionType.MinimumAuthority} authority to issue. " +
+                "A head of department may only issue actions set to head-of-department authority.");
+        }
 
         entity.ActionTypeId = dto.ActionTypeId;
         entity.ActionDetails = dto.ActionDetails;
         entity.DecisionRationale = dto.DecisionRationale;
         entity.DecisionDate = dto.DecisionDate;
         entity.DecisionById = decidedByEmployeeId;
-        entity.Status = DisciplinaryStatus.AwaitingDecision;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = decidedByEmployeeId.ToString();
+
+        // Persist the proposal BEFORE starting the instance: BuildEntityContextAsync re-reads the
+        // case to build the routing context, and it must see the action type that was just chosen.
+        // Starting the workflow first would route on the previous decision, or on none at all.
+        await _caseRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the disciplinary decision approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
 
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Decision recorded for case {CaseNumber}, ActionType: {ActionTypeId}", entity.CaseNumber, dto.ActionTypeId);
+        _logger.LogInformation(
+            "Disciplinary decision proposed for case {CaseNumber}, ActionType: {ActionTypeId}, status now {Status}",
+            entity.CaseNumber, dto.ActionTypeId, entity.Status);
+
+        return true;
+    }
+
+    /// <summary>
+    /// The cases the caller can confirm a decision on right now.
+    /// </summary>
+    /// <remarks>
+    /// Without this an approver has nowhere to find their work: the register is HR-only, and the
+    /// approver of a disciplinary decision is a head of department or the MD, neither of whom is
+    /// necessarily in HR. Token-derived and with no id parameter, so it cannot become "read anyone's
+    /// queue by passing their id" — the same shape as the movement queue.
+    ///
+    /// The engine answers per case rather than per user, so this asks it about each case awaiting a
+    /// decision in turn. That set is small by nature: everything in it is work nobody has done yet.
+    /// </remarks>
+    public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetAwaitingMyApprovalAsync(CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var userId = RequireUserId();
+
+        var awaiting = await _caseRepository.GetByStatusAsync(tenantId, DisciplinaryStatus.AwaitingDecision);
+
+        var mine = new List<StaffDisciplinaryAction>();
+        foreach (var disciplinaryCase in awaiting)
+        {
+            if (await _workflowIntegrationService.CanUserApproveAsync(EntityType, disciplinaryCase.Id, userId))
+                mine.Add(disciplinaryCase);
+        }
+
+        return mine.ToSummaryDtoList();
+    }
+
+    public async Task<bool> ApproveDecisionAsync(Guid caseId, Guid approvingEmployeeId, string? comments = null, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCaseAsync(caseId);
+        var userId = RequireUserId();
+
+        if (entity.Status != DisciplinaryStatus.AwaitingDecision)
+            throw new InvalidOperationException("Only a case whose decision is awaiting confirmation can be approved.");
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, caseId, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, caseId, userId, "Approve", comments);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, comments);
+
+        await _caseRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Disciplinary decision approval step processed for {CaseNumber}, status now {Status}",
+            entity.CaseNumber, entity.Status);
+
+        return true;
+    }
+
+    public async Task<bool> RejectDecisionAsync(Guid caseId, Guid rejectingEmployeeId, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCaseAsync(caseId);
+        var userId = RequireUserId();
+
+        if (entity.Status != DisciplinaryStatus.AwaitingDecision)
+            throw new InvalidOperationException("Only a case whose decision is awaiting confirmation can be refused.");
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, caseId, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, caseId, userId, "Reject", reason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the refusal.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, reason);
+
+        await _caseRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Disciplinary decision refused for {CaseNumber}; case returned to review", entity.CaseNumber);
+
+        return true;
+    }
+
+    /// <remarks>
+    /// Recall is the officer taking their own proposal back before anyone rules on it. Unlike the
+    /// generic recall button, this goes through the service so the case returns to review with the
+    /// proposed sanction cleared.
+    /// </remarks>
+    public async Task<bool> RecallDecisionAsync(Guid caseId, Guid recallingEmployeeId, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCaseAsync(caseId);
+        var userId = RequireUserId();
+
+        if (entity.Status != DisciplinaryStatus.AwaitingDecision)
+            throw new InvalidOperationException("Only a decision still awaiting confirmation can be recalled.");
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, caseId, userId, reason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the decision.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId, reason);
+
+        await _caseRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Disciplinary decision recalled for {CaseNumber}", entity.CaseNumber);
 
         return true;
     }
@@ -416,9 +593,12 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     {
         var entity = await GetOwnedCaseAsync(dto.CaseId);
 
+        // AwaitingDecision is deliberately NOT in this list any more. It now means the proposed
+        // sanction is out for confirmation, and closing from there would finish a case on a decision
+        // nobody approved — leaving the workflow instance running with a task in someone's queue.
+        // The same shape was caught on staff-movement deletion in area 8 slice 2.
         var allowedStatuses = new[]
         {
-            DisciplinaryStatus.AwaitingDecision,
             DisciplinaryStatus.DecisionMade,
             DisciplinaryStatus.UnderAppeal,
         };
@@ -449,6 +629,13 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         if (terminalStatuses.Contains(entity.Status))
             throw new InvalidOperationException($"Cannot put a case in '{entity.Status}' status on hold.");
+
+        // Holding a case whose decision is out for confirmation would leave the instance running and
+        // the task sitting in an approver's queue while the case says it is paused — the two would
+        // disagree, and the approver would be acting on something nobody is waiting for.
+        if (entity.Status == DisciplinaryStatus.AwaitingDecision)
+            throw new InvalidOperationException(
+                "This case has a decision awaiting confirmation. Recall the decision before putting the case on hold.");
 
         entity.Status = DisciplinaryStatus.OnHold;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -485,6 +672,10 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     {
         var entity = await GetOwnedCaseAsync(caseId);
 
+        // None of these three can have a live approval instance — one only starts when a decision is
+        // proposed, which moves the case to AwaitingDecision. So dismissal cannot strand a task in an
+        // approver's queue, and needs no cancellation step. Recall the decision first if you want to
+        // dismiss a case that is out for confirmation.
         var allowedStatuses = new[]
         {
             DisciplinaryStatus.Draft,

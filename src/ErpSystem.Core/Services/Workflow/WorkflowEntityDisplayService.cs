@@ -242,6 +242,23 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("StaffDisciplinaryAction") || key == Normalize("STAFF_DISCIPLINARY_ACTION") || key == Normalize("Staff Disciplinary Action"))
+            {
+                var disciplinaryCase = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffDisciplinaryAction";
+                info.EntityNumber = disciplinaryCase?.CaseNumber;
+                // Severity and the proposed sanction, and deliberately NOT the employee's name or
+                // the allegation. This string travels into notification subjects and approval
+                // queues, which are seen more widely than the case itself — an approver opens the
+                // record to learn who it concerns.
+                info.EntityName = disciplinaryCase == null
+                    ? null
+                    : $"{disciplinaryCase.Severity} disciplinary decision";
+                info.ActionUrl = $"/hr/discipline/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("AppraisalTemplate") || key == Normalize("APPRAISAL_TEMPLATE") || key == Normalize("Appraisal Template"))
             {
                 var template = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.AppraisalTemplate>()

@@ -142,6 +142,7 @@ public static class StaffDisciplineMappingExtensions
             IsActive = entity.IsActive,
             DefaultSuspensionDays = entity.DefaultSuspensionDays,
             DefaultFineAmount = entity.DefaultFineAmount,
+            MinimumAuthority = entity.MinimumAuthority,
         };
     }
 
@@ -153,6 +154,7 @@ public static class StaffDisciplineMappingExtensions
             Code = entity.Code,
             Name = entity.Name,
             IsActive = entity.IsActive,
+            MinimumAuthority = entity.MinimumAuthority,
         };
     }
 
@@ -167,6 +169,7 @@ public static class StaffDisciplineMappingExtensions
             IsActive = dto.IsActive,
             DefaultSuspensionDays = dto.DefaultSuspensionDays,
             DefaultFineAmount = dto.DefaultFineAmount,
+            MinimumAuthority = dto.MinimumAuthority,
             CreatedBy = userId.ToString(),
         };
     }
@@ -179,6 +182,7 @@ public static class StaffDisciplineMappingExtensions
         entity.IsActive = dto.IsActive;
         entity.DefaultSuspensionDays = dto.DefaultSuspensionDays;
         entity.DefaultFineAmount = dto.DefaultFineAmount;
+        entity.MinimumAuthority = dto.MinimumAuthority;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

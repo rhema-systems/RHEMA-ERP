@@ -293,6 +293,52 @@ public class StaffDisciplineCasesController : ControllerBase
         return Ok(new { message = "Decision recorded." });
     }
 
+    /// <summary>
+    /// The cases whose proposed decision the caller may confirm. Deliberately ungated: the approver
+    /// of a disciplinary decision is a head of department or the MD, neither of whom is necessarily
+    /// in HR, and the register above answers 403 for them — so without this they would have nowhere
+    /// to find their work. The engine decides what is in the list; no id is accepted.
+    /// </summary>
+    [HttpGet("awaiting-my-approval")]
+    public async Task<ActionResult<IEnumerable<StaffDisciplinaryActionSummaryDto>>> GetAwaitingMyApproval()
+        => Ok(await _caseService.GetAwaitingMyApprovalAsync());
+
+    /// <summary>
+    /// Confirms a proposed decision. Ungated for the same reason as the queue above — the service
+    /// refuses anyone the engine has not assigned to the current step.
+    /// </summary>
+    [HttpPost("{id:guid}/approve-decision")]
+    public async Task<IActionResult> ApproveDecision(Guid id, [FromBody] DisciplinaryDecisionActionDto? dto = null)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _caseService.ApproveDecisionAsync(id, employeeId.Value, dto?.Comments);
+        return Ok(new { message = "Decision approved." });
+    }
+
+    [HttpPost("{id:guid}/reject-decision")]
+    public async Task<IActionResult> RejectDecision(Guid id, [FromBody] DisciplinaryDecisionActionDto? dto = null)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _caseService.RejectDecisionAsync(id, employeeId.Value, dto?.Comments);
+        return Ok(new { message = "Decision refused. The case has returned for reconsideration." });
+    }
+
+    /// <summary>Recall is the proposing officer's, so this one stays HR-gated with the rest of the decision path.</summary>
+    [Authorize(Roles = HrRoles)]
+    [HttpPost("{id:guid}/recall-decision")]
+    public async Task<IActionResult> RecallDecision(Guid id, [FromBody] DisciplinaryDecisionActionDto? dto = null)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _caseService.RecallDecisionAsync(id, employeeId.Value, dto?.Comments);
+        return Ok(new { message = "Decision recalled." });
+    }
+
     [Authorize(Roles = HrRoles)]
     [HttpPost("{id:guid}/close")]
     public async Task<IActionResult> CloseCase(Guid id, [FromBody] CloseDisciplinaryCaseDto dto)

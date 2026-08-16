@@ -144,8 +144,35 @@ class DisciplineService {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/start-review`, {});
   }
 
+  /**
+   * Proposes a sanction and sends it for confirmation. This does NOT finalise the decision: the
+   * case moves to AwaitingDecision and an approval instance starts. It becomes DecisionMade only
+   * when the assigned approver confirms it.
+   */
   recordDecision(id: string, payload: RecordDecisionRequest): Promise<{ message: string }> {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/decision`, payload);
+  }
+
+  /**
+   * The cases whose proposed decision the caller may confirm. Token-derived — the engine decides
+   * what is in it. Open to non-HR callers by design: the confirming officer is a head of department
+   * or the MD, and the register answers 403 for them, so this is the only place their work appears.
+   */
+  getAwaitingMyApproval(): Promise<DisciplinaryCaseSummary[]> {
+    return apiService.get<DisciplinaryCaseSummary[]>(`${this.baseUrl}/awaiting-my-approval`);
+  }
+
+  approveDecision(id: string, comments?: string | null): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/approve-decision`, { comments });
+  }
+
+  /** Refusing a sanction returns the case to review; it does not refuse the allegation. */
+  rejectDecision(id: string, comments?: string | null): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/reject-decision`, { comments });
+  }
+
+  recallDecision(id: string, comments?: string | null): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/recall-decision`, { comments });
   }
 
   close(id: string, payload: CloseCaseRequest): Promise<{ message: string }> {

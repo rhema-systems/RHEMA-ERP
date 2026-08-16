@@ -18,6 +18,9 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -71,6 +74,26 @@ export default function DisciplineCaseDetailPage() {
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline'] });
+
+  // The decision segment of the case runs on the generic workflow engine. The screen never sets a
+  // status itself — it refetches and lets the adapter decide, which is the whole contract.
+  const workflow = useWorkflowRecord({
+    entityType: 'StaffDisciplinaryAction',
+    entityId: id,
+    entityLabel: 'Disciplinary Decision',
+    entityNumber: c?.caseNumber,
+    status: c?.status ?? 'Draft',
+    // Proposing has its own dialog below, because it carries the sanction and the rationale.
+    canSubmit: false,
+    canApproveReject: c?.status === 'AwaitingDecision',
+    enabled: !!c,
+    commands: {
+      approve: (ctx) => disciplineService.approveDecision(id, ctx.comments || null),
+      reject: (ctx) => disciplineService.rejectDecision(id, ctx.comments || 'Refused'),
+      afterAction: async () => { refresh(); },
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   // Each lifecycle mutation surfaces the server's own refusal text rather than a generic failure.
   // The services answer 422 with the rule — "Only Draft cases can be submitted" — and that message
@@ -139,6 +162,18 @@ export default function DisciplineCaseDetailPage() {
     onError: (e: Error) => toast({ title: 'Could not dismiss', description: e.message, variant: 'destructive' }),
   });
 
+  const recallMutation = useMutation({
+    mutationFn: () => disciplineService.recallDecision(id),
+    onSuccess: () => {
+      toast({
+        title: 'Decision recalled',
+        description: 'The case has returned to review and the proposed sanction has been cleared.',
+      });
+      refresh();
+    },
+    onError: (e: Error) => toast({ title: 'Could not recall', description: e.message, variant: 'destructive' }),
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-16">
@@ -175,6 +210,10 @@ export default function DisciplineCaseDetailPage() {
         }
       />
 
+      {/* The confirming officer's actions, when the caller is one. The engine decides whether they
+          are — this component asks it, and renders nothing when they are not. */}
+      <WorkflowApprovalActions {...workflow.actionProps} />
+
       {/* Lifecycle. Every button is offered unconditionally except where the status makes it
           meaningless — the server owns the rules and answers 422 with the reason, which the toast
           shows verbatim. Hiding buttons on a guess would put a second, disagreeing copy of the rules
@@ -182,6 +221,16 @@ export default function DisciplineCaseDetailPage() {
       {!isTerminal && (
         <Card>
           <CardContent className="flex flex-wrap gap-2 p-4">
+            {detail.status === 'AwaitingDecision' && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => recallMutation.mutate()}
+                disabled={recallMutation.isPending}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" /> Recall decision
+              </Button>
+            )}
             {detail.status === 'Draft' && (
               <Button size="sm" onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending}>
                 <Send className="mr-2 h-4 w-4" /> Submit
@@ -221,6 +270,7 @@ export default function DisciplineCaseDetailPage() {
           <TabsTrigger value="sanctions">Sanctions</TabsTrigger>
           <TabsTrigger value="record">Case file</TabsTrigger>
           <TabsTrigger value="appeal">Appeal</TabsTrigger>
+          <WorkflowTabTrigger value="workflow" />
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
@@ -554,15 +604,32 @@ export default function DisciplineCaseDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <WorkflowTabContent
+          value="workflow"
+          entityType="StaffDisciplinaryAction"
+          entityId={id}
+          entityLabel="Disciplinary Decision"
+          entityNumber={detail.caseNumber}
+          status={detail.status}
+          workflowSummary={workflow.summary}
+          canApproveReject={detail.status === 'AwaitingDecision'}
+          onAfterAction={async () => {
+            refresh();
+            await workflow.refresh();
+          }}
+        />
       </Tabs>
 
       {/* Record decision */}
       <Dialog open={decisionOpen} onOpenChange={setDecisionOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Record the decision</DialogTitle>
+            <DialogTitle>Propose the decision</DialogTitle>
             <DialogDescription>
-              You are recorded as the deciding officer. The case moves to awaiting decision.
+              You are recorded as the deciding officer. This does not finalise the sanction — the
+              case goes to a confirming officer, and becomes a decision once they confirm it.
+              Who that is depends on the authority the chosen action requires.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -574,6 +641,7 @@ export default function DisciplineCaseDetailPage() {
                   {(actionTypes ?? []).map((t) => (
                     <SelectItem key={t.id} value={t.id}>
                       {t.code ? `${t.code} — ${t.name}` : t.name}
+                      {t.minimumAuthorityName ? ` · ${t.minimumAuthorityName} authority` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>

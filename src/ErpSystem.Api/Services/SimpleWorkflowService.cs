@@ -1517,6 +1517,42 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = movement.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "STAFF_DISCIPLINARY_ACTION", "StaffDisciplinaryAction", "Staff Disciplinary Action"))
+        {
+            var disciplinaryCase = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()
+                .FirstOrDefaultAsync(d => d.Id == entityId)
+                ?? throw new InvalidOperationException("Disciplinary case not found");
+
+            // What is being decided, how serious it is, and who is entitled to confirm it. FR-HR-080
+            // limits heads of department to verbal warnings and FR-HR-092 has the MD signing
+            // terminations, so `minimumAuthority` is the field a definition branches on to pick the
+            // approver — it is the catalog's own statement of who may issue this sanction, rather
+            // than a guess made from the action's name.
+            var actionType = disciplinaryCase.ActionTypeId is Guid actionTypeId
+                ? await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryActionType>()
+                    .FirstOrDefaultAsync(t => t.Id == actionTypeId)
+                : null;
+
+            context["caseNumber"] = disciplinaryCase.CaseNumber;
+            context["employeeId"] = disciplinaryCase.EmployeeId;
+            context["staffOffenseId"] = disciplinaryCase.StaffOffenseId;
+            context["severity"] = disciplinaryCase.Severity.ToString();
+            context["isGrossMisconduct"] = disciplinaryCase.Severity == Core.Enums.StaffOffenseSeverity.GrossMisconduct;
+            context["requiresInvestigation"] = disciplinaryCase.RequiresInvestigation;
+            context["hearingRequired"] = disciplinaryCase.HearingRequired;
+            context["reportedById"] = disciplinaryCase.ReportedById;
+            context["reportedToId"] = disciplinaryCase.ReportedToId;
+            context["decisionById"] = disciplinaryCase.DecisionById;
+            context["actionTypeId"] = disciplinaryCase.ActionTypeId;
+            context["actionTypeCode"] = actionType?.Code;
+            context["actionTypeName"] = actionType?.Name;
+            context["minimumAuthority"] = actionType?.MinimumAuthority.ToString();
+            context["requiresManagementApproval"] =
+                actionType?.MinimumAuthority == Core.Enums.DisciplinaryActionAuthority.Management;
+            context["incidentDate"] = disciplinaryCase.IncidentDate;
+            context["status"] = disciplinaryCase.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_REQUISITION", "StaffRequisition", "Staff Requisition"))
         {
             var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Requisition.StaffRequisition>()

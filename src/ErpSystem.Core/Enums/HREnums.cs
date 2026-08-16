@@ -2685,6 +2685,38 @@ public enum DisciplineLegalRiskLevel
     Critical = 4
 }
 
+/// <summary>
+/// Who may issue a disciplinary action of a given type, per FR-HR-080 and FR-HR-092.
+/// </summary>
+/// <remarks>
+/// This lives on <see cref="ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryActionType"/>
+/// rather than being hard-coded against sanction names, because what counts as a head-of-department
+/// sanction is a policy each tenant sets in its own catalog — TDC's rule is that HODs are limited to
+/// verbal warnings, but the mechanism should not assume the rule.
+///
+/// The values are ordered by increasing authority so a comparison reads naturally
+/// (<c>type.MinimumAuthority > DisciplinaryActionAuthority.HeadOfDepartment</c>). Append only:
+/// this is a plain int column with no lookup table, so renumbering would silently change what
+/// existing rows mean.
+/// </remarks>
+public enum DisciplinaryActionAuthority
+{
+    /// <summary>A head of department may issue this directly. FR-HR-080 puts verbal warnings here.</summary>
+    [Description("Head of Department")]
+    HeadOfDepartment = 1,
+
+    /// <summary>HR issues it. The default, and the safe one for an unmaintained catalog row.</summary>
+    [Description("HR")]
+    Hr = 2,
+
+    /// <summary>
+    /// Requires management sign-off. FR-HR-092 puts terminations here — the MD signs all of them
+    /// except the procedural cases HR approves automatically per policy.
+    /// </summary>
+    [Description("Management")]
+    Management = 3
+}
+
 public enum EmployeeTerminationType
 {
     [Description("Involuntary For Cause")]

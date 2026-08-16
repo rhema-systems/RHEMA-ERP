@@ -64,7 +64,30 @@ public interface IStaffDisciplinaryCaseService
     /// The deciding officer, taken from the caller's token — never from the request body. Who decided
     /// a disciplinary case is testimony.
     /// </param>
+    /// <remarks>
+    /// Proposes the sanction and starts the approval instance. The case sits at AwaitingDecision
+    /// until an approver confirms it. Enforces FR-HR-080: a non-HR caller may only issue an action
+    /// whose MinimumAuthority is HeadOfDepartment.
+    /// </remarks>
     Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The cases whose proposed decision the caller can confirm right now. Token-derived; the engine
+    /// decides what is in it.
+    /// </summary>
+    Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetAwaitingMyApprovalAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Confirms the proposed decision, advancing the case to DecisionMade when the route completes.</summary>
+    Task<bool> ApproveDecisionAsync(Guid caseId, Guid approvingEmployeeId, string? comments = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Refuses the proposed decision. The case returns to UnderReview with the proposed sanction
+    /// cleared — refusing a sanction does not refuse the allegation.
+    /// </summary>
+    Task<bool> RejectDecisionAsync(Guid caseId, Guid rejectingEmployeeId, string? reason = null, CancellationToken cancellationToken = default);
+
+    /// <summary>The proposing officer takes their own decision back before anyone rules on it.</summary>
+    Task<bool> RecallDecisionAsync(Guid caseId, Guid recallingEmployeeId, string? reason = null, CancellationToken cancellationToken = default);
 
     /// <summary>Closes a case that is in AwaitingDecision or DecisionMade status.</summary>
     /// <param name="closedByEmployeeId">Taken from the caller's token, never from the request body.</param>

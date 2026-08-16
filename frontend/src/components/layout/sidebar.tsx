@@ -50,6 +50,7 @@ import {
   Wrench,
   Calendar,
   CalendarRange,
+  Check,
   ClipboardCheck,
   ListChecks,
   OctagonX,
@@ -621,6 +622,10 @@ export const navigationItems: NavItem[] = [
         icon: Gavel,
         children: [
           { title: 'Cases', href: '/hr/discipline', icon: Gavel },
+          // Open by design: the officer who confirms a sanction is a head of department or the MD,
+          // and the register above answers 403 for them — this is where their work appears. The
+          // engine decides its contents, per case and per step.
+          { title: 'Awaiting My Confirmation', href: '/hr/discipline/approvals', icon: Check },
           // Open to every employee: the cases raised about them. The register above answers 403
           // for non-HR, so this is the only discipline screen most people can open.
           { title: 'My Record', href: '/hr/discipline/mine', icon: UserCheck },
