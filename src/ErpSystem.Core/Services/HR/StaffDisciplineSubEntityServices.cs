@@ -43,7 +43,7 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -218,7 +218,7 @@ public class StaffDisciplineHearingService : IStaffDisciplineHearingService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -383,7 +383,7 @@ public class StaffDisciplineWarningService : IStaffDisciplineWarningService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -538,7 +538,7 @@ public class StaffDisciplineSuspensionService : IStaffDisciplineSuspensionServic
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -686,7 +686,7 @@ public class StaffDisciplineFineService : IStaffDisciplineFineService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -849,7 +849,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -923,10 +923,19 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
     }
 
-    public async Task<StaffDisciplineAppealDto> FileAsync(FileAppealDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// The appellant is the case's own employee and is never taken from the request. An appeal is
+    /// the subject's act, so this refuses the call from anyone else — HR included, exactly as the
+    /// staff-movement acceptance path does. HR's role here is to schedule and decide, not to appeal
+    /// on someone's behalf.
+    /// </remarks>
+    public async Task<StaffDisciplineAppealDto> FileAsync(FileAppealDto dto, Guid tenantId, Guid appellantEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
+
+        if (disciplinaryCase.EmployeeId != appellantEmployeeId)
+            throw new UnauthorizedAccessException("Only the employee a case was brought against can appeal it.");
 
         if (disciplinaryCase.Status != DisciplinaryStatus.DecisionMade
             && disciplinaryCase.Status != DisciplinaryStatus.AwaitingDecision)
@@ -940,18 +949,18 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
         {
             TenantId             = tenantId,
             DisciplinaryActionId = dto.CaseId,
-            EmployeeId           = dto.EmployeeId,
-            FiledDate            = dto.FiledDate,
+            EmployeeId           = appellantEmployeeId,
+            FiledDate            = DateTime.UtcNow,
             Reason               = dto.Reason,
             AppealStatus         = DisciplineAppealStatus.Filed,
-            CreatedBy            = userId.ToString(),
+            CreatedBy            = appellantEmployeeId.ToString(),
         };
 
         await _appealRepository.AddAsync(entity);
 
         disciplinaryCase.Status    = DisciplinaryStatus.UnderAppeal;
         disciplinaryCase.UpdatedAt = DateTime.UtcNow;
-        disciplinaryCase.UpdatedBy = userId.ToString();
+        disciplinaryCase.UpdatedBy = appellantEmployeeId.ToString();
         await _caseRepository.UpdateAsync(disciplinaryCase);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -991,7 +1000,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
         entity.AppealOutcome      = dto.AppealOutcome;
         entity.AppealOutcomeNotes = dto.AppealOutcomeNotes;
         entity.AppealOutcomeDate  = dto.AppealOutcomeDate;
-        entity.AppealOutcomeById  = dto.AppealOutcomeById;
+        entity.AppealOutcomeById  = userId;
         entity.HearingNotes       = dto.HearingNotes ?? entity.HearingNotes;
         entity.AppealStatus       = DisciplineAppealStatus.DecisionMade;
         entity.UpdatedAt          = DateTime.UtcNow;
@@ -1043,7 +1052,7 @@ public class StaffDisciplineCorrectiveActionService : IStaffDisciplineCorrective
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -1281,7 +1290,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 

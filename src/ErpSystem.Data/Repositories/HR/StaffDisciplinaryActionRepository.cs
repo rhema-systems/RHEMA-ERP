@@ -16,9 +16,17 @@ public class StaffDisciplinaryActionRepository
 {
     public StaffDisciplinaryActionRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <remarks>
+    /// <c>AsSplitQuery</c> is required, not an optimisation. This is 32 includes spanning eight
+    /// collections; as a single query SQL Server builds one row per combination of children and the
+    /// plan exceeds the 8060-byte worktable row limit, so the read fails outright the moment a case
+    /// has more than a trivial number of children. The same shape was fixed on the SHE incident,
+    /// inspection and permit detail reads and on staff-movement create.
+    /// </remarks>
     public async Task<StaffDisciplinaryAction?> GetWithFullDetailsAsync(Guid id)
     {
         return await _dbSet
+            .AsSplitQuery()
             .Include(d => d.Employee).ThenInclude(e => e.Department)
             .Include(d => d.StaffOffense)
             .Include(d => d.ReportedBy)

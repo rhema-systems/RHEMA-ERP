@@ -1,10 +1,21 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
+
+/// <summary>
+/// The role gate shared by the two discipline setup controllers in this file. Attribute arguments
+/// must be compile-time constants, so it cannot be a private member of either class.
+/// </summary>
+internal static class DisciplineLookupRoles
+{
+    public const string HrRoles = Constants.Roles.SuperAdmin + "," + Constants.Roles.Hr;
+}
 
 // ============================================================================
 // STAFF OFFENSE CONTROLLER
@@ -12,10 +23,14 @@ namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
 /// Manages the StaffOffense master-data catalog and its child procedure steps.
+///
+/// Gated at class level: this is setup data with no employee-facing action on it. The catalog names
+/// what counts as misconduct and what the procedure for it is, so it is HR's to maintain.
 /// </summary>
 [ApiController]
 [Route("api/discipline/offenses")]
-[Authorize]
+[Authorize(Roles = DisciplineLookupRoles.HrRoles)]
+[DisciplineBusinessRules]
 public class StaffOffenseController : ControllerBase
 {
     private readonly IStaffOffenseService _service;
@@ -157,10 +172,14 @@ public class StaffOffenseController : ControllerBase
 /// <summary>
 /// Manages the lookup table of disciplinary action types
 /// (e.g., Verbal Warning, Written Warning, Dismissal).
+///
+/// Gated at class level, as setup data. This catalog is where FR-HR-080's authority limit will hang
+/// when the workflow slice lands — which sanction each role may issue — so it is HR's to maintain.
 /// </summary>
 [ApiController]
 [Route("api/discipline/action-types")]
-[Authorize]
+[Authorize(Roles = DisciplineLookupRoles.HrRoles)]
+[DisciplineBusinessRules]
 public class StaffDisciplinaryActionTypeController : ControllerBase
 {
     private readonly IStaffDisciplinaryActionTypeService _service;

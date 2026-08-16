@@ -51,7 +51,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -333,7 +333,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         return true;
     }
 
-    public async Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCaseAsync(dto.CaseId);
 
@@ -351,10 +351,10 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         entity.ActionDetails = dto.ActionDetails;
         entity.DecisionRationale = dto.DecisionRationale;
         entity.DecisionDate = dto.DecisionDate;
-        entity.DecisionById = dto.DecisionById;
+        entity.DecisionById = decidedByEmployeeId;
         entity.Status = DisciplinaryStatus.AwaitingDecision;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.DecisionById.ToString();
+        entity.UpdatedBy = decidedByEmployeeId.ToString();
 
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -364,7 +364,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         return true;
     }
 
-    public async Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, CancellationToken cancellationToken = default)
+    public async Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, Guid closedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCaseAsync(dto.CaseId);
 
@@ -381,9 +381,9 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         entity.Status = DisciplinaryStatus.Closed;
         entity.ClosedDate = dto.ClosedDate;
         entity.ClosureNotes = dto.ClosureNotes;
-        entity.ClosedById = dto.ClosedById;
+        entity.ClosedById = closedByEmployeeId;
         entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = dto.ClosedById.ToString();
+        entity.UpdatedBy = closedByEmployeeId.ToString();
 
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -570,12 +570,28 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
     // ── Helper methods ────────────────────────────────────────────────────────
 
+    /// <remarks>
+    /// Numbers come from the highest suffix already issued, over rows INCLUDING soft-deleted ones —
+    /// not from a count of live rows. Counting re-issues a number the moment anything is deleted: the
+    /// count drops back, and the next case collides with a number still held by the deleted row's
+    /// unique index. Soft-deleted rows keep their numbers, so they have to keep their place in the
+    /// sequence too. The same shape was fixed across the SHE and staff-movement generators.
+    /// </remarks>
     private async Task<string> GenerateCaseNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var year = DateTime.UtcNow.Year;
-        var count = await _caseRepository.GetQueryable()
-            .CountAsync(d => d.TenantId == tenantId && d.CreatedAt.Year == year, cancellationToken);
-        return $"DC-{year}-{(count + 1):D5}";
+        var prefix = $"DC-{DateTime.UtcNow.Year}-";
+
+        var issued = await _caseRepository
+            .GetQueryableIncludingDeleted(d => d.TenantId == tenantId && d.CaseNumber.StartsWith(prefix))
+            .Select(d => d.CaseNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 }
 

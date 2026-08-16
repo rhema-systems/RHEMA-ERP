@@ -135,7 +135,11 @@ public interface IStaffDisciplineNotificationService
     Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetPendingFollowupAsync(int daysOld = 3, CancellationToken cancellationToken = default);
 
     Task<StaffDisciplineNotificationDto> SendAsync(CreateStaffDisciplineNotificationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
-    Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, CancellationToken cancellationToken = default);
+    /// <param name="acknowledgedByEmployeeId">
+    /// The caller, from their token. Refused unless this is the subject of the notification's case —
+    /// acknowledgement is the employee's own act, and the response clocks run from it.
+    /// </param>
+    Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, Guid acknowledgedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> SendFollowupAsync(SendFollowupNotificationDto dto, CancellationToken cancellationToken = default);
 }
 

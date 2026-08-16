@@ -46,7 +46,7 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -241,7 +241,7 @@ public class StaffDisciplineWitnessService : IStaffDisciplineWitnessService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -371,7 +371,7 @@ public class StaffDisciplineDocumentService : IStaffDisciplineDocumentService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -601,7 +601,7 @@ public class StaffDisciplineNoteService : IStaffDisciplineNoteService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -689,17 +689,20 @@ public class StaffDisciplineNoteService : IStaffDisciplineNoteService
 public class StaffDisciplineNotificationService : IStaffDisciplineNotificationService
 {
     private readonly IStaffDisciplineNotificationRepository _notificationRepository;
+    private readonly IStaffDisciplinaryActionRepository _caseRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineNotificationService> _logger;
 
     public StaffDisciplineNotificationService(
         IStaffDisciplineNotificationRepository notificationRepository,
+        IStaffDisciplinaryActionRepository caseRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineNotificationService> logger)
     {
         _notificationRepository = notificationRepository;
+        _caseRepository = caseRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -712,7 +715,7 @@ public class StaffDisciplineNotificationService : IStaffDisciplineNotificationSe
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -775,14 +778,30 @@ public class StaffDisciplineNotificationService : IStaffDisciplineNotificationSe
         return entity.ToDto();
     }
 
-    public async Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Acknowledgement is the employee's own act and is refused from anyone else, HR included: it is
+    /// the record that the subject received a show-cause or hearing notice, and the response clocks
+    /// are measured from it. The date is server-stamped for the same reason — a client-supplied
+    /// acknowledgement date would let the clock be set to whatever suits.
+    ///
+    /// The notification carries no recipient of its own; the recipient is the subject of the case it
+    /// belongs to, which is why the case is loaded here.
+    /// </remarks>
+    public async Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, Guid acknowledgedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNotificationAsync(dto.NotificationId);
+
+        var disciplinaryCase = await _caseRepository.GetByIdAsync(entity.DisciplinaryActionId);
+        if (disciplinaryCase == null || disciplinaryCase.TenantId != GetTenantId())
+            throw new ArgumentException($"Disciplinary case for notification '{dto.NotificationId}' not found.");
+
+        if (disciplinaryCase.EmployeeId != acknowledgedByEmployeeId)
+            throw new UnauthorizedAccessException("Only the employee a notification was issued to can acknowledge it.");
 
         if (entity.AcknowledgedDate.HasValue)
             throw new InvalidOperationException("This notification has already been acknowledged.");
 
-        entity.AcknowledgedDate = dto.AcknowledgedDate;
+        entity.AcknowledgedDate = DateTime.UtcNow;
         entity.UpdatedAt        = DateTime.UtcNow;
 
         await _notificationRepository.UpdateAsync(entity);
@@ -845,7 +864,7 @@ public class StaffDisciplineLegalReviewService : IStaffDisciplineLegalReviewServ
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 

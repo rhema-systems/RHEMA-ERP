@@ -60,10 +60,15 @@ public interface IStaffDisciplinaryCaseService
     /// advances the case to AwaitingDecision. Penalty sub-entities are created via their
     /// own services after this call.
     /// </summary>
-    Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, CancellationToken cancellationToken = default);
+    /// <param name="decidedByEmployeeId">
+    /// The deciding officer, taken from the caller's token — never from the request body. Who decided
+    /// a disciplinary case is testimony.
+    /// </param>
+    Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Closes a case that is in AwaitingDecision or DecisionMade status.</summary>
-    Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, CancellationToken cancellationToken = default);
+    /// <param name="closedByEmployeeId">Taken from the caller's token, never from the request body.</param>
+    Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, Guid closedByEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Transitions any non-terminal case to OnHold.</summary>
     Task<bool> PutOnHoldAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default);

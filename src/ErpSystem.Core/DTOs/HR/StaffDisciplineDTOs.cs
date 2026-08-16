@@ -319,7 +319,10 @@ public class CreateStaffDisciplinaryActionDto : CreateDtoBase
     [MaxLength(4000)]
     public string IncidentDescription { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// Who reported the allegation. Optional: the server fills it from the caller's token, and only
+    /// HR may name someone else (recording a report made to them). Left unset by every other caller.
+    /// </summary>
     public Guid ReportedById { get; set; }
 
     [Required]
@@ -349,7 +352,10 @@ public class UpdateStaffDisciplinaryActionDto : UpdateDtoBase
     [MaxLength(4000)]
     public string IncidentDescription { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// See <see cref="CreateStaffDisciplinaryActionDto.ReportedById"/> — server-filled from the
+    /// token unless HR names someone else.
+    /// </summary>
     public Guid ReportedById { get; set; }
 
     [Required]
@@ -360,7 +366,14 @@ public class UpdateStaffDisciplinaryActionDto : UpdateDtoBase
     public bool HearingRequired { get; set; }
 }
 
-/// <summary>Records the final decision and action type for a case.</summary>
+/// <summary>
+/// Records the final decision and action type for a case.
+/// </summary>
+/// <remarks>
+/// <c>DecisionById</c> is deliberately absent: who decided a disciplinary case is testimony, and the
+/// server takes it from the caller's token. Accepting it here let any authenticated caller record a
+/// decision in someone else's name.
+/// </remarks>
 public class RecordDisciplinaryDecisionDto
 {
     [Required]
@@ -376,19 +389,19 @@ public class RecordDisciplinaryDecisionDto
     public string? DecisionRationale { get; set; }
 
     public DateTime DecisionDate { get; set; } = DateTime.UtcNow;
-
-    [Required]
-    public Guid DecisionById { get; set; }
 }
 
-/// <summary>Transitions a case to Closed status.</summary>
+/// <summary>
+/// Transitions a case to Closed status.
+/// </summary>
+/// <remarks>
+/// <c>ClosedById</c> is deliberately absent — server-stamped from the token, for the same reason as
+/// <see cref="RecordDisciplinaryDecisionDto"/>.
+/// </remarks>
 public class CloseDisciplinaryCaseDto
 {
     [Required]
     public Guid CaseId { get; set; }
-
-    [Required]
-    public Guid ClosedById { get; set; }
 
     public DateTime ClosedDate { get; set; } = DateTime.UtcNow;
 
@@ -970,16 +983,24 @@ public class CreateStaffDisciplineNotificationDto : CreateDtoBase
     [MaxLength(4000)]
     public string Content { get; set; } = string.Empty;
 
-    [Required]
-    public Guid SentById { get; set; }
+    /// <remarks>
+    /// <c>SentById</c> is deliberately absent — server-stamped from the caller's token. Whoever
+    /// issues a notice is its sender, and a disciplinary notice is a document whose authorship must
+    /// not be forgeable.
+    /// </remarks>
 }
 
+/// <summary>
+/// Records that the subject of a case received a disciplinary notice.
+/// </summary>
+/// <remarks>
+/// <c>AcknowledgedDate</c> is deliberately absent — server-stamped, because the response clocks run
+/// from it and a client-supplied date would let them be set to whatever suits.
+/// </remarks>
 public class AcknowledgeNotificationDto
 {
     [Required]
     public Guid NotificationId { get; set; }
-
-    public DateTime AcknowledgedDate { get; set; } = DateTime.UtcNow;
 }
 
 public class SendFollowupNotificationDto
@@ -1023,15 +1044,20 @@ public class StaffDisciplineAppealDto : BaseDto
     public List<StaffDisciplineDocumentSummaryDto> Documents { get; set; } = new();
 }
 
+/// <summary>
+/// Files an appeal against a decided case.
+/// </summary>
+/// <remarks>
+/// <c>EmployeeId</c> is deliberately absent: an appeal is the subject's own act, so the appellant is
+/// the case's employee and the service refuses the call from anyone else — HR included. Accepting an
+/// appellant here let any authenticated caller file an appeal in someone else's name.
+/// <c>FiledDate</c> is server-stamped for the same reason it is in the demotion-response path: the
+/// FR-HR-180 five-working-day window is measured against it, so it cannot come from the client.
+/// </remarks>
 public class FileAppealDto
 {
     [Required]
     public Guid CaseId { get; set; }
-
-    [Required]
-    public Guid EmployeeId { get; set; }
-
-    public DateTime FiledDate { get; set; } = DateTime.UtcNow;
 
     [Required]
     [MaxLength(2000)]
@@ -1065,9 +1091,10 @@ public class RecordAppealOutcomeDto
 
     public DateTime AppealOutcomeDate { get; set; } = DateTime.UtcNow;
 
-    [Required]
-    public Guid AppealOutcomeById { get; set; }
-
+    /// <remarks>
+    /// <c>AppealOutcomeById</c> is deliberately absent — who decided an appeal is testimony, taken
+    /// from the caller's token.
+    /// </remarks>
     [MaxLength(3000)]
     public string? HearingNotes { get; set; }
 }
