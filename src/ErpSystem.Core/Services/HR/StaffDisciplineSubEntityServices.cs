@@ -1,5 +1,6 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -1312,6 +1313,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     private readonly IStaffDisciplineTerminationRepository _terminationRepository;
     private readonly IStaffDisciplineSeparationRepository _separationRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineTerminationService> _logger;
@@ -1320,6 +1322,7 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         IStaffDisciplineTerminationRepository terminationRepository,
         IStaffDisciplineSeparationRepository separationRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IStaffDisciplineAppealRepository appealRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineTerminationService> logger)
@@ -1327,9 +1330,65 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         _terminationRepository = terminationRepository;
         _separationRepository = separationRepository;
         _caseRepository = caseRepository;
+        _appealRepository = appealRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Validates a body-supplied employee id and returns the row.
+    /// </summary>
+    /// <remarks>
+    /// Two jobs in one call, as elsewhere in HR. It stops an unknown or another tenant's id reaching
+    /// the database as an FK violation (SQL 547, surfacing as an unexplained 500 rather than "that
+    /// employee was not found"), and because the row ends up tracked, EF fixes up the navigation on
+    /// the entity being written — so the separation write response carries the exit interviewer's
+    /// name instead of null, with no second read. The harness caught the null.
+    /// </remarks>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The {role} employee with ID '{employeeId}' was not found.");
+        return employee;
+    }
+
+    /// <summary>
+    /// Refuses a termination until the decision behind it is final and any appeal against it has
+    /// been answered.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things were unguarded. A termination could be recorded against a case in ANY status
+    /// — a draft, or one whose proposed sanction was still sitting in an approver's queue — so the
+    /// record could say an employee had been dismissed on a decision nobody had confirmed. And it
+    /// could be recorded while an appeal was live and undecided, which is the procedural failure this
+    /// whole area exists to prevent: dismissing someone while they are still contesting the finding.</para>
+    ///
+    /// <para><b>FR-HR-092 is NOT implemented as a flag here.</b> "The MD shall sign all terminations
+    /// except procedural ones, which HR approves automatically per policy" is a statement about WHO
+    /// CONFIRMS the decision, and that is already expressed: the action type carries its
+    /// <c>MinimumAuthority</c>, and the workflow definition routes on it. A dismissal action type set
+    /// to Management routes to the MD; a procedural one set to Hr does not. Adding an "MD signed"
+    /// boolean here would be a second, unenforced copy of a fact the approval record already holds —
+    /// and it would have to be kept in step with it by hand.</para>
+    /// </remarks>
+    private async Task EnsureTerminationIsFoundedAsync(StaffDisciplinaryAction disciplinaryCase, Guid tenantId)
+    {
+        if (disciplinaryCase.Status is not (DisciplinaryStatus.DecisionMade
+            or DisciplinaryStatus.UnderAppeal
+            or DisciplinaryStatus.Closed))
+        {
+            throw new InvalidOperationException(
+                $"A termination cannot be recorded for a case in '{disciplinaryCase.Status}' status. "
+                + "The decision must be confirmed first.");
+        }
+
+        var appeal = await _appealRepository.GetByCaseIdAsync(tenantId, disciplinaryCase.Id);
+        if (appeal != null && appeal.AppealOutcome == null)
+            throw new InvalidOperationException(
+                "This decision is under appeal and the appeal has not been decided. "
+                + "Record the appeal outcome before terminating.");
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -1413,9 +1472,13 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
+        // Duplicate first, then the state rules — the slice-5 ordering lesson: a second attempt must
+        // be told it is a duplicate, not handed a state message about a condition the first one made.
         var existing = await _terminationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A termination record already exists for this case. Use Update instead.");
+
+        await EnsureTerminationIsFoundedAsync(disciplinaryCase, tenantId);
 
         var entity = new StaffDisciplineTermination
         {
@@ -1490,6 +1553,13 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(dto.CaseId);
 
+        // ⚠ SCOPE BOUNDARY, recorded here because it is easy to mistake this checklist for more than
+        // it is. What this area owns is the DECISION to end the employment and a record of the exit
+        // steps as they are ticked off. It does NOT compute what the leaver is owed, does not block
+        // anything on a clearance form (FR-HR-091), and does not handle resignation, retirement or
+        // contract expiry — none of which involve a disciplinary case at all. Those belong to a
+        // separation module that does not exist yet; this store becomes its data when it is built,
+        // so it is deliberately kept honest rather than extended into a half-built exit process.
         var termination = await _terminationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (termination == null || termination.TenantId != tenantId)
             throw new InvalidOperationException("A termination record must be created before initiating the separation process.");
@@ -1497,6 +1567,9 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
         var existing = await _separationRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("A separation record has already been initiated for this case.");
+
+        if (dto.ExitInterviewerId is Guid interviewerId)
+            await GetOwnedEmployeeAsync(interviewerId, "exit interviewer");
 
         var entity = new StaffDisciplineSeparation
         {
@@ -1517,6 +1590,16 @@ public class StaffDisciplineTerminationService : IStaffDisciplineTerminationServ
     public async Task<StaffDisciplineSeparationDto> UpdateSeparationAsync(UpdateSeparationDto dto, Guid userId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSeparationByCaseAsync(dto.CaseId);
+
+        // The same guard as on initiate. A guard on one endpoint is worthless if another endpoint
+        // writes the same column — the area-8 slice-3 lesson, where a demotion's employee response
+        // could be written straight round the subject-only guard via a plain HR edit.
+        if (dto.ExitInterviewerId is Guid interviewerId)
+            await GetOwnedEmployeeAsync(interviewerId, "exit interviewer");
+
+        // AccessRevokedById is set here too and is an Employee FK, so it gets the same treatment.
+        if (dto.AccessRevokedById is Guid revokedById)
+            await GetOwnedEmployeeAsync(revokedById, "access-revoking");
 
         entity.ExitInterviewCompleted     = dto.ExitInterviewCompleted;
         entity.ExitInterviewDate          = dto.ExitInterviewDate;
