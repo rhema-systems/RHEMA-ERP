@@ -84,10 +84,14 @@ public class StaffDisciplineSubEntityController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffDisciplineInvestigationDto>>> GetOpenInvestigations()
         => Ok(await _investigationService.GetOpenInvestigationsAsync());
 
+    /// <summary>
+    /// Investigations open beyond FR-HR-178's four weeks. <paramref name="maxDays"/> is optional and
+    /// defaults to that rule — it used to default to 30, which was nobody's requirement.
+    /// </summary>
     [Authorize(Roles = HrRoles)]
     [HttpGet("investigations/overdue")]
     public async Task<ActionResult<IEnumerable<StaffDisciplineInvestigationDto>>> GetOverdueInvestigations(
-        [FromQuery] int maxDays = 30)
+        [FromQuery] int? maxDays = null)
         => Ok(await _investigationService.GetOverdueInvestigationsAsync(maxDays));
 
     [Authorize(Roles = HrRoles)]

@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Send, Play, Gavel, Lock, PauseCircle, RotateCcw, XCircle } from 'lucide-react';
+import {
+  Loader2, Send, Play, Gavel, Lock, PauseCircle, RotateCcw, XCircle, AlertTriangle,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -71,6 +73,12 @@ export default function DisciplineCaseDetailPage() {
     queryKey: ['hr', 'discipline', 'action-types', 'active'],
     queryFn: () => disciplineLookupService.getActiveActionTypes(),
     enabled: decisionOpen,
+  });
+
+  const { data: clock } = useQuery({
+    queryKey: ['hr', 'discipline', 'process-clock', id],
+    queryFn: () => disciplineService.getProcessClock(id),
+    enabled: !!c,
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'discipline'] });
@@ -210,6 +218,33 @@ export default function DisciplineCaseDetailPage() {
         }
       />
 
+      {/* FR-HR-177 and FR-HR-178. Shown as a statement of fact, not as an obstacle: a missed
+          deadline already happened and blocking the next step cannot undo it, so nothing here
+          disables anything. The wording is the server's, so the screen and any report say the same
+          thing about the same case. */}
+      {clock && clock.advisories.length > 0 && (
+        <Card className={clock.queryBreached || clock.investigationBreached ? 'border-destructive' : undefined}>
+          <CardContent className="space-y-2 p-4">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <AlertTriangle
+                className={`h-4 w-4 ${clock.queryBreached || clock.investigationBreached ? 'text-destructive' : 'text-muted-foreground'}`}
+              />
+              Process deadlines
+            </div>
+            <ul className="space-y-1 text-sm text-muted-foreground">
+              {clock.advisories.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">
+              Written query due {new Date(clock.queryDueAt).toLocaleString()}
+              {clock.queryIssuedAt ? ` · issued ${new Date(clock.queryIssuedAt).toLocaleString()}` : ' · not yet issued'}
+              {clock.investigationDueAt ? ` · investigation due ${fmtDate(clock.investigationDueAt)}` : ''}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* The confirming officer's actions, when the caller is one. The engine decides whether they
           are — this component asks it, and renders nothing when they are not. */}
       <WorkflowApprovalActions {...workflow.actionProps} />
@@ -320,10 +355,10 @@ export default function DisciplineCaseDetailPage() {
                   <Field label="Started" value={fmtDate(detail.investigation.investigationStartDate)} />
                   <Field label="Completed" value={fmtDate(detail.investigation.investigationEndDate)} />
                   <div className="md:col-span-3">
-                    <Field label="Findings" value={detail.investigation.findings} />
+                    <Field label="Findings" value={detail.investigation.investigationFindings} />
                   </div>
                   <div className="md:col-span-3">
-                    <Field label="Recommendations" value={detail.investigation.recommendations} />
+                    <Field label="Evidence collected" value={detail.investigation.evidenceCollected} />
                   </div>
                 </div>
               ) : (
@@ -407,10 +442,11 @@ export default function DisciplineCaseDetailPage() {
                 <div className="grid gap-5 md:grid-cols-3">
                   <Field label="From" value={fmtDate(detail.suspension.suspensionStartDate)} />
                   <Field label="To" value={fmtDate(detail.suspension.suspensionEndDate)} />
-                  <Field label="Paid" value={detail.suspension.isPaid ? 'Yes' : 'No — without pay'} />
-                  <div className="md:col-span-3">
-                    <Field label="Reason" value={detail.suspension.suspensionReason} />
-                  </div>
+                  <Field
+                    label="Pay"
+                    value={detail.suspension.suspensionWithPay ? 'With pay' : 'Without pay'}
+                  />
+                  <Field label="Days" value={detail.suspension.suspensionDays ?? '—'} />
                 </div>
               ) : (
                 <EmptyState title="No suspension" description="No suspension has been imposed on this case." />
@@ -426,7 +462,13 @@ export default function DisciplineCaseDetailPage() {
                   <Field label="Amount" value={money(detail.fine.fineAmount)} />
                   <Field label="Paid" value={money(detail.fine.finePaidAmount)} />
                   <Field label="Due" value={fmtDate(detail.fine.fineDueDate)} />
-                  <Field label="Status" value={<StatusBadge status={detail.fine.finePaymentStatusName} />} />
+                  <Field
+                    label="Status"
+                    value={detail.fine.finePaymentStatusName
+                      ? <StatusBadge status={detail.fine.finePaymentStatusName} />
+                      : '—'}
+                  />
+                  <Field label="Outstanding" value={money(detail.fine.outstandingBalance)} />
                   <p className="text-xs text-muted-foreground md:col-span-4">
                     Recovery of a fine is payroll&apos;s to run. This records what was imposed and what
                     has been paid; it does not deduct anything.
@@ -478,7 +520,7 @@ export default function DisciplineCaseDetailPage() {
                     {detail.witnesses.map((w) => (
                       <TableRow key={w.id}>
                         <TableCell>{w.name}</TableCell>
-                        <TableCell>{w.isEmployee ? (w.employeeName ?? 'Yes') : 'External'}</TableCell>
+                        <TableCell>{w.isEmployee ? 'Employee' : 'External'}</TableCell>
                         <TableCell>{w.hasStatement ? 'On file' : 'Outstanding'}</TableCell>
                         <TableCell>{fmtDate(w.statementDate)}</TableCell>
                       </TableRow>
@@ -507,10 +549,10 @@ export default function DisciplineCaseDetailPage() {
                   <TableBody>
                     {detail.documents.map((d) => (
                       <TableRow key={d.id}>
-                        <TableCell>{d.documentName}</TableCell>
+                        <TableCell>{d.fileName}</TableCell>
                         <TableCell>{d.categoryName}</TableCell>
                         <TableCell>{fmtDate(d.uploadDate)}</TableCell>
-                        <TableCell>{d.uploadedByName ?? '—'}</TableCell>
+                        <TableCell>{d.uploadedByName || '—'}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -530,8 +572,8 @@ export default function DisciplineCaseDetailPage() {
                     <TableRow>
                       <TableHead>Type</TableHead>
                       <TableHead>Sent</TableHead>
-                      <TableHead>By</TableHead>
                       <TableHead>Acknowledged</TableHead>
+                      <TableHead>Follow-up</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -539,12 +581,12 @@ export default function DisciplineCaseDetailPage() {
                       <TableRow key={n.id}>
                         <TableCell>{n.notificationTypeName}</TableCell>
                         <TableCell>{fmtDate(n.sentDate)}</TableCell>
-                        <TableCell>{n.sentByName ?? '—'}</TableCell>
                         <TableCell>
                           {n.isAcknowledged
-                            ? fmtDate(n.acknowledgedDate)
+                            ? 'Acknowledged'
                             : <span className="text-muted-foreground">Not yet</span>}
                         </TableCell>
+                        <TableCell>{n.isFollowupSent ? 'Follow-up sent' : '—'}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -562,12 +604,13 @@ export default function DisciplineCaseDetailPage() {
                 detail.notes.map((n) => (
                   <div key={n.id} className="rounded-md border p-3">
                     <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>{n.createdByName ?? 'Unknown'}</span>
+                      <span>{n.createdByEmployeeName || 'Unknown'}</span>
                       <span>·</span>
                       <span>{fmtDate(n.noteDate)}</span>
                       {n.isConfidential && <StatusBadge status="Confidential" />}
                     </div>
-                    <p className="whitespace-pre-wrap text-sm">{n.content}</p>
+                    {/* An excerpt, not the whole note — the case-file read returns summaries. */}
+                    <p className="whitespace-pre-wrap text-sm">{n.noteExcerpt}</p>
                   </div>
                 ))
               )}

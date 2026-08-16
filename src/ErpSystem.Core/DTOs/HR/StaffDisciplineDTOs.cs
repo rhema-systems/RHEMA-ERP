@@ -409,6 +409,46 @@ public class RecordDisciplinaryDecisionDto
 }
 
 /// <summary>
+/// How a case stands against the two statutory clocks: FR-HR-177's 48-hour written query and
+/// FR-HR-178's four-week investigation.
+/// </summary>
+/// <remarks>
+/// Reported, not enforced. A breach is a fact about what already happened and refusing the next step
+/// cannot undo it — see <c>DisciplineProcessDeadlines</c> for why both clocks advise rather than
+/// block. The figures are computed from the record on every read, so they cannot drift from the rule.
+/// </remarks>
+public class DisciplineProcessClockDto
+{
+    // ── FR-HR-177: the written query ──
+    public DateTime QueryDueAt { get; set; }
+    public DateTime? QueryIssuedAt { get; set; }
+    public bool QueryIssued { get; set; }
+    public bool QueryAcknowledged { get; set; }
+    public DateTime? QueryAcknowledgedAt { get; set; }
+
+    /// <summary>True once the deadline has passed with no query issued, or it was issued late.</summary>
+    public bool QueryBreached { get; set; }
+
+    /// <summary>
+    /// Hours late, when breached. Measured to issuance where a query was issued late, and to now
+    /// where none has been issued at all — an open breach keeps growing, which is the point.
+    /// </summary>
+    public double? QueryHoursLate { get; set; }
+
+    // ── FR-HR-178: the investigation ──
+    public bool InvestigationRequired { get; set; }
+    public bool InvestigationOpened { get; set; }
+    public DateTime? InvestigationStartedAt { get; set; }
+    public DateTime? InvestigationDueAt { get; set; }
+    public DateTime? InvestigationCompletedAt { get; set; }
+    public bool InvestigationBreached { get; set; }
+    public int? InvestigationDaysLate { get; set; }
+
+    /// <summary>A short sentence per live breach, for the banner. Empty when the case is on time.</summary>
+    public List<string> Advisories { get; set; } = new();
+}
+
+/// <summary>
 /// Comments carried with an approve, refuse or recall of a proposed decision.
 /// </summary>
 /// <remarks>

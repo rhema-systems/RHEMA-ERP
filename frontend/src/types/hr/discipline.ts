@@ -307,63 +307,99 @@ export interface CloseCaseRequest {
   closureNotes?: string | null;
 }
 
-// ── Sub-entities (read shapes; their write screens land in slices 3-6) ────────
+// ── Sub-entities ─────────────────────────────────────────────────────────────
+//
+// ⚠ Every field below was extracted from the DTOs in StaffDisciplineDTOs.cs, not inferred from the
+// entity or the field's likely name. Several of these were guessed when the case-detail tabs were
+// first written in slice 1 and were WRONG — `findings`/`recommendations` instead of
+// `investigationFindings`/`evidenceCollected`, `isPaid` instead of `suspensionWithPay`, a
+// `suspensionReason` that does not exist. A wrong field name is not a compile error against an
+// interface you also wrote: it renders as undefined, the tab shows "—", and the screen looks like
+// it is working on a record with nothing in it.
 
 export interface DisciplineInvestigation {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
   investigatorId?: string | null;
   investigatorName?: string | null;
   investigationStartDate?: string | null;
   investigationEndDate?: string | null;
-  findings?: string | null;
-  recommendations?: string | null;
+  investigationFindings?: string | null;
+  evidenceCollected?: string | null;
 }
 
 export interface DisciplineHearing {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
   hearingDate?: string | null;
   hearingVenue?: string | null;
+  hearingNotes?: string | null;
   hearingOfficerId?: string | null;
   hearingOfficerName?: string | null;
+  employeeAttendedHearing: boolean;
+  employeeStatement?: string | null;
+  employeeHadRepresentation: boolean;
+  representativeType?: DisciplinaryRepresentativeType | null;
+  representativeTypeName?: string | null;
   representativeEmployeeId?: string | null;
   representativeEmployeeName?: string | null;
-  representativeType?: DisciplinaryRepresentativeType | null;
-  hearingNotes?: string | null;
+  representativeName?: string | null;
+  representativePosition?: string | null;
+  representativeContactInfo?: string | null;
 }
 
 export interface DisciplineWarning {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
   warningType: DisciplinaryWarningType;
   warningTypeName: string;
   warningExpiryDate?: string | null;
+  /** Server-computed against the expiry date — do not re-derive it in the client. */
+  isExpired: boolean;
   warningLetterReference?: string | null;
 }
 
 export interface DisciplineSuspension {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
   suspensionStartDate?: string | null;
   suspensionEndDate?: string | null;
-  isPaid: boolean;
-  suspensionReason?: string | null;
+  /** Note the sense: TRUE means the suspension is WITH pay. FR-HR-179's ladder names the unpaid one. */
+  suspensionWithPay: boolean;
+  suspensionDays?: number | null;
 }
 
 export interface DisciplineFine {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
   fineAmount?: number | null;
-  finePaidAmount?: number | null;
+  finePaymentStatus?: DisciplinaryFinePaymentStatus | null;
+  finePaymentStatusName?: string | null;
   fineDueDate?: string | null;
-  finePaymentStatus: DisciplinaryFinePaymentStatus;
-  finePaymentStatusName: string;
+  finePaidAmount?: number | null;
+  finePaymentDate?: string | null;
+  outstandingBalance?: number | null;
 }
 
 export interface DisciplineTermination {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
   type: EmployeeTerminationType;
   typeName: string;
   isEligibleForRehire: boolean;
@@ -378,15 +414,30 @@ export interface DisciplineTermination {
 export interface DisciplineSeparation {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
+  employeeId: string;
+  employeeName: string;
   exitInterviewCompleted: boolean;
   exitInterviewDate?: string | null;
+  exitInterviewNotes?: string | null;
   exitInterviewerId?: string | null;
   exitInterviewerName?: string | null;
   equipmentReturned: boolean;
+  equipmentReturnedDate?: string | null;
+  missingEquipment?: string | null;
   accessRevoked: boolean;
+  accessRevokedDate?: string | null;
+  accessRevokedById?: string | null;
+  accessRevokedByName?: string | null;
   finalPayrollProcessed: boolean;
+  finalPayrollDate?: string | null;
   benefitsTerminated: boolean;
+  benefitsTerminationDate?: string | null;
   exitChecklistCompleted: boolean;
+  exitChecklistCompletedDate?: string | null;
+  additionalNotes?: string | null;
+  /** Server-computed over the six checklist flags. */
+  checklistCompletionPercent: number;
 }
 
 export interface DisciplineAppeal {
@@ -416,22 +467,30 @@ export interface DisciplineCorrectiveActionItem {
   id: string;
   correctiveActionId: string;
   description: string;
-  targetDate?: string | null;
-  status: DisciplineCorrectiveActionStatus;
+  targetDate: string;
   completedDate?: string | null;
+  status: DisciplineCorrectiveActionStatus;
+  completionNotes?: string | null;
 }
 
 export interface DisciplineCorrectiveAction {
   id: string;
   disciplinaryActionId: string;
+  caseNumber: string;
   employeeId: string;
-  employeeName?: string | null;
+  employeeName: string;
   supervisorId: string;
-  supervisorName?: string | null;
-  startDate?: string | null;
-  reviewDate?: string | null;
+  supervisorName: string;
+  objective: string;
+  startDate: string;
+  reviewDate: string;
+  completedDate?: string | null;
   status: DisciplineCorrectiveActionStatus;
   statusName: string;
+  notes?: string | null;
+  isOverdue: boolean;
+  itemCount: number;
+  completedItemCount: number;
   items: DisciplineCorrectiveActionItem[];
 }
 
@@ -439,8 +498,10 @@ export interface DisciplineActionStep {
   id: string;
   disciplinaryActionId: string;
   offenseProcedureId: string;
-  stepName?: string | null;
-  sequence?: number | null;
+  stepName: string;
+  stepDescription?: string | null;
+  sequence: number;
+  expectedCompletionDays?: number | null;
   dueDate?: string | null;
   startedDate?: string | null;
   completedDate?: string | null;
@@ -449,63 +510,92 @@ export interface DisciplineActionStep {
   actionedById?: string | null;
   actionedByName?: string | null;
   notes?: string | null;
+  isOverdue: boolean;
+  documents: DisciplineDocumentSummary[];
 }
 
+/** Note there is no employeeName here — the summary carries the witness's own `name` either way. */
 export interface DisciplineWitnessSummary {
   id: string;
-  disciplinaryActionId: string;
   name: string;
   isEmployee: boolean;
   employeeId?: string | null;
-  employeeName?: string | null;
-  statementDate?: string | null;
   hasStatement: boolean;
+  statement?: string | null;
+  statementDate?: string | null;
 }
 
 export interface DisciplineDocumentSummary {
   id: string;
-  disciplinaryActionId: string;
-  documentName: string;
+  fileName: string;
+  filePath: string;
   category: DisciplinaryDocumentCategory;
   categoryName: string;
   scope: DisciplinaryDocumentScope;
+  scopeName: string;
+  actionStepId?: string | null;
+  appealId?: string | null;
   uploadDate: string;
-  uploadedById: string;
-  uploadedByName?: string | null;
+  uploadedByName: string;
 }
 
+/** The summary carries an EXCERPT, not the full note — the full text is on the note read. */
 export interface DisciplineNoteSummary {
   id: string;
-  disciplinaryActionId: string;
-  noteDate: string;
+  createdByEmployeeName: string;
+  noteExcerpt: string;
   isConfidential: boolean;
-  createdByEmployeeId: string;
-  createdByName?: string | null;
-  content: string;
+  noteDate: string;
 }
 
 export interface DisciplineNotificationSummary {
   id: string;
-  disciplinaryActionId: string;
   notificationType: DisciplinaryNotificationType;
   notificationTypeName: string;
   sentDate: string;
-  sentById: string;
-  sentByName?: string | null;
-  acknowledgedDate?: string | null;
   isAcknowledged: boolean;
   isFollowupSent: boolean;
 }
 
 export interface DisciplineLegalReviewSummary {
   id: string;
-  disciplinaryActionId: string;
-  referredToLegalDate?: string | null;
-  legalReviewCompleteDate?: string | null;
+  referredToLegalDate: string;
   legalRiskLevel: DisciplineLegalRiskLevel;
   legalRiskLevelName: string;
+  legalReviewCompleteDate?: string | null;
   requiresExternalCounsel: boolean;
-  referredByName?: string | null;
+  isConfidential: boolean;
+}
+
+// ── Statutory clocks ─────────────────────────────────────────────────────────
+
+/**
+ * How a case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
+ * investigation.
+ *
+ * Reported, not enforced: a breach is a fact about what already happened, and refusing the next step
+ * cannot undo it — it would only stop the case being dealt with. The figures are computed server-side
+ * on every read, so the client must never re-derive them; two definitions of "overdue" over the same
+ * record is how a screen and its queue end up disagreeing.
+ */
+export interface DisciplineProcessClock {
+  queryDueAt: string;
+  queryIssuedAt?: string | null;
+  queryIssued: boolean;
+  queryAcknowledged: boolean;
+  queryAcknowledgedAt?: string | null;
+  queryBreached: boolean;
+  queryHoursLate?: number | null;
+
+  investigationRequired: boolean;
+  investigationOpened: boolean;
+  investigationStartedAt?: string | null;
+  investigationDueAt?: string | null;
+  investigationCompletedAt?: string | null;
+  investigationBreached: boolean;
+  investigationDaysLate?: number | null;
+
+  advisories: string[];
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────

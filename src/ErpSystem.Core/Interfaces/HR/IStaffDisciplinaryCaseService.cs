@@ -72,6 +72,12 @@ public interface IStaffDisciplinaryCaseService
     Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// How a case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
+    /// investigation. Computed from the record, and advisory — it reports, it does not block.
+    /// </summary>
+    Task<DisciplineProcessClockDto> GetProcessClockAsync(Guid caseId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The cases whose proposed decision the caller can confirm right now. Token-derived; the engine
     /// decides what is in it.
     /// </summary>

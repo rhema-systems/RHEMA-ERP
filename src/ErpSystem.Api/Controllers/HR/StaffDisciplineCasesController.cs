@@ -294,6 +294,26 @@ public class StaffDisciplineCasesController : ControllerBase
     }
 
     /// <summary>
+    /// How this case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
+    /// investigation. Advisory: it reports, it does not refuse anything.
+    /// </summary>
+    /// <remarks>
+    /// Open to the case's subject as well as HR, on the same reasoning as the case read itself — the
+    /// clocks exist to protect the person being investigated, so telling them the query was issued
+    /// eleven days late is telling them something about their own case they are entitled to know.
+    /// </remarks>
+    [HttpGet("{id:guid}/process-clock")]
+    public async Task<ActionResult<DisciplineProcessClockDto>> GetProcessClock(Guid id)
+    {
+        var disciplinaryCase = await _caseService.GetByIdAsync(id);
+
+        if (!IsHr && disciplinaryCase.EmployeeId != _currentUser.EmployeeId)
+            return Forbid();
+
+        return Ok(await _caseService.GetProcessClockAsync(id));
+    }
+
+    /// <summary>
     /// The cases whose proposed decision the caller may confirm. Deliberately ungated: the approver
     /// of a disciplinary decision is a head of department or the MD, neither of whom is necessarily
     /// in HR, and the register above answers 403 for them — so without this they would have nowhere

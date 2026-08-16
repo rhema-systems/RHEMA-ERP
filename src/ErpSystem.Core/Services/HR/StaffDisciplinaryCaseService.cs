@@ -481,6 +481,94 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     }
 
     /// <summary>
+    /// How a case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
+    /// investigation.
+    /// </summary>
+    /// <remarks>
+    /// Computed from the record rather than stored, so it cannot drift from the rule, and reported
+    /// rather than enforced — see <see cref="DisciplineProcessDeadlines"/>.
+    ///
+    /// The query is identified as the case's earliest ShowCause notification. Earliest, not latest:
+    /// a follow-up notice does not undo a late first one, and taking the most recent would let a
+    /// breach be papered over by re-issuing.
+    /// </remarks>
+    public async Task<DisciplineProcessClockDto> GetProcessClockAsync(Guid caseId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _caseRepository.GetWithFullDetailsAsync(GetTenantId(), caseId)
+            ?? throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
+
+        var now = DateTime.UtcNow;
+        var clock = new DisciplineProcessClockDto
+        {
+            QueryDueAt = DisciplineProcessDeadlines.WrittenQueryDueAt(entity.ReportedDate),
+            InvestigationRequired = entity.RequiresInvestigation,
+        };
+
+        var query = entity.Notifications
+            .Where(n => !n.IsDeleted && n.NotificationType == DisciplineProcessDeadlines.WrittenQueryType)
+            .OrderBy(n => n.SentDate)
+            .FirstOrDefault();
+
+        clock.QueryIssued = query != null;
+        clock.QueryIssuedAt = query?.SentDate;
+        clock.QueryAcknowledged = query?.AcknowledgedDate != null;
+        clock.QueryAcknowledgedAt = query?.AcknowledgedDate;
+
+        if (query == null)
+        {
+            // No query at all. Only a breach once the deadline has actually passed — a case reported
+            // an hour ago is not in breach, it is simply not done yet.
+            clock.QueryBreached = now > clock.QueryDueAt;
+            if (clock.QueryBreached)
+                clock.QueryHoursLate = Math.Round((now - clock.QueryDueAt).TotalHours, 1);
+        }
+        else if (query.SentDate > clock.QueryDueAt)
+        {
+            clock.QueryBreached = true;
+            clock.QueryHoursLate = Math.Round((query.SentDate - clock.QueryDueAt).TotalHours, 1);
+        }
+
+        var investigation = entity.Investigation;
+        clock.InvestigationOpened = investigation != null;
+        clock.InvestigationStartedAt = investigation?.InvestigationStartDate;
+        clock.InvestigationCompletedAt = investigation?.InvestigationEndDate;
+        clock.InvestigationDueAt = DisciplineProcessDeadlines.InvestigationDueAt(investigation?.InvestigationStartDate);
+
+        if (clock.InvestigationDueAt is DateTime due)
+        {
+            // Measured to completion where it finished late, and to now where it is still running.
+            var finishedAt = investigation?.InvestigationEndDate;
+            var breachedAt = finishedAt ?? now;
+            if (breachedAt > due)
+            {
+                clock.InvestigationBreached = true;
+                clock.InvestigationDaysLate = (int)Math.Ceiling((breachedAt - due).TotalDays);
+            }
+        }
+
+        if (clock.QueryBreached && !clock.QueryIssued)
+            clock.Advisories.Add(
+                $"No written query has been issued. FR-HR-177 required one within {DisciplineProcessDeadlines.WrittenQueryHours} hours of the allegation; " +
+                $"it is now {clock.QueryHoursLate:0.#} hours overdue.");
+        else if (clock.QueryBreached)
+            clock.Advisories.Add(
+                $"The written query was issued {clock.QueryHoursLate:0.#} hours after the {DisciplineProcessDeadlines.WrittenQueryHours}-hour deadline in FR-HR-177.");
+        else if (clock.QueryIssued && !clock.QueryAcknowledged)
+            clock.Advisories.Add("The written query has been issued but the employee has not acknowledged receiving it.");
+
+        if (clock.InvestigationBreached && clock.InvestigationCompletedAt == null)
+            clock.Advisories.Add(
+                $"The investigation has been open {clock.InvestigationDaysLate} day(s) beyond the {DisciplineProcessDeadlines.InvestigationDays}-day limit in FR-HR-178.");
+        else if (clock.InvestigationBreached)
+            clock.Advisories.Add(
+                $"The investigation completed {clock.InvestigationDaysLate} day(s) beyond the {DisciplineProcessDeadlines.InvestigationDays}-day limit in FR-HR-178.");
+        else if (clock.InvestigationRequired && !clock.InvestigationOpened)
+            clock.Advisories.Add("This case requires an investigation and none has been opened.");
+
+        return clock;
+    }
+
+    /// <summary>
     /// The cases the caller can confirm a decision on right now.
     /// </summary>
     /// <remarks>

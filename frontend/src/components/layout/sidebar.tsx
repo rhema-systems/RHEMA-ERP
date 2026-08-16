@@ -622,6 +622,9 @@ export const navigationItems: NavItem[] = [
         icon: Gavel,
         children: [
           { title: 'Cases', href: '/hr/discipline', icon: Gavel },
+          // Sub-entity queues: which investigations have run past FR-HR-178's four weeks, and which
+          // hearings are scheduled or have happened without their notes recorded.
+          { title: 'Investigations & Hearings', href: '/hr/discipline/queues', icon: Search },
           // Open by design: the officer who confirms a sanction is a head of department or the MD,
           // and the register above answers 403 for them — this is where their work appears. The
           // engine decides its contents, per case and per step.

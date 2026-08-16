@@ -10,6 +10,9 @@ import type {
   RecordDecisionRequest,
   CloseCaseRequest,
   DisciplineDashboard,
+  DisciplineProcessClock,
+  DisciplineInvestigation,
+  DisciplineHearing,
   StaffOffense,
   StaffOffenseSummary,
   DisciplinaryActionTypeSummary,
@@ -119,6 +122,15 @@ class DisciplineService {
     return apiService.get<DisciplineDashboard>(`${this.baseUrl}/dashboard`);
   }
 
+  /**
+   * How the case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
+   * investigation. Advisory — nothing here refuses an action. Readable by the case's subject as well
+   * as HR: the clocks exist to protect the person being investigated.
+   */
+  getProcessClock(id: string): Promise<DisciplineProcessClock> {
+    return apiService.get<DisciplineProcessClock>(`${this.baseUrl}/${id}/process-clock`);
+  }
+
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   create(payload: CreateDisciplinaryCaseRequest): Promise<DisciplinaryCase> {
@@ -193,6 +205,34 @@ class DisciplineService {
 }
 
 /**
+ * The investigation and hearing work queues. All HR-gated.
+ */
+class DisciplineProcessService {
+  getOpenInvestigations(): Promise<DisciplineInvestigation[]> {
+    return apiService.get<DisciplineInvestigation[]>('/discipline/investigations/open');
+  }
+
+  /**
+   * Investigations past FR-HR-178's four weeks.
+   *
+   * `maxDays` is deliberately not passed: the server defaults to the rule, and the whole point of
+   * moving that constant server-side was to stop this queue and the case advisory answering the
+   * same question differently. Pass one only for a genuine ad-hoc sweep.
+   */
+  getOverdueInvestigations(): Promise<DisciplineInvestigation[]> {
+    return apiService.get<DisciplineInvestigation[]>('/discipline/investigations/overdue');
+  }
+
+  getUpcomingHearings(): Promise<DisciplineHearing[]> {
+    return apiService.get<DisciplineHearing[]>('/discipline/hearings/upcoming');
+  }
+
+  getHearingsAwaitingOutcome(): Promise<DisciplineHearing[]> {
+    return apiService.get<DisciplineHearing[]>('/discipline/hearings/awaiting-outcome');
+  }
+}
+
+/**
  * The offence and action-type catalogs. Setup data, HR-gated at class level — an ordinary employee
  * gets a 403 from every method here, so screens that offer them must be behind the same gate.
  */
@@ -219,4 +259,5 @@ class DisciplineLookupService {
 }
 
 export const disciplineService = new DisciplineService();
+export const disciplineProcessService = new DisciplineProcessService();
 export const disciplineLookupService = new DisciplineLookupService();

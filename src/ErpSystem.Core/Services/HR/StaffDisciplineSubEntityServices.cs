@@ -96,10 +96,18 @@ public class StaffDisciplineInvestigationService : IStaffDisciplineInvestigation
         return entities.Select(e => e.ToDto()).ToList();
     }
 
-    public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int maxDays = 30, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// "Overdue" is FR-HR-178's four weeks, taken from <see cref="DisciplineProcessDeadlines"/> — not
+    /// the caller's choice. It used to be a <c>maxDays</c> argument defaulting to 30, so this queue,
+    /// the case advisory and any future reminder could each answer the same question differently and
+    /// the spec's own figure appeared nowhere. The parameter is kept so an ad-hoc wider sweep is
+    /// still possible, but it now defaults to the rule.
+    /// </remarks>
+    public async Task<IEnumerable<StaffDisciplineInvestigationDto>> GetOverdueInvestigationsAsync(int? maxDays = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _investigationRepository.GetOverdueInvestigationsAsync(tenantId, maxDays);
+        var entities = await _investigationRepository.GetOverdueInvestigationsAsync(
+            tenantId, maxDays ?? DisciplineProcessDeadlines.InvestigationDays);
         return entities.Select(e => e.ToDto()).ToList();
     }
 
