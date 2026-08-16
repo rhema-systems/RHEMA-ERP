@@ -628,8 +628,60 @@ export interface DisciplineProcessClock {
   /** The server's own words, so the screen and the refusal cannot drift apart. */
   decisionBlockedReason?: string | null;
 
+  // FR-HR-180. The FILING window is enforced — an appeal out of time is refused. The DECISION window
+  // is advisory: an appeal decided late is still a decision, and refusing to record it would leave
+  // the employee with no answer at all.
+  decisionMade: boolean;
+  appealFilingClosesAt?: string | null;
+  appealFilingWindowOpen: boolean;
+  appealFiled: boolean;
+  appealFiledAt?: string | null;
+  appealDecisionDueAt?: string | null;
+  appealDecisionBreached: boolean;
+  appealDecisionWorkingDaysLate?: number | null;
+
   advisories: string[];
 }
+
+/** Grounds of appeal. The appellant is the token's employee — never a field. */
+export interface FileAppealRequest {
+  caseId: string;
+  reason: string;
+}
+
+export interface ScheduleAppealHearingRequest {
+  caseId: string;
+  hearingDate: string;
+  hearingVenue?: string | null;
+  appealOfficerId?: string | null;
+}
+
+/** `appealOutcomeById` is absent by design — who decided an appeal is testimony, taken from the token. */
+export interface RecordAppealOutcomeRequest {
+  caseId: string;
+  appealOutcome: DisciplineAppealOutcomeType;
+  appealOutcomeNotes?: string | null;
+  appealOutcomeDate: string;
+  hearingNotes?: string | null;
+}
+
+export const APPEAL_OUTCOME_OPTIONS: { value: DisciplineAppealOutcomeType; label: string; hint: string }[] = [
+  {
+    value: 'Upheld',
+    label: 'Sanction upheld',
+    hint: 'The appeal fails and the original sanction stands.',
+  },
+  {
+    value: 'Overturned',
+    label: 'Sanction overturned',
+    hint: 'The appeal succeeds and the sanction falls away.',
+  },
+  {
+    value: 'Reduced',
+    label: 'Sanction reduced',
+    hint: 'The appeal partly succeeds and a lesser sanction replaces it.',
+  },
+];
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 

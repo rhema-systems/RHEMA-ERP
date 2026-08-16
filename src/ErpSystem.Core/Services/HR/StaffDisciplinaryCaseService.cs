@@ -32,6 +32,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     private readonly IStaffDisciplineCorrectiveActionItemRepository _correctiveItemRepository;
     private readonly IStaffDisciplineFineRepository _fineRepository;
     private readonly IStaffDisciplineNotificationRepository _notificationRepository;
+    private readonly IHrWorkingDayCalculator _workingDays;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -44,6 +45,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         IStaffDisciplineCorrectiveActionItemRepository correctiveItemRepository,
         IStaffDisciplineFineRepository fineRepository,
         IStaffDisciplineNotificationRepository notificationRepository,
+        IHrWorkingDayCalculator workingDays,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
@@ -55,6 +57,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         _correctiveItemRepository = correctiveItemRepository;
         _fineRepository = fineRepository;
         _notificationRepository = notificationRepository;
+        _workingDays = workingDays;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
@@ -633,7 +636,8 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     /// </remarks>
     public async Task<DisciplineProcessClockDto> GetProcessClockAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
-        var entity = await _caseRepository.GetWithFullDetailsAsync(GetTenantId(), caseId)
+        var tenantId = GetTenantId();
+        var entity = await _caseRepository.GetWithFullDetailsAsync(tenantId, caseId)
             ?? throw new ArgumentException($"Disciplinary case with ID '{caseId}' not found.");
 
         var now = DateTime.UtcNow;
@@ -713,6 +717,43 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (clock.QueryOpportunityWaived)
             clock.Advisories.Add(
                 $"The employee's chance to answer was recorded as waived: {clock.QueryOpportunityWaivedReason}");
+
+        // FR-HR-180. Both windows run from a real event on the record — the decision, and the filing —
+        // so a case with neither simply reports nothing rather than inventing a deadline.
+        clock.DecisionMade = entity.DecisionDate.HasValue;
+        clock.AppealFiled = entity.Appeal != null;
+        clock.AppealFiledAt = entity.Appeal?.FiledDate;
+
+        if (entity.DecisionDate is DateTime decidedAt)
+        {
+            clock.AppealFilingClosesAt = await _workingDays.AddWorkingDaysAsync(
+                tenantId, decidedAt, DisciplineProcessDeadlines.AppealFilingWorkingDays, cancellationToken);
+            clock.AppealFilingWindowOpen = !clock.AppealFiled && now <= clock.AppealFilingClosesAt;
+        }
+
+        if (entity.Appeal is { } appeal)
+        {
+            clock.AppealDecisionDueAt = await _workingDays.AddWorkingDaysAsync(
+                tenantId, appeal.FiledDate, DisciplineProcessDeadlines.AppealDecisionWorkingDays, cancellationToken);
+
+            var settledAt = appeal.AppealOutcomeDate;
+            var measureTo = settledAt ?? now;
+            if (measureTo > clock.AppealDecisionDueAt)
+            {
+                clock.AppealDecisionBreached = true;
+                clock.AppealDecisionWorkingDaysLate = await _workingDays.CountWorkingDaysAsync(
+                    tenantId, clock.AppealDecisionDueAt.Value, measureTo, cancellationToken);
+            }
+        }
+
+        if (clock.AppealDecisionBreached && clock.AppealFiledAt != null && entity.Appeal?.AppealOutcomeDate == null)
+            clock.Advisories.Add(
+                $"The appeal has been open {clock.AppealDecisionWorkingDaysLate} working day(s) beyond the "
+                + $"{DisciplineProcessDeadlines.AppealDecisionWorkingDays}-working-day limit in FR-HR-180.");
+        else if (clock.AppealDecisionBreached)
+            clock.Advisories.Add(
+                $"The appeal was decided {clock.AppealDecisionWorkingDaysLate} working day(s) beyond the "
+                + $"{DisciplineProcessDeadlines.AppealDecisionWorkingDays}-working-day limit in FR-HR-180.");
 
         if (clock.QueryBreached && !clock.QueryIssued)
             clock.Advisories.Add(

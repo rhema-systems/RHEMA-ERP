@@ -59,6 +59,19 @@ public static class DisciplineProcessDeadlines
         => issuedAt.AddHours(QueryResponseWindowHours);
 
     /// <summary>
+    /// FR-HR-180 — an appeal must be filed within five WORKING days of the decision.
+    /// </summary>
+    /// <remarks>
+    /// Working days, counted by <see cref="IHrWorkingDayCalculator"/>. Calendar days would quietly
+    /// shorten the window — five calendar days across a weekend is three working days — and on a
+    /// clock that decides whether an appeal was filed in time, that difference is the whole question.
+    /// </remarks>
+    public const int AppealFilingWorkingDays = 5;
+
+    /// <summary>FR-HR-180 — an appeal's outcome is tracked within ten WORKING days of filing.</summary>
+    public const int AppealDecisionWorkingDays = 10;
+
+    /// <summary>
     /// The notification type that IS the formal written query. FR-HR-177's "written query" and the
     /// enum's <c>ShowCause</c> are the same document: the notice asking the employee to explain
     /// themselves. The enum member documents itself as exactly that.

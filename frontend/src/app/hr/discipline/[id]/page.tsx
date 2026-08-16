@@ -5,11 +5,12 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Loader2, Send, Play, Gavel, Lock, PauseCircle, RotateCcw, XCircle, AlertTriangle, UserX,
+  Loader2, Send, Play, Gavel, Lock, PauseCircle, RotateCcw, XCircle, AlertTriangle, UserX, CalendarClock, Scale,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -27,9 +28,12 @@ import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { disciplineService, disciplineLookupService } from '@/services/hr/discipline.service';
+import { disciplineService, disciplineLookupService, disciplineAppealService } from '@/services/hr/discipline.service';
 import { useToast } from '@/hooks/use-toast';
-import { TERMINAL_CASE_STATUSES, type DisciplinaryCase } from '@/types/hr/discipline';
+import {
+  TERMINAL_CASE_STATUSES, APPEAL_OUTCOME_OPTIONS,
+  type DisciplinaryCase, type DisciplineAppealOutcomeType,
+} from '@/types/hr/discipline';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const money = (v?: number | null) =>
@@ -62,6 +66,12 @@ export default function DisciplineCaseDetailPage() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [waiveOpen, setWaiveOpen] = useState(false);
   const [waiveReason, setWaiveReason] = useState('');
+  const [appealHearingOpen, setAppealHearingOpen] = useState(false);
+  const [appealHearingDate, setAppealHearingDate] = useState('');
+  const [appealHearingVenue, setAppealHearingVenue] = useState('');
+  const [appealOutcomeOpen, setAppealOutcomeOpen] = useState(false);
+  const [appealOutcome, setAppealOutcome] = useState<DisciplineAppealOutcomeType | ''>('');
+  const [appealOutcomeNotes, setAppealOutcomeNotes] = useState('');
   const [actionTypeId, setActionTypeId] = useState('');
   const [actionDetails, setActionDetails] = useState('');
   const [decisionRationale, setDecisionRationale] = useState('');
@@ -182,6 +192,39 @@ export default function DisciplineCaseDetailPage() {
       });
       setWaiveOpen(false);
       setWaiveReason('');
+      refresh();
+    },
+    onError: (e: Error) => toast({ title: 'Could not record it', description: e.message, variant: 'destructive' }),
+  });
+
+  const appealHearingMutation = useMutation({
+    mutationFn: () => disciplineAppealService.scheduleHearing(id, {
+      caseId: id,
+      hearingDate: new Date(appealHearingDate).toISOString(),
+      hearingVenue: appealHearingVenue || null,
+    }),
+    onSuccess: () => {
+      toast({ title: 'Appeal hearing scheduled' });
+      setAppealHearingOpen(false);
+      setAppealHearingDate('');
+      setAppealHearingVenue('');
+      refresh();
+    },
+    onError: (e: Error) => toast({ title: 'Could not schedule it', description: e.message, variant: 'destructive' }),
+  });
+
+  const appealOutcomeMutation = useMutation({
+    mutationFn: () => disciplineAppealService.recordOutcome(id, {
+      caseId: id,
+      appealOutcome: appealOutcome as DisciplineAppealOutcomeType,
+      appealOutcomeNotes: appealOutcomeNotes || null,
+      appealOutcomeDate: new Date().toISOString(),
+    }),
+    onSuccess: () => {
+      toast({ title: 'Appeal outcome recorded' });
+      setAppealOutcomeOpen(false);
+      setAppealOutcome('');
+      setAppealOutcomeNotes('');
       refresh();
     },
     onError: (e: Error) => toast({ title: 'Could not record it', description: e.message, variant: 'destructive' }),
@@ -730,6 +773,46 @@ export default function DisciplineCaseDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* FR-HR-180's two windows, stated plainly. The filing one is enforced, so it says when it
+              closes; the decision one is advisory, so it says when it is due and reports lateness
+              without preventing anything. */}
+          {clock?.decisionMade && (
+            <Card>
+              <CardContent className="space-y-2 p-4 text-sm">
+                <div className="font-medium">Appeal windows</div>
+                <p className="text-muted-foreground">
+                  {clock.appealFiled
+                    ? <>Appeal filed {fmtDate(clock.appealFiledAt)}. A decision on it is due {fmtDate(clock.appealDecisionDueAt)}.</>
+                    : clock.appealFilingWindowOpen
+                      ? <>The employee has until {fmtDate(clock.appealFilingClosesAt)} to appeal — five working days from the decision.</>
+                      : <>The window to appeal closed on {fmtDate(clock.appealFilingClosesAt)}.</>}
+                </p>
+                {clock.appealDecisionBreached && (
+                  <p className="text-destructive">
+                    The ten-working-day limit for deciding this appeal passed{' '}
+                    {clock.appealDecisionWorkingDaysLate} working day(s) ago. It can still be decided —
+                    this is a record of the delay, not a block.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* HR's two actions on an appeal. Filing is absent by design: it is the appellant's own act
+              and the server refuses it from HR, so offering the button would only produce a 403. */}
+          {detail.appeal && !isTerminal && (
+            <Card>
+              <CardContent className="flex flex-wrap gap-2 p-4">
+                <Button size="sm" variant="outline" onClick={() => setAppealHearingOpen(true)}>
+                  <CalendarClock className="mr-2 h-4 w-4" /> Schedule appeal hearing
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setAppealOutcomeOpen(true)}>
+                  <Scale className="mr-2 h-4 w-4" /> Record appeal outcome
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <WorkflowTabContent
@@ -838,6 +921,97 @@ export default function DisciplineCaseDetailPage() {
             >
               {waiveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Record and proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule the appeal hearing */}
+      <Dialog open={appealHearingOpen} onOpenChange={setAppealHearingOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Schedule the appeal hearing</DialogTitle>
+            <DialogDescription>
+              FR-HR-180 tracks an appeal to a decision within ten working days of filing.
+              {clock?.appealDecisionDueAt
+                ? ` This one is due by ${fmtDate(clock.appealDecisionDueAt)}.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Date and time *</Label>
+              <Input
+                type="datetime-local"
+                value={appealHearingDate}
+                onChange={(e) => setAppealHearingDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Venue</Label>
+              <Input value={appealHearingVenue} onChange={(e) => setAppealHearingVenue(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAppealHearingOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => appealHearingMutation.mutate()}
+              disabled={!appealHearingDate || appealHearingMutation.isPending}
+            >
+              {appealHearingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Schedule
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Record the appeal outcome */}
+      <Dialog open={appealOutcomeOpen} onOpenChange={setAppealOutcomeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record the appeal outcome</DialogTitle>
+            <DialogDescription>
+              You are recorded as the deciding officer. Say enough that the employee can understand
+              the reasoning — this is the answer to the case they put.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Outcome *</Label>
+              <Select
+                value={appealOutcome}
+                onValueChange={(v) => setAppealOutcome(v as DisciplineAppealOutcomeType)}
+              >
+                <SelectTrigger><SelectValue placeholder="Choose the outcome" /></SelectTrigger>
+                <SelectContent>
+                  {APPEAL_OUTCOME_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {appealOutcome && (
+                <p className="text-xs text-muted-foreground">
+                  {APPEAL_OUTCOME_OPTIONS.find((o) => o.value === appealOutcome)?.hint}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Reasons</Label>
+              <Textarea
+                rows={4}
+                value={appealOutcomeNotes}
+                onChange={(e) => setAppealOutcomeNotes(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAppealOutcomeOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => appealOutcomeMutation.mutate()}
+              disabled={!appealOutcome || appealOutcomeMutation.isPending}
+            >
+              {appealOutcomeMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Record outcome
             </Button>
           </DialogFooter>
         </DialogContent>

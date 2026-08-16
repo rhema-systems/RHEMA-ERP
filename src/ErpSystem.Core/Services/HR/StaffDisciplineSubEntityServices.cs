@@ -842,6 +842,7 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
 {
     private readonly IStaffDisciplineAppealRepository _appealRepository;
     private readonly IStaffDisciplinaryActionRepository _caseRepository;
+    private readonly IHrWorkingDayCalculator _workingDays;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineAppealService> _logger;
@@ -849,12 +850,14 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
     public StaffDisciplineAppealService(
         IStaffDisciplineAppealRepository appealRepository,
         IStaffDisciplinaryActionRepository caseRepository,
+        IHrWorkingDayCalculator workingDays,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineAppealService> logger)
     {
         _appealRepository = appealRepository;
         _caseRepository = caseRepository;
+        _workingDays = workingDays;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -957,13 +960,37 @@ public class StaffDisciplineAppealService : IStaffDisciplineAppealService
         if (disciplinaryCase.EmployeeId != appellantEmployeeId)
             throw new UnauthorizedAccessException("Only the employee a case was brought against can appeal it.");
 
-        if (disciplinaryCase.Status != DisciplinaryStatus.DecisionMade
-            && disciplinaryCase.Status != DisciplinaryStatus.AwaitingDecision)
-            throw new InvalidOperationException("An appeal can only be filed for a case where a decision has been made or is awaiting confirmation.");
+        // FR-HR-180 — five WORKING days from the decision. The window is enforced, unlike the two
+        // advisory clocks on the case: an appeal filed out of time is not a late act that can still
+        // be dealt with, it is one the employer is entitled to refuse to hear, and letting it through
+        // silently would misrepresent the position to both sides.
+        //
+        // It runs from the DECISION DATE, not from the case being closed: the decision is the thing
+        // being appealed and the point from which the employee knows there is something to appeal.
+        if (disciplinaryCase.DecisionDate is DateTime decidedAt)
+        {
+            var closesAt = await _workingDays.AddWorkingDaysAsync(
+                tenantId, decidedAt, DisciplineProcessDeadlines.AppealFilingWorkingDays, cancellationToken);
 
+            if (DateTime.UtcNow > closesAt)
+                throw new InvalidOperationException(
+                    $"The window to appeal this decision closed on {closesAt:dd MMM yyyy}. "
+                    + $"FR-HR-180 allows {DisciplineProcessDeadlines.AppealFilingWorkingDays} working days from the decision.");
+        }
+
+        // The duplicate check runs BEFORE the status check, and the order is load-bearing. Filing an
+        // appeal moves the case to UnderAppeal, so a second attempt fails the status test first and
+        // the caller is told "an appeal can only be filed where a decision has been made" — on a case
+        // that plainly has one. The status guard was firing on a condition the first filing created,
+        // and the real reason was never reachable. Same shape as the decision-gate ordering in slice 4:
+        // answer with the thing that is actually wrong.
         var existing = await _appealRepository.GetByCaseIdAsync(tenantId, dto.CaseId);
         if (existing != null && existing.TenantId == tenantId)
             throw new InvalidOperationException("An appeal has already been filed for this case.");
+
+        if (disciplinaryCase.Status != DisciplinaryStatus.DecisionMade
+            && disciplinaryCase.Status != DisciplinaryStatus.AwaitingDecision)
+            throw new InvalidOperationException("An appeal can only be filed for a case where a decision has been made or is awaiting confirmation.");
 
         var entity = new StaffDisciplineAppeal
         {

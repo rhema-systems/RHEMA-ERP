@@ -604,6 +604,11 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOnboardingPlanService, OnboardingPlanService>();
         services.AddScoped<IProbationService, ProbationService>();
         services.AddScoped<IRecruitmentAnalyticsService, RecruitmentAnalyticsService>();
+        // Working days for HR's statutory deadlines (FR-HR-180's appeal windows). Org-level by
+        // design — Monday to Friday less the tenant's public holidays, never the appellant's own
+        // roster, or the same deadline would fall on different dates for different people.
+        services.AddScoped<IHrWorkingDayCalculator, HrWorkingDayCalculator>();
+
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();
         services.AddScoped<IStaffDisciplinaryCaseService, StaffDisciplinaryCaseService>();

@@ -495,6 +495,23 @@ public class DisciplineProcessClockDto
     /// <summary>The reason a decision cannot be proposed yet, in the words the server would refuse with.</summary>
     public string? DecisionBlockedReason { get; set; }
 
+    // ── FR-HR-180: the appeal windows ──
+    //
+    // The FILING window is enforced — an appeal out of time is one the employer may refuse to hear,
+    // and letting it through would misrepresent the position to both sides. The DECISION window is
+    // advisory, like the two clocks above: an appeal decided late is still a decision, and refusing
+    // to record it would leave the employee with no answer at all.
+
+    public bool DecisionMade { get; set; }
+    public DateTime? AppealFilingClosesAt { get; set; }
+    public bool AppealFilingWindowOpen { get; set; }
+    public bool AppealFiled { get; set; }
+    public DateTime? AppealFiledAt { get; set; }
+
+    public DateTime? AppealDecisionDueAt { get; set; }
+    public bool AppealDecisionBreached { get; set; }
+    public int? AppealDecisionWorkingDaysLate { get; set; }
+
     /// <summary>A short sentence per live breach, for the banner. Empty when the case is on time.</summary>
     public List<string> Advisories { get; set; } = new();
 }

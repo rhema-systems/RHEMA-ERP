@@ -12,6 +12,10 @@ import type {
   DisciplineDashboard,
   DisciplineProcessClock,
   DisciplineInvestigation,
+  DisciplineAppeal,
+  FileAppealRequest,
+  ScheduleAppealHearingRequest,
+  RecordAppealOutcomeRequest,
   DisciplineHearing,
   StaffOffense,
   StaffOffenseSummary,
@@ -216,6 +220,48 @@ class DisciplineService {
 }
 
 /**
+ * Appeals. Backend routes nested under `api/discipline`.
+ *
+ * Filing is the appellant's own act — the server refuses it from anyone but the case's subject, HR
+ * included — while scheduling and deciding are HR's. The UI must not offer HR a "file on their
+ * behalf" affordance, because there isn't one and there should not be.
+ */
+class DisciplineAppealService {
+  getForCase(caseId: string): Promise<DisciplineAppeal | null> {
+    return apiService.get<DisciplineAppeal | null>(`/discipline/cases/${caseId}/appeal`);
+  }
+
+  /** The caller's own appeals — token-derived, no id segment. */
+  getMine(): Promise<DisciplineAppeal[]> {
+    return apiService.get<DisciplineAppeal[]>('/discipline/appeals/mine');
+  }
+
+  getPendingHearing(): Promise<DisciplineAppeal[]> {
+    return apiService.get<DisciplineAppeal[]>('/discipline/appeals/pending-hearing');
+  }
+
+  getAwaitingOutcome(): Promise<DisciplineAppeal[]> {
+    return apiService.get<DisciplineAppeal[]>('/discipline/appeals/awaiting-outcome');
+  }
+
+  /**
+   * Files an appeal. Refused after FR-HR-180's five-working-day window has closed, and refused from
+   * anyone but the employee the case was brought against.
+   */
+  file(caseId: string, payload: FileAppealRequest): Promise<DisciplineAppeal> {
+    return apiService.post<DisciplineAppeal>(`/discipline/cases/${caseId}/appeal`, payload);
+  }
+
+  scheduleHearing(caseId: string, payload: ScheduleAppealHearingRequest): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`/discipline/cases/${caseId}/appeal/schedule-hearing`, payload);
+  }
+
+  recordOutcome(caseId: string, payload: RecordAppealOutcomeRequest): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`/discipline/cases/${caseId}/appeal/outcome`, payload);
+  }
+}
+
+/**
  * The investigation and hearing work queues. All HR-gated.
  */
 class DisciplineProcessService {
@@ -270,5 +316,6 @@ class DisciplineLookupService {
 }
 
 export const disciplineService = new DisciplineService();
+export const disciplineAppealService = new DisciplineAppealService();
 export const disciplineProcessService = new DisciplineProcessService();
 export const disciplineLookupService = new DisciplineLookupService();
