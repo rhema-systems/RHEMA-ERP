@@ -1,4 +1,4 @@
-// Lightweight discovery metadata for migrations whose generated target-model
+﻿// Lightweight discovery metadata for migrations whose generated target-model
 // designers are intentionally omitted from fast Debug builds. This file is
 // excluded from full Release/verification builds to avoid duplicate attributes.
 
@@ -174,3 +174,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260814215553_AddSheAuditStopWorkStatutory")] partial class AddSheAuditStopWorkStatutory { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260814230406_AddSheControlledDocumentRegister")] partial class AddSheControlledDocumentRegister { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260815073258_AddSheEnvironmentalCompliance")] partial class AddSheEnvironmentalCompliance { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260816002054_AddStaffMovementReminderEngine")] partial class AddStaffMovementReminderEngine { }

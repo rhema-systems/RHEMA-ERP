@@ -1,4 +1,4 @@
-// <auto-ported> HR module — EF Core configuration.
+﻿// <auto-ported> HR module — EF Core configuration.
 //
 // This partial holds ALL HR DbSets and HR Fluent configuration for the HR module ported from the
 // standalone HRApi solution. It is deliberately kept OUT of ApplicationDbContext.cs so that the
@@ -234,6 +234,8 @@ public partial class ApplicationDbContext
     public DbSet<StaffMovementStatusHistory> StaffMovementStatusHistories { get; set; } = null!;
     public DbSet<StaffMovementAttachment> StaffMovementAttachments { get; set; } = null!;
     public DbSet<StaffMovementChecklistItem> StaffMovementChecklistItems { get; set; } = null!;
+    public DbSet<StaffMovementReminderRun> StaffMovementReminderRuns { get; set; } = null!;
+    public DbSet<StaffMovementReminderDispatchLog> StaffMovementReminderDispatchLogs { get; set; } = null!;
     public DbSet<StaffPromotion> StaffPromotions { get; set; } = null!;
     public DbSet<StaffTransfer> StaffTransfers { get; set; } = null!;
     public DbSet<StaffDemotion> StaffDemotions { get; set; } = null!;
@@ -8654,6 +8656,15 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             e.HasIndex(x => new { x.TenantId, x.PlanNumber }).IsUnique();
             e.HasIndex(x => x.Status);
+        });
+
+        // Staff movement reminder engine (area 8 slice 5) ─────────────
+        builder.Entity<StaffMovementReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<StaffMovementReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
         });
 
         // S. SHE reminder engine ──────────────────────────────────────

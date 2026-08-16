@@ -1524,6 +1524,13 @@ export const navigationItems: NavItem[] = [
             ],
           },
           {
+            // The movement reminder sweep: run-now, run history and the dispatch log. Operational
+            // movement screens live under HR; this is the engine's admin surface.
+            title: 'Movements',
+            href: '/administration/hr/movements/reminders',
+            icon: ArrowRightLeft,
+          },
+          {
             title: 'Safety (SHE)',
             href: '/administration/hr/safety',
             icon: HardHat,

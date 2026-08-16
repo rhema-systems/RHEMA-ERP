@@ -1,4 +1,4 @@
-// <auto-ported> HR module — dependency injection registrations.
+﻿// <auto-ported> HR module — dependency injection registrations.
 //
 // Kept OUT of ServiceCollectionExtensions.cs (shared by all module developers) so that re-syncing
 // HR from HRApi only rewrites this file. Wired up with a single call:
@@ -542,6 +542,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ISafetyCommitteeService, SafetyCommitteeService>();
         services.AddScoped<ISheReturnToWorkService, SheReturnToWorkService>();
         services.AddScoped<ISheReminderService, SheReminderService>();
+        services.AddScoped<IStaffMovementReminderService, StaffMovementReminderService>();
         services.AddScoped<ISheCorrectiveActionTrackerService, SheCorrectiveActionTrackerService>();
         services.AddScoped<ISheKpiComputationService, SheKpiComputationService>();
         services.AddScoped<ISheAuditService, SheAuditService>();

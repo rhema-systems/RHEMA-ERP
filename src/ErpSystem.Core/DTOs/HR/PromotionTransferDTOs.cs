@@ -1527,3 +1527,43 @@ public class MovementPendingAlertDto
 }
 
 #endregion
+
+// ============================================================================
+// REMINDER ENGINE DTOs (area 8 slice 5)
+// ============================================================================
+
+#region Staff Movement Reminders
+
+public class StaffMovementReminderRunDto
+{
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+}
+
+public class StaffMovementReminderRunResultDto
+{
+    public Guid RunId { get; set; }
+    public int RemindersQueued { get; set; }
+
+    /// <summary>Per-kind breakdown, so a run-now shows what it actually found.</summary>
+    public Dictionary<string, int> ByKind { get; set; } = new();
+}
+
+public class StaffMovementReminderLogEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public DateTime DispatchedAt { get; set; }
+}
+
+#endregion

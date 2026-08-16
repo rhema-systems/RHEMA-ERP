@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Threading.RateLimiting;
 using ErpSystem.Api.Authorization;
 using ErpSystem.Api.HealthChecks;
@@ -1713,6 +1713,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // due-date reminder ladders, tiered escalation. Sweep logic is scoped
             // (ISheReminderService) so the run-now endpoint shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.SheReminderBackgroundService>();
+
+            // Staff movement reminder engine (area 8 slice 5): daily sweep — assignments ending,
+            // returns and approvals overdue, effective dates reached with nobody implementing.
+            // Sweep logic is scoped (IStaffMovementReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.StaffMovementReminderBackgroundService>();
 
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,

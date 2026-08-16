@@ -406,3 +406,26 @@ public interface IEmployeeCareerPathService
 }
 
 #endregion
+
+// ============================================================================
+// STAFF MOVEMENT REMINDER ENGINE
+// ============================================================================
+
+#region Staff Movement Reminder Service
+
+/// <summary>
+/// The movement sweep. The hourly background host and the HR-gated run-now endpoint both call
+/// <see cref="RunSweepForTenantAsync"/>, so there is exactly one implementation of what a reminder
+/// run does — and running it by hand is always safe, because dispatch is deduped.
+/// </summary>
+public interface IStaffMovementReminderService
+{
+    Task<StaffMovementReminderRunResultDto> RunSweepForTenantAsync(
+        Guid tenantId, string trigger, Guid? triggeredByUserId, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<StaffMovementReminderRunDto>> GetRecentRunsAsync(int count = 20, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<StaffMovementReminderLogEntryDto>> GetRecentLogAsync(int days = 14, CancellationToken cancellationToken = default);
+}
+
+#endregion
