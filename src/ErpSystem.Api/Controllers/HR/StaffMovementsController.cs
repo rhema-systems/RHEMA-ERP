@@ -120,6 +120,15 @@ public class StaffMovementsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetAwaitingMyApproval()
         => Ok(await _service.GetAwaitingMyApprovalAsync());
 
+    /// <summary>
+    /// How the destination position stands against its establishment (FR-HR-173), or null when there
+    /// is nothing to report. Advisory: the movement is not refused on it.
+    /// </summary>
+    [Authorize(Roles = HrRoles)]
+    [HttpGet("{id:guid}/establishment-advisory")]
+    public async Task<ActionResult<object>> GetEstablishmentAdvisory(Guid id)
+        => Ok(new { advisory = await _service.GetEstablishmentAdvisoryAsync(id) });
+
     /// <summary>The caller's own movement history. The token supplies the employee — see GetByEmployee.</summary>
     [HttpGet("employee/me")]
     public async Task<ActionResult<IEnumerable<StaffMovementSummaryDto>>> GetMine()

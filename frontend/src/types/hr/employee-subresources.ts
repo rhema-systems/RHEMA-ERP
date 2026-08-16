@@ -25,7 +25,11 @@ export type PositionChangeReason =
   | 'Transfer'
   | 'Restructure'
   | 'Termination'
-  | 'Other';
+  | 'Other'
+  // Added with area 8, so the timeline can say which kind of move it was.
+  | 'Secondment'
+  | 'ActingAppointment'
+  | 'Redesignation';
 export type DependentRelationship =
   | 'Spouse'
   | 'Son'
@@ -73,6 +77,9 @@ export const POSITION_CHANGE_REASON_OPTIONS = asOptions([
   'Promotion',
   'Demotion',
   'Transfer',
+  'Secondment',
+  'ActingAppointment',
+  'Redesignation',
   'Restructure',
   'Termination',
   'Other',

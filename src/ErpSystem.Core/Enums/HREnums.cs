@@ -301,6 +301,12 @@ public enum RefereeType
     Personal
 }
 
+/// <summary>
+/// Why an employee's position changed, as recorded on their position-history timeline.
+///
+/// Stored as an int with no lookup table or check constraint, so members are APPENDED and never
+/// renumbered — an existing row's meaning must not shift under it.
+/// </summary>
 public enum PositionChangeReason
 {
     InitialAssignment = 0,
@@ -315,7 +321,17 @@ public enum PositionChangeReason
 
     Termination = 5,
 
-    Other = 6
+    Other = 6,
+
+    // Added with area 8. Three of the seven staff-movement types had no reason of their own and
+    // landed on Other, which loses the fact in the one place people look for it: a secondment and a
+    // permanent transfer are not the same event, and a timeline that calls both "Other" cannot say
+    // whether someone ever actually left their post.
+    Secondment = 7,
+
+    ActingAppointment = 8,
+
+    Redesignation = 9
 }
 
 public enum EmployeeBankAccountType

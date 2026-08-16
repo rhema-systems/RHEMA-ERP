@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -68,7 +69,7 @@ const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '
 const money = (v?: number | null) =>
   v === null || v === undefined ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: 2 });
 
-type ActionKind = 'submit' | 'cancel' | 'handover' | 'return' | null;
+type ActionKind = 'submit' | 'cancel' | 'handover' | 'return' | 'implement' | null;
 
 /**
  * A single movement: the before/after comparison, the workflow actions available in its current
@@ -129,6 +130,8 @@ export default function MovementDetailPage() {
           return movementService.completeHandover(id, note || undefined);
         case 'return':
           return movementService.processReturn(id, new Date(returnDate).toISOString(), note || undefined);
+        case 'implement':
+          return movementService.implementMovement(id);
       }
     },
     onSuccess: () => {
@@ -136,16 +139,6 @@ export default function MovementDetailPage() {
       setAction(null);
       setNote('');
       setReturnDate('');
-      refresh();
-    },
-    onError: (error: any) =>
-      toast({ title: 'Refused', description: error?.message ?? 'Unexpected error.', variant: 'destructive' }),
-  });
-
-  const implement = useMutation({
-    mutationFn: () => movementService.implementMovement(id),
-    onSuccess: () => {
-      toast({ title: 'Movement implemented' });
       refresh();
     },
     onError: (error: any) =>
@@ -241,7 +234,7 @@ export default function MovementDetailPage() {
               </Button>
             )}
             {isApproved && (
-              <Button onClick={() => implement.mutate()} disabled={implement.isPending}>
+              <Button onClick={() => setAction('implement')}>
                 <PlayCircle className="mr-2 h-4 w-4" />
                 Implement
               </Button>
@@ -258,6 +251,9 @@ export default function MovementDetailPage() {
                 Cancel
               </Button>
             )}
+            <Button variant="ghost" asChild>
+              <Link href={`/hr/movements/career-paths/${m.employeeId}`}>Career history</Link>
+            </Button>
             {isDraft && (
               <Button variant="ghost" onClick={() => removeMovement.mutate()}>
                 <Trash2 className="mr-2 h-4 w-4" />
@@ -560,6 +556,7 @@ export default function MovementDetailPage() {
           <DialogHeader>
             <DialogTitle>
               {action === 'submit' && 'Submit for approval'}
+              {action === 'implement' && 'Implement this movement'}
               {action === 'cancel' && 'Cancel this movement'}
               {action === 'handover' && 'Record handover'}
               {action === 'return' && 'Process return from the temporary assignment'}
@@ -571,6 +568,35 @@ export default function MovementDetailPage() {
                 'The reason is recorded on the movement and in its history, and any approval still in flight is closed.'}
             </DialogDescription>
           </DialogHeader>
+
+          {action === 'implement' && (
+            <div className="rounded-md border bg-muted/40 p-3 text-sm">
+              <p className="mb-2 font-medium">This will change {m.employeeName}&apos;s record:</p>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>
+                  Position → <span className="text-foreground">{m.newPositionTitle}</span>
+                </li>
+                <li>
+                  Organisation unit → <span className="text-foreground">{m.newOrganizationUnitName}</span>
+                </li>
+                {m.newSupervisorName && (
+                  <li>
+                    Reports to → <span className="text-foreground">{m.newSupervisorName}</span>
+                  </li>
+                )}
+                {m.newSalary > 0 && (
+                  <li>
+                    Salary → <span className="text-foreground">{money(m.newSalary)}</span>
+                  </li>
+                )}
+                <li>A new step is opened in their career history and position timeline.</li>
+              </ul>
+              <p className="mt-2 text-xs">
+                Effective {fmtDate(m.effectiveDate)}. There is no undo — a mistake is corrected with
+                another movement.
+              </p>
+            </div>
+          )}
 
           {action === 'return' && (
             <div className="space-y-2">
@@ -584,7 +610,7 @@ export default function MovementDetailPage() {
             </div>
           )}
 
-          <div className="space-y-2">
+          <div className={action === 'implement' ? 'hidden' : 'space-y-2'}>
             <Label htmlFor="note">
               {action === 'cancel' ? 'Reason' : 'Notes'}
               {action === 'cancel' && <span className="ml-0.5 text-red-500">*</span>}

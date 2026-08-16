@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -1291,6 +1291,15 @@ public class EmployeeCareerPathDto : BaseDto
 public class EmployeeCareerPathSummaryDto
 {
     public Guid Id { get; set; }
+
+    // The ids the timeline actually needs: without PositionId it cannot tell which post a step is,
+    // and without MovementId it cannot link the movement that caused the change — which is the one
+    // thing a career step is for.
+    public Guid EmployeeId { get; set; }
+    public Guid PositionId { get; set; }
+    public Guid? MovementId { get; set; }
+    public string? MovementNumber { get; set; }
+
     public string PositionTitle { get; set; } = string.Empty;
     public string OrganizationUnitName { get; set; } = string.Empty;
     public string? LocationName { get; set; }

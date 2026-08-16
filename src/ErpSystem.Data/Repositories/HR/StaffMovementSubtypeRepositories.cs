@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.PromotionTransfer;
+﻿using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -423,6 +423,10 @@ public class EmployeeCareerPathRepository
             .Include(cp => cp.Position)
             .Include(cp => cp.OrganizationUnit)
             .Include(cp => cp.OrganizationLevel)
+            .Include(cp => cp.Location)
+            // The summary reports which movement caused the step and what kind it was; without this
+            // include both read as null on every row, which is the whole point of a career step.
+            .Include(cp => cp.Movement)
             .Include(cp => cp.SalaryGrade)
             .Include(cp => cp.SalaryLevel)
             .Include(cp => cp.SalaryNotch)

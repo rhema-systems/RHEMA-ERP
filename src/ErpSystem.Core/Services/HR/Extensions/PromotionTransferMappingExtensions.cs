@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 
@@ -1050,6 +1050,10 @@ public static class PromotionTransferMappingExtensions
         return new EmployeeCareerPathSummaryDto
         {
             Id = entity.Id,
+            EmployeeId = entity.EmployeeId,
+            PositionId = entity.PositionId,
+            MovementId = entity.MovementId,
+            MovementNumber = entity.Movement?.MovementNumber,
             PositionTitle = entity.Position?.Title ?? string.Empty,
             OrganizationUnitName = entity.OrganizationUnit?.Name ?? string.Empty,
             LocationName = entity.Location?.Name,

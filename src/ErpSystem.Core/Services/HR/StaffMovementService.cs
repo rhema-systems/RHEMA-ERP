@@ -453,6 +453,11 @@ public class StaffMovementService : IStaffMovementService
             throw new InvalidOperationException(
                 "Set the position and organisation unit the employee is moving into before submitting this movement.");
 
+        // Establishment pressure is reported, not enforced — see the note on the method. It goes
+        // into the movement's own history so the approver sees it on the record they are approving,
+        // rather than only in a screen they may never open.
+        var establishmentWarning = await DescribeEstablishmentPressureAsync(entity, cancellationToken);
+
         var previousStatus = entity.Status;
         entity.RequestSubmissionDate = DateTime.UtcNow;
 
@@ -470,12 +475,29 @@ public class StaffMovementService : IStaffMovementService
             entity.AuthorizedById = submittedByEmployeeId;
 
         await _movementRepo.UpdateAsync(entity);
-        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.SubmissionNotes, submittedByEmployeeId, cancellationToken);
+
+        var submissionNote = string.IsNullOrWhiteSpace(establishmentWarning)
+            ? dto.SubmissionNotes
+            : string.IsNullOrWhiteSpace(dto.SubmissionNotes)
+                ? $"Establishment note: {establishmentWarning}"
+                : $"{dto.SubmissionNotes} — establishment note: {establishmentWarning}";
+
+        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, submissionNote, submittedByEmployeeId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (establishmentWarning != null)
+            _logger.LogInformation("Staff movement {MovementNumber} submitted over establishment: {Warning}",
+                entity.MovementNumber, establishmentWarning);
 
         _logger.LogInformation("Staff movement submitted: {MovementNumber}", entity.MovementNumber);
 
         return true;
+    }
+
+    public async Task<string?> GetEstablishmentAdvisoryAsync(Guid movementId, CancellationToken cancellationToken = default)
+    {
+        var movement = await GetOwnedMovementAsync(movementId);
+        return await DescribeEstablishmentPressureAsync(movement, cancellationToken);
     }
 
     /// <summary>
@@ -705,32 +727,343 @@ public class StaffMovementService : IStaffMovementService
         if (entity.ReturnProcessed)
             throw new InvalidOperationException("Return has already been processed for this movement.");
 
-        var previousStatus = entity.Status;
-        entity.ReturnProcessed  = true;
-        entity.ActualReturnDate = dto.ActualReturnDate;
-        entity.ReturnMovementId = dto.ReturnMovementId;
-        entity.Status           = StaffMovementStatus.Implemented;
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var owned = _unitOfWork.HasActiveTransaction;
+            if (!owned) await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-        await _movementRepo.UpdateAsync(entity);
-        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, dto.Notes ?? "Return from temporary assignment processed", processedByUserId, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                var previousStatus = entity.Status;
+                entity.ReturnProcessed  = true;
+                entity.ActualReturnDate = dto.ActualReturnDate;
+                entity.ReturnMovementId = dto.ReturnMovementId;
+                entity.Status           = StaffMovementStatus.Implemented;
+
+                // Coming back is a move too. If the secondment was applied, the employee is sitting
+                // in the host post; flagging the return without putting them back would leave them
+                // there for good — the assignment would be temporary only on paper.
+                if (entity.Status == StaffMovementStatus.Implemented && entity.CurrentPositionId != Guid.Empty)
+                    await ReverseTemporaryAssignmentAsync(entity, processedByUserId, cancellationToken);
+
+                await _movementRepo.UpdateAsync(entity);
+                await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status,
+                    dto.Notes ?? "Return from temporary assignment processed", processedByUserId, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                if (!owned) await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (!owned) await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }, cancellationToken);
 
         _logger.LogInformation("Return processed for temporary movement: {MovementNumber}", entity.MovementNumber);
 
         return true;
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // APPLYING THE MOVEMENT
+    //
+    // Until this slice, implementing a movement flipped a status and stopped. Nothing wrote the
+    // employee's position, unit, reporting line or pay; EmployeeCareerPath had no automatic writer
+    // anywhere in the solution; Employee.LastPromotionDate was never assigned. A movement was
+    // paperwork that described a change nobody had made.
+    //
+    // FR-HR-173: "validate vacancy availability before promotion approval, and update grade, salary
+    // scale, position and reporting line on approval."
+    // ═════════════════════════════════════════════════════════════════════════
+
     /// <summary>
-    /// Marks the movement as carried out.
+    /// Puts an employee back where they were before a temporary assignment.
+    ///
+    /// The movement holds both sides, so the return is the same write with the halves swapped: the
+    /// CURRENT snapshot taken when the secondment was raised is where they belong afterwards.
+    /// </summary>
+    private async Task ReverseTemporaryAssignmentAsync(
+        StaffMovement movement, Guid actorEmployeeId, CancellationToken cancellationToken)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(movement.EmployeeId);
+        if (employee == null) return;
+
+        // Only put them back if they are actually where the movement left them; if something else
+        // has moved them since, that later placement is the truth and this must not overwrite it.
+        if (employee.PositionId != movement.NewPositionId) return;
+
+        var returnDate = (movement.ActualReturnDate ?? DateTime.UtcNow).Date;
+
+        employee.PositionId = movement.CurrentPositionId;
+        employee.OrganizationUnitId = movement.CurrentOrganizationUnitId;
+        if (movement.CurrentOrganizationLevelId.HasValue) employee.OrganizationLevelId = movement.CurrentOrganizationLevelId;
+        if (movement.CurrentLocationId.HasValue) employee.LocationId = movement.CurrentLocationId;
+        if (movement.CurrentLocationLevelId.HasValue) employee.LocationLevelId = movement.CurrentLocationLevelId;
+        if (movement.CurrentSupervisorId.HasValue) employee.ManagerId = movement.CurrentSupervisorId;
+        if (movement.CurrentSalary > 0) employee.Salary = movement.CurrentSalary;
+
+        employee.UpdatedAt = DateTime.UtcNow;
+        employee.UpdatedBy = actorEmployeeId.ToString();
+        await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
+
+        var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();
+        var openStep = await careerRepo
+            .GetQueryable(c => c.TenantId == movement.TenantId
+                            && c.EmployeeId == movement.EmployeeId
+                            && c.IsCurrent)
+            .OrderByDescending(c => c.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openStep != null)
+        {
+            openStep.IsCurrent = false;
+            openStep.EndDate = returnDate;
+            await careerRepo.UpdateAsync(openStep);
+        }
+
+        await careerRepo.AddAsync(new EmployeeCareerPath
+        {
+            TenantId = movement.TenantId,
+            EmployeeId = movement.EmployeeId,
+            PositionId = movement.CurrentPositionId,
+            OrganizationUnitId = movement.CurrentOrganizationUnitId,
+            OrganizationLevelId = movement.CurrentOrganizationLevelId,
+            LocationId = movement.CurrentLocationId,
+            LocationLevelId = movement.CurrentLocationLevelId,
+            StartDate = returnDate.AddDays(1),
+            IsCurrent = true,
+            MovementId = movement.Id,
+            Salary = movement.CurrentSalary,
+            SalaryGradeId = movement.CurrentSalaryGradeId,
+            SalaryLevelId = movement.CurrentSalaryLevelId,
+            SalaryNotchId = movement.CurrentSalaryNotchId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = actorEmployeeId.ToString(),
+        });
+
+        var historyRepo = _unitOfWork.Repository<EmployeePositionHistory>();
+        var openHistory = await historyRepo
+            .GetQueryable(h => h.TenantId == movement.TenantId
+                            && h.EmployeeId == movement.EmployeeId
+                            && h.EndDate == null)
+            .OrderByDescending(h => h.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openHistory != null)
+        {
+            openHistory.EndDate = returnDate;
+            await historyRepo.UpdateAsync(openHistory);
+        }
+
+        await historyRepo.AddAsync(new EmployeePositionHistory
+        {
+            TenantId = movement.TenantId,
+            EmployeeId = movement.EmployeeId,
+            PositionId = movement.CurrentPositionId,
+            OrganizationUnitId = movement.CurrentOrganizationUnitId,
+            OrganizationLevelId = movement.CurrentOrganizationLevelId ?? Guid.Empty,
+            LocationId = movement.CurrentLocationId,
+            LocationLevelId = movement.CurrentLocationLevelId,
+            StartDate = returnDate.AddDays(1),
+            // Coming back from cover is not itself a secondment — the employee is resuming the post
+            // they never gave up, which is closest to their original assignment.
+            ChangeReason = PositionChangeReason.InitialAssignment,
+            Notes = $"{movement.MovementNumber}: returned from temporary assignment",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = actorEmployeeId.ToString(),
+        });
+    }
+
+    /// <summary>
+    /// Reports how the destination position stands against its establishment (FR-HR-173).
+    ///
+    /// <para><b>Advisory, not a block — a decision taken with the user.</b> The rule as specified
+    /// refuses a move into a full post, and that is the right rule the day the establishment is
+    /// maintained. It is not maintained: in the live tenant 132 of 146 positions still carry
+    /// <c>ExpectedHeadcount = 1</c>, the entity default, while one of them holds over a thousand
+    /// people. Enforced as a block it would refuse very nearly every movement, and a rule that
+    /// refuses everything is one people route around rather than obey. Reported instead, with the
+    /// actual figures, it is the thing most likely to get the establishment filled in.</para>
+    ///
+    /// <para>Temporary assignments are exempt: a secondment or an acting appointment is cover, and
+    /// the substantive holder still occupies the post. A move that does not change position is
+    /// exempt for the obvious reason.</para>
+    ///
+    /// <para>Returns null when there is nothing to say.</para>
+    /// </summary>
+    private async Task<string?> DescribeEstablishmentPressureAsync(
+        StaffMovement movement, CancellationToken cancellationToken)
+    {
+        if (movement.IsTemporary) return null;
+
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(movement.EmployeeId);
+        if (employee != null && employee.PositionId == movement.NewPositionId) return null;
+
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetByIdAsync(movement.NewPositionId);
+        if (position == null || position.IsDeleted || position.TenantId != movement.TenantId)
+            throw new ArgumentException($"The position with ID '{movement.NewPositionId}' was not found.");
+
+        var occupied = await _unitOfWork.Repository<Employee>()
+            .GetQueryable(e => e.TenantId == movement.TenantId
+                            && e.PositionId == movement.NewPositionId
+                            && e.IsActive)
+            .CountAsync(cancellationToken);
+
+        if (occupied < position.ExpectedHeadcount) return null;
+
+        return $"{position.Title} is established for {position.ExpectedHeadcount} and already has {occupied} " +
+               $"in post. This movement takes it to {occupied + 1}.";
+    }
+
+    /// <summary>
+    /// Applies the movement to the employee and writes both history stores.
+    ///
+    /// <para>Both, deliberately. EmployeeCareerPath is the movement-linked record with the salary
+    /// grade snapshot; EmployeePositionHistory is the timeline the employee-detail screen has
+    /// rendered since area 1. They are two stores of the same fact, and a movement that updated only
+    /// one would leave the other quietly lying.</para>
+    ///
+    /// <para>Payroll is NOT touched. Employee.Salary is the HR-side figure and ours to write; the
+    /// pay run belongs to the payroll module, and this records that the movement happened rather
+    /// than instructing anyone to pay differently.</para>
+    /// </summary>
+    private async Task ApplyMovementToEmployeeAsync(
+        StaffMovement movement, Guid actorEmployeeId, CancellationToken cancellationToken)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(movement.EmployeeId)
+            ?? throw new ArgumentException($"The employee for movement {movement.MovementNumber} was not found.");
+
+        var effective = movement.EffectiveDate.Date;
+
+        // ── The live employee record ──────────────────────────────────────────
+        employee.PositionId = movement.NewPositionId;
+        employee.OrganizationUnitId = movement.NewOrganizationUnitId;
+        if (movement.NewOrganizationLevelId.HasValue) employee.OrganizationLevelId = movement.NewOrganizationLevelId;
+        if (movement.NewLocationId.HasValue) employee.LocationId = movement.NewLocationId;
+        if (movement.NewLocationLevelId.HasValue) employee.LocationLevelId = movement.NewLocationLevelId;
+        if (movement.NewSupervisorId.HasValue) employee.ManagerId = movement.NewSupervisorId;
+        if (movement.NewSalary > 0) employee.Salary = movement.NewSalary;
+
+        if (movement.MovementType == StaffMovementType.Promotion)
+            employee.LastPromotionDate = effective;
+
+        employee.UpdatedAt = DateTime.UtcNow;
+        employee.UpdatedBy = actorEmployeeId.ToString();
+        await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
+
+        // ── Career path: close the open step, open the new one ────────────────
+        var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();
+
+        var openStep = await careerRepo
+            .GetQueryable(c => c.TenantId == movement.TenantId
+                            && c.EmployeeId == movement.EmployeeId
+                            && c.IsCurrent)
+            .OrderByDescending(c => c.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openStep != null)
+        {
+            openStep.IsCurrent = false;
+            // The day before the new step starts, so the two do not both claim the same day.
+            openStep.EndDate = effective.AddDays(-1);
+            openStep.UpdatedAt = DateTime.UtcNow;
+            openStep.UpdatedBy = actorEmployeeId.ToString();
+            await careerRepo.UpdateAsync(openStep);
+        }
+
+        await careerRepo.AddAsync(new EmployeeCareerPath
+        {
+            TenantId = movement.TenantId,
+            EmployeeId = movement.EmployeeId,
+            PositionId = movement.NewPositionId,
+            OrganizationUnitId = movement.NewOrganizationUnitId,
+            OrganizationLevelId = movement.NewOrganizationLevelId,
+            LocationId = movement.NewLocationId,
+            LocationLevelId = movement.NewLocationLevelId,
+            StartDate = effective,
+            IsCurrent = true,
+            MovementId = movement.Id,
+            Salary = movement.NewSalary,
+            SalaryGradeId = movement.NewSalaryGradeId,
+            SalaryLevelId = movement.NewSalaryLevelId,
+            SalaryNotchId = movement.NewSalaryNotchId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = actorEmployeeId.ToString(),
+        });
+
+        // ── Position history: the timeline area 1 already renders ─────────────
+        var historyRepo = _unitOfWork.Repository<EmployeePositionHistory>();
+
+        var openHistory = await historyRepo
+            .GetQueryable(h => h.TenantId == movement.TenantId
+                            && h.EmployeeId == movement.EmployeeId
+                            && h.EndDate == null)
+            .OrderByDescending(h => h.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openHistory != null)
+        {
+            openHistory.EndDate = effective.AddDays(-1);
+            openHistory.UpdatedAt = DateTime.UtcNow;
+            openHistory.UpdatedBy = actorEmployeeId.ToString();
+            await historyRepo.UpdateAsync(openHistory);
+        }
+
+        await historyRepo.AddAsync(new EmployeePositionHistory
+        {
+            TenantId = movement.TenantId,
+            EmployeeId = movement.EmployeeId,
+            PositionId = movement.NewPositionId,
+            OrganizationUnitId = movement.NewOrganizationUnitId,
+            OrganizationLevelId = movement.NewOrganizationLevelId ?? Guid.Empty,
+            LocationId = movement.NewLocationId,
+            LocationLevelId = movement.NewLocationLevelId,
+            StartDate = effective,
+            ChangeReason = MapChangeReason(movement.MovementType),
+            Notes = $"{movement.MovementNumber}: {movement.Reason}",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = actorEmployeeId.ToString(),
+        });
+    }
+
+    /// <summary>
+    /// Every movement type has a reason of its own.
+    ///
+    /// A lateral move is recorded as a Transfer because that is what it is — an equivalent post
+    /// elsewhere — but a secondment, an acting appointment and a redesignation each got their own
+    /// member on <see cref="PositionChangeReason"/> rather than sharing Other, which would have left
+    /// the timeline unable to say whether someone had ever really left their post.
+    /// </summary>
+    private static PositionChangeReason MapChangeReason(StaffMovementType type) => type switch
+    {
+        StaffMovementType.Promotion => PositionChangeReason.Promotion,
+        StaffMovementType.Demotion => PositionChangeReason.Demotion,
+        StaffMovementType.Transfer => PositionChangeReason.Transfer,
+        StaffMovementType.LateralMove => PositionChangeReason.Transfer,
+        StaffMovementType.Secondment => PositionChangeReason.Secondment,
+        StaffMovementType.ActingAppointment => PositionChangeReason.ActingAppointment,
+        StaffMovementType.Redesignation => PositionChangeReason.Redesignation,
+        _ => PositionChangeReason.Other,
+    };
+
+    /// <summary>
+    /// Marks the movement as carried out AND carries it out.
     ///
     /// The three gates below were all modelled and none was enforced: RequiresEmployeeAcceptance,
     /// RequiresHandover and the required checklist items existed as flags and a helper that nothing
     /// called. A movement could be implemented over an employee who had declined it, with the
     /// outgoing duties un-handed-over and the access-revocation tasks still open.
+    ///
+    /// The whole thing runs in one transaction: a half-applied movement — employee moved, history
+    /// not written, or the reverse — is worse than one that failed cleanly and can be retried.
     /// </summary>
     public async Task<bool> ImplementAsync(Guid movementId, Guid implementedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedMovementAsync(movementId);
+
+        if (entity.Status == StaffMovementStatus.Implemented)
+            throw new InvalidOperationException("This movement has already been implemented.");
 
         if (entity.Status != StaffMovementStatus.Approved)
             throw new InvalidOperationException($"Only approved movements can be implemented. Current status: {entity.Status}.");
@@ -748,14 +1081,34 @@ public class StaffMovementService : IStaffMovementService
             throw new InvalidOperationException(
                 "Every required checklist task must be complete before this movement can be implemented.");
 
-        var previousStatus = entity.Status;
-        entity.Status = StaffMovementStatus.Implemented;
 
-        await _movementRepo.UpdateAsync(entity);
-        await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status, "Movement implemented", implementedByUserId, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            var owned = _unitOfWork.HasActiveTransaction;
+            if (!owned) await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-        _logger.LogInformation("Staff movement implemented: {MovementNumber}", entity.MovementNumber);
+            try
+            {
+                var previousStatus = entity.Status;
+                entity.Status = StaffMovementStatus.Implemented;
+
+                await ApplyMovementToEmployeeAsync(entity, implementedByUserId, cancellationToken);
+
+                await _movementRepo.UpdateAsync(entity);
+                await RecordStatusHistoryAsync(entity.TenantId, entity.Id, previousStatus, entity.Status,
+                    "Movement implemented and applied to the employee record", implementedByUserId, cancellationToken);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+                if (!owned) await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (!owned) await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }, cancellationToken);
+
+        _logger.LogInformation("Staff movement implemented and applied: {MovementNumber}", entity.MovementNumber);
 
         return true;
     }

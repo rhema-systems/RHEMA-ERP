@@ -105,6 +105,12 @@ public interface IStaffMovementService
     Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// How the destination position stands against its establishment, or null when there is nothing
+    /// to report. Advisory only — see the note on the implementation.
+    /// </summary>
+    Task<string?> GetEstablishmentAdvisoryAsync(Guid movementId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the movements the caller can currently approve. Token-derived: an approver is normally
     /// a line manager, not HR, and the register is HR-only, so without this they have no queue.
     /// </summary>
