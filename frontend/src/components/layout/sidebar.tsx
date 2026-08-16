@@ -614,6 +614,19 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // Area 9. The case is the unit of work: one record carries the allegation, the
+        // investigation, the hearing, the decision, whichever sanction follows, and the appeal.
+        title: 'Discipline',
+        href: '/hr/discipline',
+        icon: Gavel,
+        children: [
+          { title: 'Cases', href: '/hr/discipline', icon: Gavel },
+          // Open to every employee: the cases raised about them. The register above answers 403
+          // for non-HR, so this is the only discipline screen most people can open.
+          { title: 'My Record', href: '/hr/discipline/mine', icon: UserCheck },
+        ],
+      },
+      {
         // Slice 1 of area 10: the live dashboard and the hand-reported KPI snapshots. Each later
         // slice adds its register here in lifecycle order (incidents, hazards, inspections,
         // permits, PPE, …). Reference data lives under Administration → HR → Safety.

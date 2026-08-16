@@ -80,29 +80,29 @@ public class StaffOffenseService : IStaffOffenseService
     public async Task<StaffOffenseDto?> GetByCodeAsync(string code, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _offenseRepository.GetByCodeAsync(code);
+        var entity = await _offenseRepository.GetByCodeAsync(tenantId, code);
         return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<StaffOffenseDto?> GetWithProceduresAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _offenseRepository.GetWithProceduresAsync(id);
+        var entity = await _offenseRepository.GetWithProceduresAsync(tenantId, id);
         return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffOffenseSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _offenseRepository.GetAllAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _offenseRepository.GetAllForTenantAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffOffenseSummaryDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _offenseRepository.GetActiveOffensesAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _offenseRepository.GetActiveOffensesAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<StaffOffenseDto> CreateAsync(CreateStaffOffenseDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -164,8 +164,8 @@ public class StaffOffenseService : IStaffOffenseService
     {
         await GetOwnedOffenseAsync(offenseId);
         var tenantId = GetTenantId();
-        var entities = await _procedureRepository.GetByOffenseIdAsync(offenseId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _procedureRepository.GetByOffenseIdAsync(tenantId, offenseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffOffenseProcedureDto> AddProcedureAsync(CreateStaffOffenseProcedureDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -214,8 +214,7 @@ public class StaffOffenseService : IStaffOffenseService
 
         await GetOwnedOffenseAsync(offenseId);
         var tenantId = GetTenantId();
-        var procedures = (await _procedureRepository.GetByOffenseIdAsync(offenseId))
-            .Where(p => p.TenantId == tenantId)
+        var procedures = (await _procedureRepository.GetByOffenseIdAsync(tenantId, offenseId))
             .ToList();
 
         if (procedures.Count == 0)
@@ -327,22 +326,22 @@ public class StaffDisciplinaryActionTypeService : IStaffDisciplinaryActionTypeSe
     public async Task<StaffDisciplinaryActionTypeDto?> GetByCodeAsync(string code, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _actionTypeRepository.GetByCodeAsync(code);
+        var entity = await _actionTypeRepository.GetByCodeAsync(tenantId, code);
         return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionTypeSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _actionTypeRepository.GetAllAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _actionTypeRepository.GetAllForTenantAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionTypeSummaryDto>> GetActiveAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _actionTypeRepository.GetActiveTypesAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _actionTypeRepository.GetActiveTypesAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<StaffDisciplinaryActionTypeDto> CreateAsync(CreateStaffDisciplinaryActionTypeDto createDto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)

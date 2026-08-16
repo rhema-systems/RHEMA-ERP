@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -71,12 +72,51 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         return entity;
     }
 
+    /// <summary>
+    /// Validates a body-supplied employee id and returns the row.
+    /// </summary>
+    /// <remarks>
+    /// Two jobs in one call, as in the SHE and staff-movement services. It stops an unknown or another
+    /// tenant's id reaching the database as an FK violation (SQL 547, which surfaces as an unexplained
+    /// 500 rather than "that employee was not found"), and because the row ends up tracked, EF fixes up
+    /// the navigation on the entity being written — so the write response carries the subject's or
+    /// reporter's name instead of an empty string, with no second read.
+    /// </remarks>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId, string role)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(employeeId);
+        if (employee == null || employee.IsDeleted || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"The {role} employee with ID '{employeeId}' was not found.");
+        return employee;
+    }
+
+    /// <remarks>
+    /// The offense is the case's classification and drives the procedure steps, so an id from another
+    /// tenant's catalog would silently mis-file the case — the cross-tenant child-attach shape the SHE
+    /// slices met repeatedly, here on the parent rather than a child.
+    /// </remarks>
+    private async Task<StaffOffense> GetOwnedOffenseAsync(Guid offenseId)
+    {
+        var offense = await _unitOfWork.Repository<StaffOffense>().GetByIdAsync(offenseId);
+        if (offense == null || offense.IsDeleted || offense.TenantId != GetTenantId())
+            throw new ArgumentException($"The offense with ID '{offenseId}' was not found.");
+        return offense;
+    }
+
+    private async Task<StaffDisciplinaryActionType> GetOwnedActionTypeAsync(Guid actionTypeId)
+    {
+        var actionType = await _unitOfWork.Repository<StaffDisciplinaryActionType>().GetByIdAsync(actionTypeId);
+        if (actionType == null || actionType.IsDeleted || actionType.TenantId != GetTenantId())
+            throw new ArgumentException($"The disciplinary action type with ID '{actionTypeId}' was not found.");
+        return actionType;
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     public async Task<StaffDisciplinaryActionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _caseRepository.GetWithFullDetailsAsync(id);
+        var entity = await _caseRepository.GetWithFullDetailsAsync(tenantId, id);
 
         if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{id}' not found.");
@@ -87,29 +127,26 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     public async Task<StaffDisciplinaryActionDto?> GetByCaseNumberAsync(string caseNumber, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _caseRepository.GetByCaseNumberAsync(caseNumber);
+        var entity = await _caseRepository.GetByCaseNumberAsync(tenantId, caseNumber);
         return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetAllOpenAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetOpenCasesAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetOpenCasesAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
+    /// <remarks>
+    /// Paging moved into the repository so the register shares the one include set every other list
+    /// read uses. Built here from a bare queryable, it loaded no navigations at all — so the main
+    /// case list rendered blank employee and offense names, and every sanction badge read false,
+    /// while the narrower quick views beside it showed them correctly.
+    /// </remarks>
     public async Task<PagedResult<StaffDisciplinaryActionSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var query = _caseRepository.GetQueryable().Where(d => d.TenantId == tenantId);
-        var totalCount = await query.CountAsync(cancellationToken);
-
-        var items = await query
-            .OrderByDescending(d => d.IncidentDate)
-            .ThenByDescending(d => d.ReportedDate)
-            .Skip((pageNumber - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
+        var (items, totalCount) = await _caseRepository.GetPagedAsync(GetTenantId(), pageNumber, pageSize);
 
         return new PagedResult<StaffDisciplinaryActionSummaryDto>
         {
@@ -123,116 +160,111 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetByEmployeeAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetByEmployeeAsync(tenantId, employeeId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByStatusAsync(DisciplinaryStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetByStatusAsync(status);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetByStatusAsync(tenantId, status);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByOffenseAsync(Guid offenseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetByOffenseAsync(offenseId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetByOffenseAsync(tenantId, offenseId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetBySeverityAsync(StaffOffenseSeverity minimumSeverity, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetBySeverityAsync(minimumSeverity);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetBySeverityAsync(tenantId, minimumSeverity);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByIncidentDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetByIncidentDateRangeAsync(from, to);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetByIncidentDateRangeAsync(tenantId, from, to);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetByReportedDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetByReportedDateRangeAsync(from, to);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetByReportedDateRangeAsync(tenantId, from, to);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetPendingInvestigationAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetPendingInvestigationAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetPendingInvestigationAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetPendingHearingAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetPendingHearingAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetPendingHearingAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetPendingClosureAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetPendingClosureAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetPendingClosureAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveWarningAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetWithActiveWarningAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetWithActiveWarningAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveSuspensionAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetWithActiveSuspensionAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetWithActiveSuspensionAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithOutstandingFineAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetWithOutstandingFineAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetWithOutstandingFineAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithPendingTerminationAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetWithPendingTerminationAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetWithPendingTerminationAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveAppealAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetWithActiveAppealAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetWithActiveAppealAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetWithActiveLegalReviewAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _caseRepository.GetWithActiveLegalReviewAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _caseRepository.GetWithActiveLegalReviewAsync(tenantId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<int> GetOpenCaseCountForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        return await _caseRepository.GetQueryable()
-            .CountAsync(d => d.TenantId == tenantId
-                          && d.EmployeeId == employeeId
-                          && d.Status != DisciplinaryStatus.Closed
-                          && d.Status != DisciplinaryStatus.Dismissed, cancellationToken);
+        return await _caseRepository.GetOpenCaseCountForEmployeeAsync(GetTenantId(), employeeId);
     }
 
     public async Task<bool> CaseNumberExistsAsync(string caseNumber, Guid tenantId, CancellationToken cancellationToken = default)
@@ -246,6 +278,15 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     public async Task<StaffDisciplinaryActionDto> CreateAsync(CreateStaffDisciplinaryActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        // Guard every id the caller supplied before it reaches the database. Unvalidated, each of
+        // these is an FK violation reported to the user as an unexplained 500; guarded, they also
+        // leave the rows tracked, so the response below carries real names instead of empty strings.
+        await GetOwnedEmployeeAsync(createDto.EmployeeId, "subject");
+        await GetOwnedEmployeeAsync(createDto.ReportedById, "reporting");
+        if (createDto.ReportedToId is Guid reportedTo)
+            await GetOwnedEmployeeAsync(reportedTo, "reported-to");
+        await GetOwnedOffenseAsync(createDto.StaffOffenseId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         if (string.IsNullOrWhiteSpace(entity.CaseNumber))
@@ -267,6 +308,11 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         if (entity.Status == DisciplinaryStatus.Closed || entity.Status == DisciplinaryStatus.Dismissed)
             throw new InvalidOperationException("A closed or dismissed case cannot be edited.");
+
+        await GetOwnedEmployeeAsync(updateDto.ReportedById, "reporting");
+        if (updateDto.ReportedToId is Guid reportedTo)
+            await GetOwnedEmployeeAsync(reportedTo, "reported-to");
+        await GetOwnedOffenseAsync(updateDto.StaffOffenseId);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
@@ -346,6 +392,8 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         if (!allowedStatuses.Contains(entity.Status))
             throw new InvalidOperationException($"Cannot record a decision for a case in '{entity.Status}' status.");
+
+        await GetOwnedActionTypeAsync(dto.ActionTypeId);
 
         entity.ActionTypeId = dto.ActionTypeId;
         entity.ActionDetails = dto.ActionDetails;
@@ -495,16 +543,16 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         var openCases = cases.Where(c => !terminalStatuses.Contains(c.Status)).ToList();
 
         // Overdue action steps
-        var overdueSteps = await _actionStepRepository.GetOverdueStepsAsync();
-        int overdueStepCount = overdueSteps.Count(s => s.TenantId == tenantId);
+        var overdueSteps = await _actionStepRepository.GetOverdueStepsAsync(tenantId);
+        int overdueStepCount = overdueSteps.Count();
 
         // Overdue corrective action items
-        var overdueItems = await _correctiveItemRepository.GetOverdueItemsAsync();
-        int overdueItemCount = overdueItems.Count(i => i.TenantId == tenantId);
+        var overdueItems = await _correctiveItemRepository.GetOverdueItemsAsync(tenantId);
+        int overdueItemCount = overdueItems.Count();
 
         // Outstanding fines
-        var outstandingFines = await _fineRepository.GetOutstandingAsync();
-        int outstandingFineCount = outstandingFines.Count(f => f.TenantId == tenantId);
+        var outstandingFines = await _fineRepository.GetOutstandingAsync(tenantId);
+        int outstandingFineCount = outstandingFines.Count();
 
         // Recent open cases for alerts (newest 15)
         var recentOpenAlerts = openCases

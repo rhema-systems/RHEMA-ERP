@@ -14,6 +14,7 @@ import {
   Target,
   HandCoins,
   ArrowRightLeft,
+  Gavel,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -151,6 +152,13 @@ export default function HrHomePage() {
                 'Promotions, transfers, demotions, secondments and acting appointments — from request through approval to the change taking effect.',
               href: '/hr/movements',
               icon: ArrowRightLeft,
+            },
+            {
+              title: 'Discipline',
+              description:
+                'Misconduct cases from report through investigation and hearing to decision, sanction and appeal.',
+              href: '/hr/discipline',
+              icon: Gavel,
             },
             {
               title: 'Payroll',

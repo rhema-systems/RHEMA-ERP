@@ -274,6 +274,42 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   satisfactory: 'secondary',
   poor: 'destructive',
   unsatisfactory: 'destructive',
+
+  // Discipline (area 9). A case in progress reads neutral: the weight belongs on the outcome, not
+  // on the fact that someone is under investigation.
+  //
+  // `underreview`, `dismissed`, `partiallypaid` and `waived` are NOT repeated here — they are
+  // already defined above and mean the same thing in this module.
+  //
+  // ⚠ `upheld` is also already defined, and there it means the OPPOSITE. In appraisal appeals an
+  // upheld appeal is the appellant's win, so it reads positive. In discipline,
+  // DisciplineAppealOutcomeType.Upheld means the SANCTION was upheld — the appeal failed. One
+  // shared map cannot carry both valences, so the neutral existing colour stands for both rather
+  // than either module silently recolouring the other's badge. Do not "fix" it for one side.
+  reported: 'secondary',
+  underinvestigation: 'secondary',
+  investigationcomplete: 'secondary',
+  hearingscheduled: 'secondary',
+  hearingconducted: 'secondary',
+  awaitingdecision: 'secondary',
+  decisionmade: 'default',
+  underappeal: 'secondary',
+
+  // StaffOffenseSeverity — a judgement about how serious the allegation is, so unlike the
+  // lifecycle above it does carry weight.
+  minor: 'outline',
+  moderate: 'secondary',
+  serious: 'destructive',
+  grossmisconduct: 'destructive',
+
+  // Sanctions and the remaining appeal outcomes.
+  verbal: 'outline',
+  written: 'secondary',
+  final: 'destructive',
+  filed: 'secondary',
+  overturned: 'default',
+  reduced: 'secondary',
+  fullypaid: 'default',
 };
 
 interface StatusBadgeProps {
