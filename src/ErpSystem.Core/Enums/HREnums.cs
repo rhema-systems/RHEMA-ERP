@@ -2743,6 +2743,24 @@ public enum EmployeeTerminationType
     [Description("Death")]
     Death = 8,
 
+    /// <summary>
+    /// FR-HR-179's sanction ladder names summary dismissal separately from termination, and it is a
+    /// distinct thing: dismissal without notice or pay in lieu, for conduct grave enough to end the
+    /// contract immediately.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ "Summary" means without NOTICE, not without PROCESS. A summary dismissal still requires the
+    /// employee to have been queried and heard — the natural-justice gate in
+    /// <c>StaffDisciplinaryCaseService</c> has no carve-out for it, deliberately.
+    ///
+    /// Appended as 9, immediately after Death=8 and before Other=99. This column is a plain int with
+    /// no lookup table or check constraint, so appending is schema-safe and needs no migration — but
+    /// members must be APPENDED, never renumbered, or existing rows silently change meaning. The same
+    /// call was made for PositionChangeReason in area 8 slice 4.
+    /// </remarks>
+    [Description("Summary Dismissal")]
+    SummaryDismissal = 9,
+
     [Description("Other")]
     Other = 99
 }

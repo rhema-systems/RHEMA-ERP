@@ -176,3 +176,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260815073258_AddSheEnvironmentalCompliance")] partial class AddSheEnvironmentalCompliance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260816002054_AddStaffMovementReminderEngine")] partial class AddStaffMovementReminderEngine { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260816170121_AddDisciplineMinimumAuthority")] partial class AddDisciplineMinimumAuthority { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260816201802_AddDisciplineQueryOpportunityWaiver")] partial class AddDisciplineQueryOpportunityWaiver { }

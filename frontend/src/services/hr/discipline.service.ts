@@ -187,6 +187,17 @@ class DisciplineService {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/recall-decision`, { comments });
   }
 
+  /**
+   * Records that the employee could not be given a chance to answer the written query, so a decision
+   * may proceed without it.
+   *
+   * This is the documented exception to the rule that nobody is sanctioned unheard. The reason is
+   * required and goes onto the case record — it is not a dismissible confirmation.
+   */
+  waiveQueryOpportunity(id: string, reason: string): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/waive-query-opportunity`, { reason });
+  }
+
   close(id: string, payload: CloseCaseRequest): Promise<{ message: string }> {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/close`, payload);
   }

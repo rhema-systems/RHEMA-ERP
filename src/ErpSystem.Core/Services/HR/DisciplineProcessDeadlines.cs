@@ -34,6 +34,31 @@ public static class DisciplineProcessDeadlines
     public const int InvestigationDays = 28;
 
     /// <summary>
+    /// How long the employee has to answer a written query before a decision may be proposed
+    /// without them.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>This figure is not in the specification and needs TDC's confirmation.</b> FR-HR-177 gives
+    /// 48 hours for ISSUING the query and FR-HR-180 gives five working days to file an appeal, but
+    /// nothing states how long the employee has to respond. 72 hours is a defensible default, not a
+    /// requirement — it is named here rather than buried so the figure can be changed in one place
+    /// once TDC says what it should be.
+    ///
+    /// TDC may well want this in WORKING days, as FR-HR-180's appeal window is. That needs the
+    /// holiday calendar, which the appeal slice brings in; converting this at the same time keeps
+    /// both windows counting the same way.
+    ///
+    /// The window is what makes the natural-justice gate workable. Requiring the employee to
+    /// ACKNOWLEDGE before a decision could be proposed would let anyone stall their own case
+    /// indefinitely by ignoring the notice; silence after a fair opportunity is not a defence.
+    /// </remarks>
+    public const int QueryResponseWindowHours = 72;
+
+    /// <summary>When the employee's opportunity to answer a query issued at <paramref name="issuedAt"/> closes.</summary>
+    public static DateTime QueryResponseClosesAt(DateTime issuedAt)
+        => issuedAt.AddHours(QueryResponseWindowHours);
+
+    /// <summary>
     /// The notification type that IS the formal written query. FR-HR-177's "written query" and the
     /// enum's <c>ShowCause</c> are the same document: the notice asking the employee to explain
     /// themselves. The enum member documents itself as exactly that.

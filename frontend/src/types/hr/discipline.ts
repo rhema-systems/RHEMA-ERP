@@ -237,7 +237,14 @@ export interface DisciplinaryCase {
   hasSuspension: boolean;
   hasFine: boolean;
   hasTermination: boolean;
+  /**
+   * Whether a reduction in rank cites this case. A demotion is NOT a sub-entity here — it is a staff
+   * movement, because reducing someone's rank means moving them to a different post with its own
+   * grade, unit and salary. Area 8 owns that record and the write to the employee; this flag and the
+   * list below only report that one exists.
+   */
   hasDemotion: boolean;
+  linkedDemotions: DisciplinaryLinkedDemotion[];
 
   // One-to-one sub-entities; null when that penalty or stage does not apply.
   investigation?: DisciplineInvestigation | null;
@@ -567,6 +574,20 @@ export interface DisciplineLegalReviewSummary {
   isConfidential: boolean;
 }
 
+/**
+ * A reduction in rank citing a disciplinary case. Read-only here: the movement is area 8's record
+ * and owns the destination post, the approval route and the write to the employee.
+ */
+export interface DisciplinaryLinkedDemotion {
+  demotionId: string;
+  movementId: string;
+  movementNumber: string;
+  movementStatus: string;
+  gradeLevelDecrease: number;
+  effectiveDate?: string | null;
+  newPositionTitle?: string | null;
+}
+
 // ── Statutory clocks ─────────────────────────────────────────────────────────
 
 /**
@@ -594,6 +615,18 @@ export interface DisciplineProcessClock {
   investigationCompletedAt?: string | null;
   investigationBreached: boolean;
   investigationDaysLate?: number | null;
+
+  // Natural justice. Unlike the two clocks above, THIS ONE BLOCKS — a decision is refused until the
+  // employee has been queried and given a chance to answer. Surfaced so the screen can explain the
+  // refusal in advance rather than letting the user discover it by pressing the button.
+  queryResponseClosesAt?: string | null;
+  queryOpportunityWaived: boolean;
+  queryOpportunityWaivedAt?: string | null;
+  queryOpportunityWaivedReason?: string | null;
+  queryOpportunityWaivedByName?: string | null;
+  canProposeDecision: boolean;
+  /** The server's own words, so the screen and the refusal cannot drift apart. */
+  decisionBlockedReason?: string | null;
 
   advisories: string[];
 }

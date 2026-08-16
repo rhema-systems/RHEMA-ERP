@@ -73,9 +73,17 @@ public interface IStaffDisciplinaryCaseService
 
     /// <summary>
     /// How a case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
-    /// investigation. Computed from the record, and advisory — it reports, it does not block.
+    /// investigation — both advisory — and whether the natural-justice gate currently permits a
+    /// decision, which is not advisory.
     /// </summary>
     Task<DisciplineProcessClockDto> GetProcessClockAsync(Guid caseId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that the employee could not be given a chance to answer the written query — absconded,
+    /// detained, refused service — so a decision may proceed without it. Requires a reason, which
+    /// goes on the case record.
+    /// </summary>
+    Task<bool> WaiveQueryOpportunityAsync(Guid caseId, Guid waivedByEmployeeId, string reason, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The cases whose proposed decision the caller can confirm right now. Token-derived; the engine

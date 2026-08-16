@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Loader2, Send, Play, Gavel, Lock, PauseCircle, RotateCcw, XCircle, AlertTriangle,
+  Loader2, Send, Play, Gavel, Lock, PauseCircle, RotateCcw, XCircle, AlertTriangle, UserX,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -59,6 +60,8 @@ export default function DisciplineCaseDetailPage() {
 
   const [decisionOpen, setDecisionOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
+  const [waiveOpen, setWaiveOpen] = useState(false);
+  const [waiveReason, setWaiveReason] = useState('');
   const [actionTypeId, setActionTypeId] = useState('');
   const [actionDetails, setActionDetails] = useState('');
   const [decisionRationale, setDecisionRationale] = useState('');
@@ -170,6 +173,20 @@ export default function DisciplineCaseDetailPage() {
     onError: (e: Error) => toast({ title: 'Could not dismiss', description: e.message, variant: 'destructive' }),
   });
 
+  const waiveMutation = useMutation({
+    mutationFn: () => disciplineService.waiveQueryOpportunity(id, waiveReason),
+    onSuccess: () => {
+      toast({
+        title: 'Recorded on the case',
+        description: 'The reason is now part of the disciplinary record and will be visible on it.',
+      });
+      setWaiveOpen(false);
+      setWaiveReason('');
+      refresh();
+    },
+    onError: (e: Error) => toast({ title: 'Could not record it', description: e.message, variant: 'destructive' }),
+  });
+
   const recallMutation = useMutation({
     mutationFn: () => disciplineService.recallDecision(id),
     onSuccess: () => {
@@ -276,9 +293,23 @@ export default function DisciplineCaseDetailPage() {
                 <Play className="mr-2 h-4 w-4" /> Start review
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={() => setDecisionOpen(true)}>
-              <Gavel className="mr-2 h-4 w-4" /> Record decision
+            {/* The one place a button IS disabled on client-side knowledge — because the server has
+                already told us it will refuse, and why. The tooltip carries the server's own words,
+                so the two cannot drift. Everything else here stays enabled and lets the 422 explain. */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setDecisionOpen(true)}
+              disabled={clock ? !clock.canProposeDecision : false}
+              title={clock?.decisionBlockedReason ?? undefined}
+            >
+              <Gavel className="mr-2 h-4 w-4" /> Propose decision
             </Button>
+            {clock && !clock.canProposeDecision && (
+              <Button size="sm" variant="ghost" onClick={() => setWaiveOpen(true)}>
+                <UserX className="mr-2 h-4 w-4" /> Employee cannot be heard
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => setCloseOpen(true)}>
               <Lock className="mr-2 h-4 w-4" /> Close
             </Button>
@@ -476,6 +507,59 @@ export default function DisciplineCaseDetailPage() {
                 </div>
               ) : (
                 <EmptyState title="No fine" description="No fine has been imposed on this case." />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Reduction in rank</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              {detail.linkedDemotions.length === 0 ? (
+                <div className="p-6">
+                  <EmptyState
+                    title="No reduction in rank"
+                    description="No demotion cites this case."
+                  />
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    A reduction in rank is recorded as a staff movement, not here — moving someone
+                    down a grade means moving them to a different post, with its own unit and salary,
+                    and the movement is what carries that and applies it to their record. Raise it
+                    under Staff Movements and cite this case as the reason; it will then appear here.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Movement</TableHead>
+                        <TableHead>New post</TableHead>
+                        <TableHead>Grades down</TableHead>
+                        <TableHead>Effective</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detail.linkedDemotions.map((d) => (
+                        <TableRow key={d.demotionId}>
+                          <TableCell className="font-medium">
+                            <Link href={`/hr/movements/${d.movementId}`} className="hover:underline">
+                              {d.movementNumber || 'Movement'}
+                            </Link>
+                          </TableCell>
+                          <TableCell>{d.newPositionTitle || '—'}</TableCell>
+                          <TableCell>{d.gradeLevelDecrease}</TableCell>
+                          <TableCell>{fmtDate(d.effectiveDate)}</TableCell>
+                          <TableCell><StatusBadge status={d.movementStatus} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <p className="p-4 text-xs text-muted-foreground">
+                    The movement owns its own approval route and is what changes the employee&apos;s
+                    record. This is a link to it, not a second copy.
+                  </p>
+                </>
               )}
             </CardContent>
           </Card>
@@ -712,6 +796,48 @@ export default function DisciplineCaseDetailPage() {
             >
               {decisionMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Record decision
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* The recorded override on the natural-justice gate. Deliberately not a confirm-and-forget
+          dialog: it states what is being set aside, requires a reason of real length, and says the
+          reason goes on the record. Making it costless would turn the gate into something people
+          click past. */}
+      <Dialog open={waiveOpen} onOpenChange={setWaiveOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record that the employee cannot be heard</DialogTitle>
+            <DialogDescription>
+              A decision is normally refused until the employee has been issued a written query and
+              given a chance to answer it. Use this only where that chance genuinely cannot be given
+              — they have absconded, are detained, or refuse service. The reason becomes part of the
+              disciplinary record.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Why the opportunity could not be given *</Label>
+            <Textarea
+              rows={4}
+              placeholder="Set out what was attempted and when — dates, addresses tried, who was contacted."
+              value={waiveReason}
+              onChange={(e) => setWaiveReason(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              At least 10 characters. This is the answer to &ldquo;why was this employee sanctioned
+              without being heard?&rdquo;, so write it for someone reading the file later.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWaiveOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => waiveMutation.mutate()}
+              disabled={waiveReason.trim().length < 10 || waiveMutation.isPending}
+            >
+              {waiveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Record and proceed
             </Button>
           </DialogFooter>
         </DialogContent>

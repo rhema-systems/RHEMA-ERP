@@ -314,6 +314,28 @@ public class StaffDisciplineCasesController : ControllerBase
     }
 
     /// <summary>
+    /// Records that the employee could not be given a chance to answer the written query, so a
+    /// decision may proceed without it.
+    /// </summary>
+    /// <remarks>
+    /// HR-gated and deliberately not offered casually: this is the documented exception to the rule
+    /// that nobody is sanctioned unheard. It requires a reason, it is written onto the case, and it
+    /// is logged at warning level.
+    /// </remarks>
+    [Authorize(Roles = HrRoles)]
+    [HttpPost("{id:guid}/waive-query-opportunity")]
+    public async Task<IActionResult> WaiveQueryOpportunity(Guid id, [FromBody] WaiveQueryOpportunityDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _caseService.WaiveQueryOpportunityAsync(id, employeeId.Value, dto.Reason);
+        return Ok(new { message = "Recorded. The reason is on the case record." });
+    }
+
+    /// <summary>
     /// The cases whose proposed decision the caller may confirm. Deliberately ungated: the approver
     /// of a disciplinary decision is a head of department or the MD, neither of whom is necessarily
     /// in HR, and the register above answers 403 for them — so without this they would have nowhere

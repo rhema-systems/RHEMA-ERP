@@ -273,7 +273,18 @@ public class StaffDisciplinaryActionDto : BaseDto
     public bool HasSuspension { get; set; }
     public bool HasFine { get; set; }
     public bool HasTermination { get; set; }
+    /// <summary>
+    /// Whether a reduction in rank cites this case. FR-HR-179's ladder includes it, but a demotion
+    /// is not a sub-entity of the case — it is a staff movement, because reducing someone's rank
+    /// means moving them to a different post with its own grade, unit and salary, and only the
+    /// movement carries that. The case is cited as the REASON via
+    /// <c>StaffDemotion.DisciplinaryActionId</c>, and area 8's implement path is what actually
+    /// changes the employee record.
+    /// </summary>
     public bool HasDemotion { get; set; }
+
+    /// <summary>The demotions citing this case, for the link on the sanctions tab.</summary>
+    public List<DisciplinaryLinkedDemotionDto> LinkedDemotions { get; set; } = new();
 
     // One-to-one sub-entity details (null when not applicable)
     public StaffDisciplineInvestigationDto? Investigation { get; set; }
@@ -409,6 +420,27 @@ public class RecordDisciplinaryDecisionDto
 }
 
 /// <summary>
+/// A reduction in rank citing a disciplinary case — enough to show it and link to it, not a copy of
+/// the movement.
+/// </summary>
+/// <remarks>
+/// Read-only by design. The movement is area 8's record: it owns the destination post, the approval
+/// route and the write to the employee. Duplicating any of that here would be two records of the same
+/// fact, which is exactly what area 8 refused to do when it chose to write both history stores from
+/// one code path.
+/// </remarks>
+public class DisciplinaryLinkedDemotionDto
+{
+    public Guid DemotionId { get; set; }
+    public Guid MovementId { get; set; }
+    public string MovementNumber { get; set; } = string.Empty;
+    public string MovementStatus { get; set; } = string.Empty;
+    public int GradeLevelDecrease { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+    public string? NewPositionTitle { get; set; }
+}
+
+/// <summary>
 /// How a case stands against the two statutory clocks: FR-HR-177's 48-hour written query and
 /// FR-HR-178's four-week investigation.
 /// </summary>
@@ -444,6 +476,25 @@ public class DisciplineProcessClockDto
     public bool InvestigationBreached { get; set; }
     public int? InvestigationDaysLate { get; set; }
 
+    // ── Natural justice: has the employee been heard? ──
+    //
+    // Unlike the two clocks above, this one BLOCKS. It is surfaced here so the screen can explain
+    // why the decision button will be refused, rather than letting the user find out by pressing it.
+
+    /// <summary>When the employee's chance to answer the written query closes.</summary>
+    public DateTime? QueryResponseClosesAt { get; set; }
+
+    public bool QueryOpportunityWaived { get; set; }
+    public DateTime? QueryOpportunityWaivedAt { get; set; }
+    public string? QueryOpportunityWaivedReason { get; set; }
+    public string? QueryOpportunityWaivedByName { get; set; }
+
+    /// <summary>False while the employee has not yet been queried, or still has time to answer.</summary>
+    public bool CanProposeDecision { get; set; }
+
+    /// <summary>The reason a decision cannot be proposed yet, in the words the server would refuse with.</summary>
+    public string? DecisionBlockedReason { get; set; }
+
     /// <summary>A short sentence per live breach, for the banner. Empty when the case is on time.</summary>
     public List<string> Advisories { get; set; } = new();
 }
@@ -460,6 +511,22 @@ public class DisciplinaryDecisionActionDto
 {
     [MaxLength(2000)]
     public string? Comments { get; set; }
+}
+
+/// <summary>
+/// Records that the employee's chance to answer the written query could not be given.
+/// </summary>
+/// <remarks>
+/// The reason is required, not optional. This override exists for absconded, detained or unreachable
+/// employees; making it costless would turn the natural-justice gate into a formality it can be
+/// clicked past.
+/// </remarks>
+public class WaiveQueryOpportunityDto
+{
+    [Required]
+    [MaxLength(1000)]
+    [MinLength(10)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>

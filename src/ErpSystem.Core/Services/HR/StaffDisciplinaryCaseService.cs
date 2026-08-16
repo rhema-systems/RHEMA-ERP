@@ -2,6 +2,7 @@ using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -30,6 +31,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
     private readonly IStaffDisciplineActionStepRepository _actionStepRepository;
     private readonly IStaffDisciplineCorrectiveActionItemRepository _correctiveItemRepository;
     private readonly IStaffDisciplineFineRepository _fineRepository;
+    private readonly IStaffDisciplineNotificationRepository _notificationRepository;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -41,6 +43,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         IStaffDisciplineActionStepRepository actionStepRepository,
         IStaffDisciplineCorrectiveActionItemRepository correctiveItemRepository,
         IStaffDisciplineFineRepository fineRepository,
+        IStaffDisciplineNotificationRepository notificationRepository,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
@@ -51,6 +54,7 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         _actionStepRepository = actionStepRepository;
         _correctiveItemRepository = correctiveItemRepository;
         _fineRepository = fineRepository;
+        _notificationRepository = notificationRepository;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
@@ -147,7 +151,46 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (entity == null || entity.TenantId != tenantId)
             throw new ArgumentException($"Disciplinary case with ID '{id}' not found.");
 
-        return entity.ToDto();
+        var dto = entity.ToDto();
+        await ResolveLinkedDemotionsAsync(dto, tenantId, id, cancellationToken);
+        return dto;
+    }
+
+    /// <summary>
+    /// Fills the reduction-in-rank half of FR-HR-179's ladder, which is not a sub-entity of the case.
+    /// </summary>
+    /// <remarks>
+    /// <c>HasDemotion</c> was hard-coded false in the mapper with a comment saying it was "resolved
+    /// externally via StaffDemotion.DisciplinaryActionId" — and nothing resolved it, so the case
+    /// detail said there was no demotion even when one cited the case. The dead-denormalised-flag
+    /// shape from [[hr-ported-list-read-bugs]].
+    ///
+    /// It is resolved here rather than included on the case query because the relationship runs the
+    /// other way: the demotion points at the case, and the case has no navigation to it. A demotion
+    /// is a staff-movement subtype, because reducing someone's rank means moving them to a different
+    /// post — area 8 owns the movement, its approval route and the write to the employee record, and
+    /// this only reports that one exists.
+    /// </remarks>
+    private async Task ResolveLinkedDemotionsAsync(
+        StaffDisciplinaryActionDto dto, Guid tenantId, Guid caseId, CancellationToken cancellationToken)
+    {
+        var demotions = await _unitOfWork.Repository<StaffDemotion>()
+            .GetQueryable()
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted && d.DisciplinaryActionId == caseId)
+            .Include(d => d.Movement).ThenInclude(m => m.NewPosition)
+            .ToListAsync(cancellationToken);
+
+        dto.HasDemotion = demotions.Count > 0;
+        dto.LinkedDemotions = demotions.Select(d => new DisciplinaryLinkedDemotionDto
+        {
+            DemotionId = d.Id,
+            MovementId = d.MovementId,
+            MovementNumber = d.Movement?.MovementNumber ?? string.Empty,
+            MovementStatus = d.Movement?.Status.ToString() ?? string.Empty,
+            GradeLevelDecrease = d.GradeLevelDecrease,
+            EffectiveDate = d.Movement?.EffectiveDate,
+            NewPositionTitle = d.Movement?.NewPosition?.Title,
+        }).ToList();
     }
 
     public async Task<StaffDisciplinaryActionDto?> GetByCaseNumberAsync(string caseNumber, CancellationToken cancellationToken = default)
@@ -436,7 +479,15 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (!allowedStatuses.Contains(entity.Status))
             throw new InvalidOperationException($"Cannot record a decision for a case in '{entity.Status}' status.");
 
+        // Order matters: validate what the caller SENT before evaluating what the case's STATE
+        // permits. A request naming an action type that does not exist is malformed, and answering
+        // it with "the employee has not been queried" buries the actual problem — the caller fixes
+        // the query, resubmits, and gets a second, different refusal. The FK guard answers 404, the
+        // state rules answer 422, and each says the thing that is wrong with the request in front of
+        // it.
         var actionType = await GetOwnedActionTypeAsync(dto.ActionTypeId);
+
+        await EnsureEmployeeHasBeenHeardAsync(entity, cancellationToken);
 
         if (!_currentUserProvider.HasRole(Constants.Roles.Hr)
             && !_currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
@@ -476,6 +527,94 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         _logger.LogInformation(
             "Disciplinary decision proposed for case {CaseNumber}, ActionType: {ActionTypeId}, status now {Status}",
             entity.CaseNumber, dto.ActionTypeId, entity.Status);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Refuses a decision until the employee has been issued a written query and given a chance to
+    /// answer it — the natural-justice gate.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this blocks when the two statutory clocks only advise.</b> FR-HR-177's 48 hours
+    /// and FR-HR-178's four weeks are about timeliness, and a missed deadline is a fact about what
+    /// already happened — refusing the next step cannot undo it, it only stops the case being dealt
+    /// with. This is different: sanctioning someone who was never asked to explain themselves is not
+    /// a late act, it is a void one. The cost of the gate is one extra step on a screen that already
+    /// exists; the cost of its absence is a sanction that will not survive challenge, with the record
+    /// showing the system permitted it.</para>
+    ///
+    /// <para><b>The condition is issuance plus elapsed time, never acknowledgement.</b> Requiring the
+    /// employee to acknowledge would let anyone stall their own disciplinary process indefinitely by
+    /// ignoring the notice. Silence after a fair opportunity is not a defence, so the window closing
+    /// is enough.</para>
+    ///
+    /// <para><b>No carve-out for gross misconduct.</b> "Summary dismissal" means without notice
+    /// period, not without process — a common and expensive misreading.</para>
+    /// </remarks>
+    private async Task EnsureEmployeeHasBeenHeardAsync(StaffDisciplinaryAction entity, CancellationToken cancellationToken)
+    {
+        if (entity.QueryOpportunityWaivedAt.HasValue)
+            return;
+
+        var query = (await _notificationRepository.GetByCaseIdAsync(entity.TenantId, entity.Id))
+            .Where(n => n.NotificationType == DisciplineProcessDeadlines.WrittenQueryType)
+            .OrderBy(n => n.SentDate)
+            .FirstOrDefault();
+
+        if (query == null)
+            throw new InvalidOperationException(
+                "The employee has not been issued a written query on this case. Issue one and give them "
+                + "a chance to answer before a decision is proposed, or record why that opportunity "
+                + "could not be given.");
+
+        if (query.AcknowledgedDate.HasValue)
+            return;
+
+        var closesAt = DisciplineProcessDeadlines.QueryResponseClosesAt(query.SentDate);
+        if (DateTime.UtcNow < closesAt)
+            throw new InvalidOperationException(
+                $"The employee has until {closesAt:dd MMM yyyy HH:mm} UTC to answer the written query. "
+                + "Wait for their response, or record why the opportunity could not be given.");
+    }
+
+    /// <summary>
+    /// Records that the employee's opportunity to answer could not be given, so a decision may
+    /// proceed without it.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately requires a reason. The override exists for absconded, detained or unreachable
+    /// employees; making it costless would turn the gate into a formality, and making it absent would
+    /// push people into working around the system entirely.
+    /// </remarks>
+    public async Task<bool> WaiveQueryOpportunityAsync(Guid caseId, Guid waivedByEmployeeId, string reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCaseAsync(caseId);
+
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException(
+                "Give the reason the employee could not be given a chance to answer. It goes on the case record.");
+
+        if (entity.Status is DisciplinaryStatus.Closed or DisciplinaryStatus.Dismissed)
+            throw new InvalidOperationException("A closed or dismissed case cannot be amended.");
+
+        if (entity.QueryOpportunityWaivedAt.HasValue)
+            throw new InvalidOperationException("The opportunity to answer has already been recorded as waived on this case.");
+
+        await GetOwnedEmployeeAsync(waivedByEmployeeId, "waiving");
+
+        entity.QueryOpportunityWaivedAt = DateTime.UtcNow;
+        entity.QueryOpportunityWaivedById = waivedByEmployeeId;
+        entity.QueryOpportunityWaivedReason = reason.Trim();
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = waivedByEmployeeId.ToString();
+
+        await _caseRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogWarning(
+            "Query opportunity waived on disciplinary case {CaseNumber} by {EmployeeId}: {Reason}",
+            entity.CaseNumber, waivedByEmployeeId, entity.QueryOpportunityWaivedReason);
 
         return true;
     }
@@ -545,6 +684,35 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
                 clock.InvestigationDaysLate = (int)Math.Ceiling((breachedAt - due).TotalDays);
             }
         }
+
+        clock.QueryResponseClosesAt = query != null
+            ? DisciplineProcessDeadlines.QueryResponseClosesAt(query.SentDate)
+            : null;
+        clock.QueryOpportunityWaived = entity.QueryOpportunityWaivedAt.HasValue;
+        clock.QueryOpportunityWaivedAt = entity.QueryOpportunityWaivedAt;
+        clock.QueryOpportunityWaivedReason = entity.QueryOpportunityWaivedReason;
+        clock.QueryOpportunityWaivedByName = entity.QueryOpportunityWaivedBy?.FullName;
+
+        // Asked and answered here rather than left for the decision call to refuse, so the screen can
+        // say why the button will not work instead of the user discovering it by pressing it. The
+        // wording is the same the service refuses with, so the two cannot drift apart.
+        try
+        {
+            await EnsureEmployeeHasBeenHeardAsync(entity, cancellationToken);
+            clock.CanProposeDecision = true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            clock.CanProposeDecision = false;
+            clock.DecisionBlockedReason = ex.Message;
+        }
+
+        if (clock.DecisionBlockedReason != null)
+            clock.Advisories.Add(clock.DecisionBlockedReason);
+
+        if (clock.QueryOpportunityWaived)
+            clock.Advisories.Add(
+                $"The employee's chance to answer was recorded as waived: {clock.QueryOpportunityWaivedReason}");
 
         if (clock.QueryBreached && !clock.QueryIssued)
             clock.Advisories.Add(
