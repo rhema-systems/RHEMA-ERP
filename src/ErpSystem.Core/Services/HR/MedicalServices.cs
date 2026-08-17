@@ -2458,6 +2458,15 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
                 MedicalWorkflowFailureReason.NotFound,
                 "The insurance policy linked to this claim no longer exists.");
 
+        // A claim may only draw down the claimant's OWN policy. Without this, a claim naming
+        // somebody else's policy consumed THEIR annual limit on approval — the tenant and status
+        // checks above both pass for a colleague's policy. It also anchors the dependent lookup
+        // below: once the policy is known to be the claimant's, its dependants are theirs too.
+        if (policy.EmployeeId != claim.EmployeeId)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.NotFound,
+                "The insurance policy linked to this claim does not belong to the claimant.");
+
         if (policy.Status != MedicalInsurancePolicyStatus.Active || !policy.IsActive)
             throw new MedicalWorkflowException(
                 MedicalWorkflowFailureReason.PolicyInactive,

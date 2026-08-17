@@ -22,6 +22,7 @@
 | §6 Findings | Before writing a fix — check it isn't already logged or closed |
 | §7 Slices | The actual work |
 | §8 Unverified | Before assuming something was checked |
+| §11 Deferred | Before assuming something was dropped — everything left out is listed with its trigger |
 
 **Update rules.** Close a finding by moving its status to `fixed` with the slice number, don't
 delete it. Add new findings as they're discovered, with evidence. When a slice closes, tick it in
@@ -35,7 +36,8 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 |---|---|---|---|
 | 1 | Finish the gating job | ☑ **green 2026-08-17** | **93** |
 | 2 | Cross-tenant adjudication + claim contract | ☑ **green 2026-08-17** | **26** |
-| 3 | Self-service claims + actor hole | ☐ not started | target ~70 |
+| 3 | Self-service claims + actor hole | ☑ **green 2026-08-17** | **30** |
+| 3a | **Claim documents onto the upload gate** (F-08) | ☐ not started — **blocks slice 6** | target ~35 |
 | 4 | UI — reference & config | ☐ not started | target ~40 |
 | 5 | UI — health records | ☐ not started | target ~50 |
 | 6 | UI — claims, NHIS, dashboard | ☐ not started | target ~60 |
@@ -225,9 +227,11 @@ Correct split for all three: **reads on plain `[Authorize]`, writes on `MedicalW
 | F-02 | **high** | 3 controllers still on bare `[Authorize]` | ✅ **fixed slice 1** |
 | F-03 | **high** | `ProcessApprovalAsync` never checks the claim's tenant | ✅ **fixed slice 2** |
 | F-04 | medium | `CreateMedicalExpenseClaimDto.Items` silently discarded | ✅ **fixed slice 2** |
-| F-05 | medium | Claim create/approve/note demand an employee-linked *caller* | ◐ **create fixed slice 1**; approve/note → slice 3 |
+| F-05 | medium | Claim create/approve/note demand an employee-linked *caller* | ✅ **fixed slices 1 + 3** |
 | F-06 | medium | On-behalf-of branch unreachable (permission + actor) | ✅ **fixed slice 1** |
-| F-07 | low | ~40 reads filter tenant in memory after `GetAllAsync()` | open → deferred |
+| F-07 | low | ~40 reads filter tenant in memory after `GetAllAsync()` | open → **deferred, see §11** |
+| F-08 | **high** | Claim documents take a caller-supplied `FilePath` | open → **slice 3a** |
+| F-09 | **high** | A claim could draw down another employee's insurance policy | ✅ **fixed slice 3** |
 
 ### F-01 — Role fallback ignores the verb ✅ *empirically confirmed*
 
@@ -372,9 +376,28 @@ Submitted=2, SupervisorReview=3, HrReview=4, FinanceReview=5, Approved=6, Reject
 
 ---
 
-### Slice 3 — Self-service claims + actor hole
+### Slice 3 — Self-service claims + actor hole ✅ green 2026-08-17, 30 assertions
 
-**Target ~70 assertions.** Implements D-1; closes F-05, F-06.
+Implemented D-1; closed F-05's approval half and **F-09**. Harness: `run-slice3.mjs`.
+
+**As-built:** the surface is a sibling controller, `MedicalSelfServiceController` at `api/medical/me`,
+under the invariant `EmployeeHealthSelfServiceController` already states. Every id-addressed
+operation resolves through one `LoadOwnClaimAsync` helper, and a claim belonging to somebody else is
+a **404, not a 403**, so the surface cannot be used to enumerate claim ids.
+
+**Reads are projected explicitly, not returned as DTOs — and it earned its keep immediately.**
+`MedicalExpenseClaimSummaryDto` carries `IsFlaggedForReview`; returning the DTO would have told a
+claimant their claim was flagged for fraud review. Keep projecting; do not "simplify" this later.
+
+**F-09 was found while scoping this slice and had to be fixed before the surface opened.**
+`ConsumePolicyUtilizationAsync` verified the policy's tenant, status and dependants but never that
+the policy belonged to the claim's employee, so approving a claim naming a colleague's policy
+consumed *their* annual limit. Only HR could mis-key that before; self-service would have made it
+deliberately reachable by every employee. The fix also anchors the dependant lookup — once the
+policy is known to be the claimant's, its dependants are theirs — which is why dependant claims are
+safe to allow here.
+
+**Deferred out of this slice: receipt upload (F-08).** See slice 3a.
 
 **Changes**
 
@@ -399,6 +422,39 @@ cannot see internal notes ✓ · cannot reach another's items or documents by id
 account *can* file on behalf but gets a specific refusal on approve ✓
 
 ---
+
+### Slice 3a — Claim documents onto the controlled-upload gate (F-08)
+
+**Target ~35 assertions. Blocks slice 6** — a claims UI without receipt upload is a half-feature,
+and self-service filing without receipts is worse than that.
+
+**The defect.** `POST api/medical-expense-claims/{claimId}/documents` takes
+`CreateMedicalExpenseDocumentDto` with a caller-supplied **`FilePath`** — a client naming a path on
+disk. This is the *identical* defect `EmployeeHealthController.AddExamDocument` was already fixed
+for in this same area, where the XML doc records that it "let any authenticated user attach
+arbitrary bytes on disk — including another tenant's — to a medical record".
+
+**Why it was not fixed in slice 3.** `MedicalExpenseDocument` lacks the three DMS columns its
+sibling `EmployeeMedicalExamDocument` already has (`FileUploadRecordId`, `DocumentRecordId`,
+`DocumentVersionId`), and there is no upload category for claim documents. So the fix needs a
+**migration** plus a new category — too much to carry inside a security slice, and a migration
+deserves its own review.
+
+**The work**
+
+1. Add the three DMS columns to `MedicalExpenseDocument` + migration (guard-everything style; the
+   snapshot must be regenerated — see `repo-db-and-hr-conventions`).
+2. Add `ControlledFileUploadCategories.HrMedicalClaimDocuments = "hr-medical-claim-documents"`.
+3. Replace the JSON POST with a multipart upload through `IHrControlledDocumentService`, modelled
+   on `EmployeeHealthController.AddExamDocument` — including the rollback on failure and the DMS
+   registration with an access profile.
+4. Add a download endpoint via `HrDocumentDownload.ServeAsync` (a document that cannot be retrieved
+   is pointless).
+5. **Then** open upload + download on `MedicalSelfServiceController`, scoped through
+   `LoadOwnClaimAsync` exactly like the item routes.
+
+⚠ The clamd stub must run alongside the API if the new category is scan-mandatory, as area 10's
+document slices needed (`node clamd-stub.mjs`).
 
 ### Slices 4–7 — UI, the W1 recipe an eighth time
 
@@ -454,6 +510,20 @@ Does not block slice 3 — the segregation-of-duties argument for self-filing ho
 it changes how prominent self-filing should be in slice 6's UI.
 
 ---
+
+## 11. Deferred register — everything consciously left out, and where it lands
+
+Nothing here is forgotten; each item has a home or an explicit trigger. Add to this list rather
+than dropping a deferral into a commit message.
+
+| What | Why deferred | Where it lands |
+|---|---|---|
+| **F-08** — claim documents on a caller-supplied path | Needs 3 new columns + a migration + a new upload category; too much inside a security slice | **Slice 3a**, and it **blocks slice 6** |
+| **F-07** — ~40 reads filter tenant in memory after `GetAllAsync()` | Correct, just wasteful; invisible at current data volumes (every medical table was empty) | No slice yet. **Trigger:** the first list screen that feels slow in slice 4–7, or the first tenant with real claim volume |
+| **Employee edit / withdraw of their own claim** | D-1's scope line was file / list / read / items / documents. A claim filed in error currently needs HR to delete it | **Trigger:** first UI feedback in slice 6. Small — an update route through `LoadOwnClaimAsync`, restricted to `Pending` |
+| **SHE ↔ Medical bridge by reference** | The slice-9 call in `she-medical-ownership-boundary` was never built; surveillance has no link to `EmployeeHealthProfile` / `EmployeeMedicalExam` | **Trigger:** slice 5 (health records UI), where the absence becomes visible. Note SHE surveillance already FKs `HealthcareFacility`, so slice 4 partially unblocks it |
+| **Workflow engine for claim approval** | Currently bespoke single-step, same shape as the `goal-approval-stays-bespoke` exception | **Trigger:** TDC asking for multi-step medical approval. Recipe in `workflow-engine-integration` |
+| **Which payment route TDC operates** | All three tables were empty, so it cannot be inferred | Open question §9 — does not block, but shapes slice 6's UI |
 
 ## 10. Correction log
 

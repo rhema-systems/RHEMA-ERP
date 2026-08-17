@@ -113,7 +113,10 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId) is { } error) return error;
+        // ApprovedById is an Employee FK, so an adjudicator genuinely has to be an employee —
+        // unlike filing, where the audit field takes the user id. Say which it is.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Recording a claim approval") is { } error) return error;
 
         await _service.ProcessApprovalAsync(dto, tenantId, employeeId, userId, ct);
         return Ok(new { message = "Approval recorded." });
@@ -264,7 +267,9 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     {
         dto.ClaimId = claimId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId) is { } error) return error;
+        // AuthorId is an Employee FK — a note has to be attributable to a person, not an account.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Adding a note to a claim") is { } error) return error;
 
         var created = await _service.AddNoteAsync(dto, tenantId, employeeId, userId, ct);
         return Ok(created);
