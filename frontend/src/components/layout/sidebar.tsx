@@ -123,6 +123,7 @@ import {
   Stethoscope,
   HeartPulse,
   Hospital,
+  FileHeart,
   Leaf,
   Recycle,
 } from 'lucide-react';
@@ -719,6 +720,7 @@ export const navigationItems: NavItem[] = [
         href: '/hr/medical',
         icon: HeartPulse,
         children: [
+          { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart },
           { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital },
           { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope },
           { title: 'Insurance Providers', href: '/hr/medical/insurance', icon: ShieldPlus },

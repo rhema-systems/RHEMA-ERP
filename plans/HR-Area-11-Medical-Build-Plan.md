@@ -39,7 +39,7 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | 3 | Self-service claims + actor hole | ☑ **green 2026-08-17** | **30** |
 | 3a | Claim documents onto the upload gate (F-08) | ☑ **green 2026-08-17** | **22** |
 | 4 | UI — reference & config | ☑ **green 2026-08-17** | tsc + lint clean, 17 routes verified |
-| 5 | UI — health records | ☐ not started | target ~50 |
+| 5 | UI — health records | ☑ **green 2026-08-17** | tsc + lint clean, 10 routes verified |
 | 6 | UI — claims, NHIS, dashboard | ☐ not started | target ~60 |
 | 7 | UI — clinical | ☐ not started | target ~40 |
 
@@ -487,7 +487,7 @@ Each slice: `types/hr/<x>.ts` → `services/hr/<x>.service.ts` → pages → sid
 | # | Slice | Contents |
 |---|---|---|
 | 4 ✅ | Reference & config | facilities, physicians, providers/plans, schemes/tiers |
-| 5 | Health records | profiles, conditions, allergies, exams + document upload |
+| 5 ✅ | Health records | profiles, conditions, allergies, exams + document upload |
 | 6 | Claims | expense claims, adjudication queue, NHIS, dashboard |
 | 7 | Clinical | pre-authorisations, referrals, appointments |
 
@@ -523,6 +523,31 @@ typecheck cannot catch.
 
 **Exam document upload (slice 5)** already runs through the shared controlled-document gate with
 malware scanning and DMS registration — do not rebuild it, wire to it.
+
+#### Slice 5 as-built (2026-08-17)
+
+`types/hr/medical.ts` (health-record section) · `services/hr/medical-health.service.ts` ·
+`app/hr/medical/health/` (profiles list + exams-due tab, and `[id]` with conditions / allergies /
+examinations) · hub card + sidebar entry.
+
+- **Severe and anaphylactic allergies are pinned to the profile header**, not left inside a tab.
+  They are the one thing on the file someone may need in seconds, and a tab hides them.
+- **The employee picker disappears on edit.** The update DTO has no `employeeId`, so a profile
+  cannot be moved to another person; offering the control would imply an action that cannot happen.
+- ⚠ **The exam-document upload route takes no id** — `examId` travels as a **form field**
+  (`POST api/employee-health/exam-documents`), unlike every other HR upload where the parent is in
+  the path. Noted in the service because it is easy to "correct" into a 404.
+- **`AttachmentsPanel` was made generic** over a new structural `AttachmentLike` (`id`, `fileName`,
+  `description`, `uploadDate`, optional `uploadedByName`) instead of being tied to
+  `AppraisalAttachment`. Examination documents record the uploader as a *user*, so they have no
+  `uploadedByName`; casting them to satisfy the old signature needed three
+  `as unknown as any`, which would have hidden precisely the mismatch types exist to catch.
+  Backward compatible — `AppraisalAttachment` satisfies the constraint, and every existing caller
+  still typechecks.
+
+**Verification:** `tsc` clean (same 19 pre-existing inventory errors), `eslint` clean, and
+`route-check-health.mjs` confirms all **10** health-record paths resolve, with profile, exam,
+condition and allergy creates exercised as its fixtures.
 
 **The dashboard (slice 6)** is already correct and tenant-scoped in SQL with proper `.Include`s.
 It only needs a screen.

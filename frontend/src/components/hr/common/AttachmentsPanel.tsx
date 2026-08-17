@@ -20,15 +20,30 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { useToast } from '@/hooks/use-toast';
 import { formatDateTime } from '@/lib/hr/attendance-format';
-import type { AppraisalAttachment } from '@/types/hr/calibration';
 
-interface AttachmentsPanelProps {
+/**
+ * The only fields this panel renders.
+ *
+ * Declared structurally rather than tying the component to one area's DTO: medical examination
+ * documents carry no uploader name, and casting them into an appraisal attachment to satisfy the
+ * old signature would have hidden exactly the kind of shape mismatch types exist to catch.
+ */
+export interface AttachmentLike {
+  id: string;
+  fileName: string;
+  description?: string | null;
+  uploadDate: string;
+  /** Absent on areas that record the uploader as a user rather than an employee. */
+  uploadedByName?: string | null;
+}
+
+interface AttachmentsPanelProps<TAttachment extends AttachmentLike> {
   title?: string;
   /** Must be stable and unique per parent record — it keys the cache. */
   queryKey: readonly unknown[];
-  list: () => Promise<AppraisalAttachment[]>;
-  upload: (file: File, description: string | null) => Promise<AppraisalAttachment>;
-  download: (attachment: AppraisalAttachment) => Promise<void>;
+  list: () => Promise<TAttachment[]>;
+  upload: (file: File, description: string | null) => Promise<TAttachment>;
+  download: (attachment: TAttachment) => Promise<void>;
   remove?: (attachmentId: string) => Promise<void>;
   readOnly?: boolean;
   emptyDescription?: string;
@@ -47,7 +62,7 @@ interface AttachmentsPanelProps {
  * is shared is the shape of the interaction and the fact that a refused upload comes back with a
  * reason worth showing verbatim.
  */
-export function AttachmentsPanel({
+export function AttachmentsPanel<TAttachment extends AttachmentLike>({
   title = 'Attachments',
   queryKey,
   list,
@@ -57,7 +72,7 @@ export function AttachmentsPanel({
   readOnly = false,
   emptyDescription = 'Nothing attached yet.',
   note,
-}: AttachmentsPanelProps) {
+}: AttachmentsPanelProps<TAttachment>) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);

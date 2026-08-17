@@ -1,6 +1,6 @@
 'use client';
 
-import { Hospital, Stethoscope, ShieldPlus, Layers } from 'lucide-react';
+import { Hospital, Stethoscope, ShieldPlus, Layers, FileHeart } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -21,6 +21,13 @@ export default function MedicalHomePage() {
 
       <NavCardGrid
         items={[
+          {
+            title: 'Health Records',
+            description:
+              'Employee health profiles, conditions, allergies and medical examinations, with the recall list.',
+            href: '/hr/medical/health',
+            icon: FileHeart,
+          },
           {
             title: 'Healthcare Facilities',
             description:
