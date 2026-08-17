@@ -644,12 +644,14 @@ pre-authorisations, referrals, appointments) · hub card + sidebar entry.
 
 ## 9. Open questions for TDC
 
-**Item 8 for `docs/HR-OPEN-QUESTIONS-FOR-TDC.md`** — which payment route does TDC actually
-operate? The module supports three: NHIS, insurance-billed, and out-of-pocket reimbursement. All
-three tables were empty, so we cannot tell from the data.
+✅ **Added to `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` as item 7, 2026-08-17** — "How does TDC actually
+pay for medical treatment?" It asks for the rough share of spend across NHIS, insurer-billed and
+out-of-pocket reimbursement, and whether employees are expected to claim money back at all.
 
-Does not block slice 3 — the segregation-of-duties argument for self-filing holds either way — but
-it changes how prominent self-filing should be in slice 6's UI.
+Does not block anything — all three routes are built and working. It changes emphasis and where
+staff are pointed, not whether the module functions. The doc's intro and heading numbering were
+updated with it (items 1–4 and 7 need an answer; 5, 6 and 8 are for information), and the
+completed-areas count moved from 13 to 14.
 
 ---
 
@@ -667,7 +669,7 @@ than dropping a deferral into a commit message.
 | **Workflow engine for claim approval** | Currently bespoke single-step, same shape as the `goal-approval-stays-bespoke` exception | **Trigger:** TDC asking for multi-step medical approval. Recipe in `workflow-engine-integration` |
 | **Which payment route TDC operates** | All three tables were empty, so it cannot be inferred | Open question §9 — does not block, but shapes slice 6's UI |
 | **Clinical create forms** (pre-auth, referral, appointment) | Slice 7 shipped the registers and the workflow actions but no authoring forms; all three are better raised from an employee's own record than a global list | **Trigger:** first time HR needs to raise one in the system rather than record one already raised |
-| **`PermissionGate.tsx` stale note** | Says "HR permissions are not seeded yet, prefer `roles`", which has been false since the medical seed went live | **Trigger:** the W3 sweep, which it will otherwise mislead. One-line fix |
+| ~~**`PermissionGate.tsx` stale note**~~ | ~~Says HR permissions are not seeded~~ | ✅ **done 2026-08-17.** Both claims were stale — the three `HR.Medical.*` permissions are seeded, and only the role `HR` exists (no `HR User`). Note now states which areas are permission-gated vs role-gated, and the two medical exceptions (open facility reads, token-scoped self-service) |
 | **Per-type claim document upload** | `AttachmentsPanel`'s upload callback carries only a description, so every claim document is recorded as `Receipt` | **Trigger:** TDC wanting invoices and discharge summaries distinguished |
 | **No frontend test coverage** | This environment has no browser automation, so UI verification was types + lint + route resolution only | **Trigger:** a UI regression, or the first e2e harness in `e2e-tests/` |
 
