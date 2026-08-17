@@ -38,7 +38,7 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | 2 | Cross-tenant adjudication + claim contract | ☑ **green 2026-08-17** | **26** |
 | 3 | Self-service claims + actor hole | ☑ **green 2026-08-17** | **30** |
 | 3a | Claim documents onto the upload gate (F-08) | ☑ **green 2026-08-17** | **22** |
-| 4 | UI — reference & config | ☐ not started | target ~40 |
+| 4 | UI — reference & config | ☑ **green 2026-08-17** | tsc + lint clean, 17 routes verified |
 | 5 | UI — health records | ☐ not started | target ~50 |
 | 6 | UI — claims, NHIS, dashboard | ☐ not started | target ~60 |
 | 7 | UI — clinical | ☐ not started | target ~40 |
@@ -486,13 +486,40 @@ Each slice: `types/hr/<x>.ts` → `services/hr/<x>.service.ts` → pages → sid
 
 | # | Slice | Contents |
 |---|---|---|
-| 4 | Reference & config | facilities, physicians, providers/plans, schemes/tiers |
+| 4 ✅ | Reference & config | facilities, physicians, providers/plans, schemes/tiers |
 | 5 | Health records | profiles, conditions, allergies, exams + document upload |
 | 6 | Claims | expense claims, adjudication queue, NHIS, dashboard |
 | 7 | Clinical | pre-authorisations, referrals, appointments |
 
 **4 must come first** — the registers are empty and everything downstream needs a facility to
 point at.
+
+#### Slice 4 as-built (2026-08-17)
+
+`types/hr/medical.ts` · `services/hr/medical-reference.service.ts` · `app/hr/medical/` (hub,
+facilities, physicians, insurance + `[id]`, schemes + `[id]`) · sidebar group **Medical & Health**.
+
+- Built on **`ResourceListPanel`** (standalone registers) and **`ResourceCollectionTab`**
+  (plans under a provider, tiers under a scheme) rather than hand-rolled tables — that is the
+  house pattern for exactly this shape and it kept four registers to roughly one screen each.
+- **Enums are strings over the wire**, so the types are string unions with `*_OPTIONS` label
+  arrays. Do not use the numeric values from `HREnums.cs` in the frontend.
+- **Summary DTOs are narrower than create DTOs.** `HealthcareFacilitySummary` has no
+  `physicalAddress`, `MedicalInsuranceProviderSummary` has no `licenseNumber`/`address`/`email`,
+  and `PhysicianSummary` carries a single `fullName`. `toForm` therefore cannot round-trip those
+  fields, so the edit dialog re-collects them instead of silently posting blanks. If an edit ever
+  needs to preserve them untouched, switch `toForm` to fetch the full record first.
+- **Physician verify is one-way** — no un-verify endpoint exists, so the action is hidden on
+  already-verified rows rather than offered and refused.
+- Sub-limits on plans and tiers are **caps within the annual limit, not cover on top of it**. The
+  dialogs say so, because entering them as additions overstates entitlement and the service
+  enforces the former.
+
+**Verification** (no browser automation available in this environment): `tsc --noEmit` clean — 19
+errors remain and all 19 are pre-existing in `src/app/inventory` and `src/services/inventory*`,
+none in HR; `eslint` clean on every new file; and `dev-harness/hr-medical/route-check.mjs` confirms
+all **17** API paths the service calls resolve against a running API, which is the failure a
+typecheck cannot catch.
 
 **Exam document upload (slice 5)** already runs through the shared controlled-document gate with
 malware scanning and DMS registration — do not rebuild it, wire to it.

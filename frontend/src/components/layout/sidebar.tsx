@@ -122,6 +122,7 @@ import {
   UserPlus,
   Stethoscope,
   HeartPulse,
+  Hospital,
   Leaf,
   Recycle,
 } from 'lucide-react';
@@ -706,6 +707,22 @@ export const navigationItems: NavItem[] = [
           { title: 'Corrective Actions', href: '/hr/safety/corrective-actions', icon: ListChecks },
           { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge },
           { title: 'SHE Analytics', href: '/hr/safety/performance/analytics', icon: BarChart3 },
+        ],
+      },
+      {
+        // Area 11 — Medical & Health. Everything here is gated on the HR.Medical.* permission
+        // policies rather than a role, so an HR user without medical permissions sees 403s.
+        // Slice 4 ships the reference registers; health records, claims and the clinical
+        // surface follow in slices 5–7. Note occupational health and return-to-work live under
+        // Safety (SHE owns them) but ride the same medical policies.
+        title: 'Medical & Health',
+        href: '/hr/medical',
+        icon: HeartPulse,
+        children: [
+          { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital },
+          { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope },
+          { title: 'Insurance Providers', href: '/hr/medical/insurance', icon: ShieldPlus },
+          { title: 'Benefit Schemes', href: '/hr/medical/schemes', icon: Layers },
         ],
       },
     ],
