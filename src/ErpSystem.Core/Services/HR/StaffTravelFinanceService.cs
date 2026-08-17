@@ -394,7 +394,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelAdvanceDto> GetAdvanceByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedAdvanceAsync(id);
+        var entity = await _advanceRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"Advance with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -473,7 +474,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Travel advance created: {AdvanceNumber}", entity.AdvanceNumber);
-        return entity.ToDto();
+        var reloaded = await _advanceRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelAdvanceDto> UpdateAdvanceAsync(UpdateStaffTravelAdvanceDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -487,7 +489,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.UnsettledAmount = (entity.ApprovedAmount ?? entity.RequestedAmount) - entity.SettledAmount;
         await _advanceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _advanceRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteAdvanceAsync(Guid id, CancellationToken cancellationToken = default)
@@ -547,7 +550,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     public async Task<StaffTravelPerDiemRateDto> GetPerDiemRateByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedPerDiemRateAsync(id);
+        var entity = await _perDiemRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"PerDiemRate with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -583,7 +587,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _perDiemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _perDiemRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelPerDiemRateDto> UpdatePerDiemRateAsync(UpdateStaffTravelPerDiemRateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -593,7 +598,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _perDiemRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _perDiemRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeletePerDiemRateAsync(Guid id, CancellationToken cancellationToken = default)

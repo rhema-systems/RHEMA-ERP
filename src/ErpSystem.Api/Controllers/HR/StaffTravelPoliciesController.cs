@@ -155,11 +155,12 @@ public class StaffTravelPoliciesController : HrControllerBase
     public async Task<IActionResult> DecideException(Guid id, [FromBody] DecideStaffTravelPolicyExceptionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // ApprovedById is an Employee FK — who granted an exception to travel policy is a person.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Deciding a travel policy exception") is { } contextError) return contextError;
 
         dto.ExceptionId = id;
-        dto.ApprovedById = userId;
-        await _service.DecideExceptionAsync(dto);
+        await _service.DecideExceptionAsync(dto, employeeId);
         return Ok(new { message = "Policy exception decision recorded." });
     }
 

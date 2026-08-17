@@ -143,6 +143,16 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
 {
     public StaffTravelAdvanceRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelAdvance?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.Employee)
+            .Include(a => a.StaffTravelRequest)
+            .Include(a => a.ApprovedBy)
+            .Include(a => a.DisbursedBy)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
+    }
+
     public async Task<StaffTravelAdvance?> GetByAdvanceNumberAsync(string advanceNumber)
     {
         return await _dbSet
@@ -218,6 +228,14 @@ public class StaffTravelAdvanceRepository : GenericRepository<StaffTravelAdvance
 public class StaffTravelPerDiemRateRepository : GenericRepository<StaffTravelPerDiemRate>, IStaffTravelPerDiemRateRepository
 {
     public StaffTravelPerDiemRateRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelPerDiemRate?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(r => r.Country)
+            .Include(r => r.StaffLevel)
+            .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId && !r.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelPerDiemRate>> GetActiveRatesAsync()
     {

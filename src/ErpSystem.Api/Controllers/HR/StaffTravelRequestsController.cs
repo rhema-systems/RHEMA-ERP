@@ -156,7 +156,10 @@ public class StaffTravelRequestsController : HrControllerBase
         if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
         dto.RequestId = id;
-        dto.ApprovedById = userId;
+        // ApprovedById is deliberately NOT set. Slice 2 moved approval onto the workflow engine,
+        // which resolves the approver from the authenticated user against the published definition;
+        // the service no longer reads this field. It stays on the DTO for wire compatibility and is
+        // vestigial — a later cleanup should drop it rather than let it look meaningful.
         await _service.ApproveAsync(dto);
         return Ok(new { message = "Travel request approved." });
     }

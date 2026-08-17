@@ -246,7 +246,7 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
             .ToList();
     }
 
-    public async Task<bool> DecideExceptionAsync(DecideStaffTravelPolicyExceptionDto decideDto, CancellationToken cancellationToken = default)
+    public async Task<bool> DecideExceptionAsync(DecideStaffTravelPolicyExceptionDto decideDto, Guid deciderEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedExceptionAsync(decideDto.ExceptionId);
 
@@ -254,9 +254,10 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
             throw new InvalidOperationException("Only pending exceptions can be decided.");
 
         entity.Status = decideDto.Status;
-        entity.ApprovedById = decideDto.ApprovedById;
+        entity.ApprovedById = deciderEmployeeId;   // the caller, not a payload value
         entity.DecidedAt = decideDto.DecidedAt;
-        entity.UpdatedBy = decideDto.ApprovedById.ToString();
+        // Audit field: the USER id, not the Employee FK stamped above.
+        entity.UpdatedBy = _currentUserProvider.UserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _exceptionRepository.UpdateAsync(entity);

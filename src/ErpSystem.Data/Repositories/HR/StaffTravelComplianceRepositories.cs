@@ -15,6 +15,15 @@ public class StaffTravelDocumentRepository : GenericRepository<StaffTravelDocume
 {
     public StaffTravelDocumentRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelDocument?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(d => d.Employee)
+            .Include(d => d.IssuingCountry)
+            .Include(d => d.VerifiedBy)
+            .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId && !d.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelDocument>> GetAllWithDetailsAsync()
     {
         return await _dbSet
@@ -98,6 +107,15 @@ public class StaffTravelVisaApplicationRepository : GenericRepository<StaffTrave
 {
     public StaffTravelVisaApplicationRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelVisaApplication?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(v => v.Employee)
+            .Include(v => v.DestinationCountry)
+            .Include(v => v.Vendor)
+            .FirstOrDefaultAsync(v => v.Id == id && v.TenantId == tenantId && !v.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelVisaApplication>> GetAllWithDetailsAsync()
     {
         return await _dbSet
@@ -159,6 +177,14 @@ public class StaffTravelRiskAssessmentRepository : GenericRepository<StaffTravel
 {
     public StaffTravelRiskAssessmentRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelRiskAssessment?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.AssessedBy)
+            .Include(a => a.DestinationCountry)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelRiskAssessment>> GetByRequestIdAsync(Guid requestId)
     {
         return await _dbSet
@@ -203,6 +229,13 @@ public class StaffTravelRiskAssessmentRepository : GenericRepository<StaffTravel
 public class StaffTravelAlertRepository : GenericRepository<StaffTravelAlert>, IStaffTravelAlertRepository
 {
     public StaffTravelAlertRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelAlert?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.Country)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelAlert>> GetActiveAlertsAsync()
     {
@@ -294,6 +327,13 @@ public class StaffTravelInsurancePolicyRepository : GenericRepository<StaffTrave
 {
     public StaffTravelInsurancePolicyRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelInsurancePolicy?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(i => i.Vendor)
+            .FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenantId && !i.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelInsurancePolicy>> GetByRequestIdAsync(Guid requestId)
     {
         return await _dbSet
@@ -328,6 +368,13 @@ public class StaffTravelInsurancePolicyRepository : GenericRepository<StaffTrave
 public class StaffTravelHealthRequirementRepository : GenericRepository<StaffTravelHealthRequirement>, IStaffTravelHealthRequirementRepository
 {
     public StaffTravelHealthRequirementRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelHealthRequirement?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(h => h.Country)
+            .FirstOrDefaultAsync(h => h.Id == id && h.TenantId == tenantId && !h.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelHealthRequirement>> GetByCountryAsync(Guid countryId)
     {

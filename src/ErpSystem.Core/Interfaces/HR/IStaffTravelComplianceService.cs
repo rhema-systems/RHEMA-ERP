@@ -18,7 +18,7 @@ public interface IStaffTravelComplianceService
     Task<IEnumerable<StaffTravelDocumentDto>> GetExpiringDocumentsAsync(int daysAhead = 90, CancellationToken cancellationToken = default);
     Task<StaffTravelDocumentDto> CreateDocumentAsync(CreateStaffTravelDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelDocumentDto> UpdateDocumentAsync(UpdateStaffTravelDocumentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, CancellationToken cancellationToken = default);
+    Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, Guid verifierEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Visa requirements (reference data)

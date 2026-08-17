@@ -68,6 +68,9 @@ public interface IStaffTravelExpenseClaimLineRepository : IGenericRepository<Sta
 
 public interface IStaffTravelAdvanceRepository : IGenericRepository<StaffTravelAdvance>
 {
+    /// <summary>The advance with its employee, request and actors, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelAdvance?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns the advance matching the unique advance number.</summary>
     Task<StaffTravelAdvance?> GetByAdvanceNumberAsync(string advanceNumber);
 
@@ -99,6 +102,9 @@ public interface IStaffTravelAdvanceRepository : IGenericRepository<StaffTravelA
 
 public interface IStaffTravelPerDiemRateRepository : IGenericRepository<StaffTravelPerDiemRate>
 {
+    /// <summary>The per-diem rate with its country and staff level, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelPerDiemRate?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all active per-diem rates.</summary>
     Task<IEnumerable<StaffTravelPerDiemRate>> GetActiveRatesAsync();
 

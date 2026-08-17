@@ -2,6 +2,11 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
+using ErpSystem.Shared;
+using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using Microsoft.Extensions.Logging;
@@ -24,8 +29,11 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     private readonly IStaffTravelAlertNotificationRepository _notificationRepository;
     private readonly IStaffTravelInsurancePolicyRepository _insuranceRepository;
     private readonly IStaffTravelHealthRequirementRepository _healthRequirementRepository;
+    private readonly IStaffTravelRequestRepository _requestRepository;
+    private readonly IEmployeeRepository _employeeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAppEventBus _appEventBus;
     private readonly ILogger<StaffTravelComplianceService> _logger;
 
     public StaffTravelComplianceService(
@@ -37,8 +45,11 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         IStaffTravelAlertNotificationRepository notificationRepository,
         IStaffTravelInsurancePolicyRepository insuranceRepository,
         IStaffTravelHealthRequirementRepository healthRequirementRepository,
+        IStaffTravelRequestRepository requestRepository,
+        IEmployeeRepository employeeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IAppEventBus appEventBus,
         ILogger<StaffTravelComplianceService> logger)
     {
         _documentRepository = documentRepository;
@@ -49,8 +60,11 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         _notificationRepository = notificationRepository;
         _insuranceRepository = insuranceRepository;
         _healthRequirementRepository = healthRequirementRepository;
+        _requestRepository = requestRepository;
+        _employeeRepository = employeeRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -141,7 +155,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
     public async Task<StaffTravelDocumentDto> GetDocumentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedDocumentAsync(id);
+        var entity = await _documentRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"Document with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -175,10 +190,12 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelDocumentDto> CreateDocumentAsync(CreateStaffTravelDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedEmployeeAsync(createDto.EmployeeId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _documentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelDocumentDto> UpdateDocumentAsync(UpdateStaffTravelDocumentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -187,17 +204,20 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _documentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _documentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
-    public async Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, CancellationToken cancellationToken = default)
+    public async Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, Guid verifierEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedDocumentAsync(verifyDto.DocumentId);
 
         entity.IsVerified = true;
-        entity.VerifiedById = verifyDto.VerifiedById;
+        entity.VerifiedById = verifierEmployeeId;   // the caller, not a payload value
         entity.VerifiedAt = verifyDto.VerifiedAt;
-        entity.UpdatedBy = verifyDto.VerifiedById.ToString();
+        // UpdatedBy is an audit field and takes the USER id; VerifiedById above is the Employee
+        // FK. Two identifiers, two different things — the same split slice 1 had to untangle.
+        entity.UpdatedBy = _currentUserProvider.UserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _documentRepository.UpdateAsync(entity);
@@ -263,7 +283,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
     public async Task<StaffTravelVisaApplicationDto> GetVisaApplicationByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedVisaApplicationAsync(id);
+        var entity = await _visaApplicationRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"VisaApplication with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -315,10 +336,13 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelVisaApplicationDto> CreateVisaApplicationAsync(CreateStaffTravelVisaApplicationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        await RequireOwnedEmployeeAsync(createDto.EmployeeId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _visaApplicationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _visaApplicationRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelVisaApplicationDto> UpdateVisaApplicationAsync(UpdateStaffTravelVisaApplicationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -327,7 +351,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _visaApplicationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _visaApplicationRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteVisaApplicationAsync(Guid id, CancellationToken cancellationToken = default)
@@ -342,7 +367,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
     public async Task<StaffTravelRiskAssessmentDto> GetRiskAssessmentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedRiskAssessmentAsync(id);
+        var entity = await _riskAssessmentRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"RiskAssessment with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -376,10 +402,12 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelRiskAssessmentDto> CreateRiskAssessmentAsync(CreateStaffTravelRiskAssessmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _riskAssessmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _riskAssessmentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelRiskAssessmentDto> UpdateRiskAssessmentAsync(UpdateStaffTravelRiskAssessmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -388,7 +416,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _riskAssessmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _riskAssessmentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> AcknowledgeRiskAssessmentAsync(AcknowledgeStaffTravelRiskAssessmentDto acknowledgeDto, CancellationToken cancellationToken = default)
@@ -456,7 +485,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _alertRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _alertRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelAlertDto> UpdateAlertAsync(UpdateStaffTravelAlertDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -465,7 +495,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _alertRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _alertRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteAlertAsync(Guid id, CancellationToken cancellationToken = default)
@@ -478,13 +509,162 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
     // ---- Alert notifications -----------------------------------------------
 
+    /// <summary>
+    /// Confirms the travel request exists in the caller's tenant, and returns it — the compliance
+    /// creates all took StaffTravelRequestId from the payload without checking it.
+    /// </summary>
+    private async Task<StaffTravelRequest> RequireOwnedRequestAsync(Guid requestId)
+    {
+        var request = await _requestRepository.GetByIdAsync(requestId);
+        if (request == null || request.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
+        return request;
+    }
+
+    /// <summary>
+    /// Confirms the employee exists in the caller's tenant, and returns it.
+    /// </summary>
+    private async Task<Employee> RequireOwnedEmployeeAsync(Guid employeeId)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+        return employee;
+    }
+
+    /// <summary>
+    /// Publishes the alert to the travel desk and the traveller, then records that it was sent.
+    /// </summary>
+    /// <remarks>
+    /// The stamp is written only after <c>PublishAsync</c> returns. If publishing throws, the row
+    /// keeps a null <c>NotificationSentAt</c> and reads as undelivered — which is the truth, and is
+    /// the whole point of the change. An unsent alert that admits it is unsent can be retried; one
+    /// that claims delivery cannot.
+    /// </remarks>
+    private async Task SendAlertAsync(
+        StaffTravelAlertNotification notification,
+        StaffTravelAlert alert,
+        StaffTravelRequest request,
+        CancellationToken cancellationToken)
+    {
+        await EnsureAlertTopicAsync(notification.TenantId, cancellationToken);
+
+        var employee = await _employeeRepository.GetByIdAsync(notification.EmployeeId);
+        var country = await _alertRepository.GetQueryable()
+            .Where(a => a.Id == alert.Id)
+            .Select(a => a.Country.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        await _appEventBus.PublishAsync(new EntityActivityEvent
+        {
+            TenantId = notification.TenantId,
+            EntityType = AlertTopicEntityType,
+            Activity = "Issued",
+            Audience = AlertTopicAudience,
+            EntityId = alert.Id,
+            TriggeredByUserId = _currentUserProvider.UserId,
+            Data = new Dictionary<string, object>
+            {
+                ["AlertTitle"] = alert.Title ?? string.Empty,
+                ["Severity"] = alert.Severity.ToString(),
+                ["Country"] = country ?? string.Empty,
+                ["Reference"] = request.RequestNumber ?? string.Empty,
+                ["Route"] = $"{request.OriginCity} to {request.DestinationCity}",
+                ["Dates"] = $"{request.TravelStartDate:yyyy-MM-dd} to {request.TravelEndDate:yyyy-MM-dd}",
+                ["TravellerEmail"] = employee?.EmailAddress ?? string.Empty,
+                ["ActionPath"] = $"/hr/travel/requests/{request.Id}",
+            },
+        }, cancellationToken);
+
+        notification.NotificationSentAt = DateTime.UtcNow;
+        await _notificationRepository.UpdateAsync(notification);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    // ---- Travel alerts that actually reach somebody ---------------------------
+
+    private const string AlertTopicEntityType = "StaffTravelAlert";
+    private const string AlertTopicAudience = "Internal";
+    private const string AlertTopicKey = "StaffTravelAlert.Issued.Internal";
+
+    /// <summary>
+    /// Creates the travel-alert notification topic for a tenant if it does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Two recipients, deliberately. <b>Role HR</b> is the travel desk, who may have to act — move
+    /// a booking, cancel a leg. <b>EmailFromData</b> reaches the traveller directly, because an
+    /// alert about the country you are flying to next week is useless if it only ever lands in
+    /// somebody's queue. The platform has no "employee" recipient kind, so the traveller's address
+    /// travels in the event data and the rule points at that key.
+    /// </remarks>
+    private async Task EnsureAlertTopicAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var topicRepo = _unitOfWork.Repository<NotificationTopic>();
+        var existing = await topicRepo
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && t.Key == AlertTopicKey)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existing != null) return;
+
+        var topic = new NotificationTopic
+        {
+            TenantId = tenantId,
+            Key = AlertTopicKey,
+            Name = "Travel: Destination alert",
+            Description = "System-seeded — a security, health or disruption alert affects a trip already booked.",
+            EntityType = AlertTopicEntityType,
+            IsSystem = true,
+            IsActive = true,
+            EnableInApp = true,
+            EnableEmail = true,
+            EnableSms = false,
+            InAppTitleTemplate = "{{Severity}} travel alert: {{Country}}",
+            InAppBodyTemplate = "{{AlertTitle}} — affects {{Reference}} ({{Route}}, {{Dates}}).",
+            ActionUrlTemplate = "{{ActionPath}}",
+            CreatedBy = "System",
+        };
+        await topicRepo.AddAsync(topic);
+
+        var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
+        await recipientRepo.AddAsync(new NotificationTopicRecipient
+        {
+            TenantId = tenantId, TopicId = topic.Id,
+            RecipientKind = "Role", RecipientValue = Constants.Roles.Hr,
+            IsSystem = true, SendInApp = true, CreatedBy = "System",
+        });
+        await recipientRepo.AddAsync(new NotificationTopicRecipient
+        {
+            TenantId = tenantId, TopicId = topic.Id,
+            RecipientKind = "EmailFromData", RecipientValue = "TravellerEmail",
+            IsSystem = true, SendEmail = true, CreatedBy = "System",
+        });
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<StaffTravelAlertNotificationDto> CreateAlertNotificationAsync(CreateStaffTravelAlertNotificationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Both parents are real records, and neither was checked.
+        var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        var alert = await _alertRepository.GetByIdAsync(createDto.TravelAlertId);
+        if (alert == null || alert.TenantId != tenantId)
+            throw new ArgumentException($"Travel alert with ID '{createDto.TravelAlertId}' not found.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // NotificationSentAt used to be stamped from the payload — the CALLER asserted delivery and
+        // nothing ever sent anything, so a destination-security alert reached nobody while the table
+        // said it had been delivered. Stamp it only after the event is actually published.
+        entity.NotificationSentAt = null;
+
         await _notificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        await SendAlertAsync(entity, alert, request, cancellationToken);
+
+        var reloaded = await _notificationRepository.GetByIdAsync(entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelAlertNotificationDto>> GetNotificationsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
@@ -522,7 +702,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
     public async Task<StaffTravelInsurancePolicyDto> GetInsuranceByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedInsuranceAsync(id);
+        var entity = await _insuranceRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"Insurance with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -538,10 +719,12 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelInsurancePolicyDto> CreateInsuranceAsync(CreateStaffTravelInsurancePolicyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _insuranceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _insuranceRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelInsurancePolicyDto> UpdateInsuranceAsync(UpdateStaffTravelInsurancePolicyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -550,7 +733,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _insuranceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _insuranceRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteInsuranceAsync(Guid id, CancellationToken cancellationToken = default)
@@ -565,7 +749,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
     public async Task<StaffTravelHealthRequirementDto> GetHealthRequirementByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedHealthRequirementAsync(id);
+        var entity = await _healthRequirementRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"HealthRequirement with ID '{id}' not found.");
         return entity.ToDto();
     }
 
@@ -602,7 +787,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _healthRequirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _healthRequirementRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelHealthRequirementDto> UpdateHealthRequirementAsync(UpdateStaffTravelHealthRequirementDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -611,7 +797,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _healthRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _healthRequirementRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteHealthRequirementAsync(Guid id, CancellationToken cancellationToken = default)

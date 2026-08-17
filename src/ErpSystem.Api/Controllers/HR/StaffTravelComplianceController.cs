@@ -78,9 +78,11 @@ public class StaffTravelComplianceController : HrControllerBase
     [HttpPost("documents/{id:guid}/verify")]
     public async Task<IActionResult> VerifyDocument(Guid id)
     {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // VerifiedById is an Employee FK — who checked a passport is a person, not an account.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Verifying a travel document") is { } contextError) return contextError;
 
-        await _service.VerifyDocumentAsync(new VerifyStaffTravelDocumentDto { DocumentId = id, VerifiedById = userId });
+        await _service.VerifyDocumentAsync(new VerifyStaffTravelDocumentDto { DocumentId = id }, employeeId);
         return Ok(new { message = "Document verified." });
     }
 

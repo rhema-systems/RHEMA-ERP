@@ -229,7 +229,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
 
     public async Task<StaffTravelHotelBookingDto> GetHotelByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedHotelAsync(id);
+        var entity = await _hotelRepository.GetWithDetailsAsync(GetTenantId(), id)
+            ?? throw new ArgumentException($"Hotel booking with ID '{id}' not found.");
         return entity.ToDto();
     }
 

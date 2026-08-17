@@ -11,6 +11,9 @@ namespace ErpSystem.Core.Interfaces.HR;
 
 public interface IStaffTravelDocumentRepository : IGenericRepository<StaffTravelDocument>
 {
+    /// <summary>The document with its employee, issuing country and verifier, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelDocument?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all travel documents for the tenant, with traveller and issuing country loaded.</summary>
     Task<IEnumerable<StaffTravelDocument>> GetAllWithDetailsAsync();
 
@@ -46,6 +49,9 @@ public interface IStaffTravelVisaRequirementRepository : IGenericRepository<Staf
 
 public interface IStaffTravelVisaApplicationRepository : IGenericRepository<StaffTravelVisaApplication>
 {
+    /// <summary>The visa application with its employee, destination and vendor, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelVisaApplication?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all visa applications for the tenant, newest-first, with traveller and destination loaded.</summary>
     Task<IEnumerable<StaffTravelVisaApplication>> GetAllWithDetailsAsync();
 
@@ -68,6 +74,9 @@ public interface IStaffTravelVisaApplicationRepository : IGenericRepository<Staf
 
 public interface IStaffTravelRiskAssessmentRepository : IGenericRepository<StaffTravelRiskAssessment>
 {
+    /// <summary>The risk assessment with its assessor and destination, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelRiskAssessment?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all risk assessments for a travel request, newest-first.</summary>
     Task<IEnumerable<StaffTravelRiskAssessment>> GetByRequestIdAsync(Guid requestId);
 
@@ -87,6 +96,9 @@ public interface IStaffTravelRiskAssessmentRepository : IGenericRepository<Staff
 
 public interface IStaffTravelAlertRepository : IGenericRepository<StaffTravelAlert>
 {
+    /// <summary>The alert with its country, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelAlert?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all active alerts.</summary>
     Task<IEnumerable<StaffTravelAlert>> GetActiveAlertsAsync();
 
@@ -125,6 +137,9 @@ public interface IStaffTravelAlertNotificationRepository : IGenericRepository<St
 
 public interface IStaffTravelInsurancePolicyRepository : IGenericRepository<StaffTravelInsurancePolicy>
 {
+    /// <summary>The insurance policy with its vendor, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelInsurancePolicy?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all insurance policies for a travel request, with vendor loaded.</summary>
     Task<IEnumerable<StaffTravelInsurancePolicy>> GetByRequestIdAsync(Guid requestId);
 
@@ -141,6 +156,9 @@ public interface IStaffTravelInsurancePolicyRepository : IGenericRepository<Staf
 
 public interface IStaffTravelHealthRequirementRepository : IGenericRepository<StaffTravelHealthRequirement>
 {
+    /// <summary>The health requirement with its country, tenant-scoped — for reloading a write (F-12) and by-id reads (F-13).</summary>
+    Task<StaffTravelHealthRequirement?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all health requirements defined for a country.</summary>
     Task<IEnumerable<StaffTravelHealthRequirement>> GetByCountryAsync(Guid countryId);
 

@@ -287,11 +287,11 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-06** | Uneven `.Include` coverage across sibling reads | medium | 55 in requests repo, 0 in configuration |
 | **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | ⚠ **supplier fixed slice 3**; currency/FX owed slice 6 | §7.2 |
 | **F-08** | Travel moves money with **no** GL / AP / budget artifact whatsoever | **high** ⏸ deferred (D-4) | §7.4 |
-| **F-09** | Travel alert notifications are never sent; `NotificationSentAt` is set by the caller | **high** | §7.5 |
+| **F-09** | Travel alert notifications are never sent; `NotificationSentAt` is set by the caller | ✅ **fixed slice 5** | §7.5 |
 | **F-10** | No travel reminder sweep, though three other HR areas have one | medium | §7.5 |
 | **F-11** | Company-vehicle transport bypasses Fleet, which already models trips | ✅ **fixed slice 3** | §7.3 |
-| **F-12** | **44 write methods return the unreloaded entity** — blank nav names on every create/update response | **high** ✅ *confirmed live, 14/14* | §6.2 |
-| **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | **high** ✅ *confirmed live, 7/7 by-id* | §6.2 |
+| **F-12** | **44 write methods return the unreloaded entity** — blank nav names on every create/update response | ✅ **CLOSED slice 5** — audit 0 findings | §6.2 |
+| **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | ✅ **CLOSED slice 5** — audit 0 findings | §6.2 |
 | **F-14** | Sibling reads include unevenly; 4 bespoke reads miss a nav their DTO declares | ✅ **fixed slice 0** (request repo); other repos unaudited | §6.1 |
 | **F-15** | `RecordDecisionAsync` is AddAsync-then-UpdateAsync (dead-path shape 3) | medium | §6.1 |
 
@@ -840,13 +840,52 @@ someone else approved or disbursed money. Stamped from the token, removed from t
 items 12.1–12.3 in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, and the settlement code says so in
 its own remarks so a later reader does not mistake the travel-side arithmetic for the accounting.
 
-### Slice 5 — Policies and compliance
-78 endpoints, the largest pair. Policy rules and exceptions; documents, visa requirements and
-applications, risk assessments, insurance, health requirements, alerts.
+### Slice 5 — Policies and compliance ✅ **green 2026-08-17, 26 assertions**
 
-**Integration (§7.5):** build `StaffTravelReminderService` on the area-9 pattern — expiring
-passports and visas, overdue advance settlements, upcoming departures. Make the travel alert
-actually send, so `NotificationSentAt` stops recording a fiction.
+`run-slice5.mjs`, 26/26. Regression: **206 assertions across seven slices, 0 failures.**
+
+⚠ **F-09 is fixed — the alert now actually reaches somebody.** `NotificationSentAt` was stamped
+`dto.NotificationSentAt ?? DateTime.UtcNow`, so the **caller asserted delivery** and nothing
+anywhere sent anything: a destination-security alert reached nobody while the table said it had
+been delivered. The row is now created with a null stamp, the event is published, and only then is
+the stamp written — so a failed publish leaves the row reading *undelivered*, which is the truth
+and is retryable. A record that falsely claims delivery is not.
+
+The topic has **two** recipients, deliberately: **Role HR** (the desk, who may have to move a
+booking) and **`EmailFromData`** pointing at the traveller's address carried in the event data —
+because an alert about the country you fly to next week is useless if it only lands in somebody's
+queue. The platform has no "employee" recipient kind, which is why the address travels in the data;
+checked rather than assumed.
+
+**Six parent guards** across the compliance creates, each guarding what its DTO actually
+references — document (employee), visa application (request + employee), risk assessment,
+insurance, alert notification (request + alert). Visa requirements, alerts and health requirements
+are genuinely global and take none.
+
+**Two more actor holes** — `VerifiedById` (who checked a passport) and `ApprovedById` on a policy
+exception (who granted an exception to travel policy). Both Employee FKs read from the body.
+
+### 🎯 F-12 and F-13 are now CLOSED for the whole area
+
+```
+CONTENT AUDIT — 41 field(s) resolved, 0 finding(s)
+```
+
+The audit went 25 → 12 → 6 → **0** across this slice. Six compliance repositories, plus advance,
+per-diem and hotel, gained tenant-scoped `GetWithDetailsAsync` reads; every create, update and
+by-id read whose DTO resolves a navigation now goes through one.
+
+⚠ **Three of the twelve were the audit's own fault, not the code's** — it still exercised the
+vendor endpoints retired in slice 3, asserted `vendorName` on bookings where it had never *set* a
+vendor, and asserted an approver on an unapproved budget. Reporting those as defects would have
+been wrong. **That is the fourth plausible-looking finding in this area to evaporate on
+inspection** (see the method note in §3.6): the audit is now both stricter and more honest.
+
+### Slice 5a — the travel reminder sweep ⏳ *split, agreed with the user*
+
+Expiring passports and visas, overdue advance settlements, upcoming departures. Follows the area-9
+pattern, which needs its own service, background service, controller, topic seeds **and a dedupe
+table** — so it carries a migration, the same reason attachments became slice 1a.
 
 ### Slice 6 — Configuration → **retire onto Finance**
 7 endpoints, and the outcome is deletion rather than screens. Drop

@@ -2584,9 +2584,7 @@ public class DecideStaffTravelPolicyExceptionDto
 {
     [Required]
     public Guid ExceptionId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
+    // ApprovedById removed: stamped from the caller's token.
 
     [Required]
     public TravelPolicyExceptionStatus Status { get; set; }
@@ -2773,9 +2771,7 @@ public class VerifyStaffTravelDocumentDto
 {
     [Required]
     public Guid DocumentId { get; set; }
-
-    [Required]
-    public Guid VerifiedById { get; set; }
+    // VerifiedById removed: stamped from the caller's token.
 
     public DateTime VerifiedAt { get; set; } = DateTime.UtcNow;
 }
