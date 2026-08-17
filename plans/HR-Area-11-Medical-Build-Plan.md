@@ -43,8 +43,14 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | 6 | UI — claims, NHIS, dashboard | ☑ **green 2026-08-17** | tsc + lint clean, 18 routes verified |
 | 7 | UI — clinical | ☑ **green 2026-08-17** | tsc + lint clean, 9 routes verified |
 
-**Area 11 build plan complete.** Backend harnesses: **171 assertions** (93 + 26 + 30 + 22), all
-re-run green on 2026-08-17. Residue and follow-ups are in §11.
+**Area 11 build plan complete.** Backend harnesses: **246 assertions** — 171 across slices
+1/2/3/3a, plus **37** in `run-resolved-names.mjs` (the `.Include` audit) and **38** in
+`run-dead-paths.mjs` (the never-executed-endpoint sweep). All green 2026-08-17.
+
+⚠ **Both audits were run AFTER slices 4–7 shipped, and both found real defects.** The
+resolved-names audit failed 20 of 37 — every detail screen built in slices 4–7 would have shown
+blanks. The lesson is in §10; the short version is that a status-code assertion says nothing about
+content, and a route check says nothing about whether a write path works.
 
 Slices 1–3 are the backend hardening block and must land in order. 4–7 are the
 `hr-frontend-port-plan` W1 recipe applied an eighth time, and 4 must precede 5–7 because every
@@ -235,6 +241,8 @@ Correct split for all three: **reads on plain `[Authorize]`, writes on `MedicalW
 | F-07 | low | ~40 reads filter tenant in memory after `GetAllAsync()` | open → **deferred, see §11** |
 | F-08 | **high** | Claim documents take a caller-supplied `FilePath` | ✅ **fixed slice 3a** |
 | F-09 | **high** | A claim could draw down another employee's insurance policy | ✅ **fixed slice 3** |
+| F-10 | **high** | Detail reads resolved no navigation names — 20 of 37 blank | ✅ **fixed 2026-08-17** (post-slice-7 audit) |
+| F-11 | medium | Provider documents: `FilePath` required and caller-supplied, no upload, no download | open → **deferred, see §11** |
 
 ### F-01 — Role fallback ignores the verb ✅ *empirically confirmed*
 
@@ -609,11 +617,20 @@ pre-authorisations, referrals, appointments) · hub card + sidebar entry.
 
 ## 8. Known-unverified — do not assume these were checked
 
-- **Repository `.Include` coverage against the detail DTOs.** Only the dashboard's was verified.
-  All 16 shapes in `hr-ported-list-read-bugs` remain unchecked across the area.
-- **~2,400 of 2,813 lines of `MedicalServices.cs`** were never read. The tenant-check sweep in
-  slice 2 is the first pass over them.
-- **Whether a second tenant exists** in the dev DB (needed for slice 2's probe).
+- ~~**Repository `.Include` coverage against the detail DTOs.**~~ ✅ **AUDITED AND FIXED 2026-08-17**
+  — `run-resolved-names.mjs`, **37 assertions**. It failed **20 of 37** on the first run: every
+  detail read resolved no names at all. Root cause: `GenericRepository.GetByIdAsync(id)` loads no
+  navigations and the medical services never used the overload that takes includes, so **list reads
+  worked and by-id reads did not** — the uneven-`.Include` shape. `GetClaimsPagedAsync` built its
+  own query without includes while the pending and flagged queues had them, and the claim create
+  response returned a freshly-constructed entity whose navigations were never loaded. See F-10.
+- ~~**~2,400 of 2,813 lines of `MedicalServices.cs`** were never read.~~ **Partly resolved:**
+  slice 2 swept every fetch in the file for tenant checks (84 `GetByIdAsync` + 71 other
+  single-entity fetches). That sweep looked *only* at tenancy — `.Include` coverage above is a
+  different pass over the same code.
+- ~~**Whether a second tenant exists** in the dev DB.~~ **Resolved slice 2** — there was only one;
+  `run-slice2.mjs` now creates a real second `Tenants` row (idempotent, all default-tenant flags
+  off) for cross-tenant probes.
 - **Whether anything here should meet the workflow engine.** Claim approval is currently bespoke
   single-step — the same shape as the `goal-approval-stays-bespoke` exception. Leave it unless
   multi-step medical approval is wanted.
@@ -654,6 +671,9 @@ than dropping a deferral into a commit message.
 | **Per-type claim document upload** | `AttachmentsPanel`'s upload callback carries only a description, so every claim document is recorded as `Receipt` | **Trigger:** TDC wanting invoices and discharge summaries distinguished |
 | **No frontend test coverage** | This environment has no browser automation, so UI verification was types + lint + route resolution only | **Trigger:** a UI regression, or the first e2e harness in `e2e-tests/` |
 
+| **F-11** — provider documents take a required caller-supplied `FilePath` | Same shape as F-08 but **not a read sink** — no DMS columns, and no download route at all, so nothing serves the file. The feature records a path to a document the system never received and can never return. Not wired into any UI, so nothing is broken for a user today | **Trigger:** anyone wiring provider documents into the insurance screen. Fix is slice 3a's recipe a third time: 3 DMS columns + migration + category + multipart + download |
+| **Policy dependants never executed** | `EmployeeDependents` is empty and creating one belongs to another module, so the add/update dependant paths could not be driven | **Trigger:** the first employee dependant fixture. The rest of the insurance lifecycle is now covered |
+
 ## 10. Correction log
 
 Things that were got wrong during the survey and corrected. Recorded so they are not re-derived.
@@ -665,3 +685,15 @@ Things that were got wrong during the survey and corrected. Recorded so they are
   soft-deleted by the area-10 harness cleanup.
 - **Gating facility/physician reads behind `MedicalReadPolicy` would be wrong** — it would break
   slice 3 two slices later. See D-3. The original slice sequence had this error.
+- ⚠ **The backend defect check was incomplete through slices 4–7, and I said it was done.**
+  Authorization and tenancy were checked thoroughly (171 assertions). **Content correctness and
+  write-path execution were not**, and §8 had flagged the first of those on day one as "the largest
+  remaining defect risk" before four UI slices were built on top of it. When finally run:
+  resolved names failed **20 of 37**, and ~24 state-changing endpoints — eleven of them wired to
+  slice 6 and 7 screens — had never executed once.
+
+  **The generalisable lesson:** a harness that asserts status codes and authorization proves the
+  gate, not the feature. Three things have to be checked separately, and none implies the others:
+  *can the caller in?* (status), *did the right bytes come back?* (content), *did the state
+  actually move?* (execution). Route resolution proves the least of all — it only shows a handler
+  is registered. Run all three **before** building UI, not after.

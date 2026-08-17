@@ -211,7 +211,9 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     public async Task<IEnumerable<PhysicianSummaryDto>> GetAllPhysiciansAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _physicianRepository.GetAllAsync();
+        // PhysicianSummaryDto promises FacilityName; the parameterless GetAllAsync loads no
+        // navigations, so it came back blank on every row.
+        var entities = await _physicianRepository.GetAllAsync(e => e.Facility!);
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
@@ -564,7 +566,14 @@ public class MedicalInsuranceService : IMedicalInsuranceService
 
     public async Task<EmployeeMedicalInsurancePolicyDto> GetPolicyByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _policyRepository.GetByIdAsync(id);
+        // Resolved names on the DTO need their navigations loaded. The list reads on this service
+        // already include them; the by-id read did not, so a detail screen showed blanks where a
+        // list showed values — the uneven-.Include shape.
+        var entity = await _policyRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.MedicalInsuranceProvider,
+            e => e.MedicalInsurancePlan);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical insurance policy with ID '{id}' not found.");
@@ -1188,7 +1197,11 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeHealthProfileDto> GetProfileByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _profileRepository.GetByIdAsync(id);
+        var entity = await _profileRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.PreferredFacility!,
+            e => e.PreferredPhysician!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee health profile with ID '{id}' not found.");
@@ -1354,7 +1367,7 @@ public class EmployeeHealthService : IEmployeeHealthService
 
     public async Task<EmployeeMedicalExamDto> GetExamByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _examRepository.GetByIdAsync(id);
+        var entity = await _examRepository.GetByIdAsync(id, e => e.Facility!, e => e.Physician!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Employee medical exam with ID '{id}' not found.");
@@ -1972,7 +1985,12 @@ public class NHISService : INHISService
 
     public async Task<NHISClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(id);
+        var entity = await _claimRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.Facility,
+            e => e.Physician!,
+            e => e.LinkedMedicalClaim!);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{id}' not found.");
@@ -2212,7 +2230,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<MedicalExpenseClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _claimRepository.GetByIdAsync(id);
+        var entity = await LoadClaimWithNamesAsync(id);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
@@ -2243,6 +2261,26 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// Loads a claim with every navigation its DTO resolves a name from.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the by-id read and the write paths, which both return a DTO promising
+    /// <c>EmployeeName</c>, <c>FacilityName</c>, <c>PhysicianName</c> and the linked record
+    /// numbers. Without it those come back as empty strings — the read succeeds, the screen is
+    /// blank, and nothing fails. Keep new resolved names on the DTO and this list in step.
+    /// </remarks>
+    private Task<MedicalExpenseClaim?> LoadClaimWithNamesAsync(Guid id)
+        => _claimRepository.GetByIdAsync(
+            id,
+            e => e.Employee,
+            e => e.Facility,
+            e => e.Physician!,
+            e => e.Dependent!,
+            e => e.InsurancePolicy!,
+            e => e.PreAuthorization!,
+            e => e.Referral!);
+
     public async Task<PagedResult<MedicalExpenseClaimSummaryDto>> GetClaimsPagedAsync(int pageNumber, int pageSize, ClaimStatus? status = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -2253,7 +2291,13 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // The summary DTO resolves employee, facility and dependent names. The pending and
+        // flagged queues already included them; this one did not, so the same claim rendered
+        // with names in one queue and blanks in another.
         var items = await query
+            .Include(c => c.Employee)
+            .Include(c => c.Facility)
+            .Include(c => c.Dependent)
             .OrderByDescending(c => c.ClaimDate)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
@@ -2308,7 +2352,12 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId} with {ItemCount} item(s)",
             entity.ClaimNumber, employeeId, createDto.Items?.Count ?? 0);
 
-        return entity.ToDto();
+        // Re-read so the response carries resolved names. A freshly-constructed entity has no
+        // navigations loaded, so returning it directly answered the caller with blank employee and
+        // facility names — and the screen that just filed the claim is the one most likely to
+        // display them.
+        var created = await LoadClaimWithNamesAsync(entity.Id);
+        return (created ?? entity).ToDto();
     }
 
     public async Task<MedicalExpenseClaimDto> UpdateClaimAsync(UpdateMedicalExpenseClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
