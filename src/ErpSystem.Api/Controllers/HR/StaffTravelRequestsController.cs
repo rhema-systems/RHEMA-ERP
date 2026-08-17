@@ -1,8 +1,12 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore;
 using ErpSystem.Shared;
 using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
@@ -17,11 +21,28 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelRequestsController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<StaffTravelRequestsController> _logger;
 
-    public StaffTravelRequestsController(IStaffTravelRequestService service, ICurrentUserService currentUser)
+    public StaffTravelRequestsController(
+        IStaffTravelRequestService service,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ILogger<StaffTravelRequestsController> logger,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
 
     // =========================================================================
@@ -228,18 +249,80 @@ public class StaffTravelRequestsController : HrControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestAttachmentDto>>> GetAttachments(Guid requestId)
         => Ok(await _service.GetAttachmentsAsync(requestId));
 
+    /// <summary>
+    /// Attaches a document to a travel request through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// <para>Multipart, not JSON. The previous endpoint took a caller-supplied <c>FileUrl</c>,
+    /// which let anyone with travel write access point an attachment at arbitrary bytes on disk —
+    /// including another tenant's. That is the same path-injection sink medical exam documents and
+    /// claim receipts were both fixed for, and a travel attachment is a passport scan or a visa
+    /// letter, so it is squarely in scope.</para>
+    ///
+    /// <para>The file is scanned, registered in the DMS and stored outside the web root; the row
+    /// keeps the three DMS ids and an empty <c>FileUrl</c>. Read it back through
+    /// <c>attachments/{id}/download</c>.</para>
+    /// </remarks>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/attachments")]
-    public async Task<ActionResult<StaffTravelRequestAttachmentDto>> AddAttachment(Guid requestId, [FromBody] CreateStaffTravelRequestAttachmentDto dto)
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> AddAttachment(
+        Guid requestId,
+        IFormFile? file,
+        [FromForm] TravelAttachmentType attachmentType = TravelAttachmentType.Other,
+        [FromForm] string? description = null,
+        CancellationToken ct = default)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-
-        // UploadedById is an Employee FK — same reasoning as comments.
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out _,
                 "Attaching a document to a travel request") is { } contextError) return contextError;
 
-        dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddAttachmentAsync(dto, tenantId, userId, employeeId));
+        // Establish the caller may touch the parent BEFORE storing anything — neither the gate nor
+        // the DMS performs an entitlement check.
+        await _service.GetByIdAsync(requestId, ct);
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.StaffTravel.StaffTravelRequest),
+            sourceRecordId: requestId,
+            sourceLabel: "Staff travel attachment",
+            documentType: "StaffTravelAttachment",
+            description: description,
+            persist: (uploadedById, document) => _service.AddAttachmentAsync(
+                new CreateStaffTravelRequestAttachmentDto
+                {
+                    StaffTravelRequestId = requestId,
+                    FileName = document.OriginalFileName,
+                    FileSizeBytes = document.FileSize,
+                    MimeType = document.ContentType,
+                    AttachmentType = attachmentType,
+                    FileUploadRecordId = document.FileUploadRecordId,
+                    DocumentRecordId = document.DocumentRecordId,
+                    DocumentVersionId = document.DocumentVersionId,
+                },
+                tenantId, userId, uploadedById, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrStaffTravelAttachments);
+    }
+
+    /// <summary>Streams a travel attachment back, byte-for-byte.</summary>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var attachment = await _db.Set<Core.Entities.HR.StaffTravel.StaffTravelRequestAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.TenantId == tenantId && !a.IsDeleted, ct);
+        if (attachment is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FileUrl,
+            attachment.FileName, fallbackContentType: attachment.MimeType,
+            inline: false, ct);
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]

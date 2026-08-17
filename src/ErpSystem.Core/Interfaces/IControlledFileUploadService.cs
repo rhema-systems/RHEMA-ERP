@@ -33,6 +33,7 @@ public static class ControlledFileUploadCategories
     public const string HrMedicalExamDocuments = "hr-medical-exam-documents";
     public const string HrMedicalClaimDocuments = "hr-medical-claim-documents";
     public const string HrAppraisalAttachments = "hr-appraisal-attachments";
+    public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
 
     /// <summary>
     /// Recruitment paperwork attached to a requisition, vacancy or advert — org charts, budget
@@ -89,6 +90,10 @@ public static class ControlledFileUploadCategories
                 HrMedicalExamDocuments,
                 HrMedicalClaimDocuments,
                 HrAppraisalAttachments,
+                // A travel attachment is a passport scan, a visa letter or an invitation carrying
+                // a name, a number and an address. A tenant policy should not be able to permit
+                // one of those unscanned.
+                HrStaffTravelAttachments,
                 HrRecruitmentAttachments,
                 HrPreEmploymentDocuments,
                 HrSheControlledDocuments

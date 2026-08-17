@@ -468,6 +468,11 @@ public class UpdateStaffTravelRequestCommentDto : UpdateDtoBase
 
 #region Staff Travel Request Attachment
 
+/// <remarks>
+/// <c>FileUrl</c> is empty for anything uploaded through the controlled gate; use
+/// <c>documentRecordId</c> to tell a stored document from a legacy row, and download through
+/// <c>GET .../attachments/{id}/download</c> rather than dereferencing a path.
+/// </remarks>
 public class StaffTravelRequestAttachmentDto : BaseDto
 {
     public Guid StaffTravelRequestId { get; set; }
@@ -477,6 +482,16 @@ public class StaffTravelRequestAttachmentDto : BaseDto
     public string MimeType { get; set; } = string.Empty;
     public TravelAttachmentType AttachmentType { get; set; }
     public string AttachmentTypeName => AttachmentType.ToString();
+
+    /// <summary>Scanned controlled upload backing this attachment; null on legacy rows.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered; null on legacy rows.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered; null on legacy rows.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     public Guid UploadedById { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
     public DateTime UploadedAt { get; set; }
@@ -487,22 +502,28 @@ public class CreateStaffTravelRequestAttachmentDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
+    // FileName, FileUrl, FileSizeBytes and MimeType are no longer caller-supplied: they are read
+    // off the stored document the upload gate returns. A caller-supplied FileUrl was the
+    // path-injection sink the medical exam and claim documents were both fixed for.
     [MaxLength(500)]
     public string FileName { get; set; } = string.Empty;
 
-    [Required]
-    [MaxLength(2000)]
-    public string FileUrl { get; set; } = string.Empty;
-
     public long FileSizeBytes { get; set; }
 
-    [Required]
     [MaxLength(100)]
     public string MimeType { get; set; } = string.Empty;
 
     [Required]
     public TravelAttachmentType AttachmentType { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     // UploadedById removed deliberately: stamped from the caller's token, same as AuthorId on a
     // comment. It was [Required], so a client had to state who uploaded — and could state anyone.

@@ -648,9 +648,44 @@ user-id contamination.** Those two were the only ones. The harness now asserts t
 an employee — the only way this is visible, since both ids are Guids and every call returns 200
 either way.
 
-**Deferred to slice 1a:** attachments still accept a caller-supplied `FileUrl` — the
-path-injection sink area 11 fixed for medical receipts. Needs three nullable DMS columns and a
-migration, so it gets its own sub-slice exactly as area 11 slice 3a did.
+### Slice 1a — Attachments onto the controlled-upload gate ✅ **green 2026-08-17, 18 assertions**
+
+`run-slice1a.mjs`, 18/18. Regression after: slice 0 54/54, slice 1 32/32.
+
+The endpoint took a caller-supplied `FileUrl` and wrote it to the row, so anyone with travel write
+access could point an attachment at arbitrary bytes on disk — including another tenant's. Same
+path-injection sink area 11 fixed twice (exam documents, claim receipts), and a travel attachment
+is typically a **passport scan or a visa letter**, so squarely in scope.
+
+`POST .../attachments` is multipart now and runs through `HrAttachmentUpload` — the existing helper
+built for exactly this shape, where the row carries a required `UploadedById` Employee FK. Scanned,
+DMS-registered, stored outside the web root; the row keeps the three DMS ids and an empty
+`FileUrl`. `GET .../attachments/{id}/download` reads it back. Entitlement is checked **before**
+anything is stored — neither the gate nor the DMS performs that check.
+
+`hr-staff-travel-attachments` is in `SystemCleanScanRequired`, so no tenant policy can permit an
+unscanned travel upload. `FileName`, `FileSizeBytes` and `MimeType` are also no longer
+caller-supplied — they are read off the stored document, so a client cannot misdeclare a file.
+
+Migration `20260817130709_AddStaffTravelAttachmentControlledUpload`: three nullable columns,
+scaffolded then rewritten as guarded SQL per repo convention, `Down` guarded symmetrically.
+**Applied and verified on the dev database.**
+
+⚠ **One deliberate departure from the area-11 precedent: no index.** That migration added a
+composite `(TenantId, FileUploadRecordId)` and dropped the standalone `TenantId` one, mirroring
+`EmployeeMedicalExamDocument`. Here **nothing queries attachments by `FileUploadRecordId`** —
+`HrDocumentDownload` resolves `FileUploadRecords` through its own primary key — so a composite
+index would carry write cost for no read. Copying the precedent without checking the queries would
+have been cargo-culting.
+
+⚠ **Needs `node clamd-stub.mjs` running alongside the API**, since the category requires a clean
+scan. Without a scanner every upload 422s. Slices 0 and 1 do not need it.
+
+⚠ **Slice 1a broke slice 1's harness, correctly.** The attachment contract changed from JSON to
+multipart, so slice 1's §2 died on a 415. Rewritten rather than deleted: slice 1a owns the upload
+assertions, and what belongs in slice 1 is the parent guard it added plus proof the old
+caller-supplied-path contract is genuinely unreachable. **When a slice changes a contract, the
+earlier slice's harness is the first place to look for what that change actually cost.**
 
 **Integration (§7.5):** attachments onto the controlled-upload gate, as area 11 slice 3a did for
 medical receipts. Wire `IAppEventBus` / `EntityActivityEvent` for the lifecycle transitions —

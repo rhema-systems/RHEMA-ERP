@@ -227,9 +227,14 @@ public class StaffTravelRequestAttachment : TenantEntity
     [MaxLength(500)]
     public string FileName { get; set; } = null!;
 
-    [Required]
+    /// <summary>
+    /// Legacy free-text location. Retained for rows written before the controlled-upload gate and
+    /// no longer accepted from callers — a caller-supplied path is the injection sink the medical
+    /// exam and claim documents were both fixed for. New rows carry the three DMS ids below and
+    /// leave this empty.
+    /// </summary>
     [MaxLength(2000)]
-    public string FileUrl { get; set; } = null!;
+    public string FileUrl { get; set; } = string.Empty;
 
     public long FileSizeBytes { get; set; }
 
@@ -238,6 +243,15 @@ public class StaffTravelRequestAttachment : TenantEntity
     public string MimeType { get; set; } = null!;
 
     public TravelAttachmentType AttachmentType { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     public Guid UploadedById { get; set; }                // FK -> Employee
 
