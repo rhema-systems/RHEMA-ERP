@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
+using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,6 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/requests")]
+[StaffTravelBusinessRules]
 [Authorize(Policy = HrPermissions.TravelReadPolicy)]
 public class StaffTravelRequestsController : HrControllerBase
 {
@@ -154,11 +156,14 @@ public class StaffTravelRequestsController : HrControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // Two ids, deliberately: CancelledById is an Employee FK on the request, userId is the
+        // audit trail. Slice 0 collapsed both onto the user id and broke the FK.
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Cancelling a travel request") is { } contextError) return contextError;
 
         dto.RequestId = id;
-        dto.CancelledById = userId;
-        await _service.CancelAsync(dto);
+        dto.CancelledById = employeeId;
+        await _service.CancelAsync(dto, userId);
         return Ok(new { message = "Travel request cancelled." });
     }
 
@@ -186,10 +191,13 @@ public class StaffTravelRequestsController : HrControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
+        // AuthorId is an Employee FK, so this is one of the few travel writes that genuinely needs
+        // the caller's employee link — the comment records who said it.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Commenting on a travel request") is { } contextError) return contextError;
 
         dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddCommentAsync(dto, tenantId, userId));
+        return Ok(await _service.AddCommentAsync(dto, tenantId, userId, employeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
@@ -226,10 +234,12 @@ public class StaffTravelRequestsController : HrControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
+        // UploadedById is an Employee FK — same reasoning as comments.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Attaching a document to a travel request") is { } contextError) return contextError;
 
         dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddAttachmentAsync(dto, tenantId, userId));
+        return Ok(await _service.AddAttachmentAsync(dto, tenantId, userId, employeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
@@ -294,10 +304,13 @@ public class StaffTravelRequestsController : HrControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
+        // Each participant's request records who initiated it — an Employee FK — so this is
+        // another of the few travel writes that genuinely needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Adding participants to a group trip") is { } contextError) return contextError;
 
         dto.GroupTravelId = id;
-        return Ok(await _service.AddGroupParticipantsAsync(dto, tenantId, userId));
+        return Ok(await _service.AddGroupParticipantsAsync(dto, tenantId, userId, employeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]

@@ -603,8 +603,54 @@ response checked for stale navigations (F-12), every generic-repo read checked f
 navigations (F-13). That audit is what converts §6.1's static list into the real defect set, and
 its output should be appended to the findings register before any screen work starts.
 
-### Slice 1 — Requests, groups and the request lifecycle
-35 endpoints. Status transitions, amendment/parent-request chain, group travel, comments.
+### Slice 1 — Requests, groups and the request lifecycle ✅ **green 2026-08-17, 37 assertions**
+
+`run-slice1.mjs`, 37/37. Slice 0 still 54/54. Content audit 30 → 29 findings.
+
+**The lifecycle guards were already correct** — submit/approve/reject/cancel/complete/delete all
+check status properly. Surveyed before building, so the slice went where the defects actually
+were and the guards are now just a regression net.
+
+Delivered:
+
+1. **Two actor holes closed.** `AuthorId` on a comment and `UploadedById` on an attachment were
+   client-supplied — any caller could post under a colleague's name or attribute an upload to
+   someone else. Both are stamped from the token and **removed from the create DTOs** so they
+   cannot be mistaken for inputs. `UploadedById` was `[Required]`, so a client was obliged to
+   declare who uploaded, and could name anyone.
+2. **Parent-FK guards.** Comment and attachment creates never validated
+   `StaffTravelRequestId`; a comment could be hung off any request id, including another
+   tenant's. Both now resolve through `GetOwnedRequestAsync`.
+3. **F-12 for these endpoints** — comments, attachments and group travel reload through new
+   by-id repository reads carrying their includes.
+4. **Lifecycle events** on all five transitions via `IAppEventBus`, published **after** commit.
+   Topics are seeded first: publishing to an unseeded topic delivers to nobody while every table
+   says it fired, which is F-09 exactly. Templates carry request number, route and dates but
+   **not the purpose** — a notification reaches more people than the record does.
+
+⚠ **The area had no error contract, and this is the slice that found it.** Five refusals were all
+*correct* and all mute: `400 "The operation is not valid for the current state of the object."`,
+swallowing the service's own message. Added `StaffTravelBusinessRulesAttribute` (404/422/403,
+each keeping its message) across all 9 controllers. **This belonged in slice 0** — areas 8 and 9
+both did "gating *and the error contract*" together.
+
+⚠ **Slice 0 introduced a regression, caught here.** Its census covered *method parameters* — 65
+audit against 3 approver — but **two actors travel inside a DTO** and were never censused, and
+both land on Employee FKs:
+
+- `CancelAsync`: `CancelledById` fed **both** `entity.CancelledById` (Employee FK) **and**
+  `UpdatedBy` (audit). One field, two different identifiers, so whichever id was supplied was
+  wrong for one of them. Now split.
+- `AddGroupParticipantsAsync`: wrote `createdByUserId` straight into `InitiatedById`.
+
+Then the check that should have run in slice 0: **all 16 Employee FKs in the area swept for
+user-id contamination.** Those two were the only ones. The harness now asserts the *stored* id is
+an employee — the only way this is visible, since both ids are Guids and every call returns 200
+either way.
+
+**Deferred to slice 1a:** attachments still accept a caller-supplied `FileUrl` — the
+path-injection sink area 11 fixed for medical receipts. Needs three nullable DMS columns and a
+migration, so it gets its own sub-slice exactly as area 11 slice 3a did.
 
 **Integration (§7.5):** attachments onto the controlled-upload gate, as area 11 slice 3a did for
 medical receipts. Wire `IAppEventBus` / `EntityActivityEvent` for the lifecycle transitions —

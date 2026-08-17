@@ -93,6 +93,13 @@ public interface IStaffTravelRequestCommentRepository : IGenericRepository<Staff
     /// <summary>Returns the reply thread for a parent comment.</summary>
     Task<IEnumerable<StaffTravelRequestComment>> GetThreadAsync(Guid parentCommentId);
 
+    /// <summary>
+    /// One comment with its author and replies resolved. Exists so a write path can reload what it
+    /// just saved: <c>AddAsync</c> leaves navigations null, so mapping the tracked entity returns
+    /// <c>authorName</c> blank (finding F-12).
+    /// </summary>
+    Task<StaffTravelRequestComment?> GetWithAuthorAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns only comments marked visible to the traveller for a request.</summary>
     Task<IEnumerable<StaffTravelRequestComment>> GetVisibleToTravellerAsync(Guid requestId);
 }
@@ -108,6 +115,9 @@ public interface IStaffTravelRequestAttachmentRepository : IGenericRepository<St
 
     /// <summary>Returns attachments for a request filtered by attachment type.</summary>
     Task<IEnumerable<StaffTravelRequestAttachment>> GetByTypeAsync(Guid requestId, TravelAttachmentType attachmentType);
+
+    /// <summary>One attachment with its uploader resolved, for reloading after a write (F-12).</summary>
+    Task<StaffTravelRequestAttachment?> GetWithUploaderAsync(Guid tenantId, Guid id);
 }
 
 #endregion

@@ -224,6 +224,14 @@ public class StaffTravelRequestCommentRepository : GenericRepository<StaffTravel
             .ToListAsync();
     }
 
+    public async Task<StaffTravelRequestComment?> GetWithAuthorAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(c => c.Author)
+            .Include(c => c.Replies).ThenInclude(r => r.Author)
+            .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId && !c.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelRequestComment>> GetThreadAsync(Guid parentCommentId)
     {
         return await _dbSet
@@ -258,6 +266,13 @@ public class StaffTravelRequestAttachmentRepository : GenericRepository<StaffTra
             .Where(a => a.StaffTravelRequestId == requestId && !a.IsDeleted)
             .OrderByDescending(a => a.UploadedAt)
             .ToListAsync();
+    }
+
+    public async Task<StaffTravelRequestAttachment?> GetWithUploaderAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
     }
 
     public async Task<IEnumerable<StaffTravelRequestAttachment>> GetByTypeAsync(Guid requestId, TravelAttachmentType attachmentType)

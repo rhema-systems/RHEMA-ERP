@@ -440,8 +440,8 @@ public class CreateStaffTravelRequestCommentDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid AuthorId { get; set; }
+    // AuthorId removed deliberately: it is stamped from the caller's token. Accepting it let
+    // any caller post a comment under a colleague's name.
 
     [Required]
     public TravelRequestCommentType CommentType { get; set; }
@@ -504,8 +504,8 @@ public class CreateStaffTravelRequestAttachmentDto : CreateDtoBase
     [Required]
     public TravelAttachmentType AttachmentType { get; set; }
 
-    [Required]
-    public Guid UploadedById { get; set; }
+    // UploadedById removed deliberately: stamped from the caller's token, same as AuthorId on a
+    // comment. It was [Required], so a client had to state who uploaded — and could state anyone.
 }
 
 #endregion

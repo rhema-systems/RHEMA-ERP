@@ -288,7 +288,7 @@ public static class StaffTravelMappingExtensions
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            AuthorId = dto.AuthorId,
+            // AuthorId is assigned by the service from the caller's token.
             CommentType = dto.CommentType,
             Body = dto.Body,
             IsVisibleToTraveller = dto.IsVisibleToTraveller,
@@ -341,7 +341,7 @@ public static class StaffTravelMappingExtensions
             FileSizeBytes = dto.FileSizeBytes,
             MimeType = dto.MimeType,
             AttachmentType = dto.AttachmentType,
-            UploadedById = dto.UploadedById,
+            // UploadedById is assigned by the service from the caller's token.
             UploadedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString(),
         };

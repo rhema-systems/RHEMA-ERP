@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
+using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,6 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/approvals")]
+[StaffTravelBusinessRules]
 [Authorize(Policy = HrPermissions.TravelReadPolicy)]
 public class StaffTravelApprovalsController : HrControllerBase
 {

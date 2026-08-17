@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -34,6 +35,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </remarks>
 [ApiController]
 [Route("api/staff-travel/me")]
+[StaffTravelBusinessRules]
 [Authorize]
 public class StaffTravelMeController : HrControllerBase
 {
@@ -154,7 +156,7 @@ public class StaffTravelMeController : HrControllerBase
         Guid id, [FromBody] CancelMyStaffTravelRequestDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
                 "Withdrawing a travel request") is { } error) return error;
 
         if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
@@ -164,7 +166,7 @@ public class StaffTravelMeController : HrControllerBase
             RequestId = id,
             CancelledById = employeeId,
             CancellationReason = dto.CancellationReason
-        }, ct);
+        }, userId, ct);
         return NoContent();
     }
 }

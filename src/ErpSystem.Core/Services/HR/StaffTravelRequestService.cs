@@ -2,8 +2,11 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using ErpSystem.Application.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -24,6 +27,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IStaffGroupTravelRepository _groupTravelRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IAppEventBus _appEventBus;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -33,6 +37,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IStaffGroupTravelRepository groupTravelRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IAppEventBus appEventBus,
         ILogger<StaffTravelRequestService> logger)
     {
         _requestRepository = requestRepository;
@@ -41,6 +46,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _groupTravelRepository = groupTravelRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _appEventBus = appEventBus;
         _logger = logger;
     }
 
@@ -93,6 +99,143 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Group travel with ID '{id}' not found.");
         return entity;
+    }
+
+    // ---- Lifecycle notifications -------------------------------------------
+
+    private const string TopicEntityType = "StaffTravelRequest";
+    private const string TopicAudience = "Internal";
+
+    private sealed record TopicSeed(string Activity, string Name, string Description,
+        string TitleTemplate, string BodyTemplate);
+
+    /// <remarks>
+    /// The templates carry the request number, route and dates — never the purpose. A travel
+    /// notification reaches more people than the request does, and the purpose is often the
+    /// commercially sensitive part ("client meeting, Acme, renegotiation"). Whoever is entitled to
+    /// the detail can open the record.
+    /// </remarks>
+    private static readonly TopicSeed[] TopicSeeds =
+    {
+        new("Submitted", "Travel: Submitted for approval",
+            "System-seeded — a travel request has been submitted and is awaiting approval.",
+            "Travel request {{Reference}} submitted",
+            "{{Traveller}} — {{Route}}, {{Dates}}. Awaiting approval."),
+        new("Approved", "Travel: Approved",
+            "System-seeded — a travel request has been approved.",
+            "Travel request {{Reference}} approved",
+            "{{Traveller}} — {{Route}}, {{Dates}}. Approved."),
+        new("Rejected", "Travel: Rejected",
+            "System-seeded — a travel request has been rejected.",
+            "Travel request {{Reference}} rejected",
+            "{{Traveller}} — {{Route}}, {{Dates}}. Rejected."),
+        new("Cancelled", "Travel: Cancelled",
+            "System-seeded — a travel request has been withdrawn or cancelled.",
+            "Travel request {{Reference}} cancelled",
+            "{{Traveller}} — {{Route}}, {{Dates}}. Cancelled."),
+        new("Completed", "Travel: Completed",
+            "System-seeded — travel has been marked completed; expense claims may now be settled.",
+            "Travel request {{Reference}} completed",
+            "{{Traveller}} — {{Route}}, {{Dates}}. Completed."),
+    };
+
+    /// <summary>
+    /// Creates this area's notification topics for a tenant if they do not exist yet.
+    /// </summary>
+    /// <remarks>
+    /// Publishing to a topic that was never seeded delivers to nobody while every table says the
+    /// event fired — which is exactly the defect recorded as F-09 for travel alerts. Seed first,
+    /// then publish.
+    /// </remarks>
+    private async Task EnsureTopicsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var topicRepo = _unitOfWork.Repository<NotificationTopic>();
+        var keys = TopicSeeds.Select(s => $"{TopicEntityType}.{s.Activity}.{TopicAudience}").ToArray();
+
+        var existing = await topicRepo
+            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && keys.Contains(t.Key))
+            .Select(t => t.Key)
+            .ToListAsync(cancellationToken);
+        var existingSet = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+        if (existingSet.Count == TopicSeeds.Length) return;
+
+        var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
+        foreach (var seed in TopicSeeds)
+        {
+            var key = $"{TopicEntityType}.{seed.Activity}.{TopicAudience}";
+            if (existingSet.Contains(key)) continue;
+
+            var topic = new NotificationTopic
+            {
+                TenantId = tenantId,
+                Key = key,
+                Name = seed.Name,
+                Description = seed.Description,
+                EntityType = TopicEntityType,
+                IsSystem = true,
+                IsActive = true,
+                EnableInApp = true,
+                EnableEmail = false,
+                EnableSms = false,
+                InAppTitleTemplate = seed.TitleTemplate,
+                InAppBodyTemplate = seed.BodyTemplate,
+                ActionUrlTemplate = "{{ActionPath}}",
+                CreatedBy = "System",
+            };
+            await topicRepo.AddAsync(topic);
+
+            await recipientRepo.AddAsync(new NotificationTopicRecipient
+            {
+                TenantId = tenantId,
+                TopicId = topic.Id,
+                RecipientKind = "Role",
+                RecipientValue = Constants.Roles.Hr,
+                IsSystem = true,
+                SendInApp = true,
+                CreatedBy = "System",
+            });
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Announces a lifecycle transition. Call only AFTER the transition has committed — an event
+    /// published for a save that then fails is a notification about something that did not happen.
+    /// </summary>
+    private async Task PublishLifecycleAsync(
+        StaffTravelRequest entity, string activity, CancellationToken cancellationToken)
+    {
+        await EnsureTopicsAsync(entity.TenantId, cancellationToken);
+
+        // The transitions reach here holding an entity loaded by GetOwnedRequestAsync, which
+        // applies no includes — so Employee is null and the traveller's name would be blank. That
+        // is F-13 by another route, and a notification reading "Traveller: " is worse than most
+        // blank fields because nobody sees the record it came from. Resolve the name here.
+        var traveller = entity.Employee is not null
+            ? $"{entity.Employee.FirstName} {entity.Employee.LastName}".Trim()
+            : await _requestRepository.GetQueryable()
+                .Where(r => r.Id == entity.Id)
+                .Select(r => (r.Employee.FirstName + " " + r.Employee.LastName).Trim())
+                .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+
+        await _appEventBus.PublishAsync(new EntityActivityEvent
+        {
+            TenantId = entity.TenantId,
+            EntityType = TopicEntityType,
+            Activity = activity,
+            Audience = TopicAudience,
+            EntityId = entity.Id,
+            TriggeredByUserId = _currentUserProvider.UserId,
+            Data = new Dictionary<string, object>
+            {
+                ["Reference"] = entity.RequestNumber ?? string.Empty,
+                ["Traveller"] = traveller,
+                ["Route"] = $"{entity.OriginCity} to {entity.DestinationCity}",
+                ["Dates"] = $"{entity.TravelStartDate:yyyy-MM-dd} to {entity.TravelEndDate:yyyy-MM-dd}",
+                ["ActionPath"] = $"/hr/travel/requests/{entity.Id}",
+            },
+        }, cancellationToken);
     }
 
     // ---- Queries -----------------------------------------------------------
@@ -385,6 +528,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request submitted: {RequestNumber}", entity.RequestNumber);
+
+        await PublishLifecycleAsync(entity, "Submitted", cancellationToken);
+
         return true;
     }
 
@@ -405,6 +551,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request approved: {RequestNumber}", entity.RequestNumber);
+
+        await PublishLifecycleAsync(entity, "Approved", cancellationToken);
+
         return true;
     }
 
@@ -424,10 +573,13 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request rejected: {RequestNumber}", entity.RequestNumber);
+
+        await PublishLifecycleAsync(entity, "Rejected", cancellationToken);
+
         return true;
     }
 
-    public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(cancelDto.RequestId);
 
@@ -436,15 +588,21 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         entity.Status = StaffTravelRequestStatus.Cancelled;
         entity.CancellationReason = cancelDto.CancellationReason;
+        // CancelledById is an Employee FK; UpdatedBy is a platform-user audit field. The one DTO
+        // field was feeding BOTH, so whichever id the caller supplied was wrong for one of them.
+        // They are separate now: the employee who cancelled, and the user account that acted.
         entity.CancelledById = cancelDto.CancelledById;
         entity.CancelledAt = cancelDto.CancelledAt;
-        entity.UpdatedBy = cancelDto.CancelledById.ToString();
+        entity.UpdatedBy = cancelledByUserId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request cancelled: {RequestNumber}", entity.RequestNumber);
+
+        await PublishLifecycleAsync(entity, "Cancelled", cancellationToken);
+
         return true;
     }
 
@@ -464,18 +622,33 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request completed: {RequestNumber}", entity.RequestNumber);
+
+        await PublishLifecycleAsync(entity, "Completed", cancellationToken);
+
         return true;
     }
 
     // ---- Comments ----------------------------------------------------------
 
-    public async Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, Guid authorEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // The parent request was never checked, so a comment could be hung off any request id at
+        // all — including another tenant's. GetOwnedRequestAsync raises "not found" for both.
+        await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // AuthorId arrived on the payload, so a caller could post a comment under a colleague's
+        // name. Authorship is the caller's identity, never an input.
+        entity.AuthorId = authorEmployeeId;
+
         await _commentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var reloaded = await _commentRepository.GetWithAuthorAsync(tenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelRequestCommentDto>> GetCommentsAsync(Guid requestId, CancellationToken cancellationToken = default)
@@ -493,7 +666,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _commentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var reloaded = await _commentRepository.GetWithAuthorAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default)
@@ -506,13 +681,22 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
     // ---- Attachments -------------------------------------------------------
 
-    public async Task<StaffTravelRequestAttachmentDto> AddAttachmentAsync(CreateStaffTravelRequestAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffTravelRequestAttachmentDto> AddAttachmentAsync(CreateStaffTravelRequestAttachmentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploaderEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // Same actor hole as comments: who uploaded a document is a fact about the caller.
+        entity.UploadedById = uploaderEmployeeId;
+
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var reloaded = await _attachmentRepository.GetWithUploaderAsync(tenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelRequestAttachmentDto>> GetAttachmentsAsync(Guid requestId, CancellationToken cancellationToken = default)
@@ -541,7 +725,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _groupTravelRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Group travel created: {GroupName}", entity.GroupName);
-        return entity.ToDto();
+
+        var reloaded = await _groupTravelRepository.GetWithRequestsAsync(entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffGroupTravelDto> GetGroupTravelByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -589,7 +775,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return true;
     }
 
-    public async Task<StaffGroupTravelDto> AddGroupParticipantsAsync(AddGroupTravelParticipantsDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<StaffGroupTravelDto> AddGroupParticipantsAsync(AddGroupTravelParticipantsDto dto, Guid tenantId, Guid createdByUserId, Guid initiatorEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var group = await _groupTravelRepository.GetWithRequestsAsync(dto.GroupTravelId);
@@ -609,7 +795,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             var createDto = new CreateStaffTravelRequestDto
             {
                 EmployeeId              = employeeId,
-                InitiatedById           = createdByUserId,
+                InitiatedById           = initiatorEmployeeId,   // Employee FK, not the user id
                 InitiatedByRole         = dto.InitiatedByRole,
                 TravelType              = dto.TravelType,
                 TravelPurpose           = dto.TravelPurpose,
