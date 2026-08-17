@@ -149,6 +149,11 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   revised: 'secondary',
   denied: 'destructive',
 
+  // Staff travel (area 12). "Returned for revision" is the one state that asks the requester to
+  // act, and it is NOT a rejection: a rejected travel request is terminal, because dates move and
+  // reviving a refused trip is usually wrong, whereas this one is "fix this and resend".
+  returnedforrevision: 'secondary',
+
   // Recruitment. The live, work-in-hand states carry weight; the ones that mean "nothing is
   // happening here any more" (Filled, Expired, Withdrawn) read as neutral rather than as a
   // problem — a filled vacancy is a success, not an alert.

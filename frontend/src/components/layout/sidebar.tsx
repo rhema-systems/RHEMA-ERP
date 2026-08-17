@@ -126,6 +126,7 @@ import {
   FileHeart,
   Leaf,
   Recycle,
+  Plane,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -614,6 +615,19 @@ export const navigationItems: NavItem[] = [
           // Open to every employee: the movements raised about them, and the tasks they owe on
           // someone else's. The register above answers 403 for non-HR.
           { title: 'My Movements', href: '/hr/movements/mine', icon: UserCheck },
+        ],
+      },
+      {
+        // Area 12. One request covers the whole trip — approval, itinerary, bookings, the advance
+        // and the expenses claimed against it. Approval runs on the generic workflow engine, so a
+        // screen reads the live step from the workflow record rather than from `status`.
+        title: 'Staff Travel',
+        href: '/hr/travel',
+        icon: Plane,
+        children: [
+          { title: 'Register', href: '/hr/travel', icon: Plane },
+          // Open to every employee; the register above answers 403 without HR.Travel.Read.
+          { title: 'My Travel', href: '/hr/travel/mine', icon: UserCheck },
         ],
       },
       {
