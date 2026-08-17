@@ -290,9 +290,9 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-09** | Travel alert notifications are never sent; `NotificationSentAt` is set by the caller | **high** | §7.5 |
 | **F-10** | No travel reminder sweep, though three other HR areas have one | medium | §7.5 |
 | **F-11** | Company-vehicle transport bypasses Fleet, which already models trips | medium | §7.3 |
-| **F-12** | **44 write methods return the unreloaded entity** — every create/update response has null nav names | **high** | §6.1 |
-| **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | **high** | §6.1 |
-| **F-14** | Sibling reads include unevenly; 4 bespoke reads miss a nav their DTO declares | medium | §6.1 |
+| **F-12** | **44 write methods return the unreloaded entity** — blank nav names on every create/update response | **high** ✅ *confirmed live, 14/14* | §6.2 |
+| **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | **high** ✅ *confirmed live, 7/7 by-id* | §6.2 |
+| **F-14** | Sibling reads include unevenly; 4 bespoke reads miss a nav their DTO declares | ✅ **fixed slice 0** (request repo); other repos unaudited | §6.1 |
 | **F-15** | `RecordDecisionAsync` is AddAsync-then-UpdateAsync (dead-path shape 3) | medium | §6.1 |
 
 ### 6.1 Defect sweep — what has and has not been done
@@ -336,22 +336,72 @@ a *filtered* include (`.Include(i => i.Legs.OrderBy(...))`) that a naive
 `.Include(x => x.Nav)` grep does not match. Any include audit in this codebase must handle
 ordered and filtered includes or it will invent defects.
 
-**Behavioural sweep — NOT done, and blocked.** Everything above is static inference. The audit
-that actually caught area 11's failures compared *live response content* against expectations,
-and that is impossible here today: create is dead (F-01), so there are no rows, so no list read
-can be checked for missing content and no write response can be checked for stale navigations.
+### 6.2 Content audit ✅ **run 2026-08-17, after slice 0** — `audit-content.mjs`
 
-Sequencing that falls out of this:
+The behavioural pass §6.1 said was blocked. With the spine alive it builds a 16-entity fixture
+across the area, then reads it back and asserts what the responses **contain**.
 
-1. **Slice 0 fixes F-01** and the area becomes exercisable for the first time.
-2. **Then a content audit runs** on the same footing as area 11's — assert resolved names are
-   non-blank, not merely that the call returned 200.
-3. **Then each slice re-audits its own endpoints** as it builds them, because F-12/F-13 are
-   whole-area shapes that need fixing per endpoint touched, not in one sweep.
+```
+CONTENT AUDIT — 14 field(s) resolved, 30 finding(s) across 21 endpoints
+```
 
-Do not treat the static list above as the complete defect set. On every prior area the
-behavioural pass found defects the static pass could not see — wrong numbers, unsatisfiable
-gates, silently skipped rows.
+**F-12 CONFIRMED — every write response tested returns blank navigation names. 14 of 14.**
+
+| create | blank on the response |
+|---|---|
+| comment | `authorName` |
+| itinerary | `requestNumber` |
+| flight booking | `vendorName` |
+| hotel booking | `countryName`, `vendorName` |
+| ground transport | `vendorName` |
+| budget | `approvedByName` |
+| advance | `employeeName`, `requestNumber` |
+| expense claim | `requestNumber` |
+| per-diem rate | `countryName` |
+| vendor | `countryName` |
+| travel document | `employeeName`, `issuingCountryName` |
+| visa application | `employeeName`, `destinationCountryName` |
+| risk assessment | `destinationCountryName`, `assessedByName` |
+| alert | `countryName` |
+
+The travel request is the only create that resolves its names — because slice 0 fixed it. Every
+other create in the area returns a payload the UI cannot render a name from.
+
+**F-13 CONFIRMED — every by-id read through `GenericRepository` returns blank names. 7 of 7:**
+vendor, advance, travel document, per-diem rate, risk assessment, visa application, hotel booking.
+
+**List reads are clean.** The bespoke repository reads carry their includes, and the ones slice 0
+fixed stay fixed. So the defect is precisely on **by-id reads and write responses**, which is
+where a detail screen gets its data — the worst possible place for it and the least visible from
+a list.
+
+⚠ **`employeeName` comes back `""`, not `null`.** The mapper concatenates first and last name off
+a null navigation, so the field is *present and empty* rather than absent. A UI binding renders a
+blank cell rather than falling back, and a `!= null` check passes. Assert non-blank, never
+non-null.
+
+⚠ **Two findings in the first run were the audit's own error, not defects** —
+`hotels by request` and `vendors (all)` were asserted for `countryName`, which the *summary* DTOs
+do not declare at all (it lives on the full DTO). Checked the DTO before recording. This is the
+third time in this area a statically-plausible finding has evaporated on inspection; see the
+method note in §3.6.
+
+**Also not defects, recorded so they are not re-investigated:** four creates 400'd on the first
+run purely from wrong payloads — the comment field is `Body` not `commentText`, the approval
+template's is `Name` not `templateName`, `visaType` is a **string** not an enum ordinal, and
+`BudgetYear` carries a `[Range(2000,2100)]` with no default so omitting it fails validation.
+
+### 6.3 What this means for the slices
+
+F-12 and F-13 are **whole-area shapes**, not a list of endpoints to patch in one sweep. Each
+slice fixes them for the endpoints it touches, and re-runs `audit-content.mjs` to confirm its
+own rows have gone from the report. The audit is the area's regression net: it should shrink
+slice by slice and read **0 findings** when area 12 closes.
+
+Do not treat §6.1 plus this audit as the complete defect set either. On every prior area the
+behavioural pass found defects that neither static analysis nor a content check can see — wrong
+numbers, unsatisfiable gates, silently skipped rows. Those surface when a slice exercises the
+*rules*, not the shapes.
 
 ### F-01 — The travel request cannot be created, read or updated ❌ *reproduced*
 
