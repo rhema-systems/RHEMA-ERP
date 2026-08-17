@@ -1603,3 +1603,76 @@ public class StaffTravelCurrencyExchangeRate : TenantEntity
 
     public bool IsOfficial { get; set; }
 }
+
+// =========================================================================
+//  GROUP 9 — REMINDER ENGINE (slice 5a)
+// =========================================================================
+
+/// <summary>One execution of the staff-travel reminder sweep.</summary>
+public class StaffTravelReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+
+    public virtual ICollection<StaffTravelReminderDispatchLog> DispatchLogs { get; set; }
+        = new List<StaffTravelReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a travel sweep.
+/// </summary>
+/// <remarks>
+/// <para>The unique (TenantId, DedupeKey) index is the send-once guarantee: a key encodes the item,
+/// the reminder kind, the date it is about and the escalation tier reached, so each rung fires
+/// exactly once — and moving a date re-arms the ladder, because it produces fresh keys.</para>
+///
+/// <para>⚠ Nothing here carries a passport number, a visa number, or an amount. A reminder travels
+/// further than the record it is about — into notification lists and email — and "your passport
+/// expires on the 3rd" is actionable without publishing the number itself. The same reasoning
+/// governs the travel notification templates and the workflow display resolver for this area.</para>
+/// </remarks>
+public class StaffTravelReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual StaffTravelReminderRun Run { get; set; } = null!;
+
+    /// <summary>
+    /// Machine kind: "TravelDocumentExpiring", "VisaExpiring", "AdvanceSettlementOverdue",
+    /// "TripDeparting".
+    /// </summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Passport", "Travel advance".</summary>
+    [MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>What the notification shows: a request number or document type, and nothing more.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
+}

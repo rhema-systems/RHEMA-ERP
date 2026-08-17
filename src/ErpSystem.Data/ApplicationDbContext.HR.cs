@@ -510,6 +510,8 @@ public partial class ApplicationDbContext
     public DbSet<StaffGroupTravel> StaffGroupTravels { get; set; } = null!;
     public DbSet<StaffTravelRequestComment> StaffTravelRequestComments { get; set; } = null!;
     public DbSet<StaffTravelRequestAttachment> StaffTravelRequestAttachments { get; set; } = null!;
+    public DbSet<StaffTravelReminderRun> StaffTravelReminderRuns { get; set; } = null!;
+    public DbSet<StaffTravelReminderDispatchLog> StaffTravelReminderDispatchLogs { get; set; } = null!;
     public DbSet<StaffTravelItinerary> StaffTravelItineraries { get; set; } = null!;
     public DbSet<StaffTravelItineraryLeg> StaffTravelItineraryLegs { get; set; } = null!;
     public DbSet<StaffTravelItineraryActivity> StaffTravelItineraryActivities { get; set; } = null!;
@@ -8519,6 +8521,21 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ---- Discipline reminder engine (area 9 slice 8) ----
         builder.Entity<DisciplineReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
         builder.Entity<DisciplineReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Staff travel reminder engine (area 12 slice 5a) ----
+        builder.Entity<StaffTravelReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<StaffTravelReminderDispatchLog>(e =>
         {
             // The engine's send-once guarantee — a sweep claims a key before it publishes.
             e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();

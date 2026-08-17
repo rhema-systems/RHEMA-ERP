@@ -1743,6 +1743,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Sweep logic is scoped (IDisciplineReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.DisciplineReminderBackgroundService>();
 
+            // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
+
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,
                 ErpSystem.Api.Services.TransactionalEmailQueue>();

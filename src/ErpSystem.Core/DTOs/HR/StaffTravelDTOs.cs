@@ -3406,3 +3406,62 @@ public class UpdateStaffTravelCurrencyExchangeRateDto : UpdateDtoBase
 }
 
 #endregion
+
+#region Staff travel reminder engine (slice 5a)
+
+public class StaffTravelReminderRunResultDto
+{
+    public Guid RunId { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+
+    /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
+    public int AlreadySent { get; set; }
+}
+
+/// <summary>
+/// One thing a sweep would fire. Carries a reference and a date and nothing sensitive — see the
+/// remarks on <c>StaffTravelReminderDispatchLog</c>.
+/// </summary>
+public class StaffTravelReminderPreviewItemDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public string DedupeKey { get; set; } = string.Empty;
+
+    /// <summary>True when a previous sweep already claimed this key, so a real run would skip it.</summary>
+    public bool AlreadySent { get; set; }
+}
+
+public class StaffTravelReminderRunDto
+{
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public Guid? TriggeredByUserId { get; set; }
+    public int RemindersQueued { get; set; }
+}
+
+public class StaffTravelReminderLogEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+#endregion

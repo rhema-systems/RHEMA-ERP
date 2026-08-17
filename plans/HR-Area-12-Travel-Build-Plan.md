@@ -288,7 +288,7 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | ⚠ **supplier fixed slice 3**; currency/FX owed slice 6 | §7.2 |
 | **F-08** | Travel moves money with **no** GL / AP / budget artifact whatsoever | **high** ⏸ deferred (D-4) | §7.4 |
 | **F-09** | Travel alert notifications are never sent; `NotificationSentAt` is set by the caller | ✅ **fixed slice 5** | §7.5 |
-| **F-10** | No travel reminder sweep, though three other HR areas have one | medium | §7.5 |
+| **F-10** | No travel reminder sweep, though three other HR areas have one | ✅ **fixed slice 5a** | §7.5 |
 | **F-11** | Company-vehicle transport bypasses Fleet, which already models trips | ✅ **fixed slice 3** | §7.3 |
 | **F-12** | **44 write methods return the unreloaded entity** — blank nav names on every create/update response | ✅ **CLOSED slice 5** — audit 0 findings | §6.2 |
 | **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | ✅ **CLOSED slice 5** — audit 0 findings | §6.2 |
@@ -881,11 +881,46 @@ vendor, and asserted an approver on an unapproved budget. Reporting those as def
 been wrong. **That is the fourth plausible-looking finding in this area to evaporate on
 inspection** (see the method note in §3.6): the audit is now both stricter and more honest.
 
-### Slice 5a — the travel reminder sweep ⏳ *split, agreed with the user*
+### Slice 5a — the travel reminder sweep ✅ **green 2026-08-17, 20 assertions, first run**
 
-Expiring passports and visas, overdue advance settlements, upcoming departures. Follows the area-9
-pattern, which needs its own service, background service, controller, topic seeds **and a dedupe
-table** — so it carries a migration, the same reason attachments became slice 1a.
+`run-slice5a.mjs`, 20/20. Regression: **226 assertions across eight slices, 0 failures.** Audit
+still 0.
+
+Travel was full of dates that mattered and **nothing watched any of them**. The endpoints already
+existed — `compliance/documents/expiring`, `compliance/visa-applications/expiring`,
+`finance/advances/overdue-settlements`, `requests/upcoming` — returning their rows to nobody. Three
+other HR areas had a sweep; travel did not, which is how an expired passport sits unnoticed until
+somebody is turned away at a gate.
+
+Four kinds swept: `TravelDocumentExpiring` and `VisaExpiring` (90-day horizon),
+`AdvanceSettlementOverdue`, `TripDeparting` (14-day horizon, **approved trips only** — the harness
+asserts a Draft trip is *not* announced, which a naive implementation gets wrong).
+
+⚠ **The advance kind only works because of slice 4.** Before settlement existed, `UnsettledAmount`
+never moved off its full value, so every disbursed advance would have appeared here for ever. The
+sweep would have been noise generating noise.
+
+Three things carried from area 9 rather than rediscovered:
+
+- **Send-once by dedupe key** (item + kind + date + tier) enforced by a unique
+  `(TenantId, DedupeKey)` index — claimed in the same `SaveChanges` that records the run.
+  Moving a date produces fresh keys and re-arms the ladder, which is wanted: a corrected passport
+  expiry genuinely is a new thing to chase.
+- **Publish after commit.** An unpublished-but-claimed reminder is one missed notification;
+  publishing first risks re-sending on every sweep, for ever.
+- **A 90-day backlog floor.** Area 9's first live run queued 275, of which 242 were history.
+
+The **`?asOf=` preview seam** was built in from the start rather than added after the fact — every
+date here is server-stamped, so without it the harness could only assert whatever happens to be
+true today. §5 uses it to prove the escalation ladder without waiting for time to pass.
+
+**Gated on `HR.Travel.Admin`**, a deliberate step up from the rest of the area: the log lists
+references across the whole tenant and forcing a sweep is administrative. The harness asserts that
+**HR itself is refused**.
+
+⚠ **`DocumentExpiryHorizonDays = 90` is an assumption, not TDC's number** — chosen as the shortest
+notice that still allows a Ghanaian passport renewal, since a 30-day warning about a six-week
+document is not a warning. Belongs in §9 with the other assumed windows.
 
 ### Slice 6 — Configuration → **retire onto Finance**
 7 endpoints, and the outcome is deletion rather than screens. Drop
@@ -912,6 +947,12 @@ than something Area 12 builds. Ask before slice 4, not after.
 (§7.2) means an airline becomes a supplier record that Procurement's process governs — onboarding,
 performance, payment terms. Confirm the travel desk is content to raise vendors through
 Procurement rather than keep a private list.
+
+**How much notice does the travel desk need of an expiring passport or visa?** The sweep chases
+from **90 days** out (`DocumentExpiryHorizonDays`). That is our number, chosen as the shortest
+notice that still allows a Ghanaian passport renewal — a 30-day warning about a document that takes
+six weeks to replace is not a warning. Easy to change, but it is running in code today. The
+departure announcement uses **14 days** and the first-sweep backlog floor is **90 days**.
 
 **⚠ For Procurement's owner, not TDC:** `SuppliersController` is entirely non-functional — two
 missing DI registrations stop it activating at all, and its create is a dead path that answers 201
