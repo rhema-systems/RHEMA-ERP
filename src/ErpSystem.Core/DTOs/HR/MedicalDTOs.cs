@@ -2204,8 +2204,10 @@ public class MedicalExpenseClaimDetailDto : MedicalExpenseClaimDto
 public class CreateMedicalExpenseClaimDto : CreateDtoBase
 {
     /// <summary>
-    /// Optional. When omitted, the claim is filed for the authenticated caller.
-    /// HR/Admin may set this to file a claim on behalf of another employee.
+    /// The employee the claim is for. <b>Required</b> on the HR endpoint
+    /// (<c>POST api/medical-expense-claims</c>), which files on an employee's behalf.
+    /// <b>Ignored</b> on the employee self-service endpoint, which always files for the
+    /// authenticated caller and never accepts a caller-supplied subject.
     /// </summary>
     public Guid? EmployeeId { get; set; }
     public bool IsForDependent { get; set; }

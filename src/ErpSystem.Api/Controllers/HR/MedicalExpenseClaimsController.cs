@@ -63,6 +63,19 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalExpenseClaimSummaryDto>>> GetFlagged(CancellationToken ct)
         => Ok(await _service.GetFlaggedClaimsAsync(ct));
 
+    /// <summary>
+    /// Files a medical expense claim on behalf of an employee. HR-facing.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>EmployeeId</c> is required here: this is the HR caseload surface, and everything on
+    /// it already requires the medical write permission, which an ordinary employee does not hold.
+    /// Employees file their <b>own</b> claims through the self-service surface instead.</para>
+    ///
+    /// <para>This previously defaulted <c>EmployeeId</c> to the caller and carried a role check to
+    /// allow HR to override it — a branch no ordinary employee could ever reach, because the
+    /// permission gate above had already turned them away. It read like a working self-service
+    /// path and was not one.</para>
+    /// </remarks>
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<MedicalExpenseClaimDto>> Create(
@@ -70,18 +83,11 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId) is { } error) return error;
+        if (dto.EmployeeId is null || dto.EmployeeId == Guid.Empty)
+            return BadRequest("An employee id is required. Employees file their own claims through self-service.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
-        // Default to the caller filing for themselves. HR/Admin may file on behalf of another employee.
-        var targetEmployeeId = employeeId;
-        if (dto.EmployeeId.HasValue && dto.EmployeeId.Value != employeeId)
-        {
-            if (!User.IsInRole("HR") && !User.IsInRole("Admin") && !User.IsInRole("SuperAdmin"))
-                return Forbid();
-            targetEmployeeId = dto.EmployeeId.Value;
-        }
-
-        var created = await _service.CreateClaimAsync(dto, targetEmployeeId, tenantId, userId, ct);
+        var created = await _service.CreateClaimAsync(dto, dto.EmployeeId.Value, tenantId, userId, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 

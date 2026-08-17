@@ -7414,10 +7414,13 @@ namespace ErpSystem.Web.Services
 
             var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
+                // HR grants come from HrPermissions.RoleGrants, which the role-fallback
+                // authorization handler also reads — the fallback stands in for this seed, so the
+                // two must not drift.
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
-                    .Concat(HrPermissions.AllNames).ToArray(),
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin)).ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
-                    .Concat(HrPermissions.AllNames).ToArray(),
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin)).ToArray(),
                 [Constants.Roles.HelpdeskAgent] = new[]
                 {
                     "enquiry.internal.access",
@@ -7711,11 +7714,7 @@ namespace ErpSystem.Web.Services
                 },
                 // HR staff maintain occupational-health records but do not administer them:
                 // deleting a medical record stays with tenant administrators.
-                [Constants.Roles.Hr] = new[]
-                {
-                    HrPermissions.ViewMedicalRecords,
-                    HrPermissions.MaintainMedicalRecords
-                }
+                [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr)
             };
 
             foreach (var (roleName, permissionNames) in rolePermissionMap)

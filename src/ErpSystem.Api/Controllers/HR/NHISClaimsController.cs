@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,7 +9,11 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/nhis-claims")]
-[Authorize]
+// NHIS claims are employee-linked medical records — amounts, diagnoses and supporting documents.
+// This controller was missed when the other medical controllers were re-gated and kept a bare
+// [Authorize], so any authenticated employee could read, edit and delete every claim in the
+// tenant. Read is the class-level floor; write and delete are tightened per action.
+[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
 public class NHISClaimsController : MedicalControllerBase
 {
     private readonly INHISService _service;
@@ -49,6 +54,7 @@ public class NHISClaimsController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<NHISClaimSummaryDto>>> GetPending(CancellationToken ct)
         => Ok(await _service.GetPendingClaimsAsync(ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<NHISClaimDto>> Create(
         [FromBody] CreateNHISClaimDto dto,
@@ -61,6 +67,7 @@ public class NHISClaimsController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<NHISClaimDto>> Update(
         Guid id,
@@ -74,6 +81,7 @@ public class NHISClaimsController : MedicalControllerBase
         return Ok(await _service.UpdateClaimAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(
         Guid id,
@@ -85,6 +93,7 @@ public class NHISClaimsController : MedicalControllerBase
         return Ok(new { message = "Claim status updated." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/submit")]
     public async Task<IActionResult> Submit(
         Guid id,
@@ -96,6 +105,7 @@ public class NHISClaimsController : MedicalControllerBase
         return Ok(new { message = "Claim submitted." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{id:guid}/payment")]
     public async Task<IActionResult> RecordPayment(
         Guid id,
@@ -107,6 +117,7 @@ public class NHISClaimsController : MedicalControllerBase
         return Ok(new { message = "Payment recorded." });
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
@@ -124,6 +135,7 @@ public class NHISClaimsController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetClaimDocumentsAsync(nhisClaimId, ct));
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("documents")]
     public async Task<ActionResult<NHISClaimDocumentDto>> AddDocument(
         [FromBody] CreateNHISClaimDocumentDto dto,
@@ -136,6 +148,7 @@ public class NHISClaimsController : MedicalControllerBase
         return Ok(created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("documents/{id:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid id, CancellationToken ct)
     {

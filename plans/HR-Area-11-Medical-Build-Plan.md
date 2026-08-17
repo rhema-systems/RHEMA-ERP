@@ -33,7 +33,7 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 
 | # | Slice | State | Assertions |
 |---|---|---|---|
-| 1 | Finish the gating job | ☐ not started | target ~90 |
+| 1 | Finish the gating job | ☑ **green 2026-08-17** | **93** |
 | 2 | Cross-tenant adjudication + claim contract | ☐ not started | target ~40 |
 | 3 | Self-service claims + actor hole | ☐ not started | target ~70 |
 | 4 | UI — reference & config | ☐ not started | target ~40 |
@@ -107,6 +107,10 @@ SuperAdmin token **cannot test gates** — use the HR actor.
 - **The harness must run in Staging.** In Development the exception page pre-empts the exception
   mapping, so every business-rule refusal reads as a 500 with a stack trace instead of a 422. This
   is the `hr-harness-run-environment` trap and it was hit during this survey. Pass the JWT key.
+- ⚠ **Pass `--contentRoot`** when launching the DLL by absolute path. The host takes its content
+  root from the working directory, so launching from anywhere else finds no `appsettings.json` and
+  dies with `Connection string 'DefaultConnection' not found` — which looks like a Staging config
+  problem and is not. Full recipe in `dev-harness/hr-medical/README.md`.
 - Kill the running `ErpSystem.Api` process before asking for a rebuild — it locks its own output
   DLLs (`stop-backend-before-user-builds`).
 
@@ -131,20 +135,22 @@ SuperAdmin token **cannot test gates** — use the HR actor.
 **Gotcha:** identity tables are `Users`, `UserRoles`, `AspNetRoles` — *not* `AspNetUsers`. Two
 queries were lost to this. Role grants join `RolePermissions → Permissions` + `AspNetRoles`.
 
-### 4.4 Smoke fixtures left in the dev DB
+### 4.4 Smoke fixtures — created then cleared
 
-Created 2026-08-17. Harmless, and usable as fixtures — clear them if you'd rather start clean.
+The survey's smoke pass wrote 11 rows (facility, provider, plan, policy, scheme, health profile,
+exam, 2 claims, approval, note). **Cleared 2026-08-17**, hard delete in FK order, verified back to
+**0 rows across all 28 medical tables**; SHE health (31 rows) and `Employees` (1,650) untouched.
 
-```
-facility  797bf770-1628-426e-aaa5-2b25610b754a   Smoke Hospital 804179M
-provider  d1154446-35b5-4eeb-838b-bbe7b0947407
-plan      b6560aa3-6934-4751-b4ba-4d7204681458
-policy    fd2e3581-4646-423b-a995-a5bbc8f2a46f
-scheme    ff27dad6-c9c0-4ab1-8b54-3b11dc4bb41d
-profile   e0dcf8d9-db67-43f9-8e0c-7f642248a296
-exam      a0073dcf-01af-49f9-bcab-9709f6b0f99d   (soft-deleted by the gate test)
-claims    1 live + 1 soft-deleted
-```
+Cleared deliberately so slice 1's harness starts from the same 0 baseline the survey recorded —
+hand-made rows sitting alongside would skew any count-based assertion. **Build fixtures in the
+harness's own `setup.mjs`**, the way areas 7/9/10 do, not by hand.
+
+The clear script is at `scratchpad/clear-smoke.sql` for the session; if you need it again, the
+FK order is: notes → approvals → items → documents → claims → exam-documents → exams →
+conditions → allergies → profiles → dependents → insurance-claims → policies → premiums →
+network-facilities → provider-documents → plans → providers → tiers → schemes → pre-auths →
+referrals → appointments → NHIS-documents → NHIS-claims → facility-services → physicians →
+facilities.
 
 ### 4.5 Enum values (extracted, save a lookup)
 
@@ -209,12 +215,12 @@ Correct split for all three: **reads on plain `[Authorize]`, writes on `MedicalW
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| F-01 | **critical** | Role fallback grants any `HR.*` permission regardless of verb | open → slice 1 |
-| F-02 | **high** | 3 controllers still on bare `[Authorize]` | open → slice 1 |
+| F-01 | **critical** | Role fallback grants any `HR.*` permission regardless of verb | ✅ **fixed slice 1** |
+| F-02 | **high** | 3 controllers still on bare `[Authorize]` | ✅ **fixed slice 1** |
 | F-03 | **high** | `ProcessApprovalAsync` never checks the claim's tenant | open → slice 2 |
 | F-04 | medium | `CreateMedicalExpenseClaimDto.Items` silently discarded | open → slice 2 |
-| F-05 | medium | Claim create/approve/note demand an employee-linked *caller* | open → slice 3 |
-| F-06 | medium | On-behalf-of branch unreachable (permission + actor) | open → slice 1/3 |
+| F-05 | medium | Claim create/approve/note demand an employee-linked *caller* | ◐ **create fixed slice 1**; approve/note → slice 3 |
+| F-06 | medium | On-behalf-of branch unreachable (permission + actor) | ✅ **fixed slice 1** |
 | F-07 | low | ~40 reads filter tenant in memory after `GetAllAsync()` | open → deferred |
 
 ### F-01 — Role fallback ignores the verb ✅ *empirically confirmed*
@@ -267,9 +273,24 @@ notes — even when HR supplies `dto.EmployeeId` to file on behalf. 18/1,609 use
 
 ## 7. The slices
 
-### Slice 1 — Finish the gating job
+### Slice 1 — Finish the gating job ✅ green 2026-08-17, 93 assertions
 
-**Target ~90 assertions.** Closes F-01, F-02, F-06 (partial).
+Closed F-01, F-02, F-06, and the create half of F-05. Harness: `dev-harness/hr-medical/run-slice1.mjs`.
+
+**As-built notes** (where it differed from the plan below):
+
+- The map is `HrPermissions.RoleGrants` + `GrantsFor(role)`; `MedicalFallbackRoles` is gone and no
+  code references it. The seeder calls `GrantsFor` rather than restating grants — **verified
+  behaviour-preserving**, role grants in the DB are byte-identical after the change.
+- **`"Admin"` was kept**, mapped to `AllNames`, against the survey's suggestion to drop it. No such
+  role exists in the reference DB (checked against all 57), but removing it would silently revoke
+  medical access in any environment that does have one — not a change to make unasked inside a
+  security fix. Flagged in the XML doc to confirm, then promote to a constant or delete.
+- **F-05's create half landed here.** Rewriting `Create` forced a choice of context helper, and
+  `TryGetEmployeeWriteContext` was never justified on that path — `CreatedByUserId` is a *user*.
+  It now uses `TryGetWriteContext`, so an unlinked HR account can file on behalf. Approval still
+  requires a linked actor, correctly, because `ApprovedById` is an Employee FK — that half is
+  slice 3.
 
 **Changes**
 

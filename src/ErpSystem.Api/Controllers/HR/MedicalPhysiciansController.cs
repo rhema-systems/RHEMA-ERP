@@ -7,12 +7,19 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The register of doctors practising at the facilities the organisation deals with.
+/// </summary>
+/// <remarks>
+/// <b>Reads are open to any authenticated user</b>, unlike the rest of the medical controllers.
+/// A physician record is professional directory data — name, specialty, facility, licence — not a
+/// patient's record, and an employee filing their own medical expense claim may name the doctor
+/// they saw. Class-level <c>MedicalRead</c> was relaxed for that reason; verifying and maintaining
+/// the register stays behind the medical write and admin permissions.
+/// </remarks>
 [ApiController]
 [Route("api/medical-physicians")]
-// Medical records are special-category personal data. This controller previously carried a
-// bare [Authorize], so any authenticated employee could read them. Read is the class-level
-// floor; write and delete are tightened per action.
-[Authorize(Policy = HrPermissions.MedicalReadPolicy)]
+[Authorize]
 public class MedicalPhysiciansController : MedicalControllerBase
 {
     private readonly IHealthcareFacilityService _service;

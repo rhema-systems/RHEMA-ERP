@@ -35,29 +35,6 @@ public static class HrPermissions
     public const string MedicalWritePolicy = "HR.Policy.MedicalWrite";
     public const string MedicalAdminPolicy = "HR.Policy.MedicalAdmin";
 
-    /// <summary>
-    /// Roles that retain medical access when a tenant predates the permission seed.
-    /// </summary>
-    /// <remarks>
-    /// Permissions resolve from the database, so without this every medical endpoint would 403
-    /// for everyone but SuperAdmin on any tenant provisioned before the seeder ran. See
-    /// <c>HrPermissionRoleFallbackAuthorizationHandler</c>.
-    /// </remarks>
-    /// <remarks>
-    /// "HR User" was the seeded name before it was renamed to "HR"
-    /// (<c>DatabaseSeedingService.MigrateLegacyHrRoleNameAsync</c>). It stays listed so a
-    /// tenant that has not yet run the renaming startup keeps medical access; drop it once
-    /// every environment is known to be migrated.
-    /// </remarks>
-    public static readonly string[] MedicalFallbackRoles =
-    {
-        Constants.Roles.SuperAdmin,
-        Constants.Roles.TenantAdmin,
-        "Admin",
-        Constants.Roles.Hr,
-        Constants.Roles.LegacyHrUser
-    };
-
     public static readonly HrPermissionDefinition[] All =
     {
         new(ViewMedicalRecords, "View Medical Records",
@@ -72,4 +49,59 @@ public static class HrPermissions
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
+
+    /// <summary>
+    /// What HR staff hold: they maintain occupational-health records but do not administer them,
+    /// so deleting a medical record stays with tenant administrators.
+    /// </summary>
+    private static readonly string[] HrStaffGrants = { ViewMedicalRecords, MaintainMedicalRecords };
+
+    /// <summary>
+    /// Per-role HR permission grants. This is the single source for both the database seed
+    /// (<c>DatabaseSeedingService</c>) and the role fallback
+    /// (<c>HrPermissionRoleFallbackAuthorizationHandler</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The fallback exists to stand in for the seed, so it must grant exactly what the
+    /// seed grants.</b> Both read this map for that reason. The previous implementation matched
+    /// on the <c>HR.</c> prefix alone and never inspected the verb, so an HR-role user — seeded
+    /// with Read and Write only — satisfied <c>MedicalAdminPolicy</c> as well and could delete
+    /// medical records, including paid expense claims. Verb-blind fallback is a privilege
+    /// escalation; keep the two sides reading one map so they cannot drift apart again.</para>
+    ///
+    /// <para>Permissions resolve from the database, so without a fallback every HR endpoint would
+    /// 403 for everyone but SuperAdmin on a tenant provisioned before the seeder ran.</para>
+    ///
+    /// <para>"HR User" was the seeded name before the rename to "HR"
+    /// (<c>DatabaseSeedingService.MigrateLegacyHrRoleNameAsync</c>). It is listed so a tenant that
+    /// has not yet run the renaming startup keeps access; the seeder does not seed it, which is
+    /// precisely what the fallback is for. Drop it once every environment is known to be migrated.</para>
+    ///
+    /// <para>⚠ "Admin" is a bare literal with no <c>Constants.Roles</c> member, and no such role
+    /// exists in the reference database (checked 2026-08-17). It is retained because removing it
+    /// would silently revoke medical access in any environment that does have one. Confirm whether
+    /// any environment uses it, then either promote it to a constant or delete it.</para>
+    ///
+    /// <para>When extending this to other HR areas (the W3 permission sweep), add the area's
+    /// permissions here per role rather than widening the match — the whole point of this map is
+    /// that a role's grants are stated, not inferred from a name.</para>
+    /// </remarks>
+    public static readonly IReadOnlyDictionary<string, string[]> RoleGrants =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Constants.Roles.SuperAdmin] = AllNames,
+            [Constants.Roles.TenantAdmin] = AllNames,
+            ["Admin"] = AllNames,
+            [Constants.Roles.Hr] = HrStaffGrants,
+            [Constants.Roles.LegacyHrUser] = HrStaffGrants
+        };
+
+    /// <summary>
+    /// The HR permissions granted to <paramref name="roleName"/>, or an empty array when the role
+    /// receives none. Callers can concatenate this with their own module's grants.
+    /// </summary>
+    public static string[] GrantsFor(string roleName)
+        => RoleGrants.TryGetValue(roleName, out var permissions)
+            ? permissions
+            : Array.Empty<string>();
 }
