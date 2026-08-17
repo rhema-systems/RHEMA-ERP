@@ -141,7 +141,11 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
     [Required]
     public Guid EmployeeId { get; set; }
 
-    [Required]
+    /// <summary>
+    /// Who raised the request. <b>Server-assigned — anything sent here is overwritten</b> with the
+    /// caller's employee id (falling back to <see cref="EmployeeId"/> for an unlinked account).
+    /// Kept on the DTO because the entity mapper reads it; it is not a client input.
+    /// </summary>
     public Guid InitiatedById { get; set; }
 
     [Required]

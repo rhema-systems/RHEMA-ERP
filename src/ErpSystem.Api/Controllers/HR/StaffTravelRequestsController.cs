@@ -103,6 +103,19 @@ public class StaffTravelRequestsController : HrControllerBase
     // CRUD
     // =========================================================================
 
+    /// <summary>Raise a travel request, normally on someone else's behalf.</summary>
+    /// <remarks>
+    /// <para><b><c>InitiatedById</c> on the payload is ignored.</b> It is an <c>Employee</c> FK
+    /// recording who <i>raised</i> the request, so it is the caller — not the traveller, since the
+    /// desk raises travel for other people, and not the payload, since accepting it let any caller
+    /// file travel under a colleague's name. This is the same actor hole slice 0 closed across the
+    /// area; it survived because the census counted controller parameters and this one travels
+    /// inside the DTO.</para>
+    ///
+    /// <para>An administrative account with no employee link falls back to the traveller, which
+    /// records the request as self-initiated. That is preferable to refusing the desk over a field
+    /// it was never able to supply — see <see cref="HrControllerBase"/> on unlinked accounts.</para>
+    /// </remarks>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffTravelRequestDto>> Create([FromBody] CreateStaffTravelRequestDto dto)
@@ -110,6 +123,8 @@ public class StaffTravelRequestsController : HrControllerBase
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
+
+        dto.InitiatedById = CurrentUser.EmployeeId ?? dto.EmployeeId;
 
         var created = await _service.CreateAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);

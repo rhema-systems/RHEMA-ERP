@@ -207,8 +207,8 @@ class TravelService {
     return apiService.get<StaffTravelRequest>(`${this.meUrl}/requests/${id}`);
   }
 
-  /** `employeeId` / `initiatedById` are overwritten server-side from the token. */
-  createMine(payload: Omit<CreateStaffTravelRequest, 'employeeId' | 'initiatedById' | 'initiatedByRole'>) {
+  /** The traveller, the initiator and the initiator's role are all taken from the token here. */
+  createMine(payload: Omit<CreateStaffTravelRequest, 'employeeId' | 'initiatedByRole'>) {
     return apiService.post<StaffTravelRequest>(`${this.meUrl}/requests`, payload);
   }
 

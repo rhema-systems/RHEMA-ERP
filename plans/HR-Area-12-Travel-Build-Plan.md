@@ -977,6 +977,56 @@ rather than a constant.
 The W1 recipe again. Operational screens under `/hr/travel/...`; setup and reference under
 `/administration/hr/travel/...`.
 
+Verification basis for every UI slice: **`tsc --noEmit` + `eslint` + route resolution only.** There
+is no browser-automation tool in this environment, so no screen here has been rendered. What that
+does and does not prove is worth being honest about — it proves the calls type-check against the
+service layer and the routes resolve; it proves nothing about layout, and nothing about a call
+whose shape is right and whose *meaning* is wrong.
+
+#### Slice 7 — Requests: register, self-service, forms, detail ✅ **green 2026-08-17, 11 assertions**
+
+Eight routes and three shared pieces:
+
+| route | |
+|---|---|
+| `/hr/travel` | the desk's register — 3 quick views, type filter |
+| `/hr/travel/new`, `/hr/travel/[id]/edit` | desk create / amend |
+| `/hr/travel/[id]` | detail — overview, comments, attachments, workflow |
+| `/hr/travel/mine`, `/hr/travel/mine/new` | the employee's own |
+| `/hr/travel/mine/[id]`, `.../edit` | self-service detail / amend |
+
+`types/hr/travel.ts`, `services/hr/travel.service.ts`, `components/hr/travel/TravelRequestForm.tsx`
+(one form, four routes) and `TravelAttachmentsPanel.tsx`.
+
+**⚠ The slice found a backend actor hole, and it found it by trying to fill in a form field.**
+`CreateStaffTravelRequestDto.InitiatedById` is an `Employee` FK recording who *raised* the request,
+and it was caller-declared: any desk actor could file travel under a colleague's name. It surfaced
+because the browser has **no employee id for the signed-in user** — the client `User` type carries
+roles and tenants, not an employee link — so there was nothing honest to put in the field. That is
+the general tell: **a value the client cannot know is a value the client should not be sending.**
+
+It is the same shape slice 0 closed 33 times over, and it survived for the same reason
+`CancelledById` and the group-participant initiator did — the slice-0 census counted *controller
+parameters*, and this actor travels inside a DTO. Fixed in the controller
+(`dto.InitiatedById = CurrentUser.EmployeeId ?? dto.EmployeeId`), `[Required]` dropped, and
+`initiatedById` removed from the frontend create type so it cannot come back. Note the fallback: an
+administrative account with no employee link records the request as self-initiated rather than being
+refused over a field it was never able to supply. `run-slice7.mjs`, 11/11; all nine earlier slices
+re-run unchanged (252).
+
+**Two design calls worth keeping:**
+
+- **`isInternational` is derived, not asked for.** It was a free boolean on the DTO, which let a
+  request claim a domestic trip between two countries. There is no case where the answer is not
+  already on the form, so the form computes it from the two country pickers.
+- **The self-service detail is deliberately narrower than the desk's.** `api/staff-travel/me` has no
+  comment, attachment or approval endpoint, and pointing the page at the desk routes to obtain them
+  would 403 for the very employee the surface exists to serve. Desk comments marked
+  `isVisibleToTraveller` arrive embedded on the record, so they render with no second call.
+
+Currency is bound to `GET /api/finance/currencies` and countries to `/api/Country` — travel keeps
+no list of either, per §7.
+
 ---
 
 ## 9. Open for TDC

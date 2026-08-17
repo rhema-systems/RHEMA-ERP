@@ -181,10 +181,13 @@ export interface StaffTravelDashboard {
 /**
  * ⚠ `currencyCode` must be one Finance holds — the server refuses anything else. Bind the picker
  * to `GET /api/finance/currencies`; travel deliberately keeps no currency list of its own.
+ *
+ * ⚠ There is no `initiatedById`. Who raised the request is the caller's employee id, stamped
+ * server-side — the desk raises travel for other people, so it is neither the traveller nor
+ * anything a form can be trusted to say. Only the *role* it was raised under is an input.
  */
 export interface CreateStaffTravelRequest {
   employeeId: string;
-  initiatedById: string;
   initiatedByRole: TravelInitiatorRole;
   travelType: StaffTravelType;
   travelPurpose: StaffTravelPurpose;
@@ -211,7 +214,7 @@ export interface CreateStaffTravelRequest {
 
 export type UpdateStaffTravelRequest = Omit<
   CreateStaffTravelRequest,
-  'employeeId' | 'initiatedById' | 'initiatedByRole'
+  'employeeId' | 'initiatedByRole'
 > & { id: string };
 
 /**
