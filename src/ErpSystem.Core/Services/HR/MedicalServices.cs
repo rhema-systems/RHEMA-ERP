@@ -2290,9 +2290,23 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         entity.ClaimNumber = $"MC-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
         await _claimRepository.AddAsync(entity);
+
+        // Lines submitted alongside the claim. The DTO has always accepted an Items collection and
+        // the mapping never read it, so a claim form that posted its lines with the claim appeared
+        // to succeed and stored nothing. Added in the same unit of work, so a claim and its lines
+        // commit together or not at all.
+        foreach (var itemDto in createDto.Items ?? Enumerable.Empty<CreateMedicalExpenseItemDto>())
+        {
+            var item = itemDto.ToEntity(tenantId, createdByUserId);
+            item.ClaimId = entity.Id; // the parent owns the link; a client-supplied ClaimId here
+                                      // would let a line be attached to somebody else's claim
+            await _itemRepository.AddAsync(item);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId}", entity.ClaimNumber, employeeId);
+        _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId} with {ItemCount} item(s)",
+            entity.ClaimNumber, employeeId, createDto.Items?.Count ?? 0);
 
         return entity.ToDto();
     }
@@ -2314,9 +2328,17 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
     public async Task<bool> ProcessApprovalAsync(ProcessMedicalExpenseClaimDto processDto, Guid tenantId, Guid approverEmployeeId, Guid processedByUserId, CancellationToken cancellationToken = default)
     {
+        EnsureTenant(tenantId);
+
         var claim = await _claimRepository.GetByIdAsync(processDto.ClaimId);
 
-        if (claim == null)
+        // Tenant before state. Every sibling method on this service checks the tenant on the row it
+        // loaded; this one only checked for null, so a claim belonging to another tenant could be
+        // approved, and the approval row was then stamped with the caller's tenant. The ORDER
+        // matters as much as the check: answering "already processed" for a claim the caller may
+        // not see turns the endpoint into an oracle for which ids exist elsewhere. A foreign claim
+        // must be indistinguishable from one that does not exist.
+        if (claim == null || claim.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{processDto.ClaimId}' not found.");
 
         // A claim is adjudicated exactly once; this keeps insurance utilization consistent.
@@ -2325,7 +2347,6 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
                 MedicalWorkflowFailureReason.InvalidState,
                 $"Claim '{claim.ClaimNumber}' has already been processed ({claim.Status}) and cannot be re-adjudicated.");
 
-        EnsureTenant(tenantId);
         var approval = processDto.ToEntity(tenantId, processedByUserId, approverEmployeeId);
 
         if (processDto.Status == MedicalExpenseApprovalStatus.Approved)

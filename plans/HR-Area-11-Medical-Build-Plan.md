@@ -34,7 +34,7 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | # | Slice | State | Assertions |
 |---|---|---|---|
 | 1 | Finish the gating job | ☑ **green 2026-08-17** | **93** |
-| 2 | Cross-tenant adjudication + claim contract | ☐ not started | target ~40 |
+| 2 | Cross-tenant adjudication + claim contract | ☑ **green 2026-08-17** | **26** |
 | 3 | Self-service claims + actor hole | ☐ not started | target ~70 |
 | 4 | UI — reference & config | ☐ not started | target ~40 |
 | 5 | UI — health records | ☐ not started | target ~50 |
@@ -111,6 +111,12 @@ SuperAdmin token **cannot test gates** — use the HR actor.
   root from the working directory, so launching from anywhere else finds no `appsettings.json` and
   dies with `Connection string 'DefaultConnection' not found` — which looks like a Staging config
   problem and is not. Full recipe in `dev-harness/hr-medical/README.md`.
+- ⚠ **Stopping it again: match the command line, not the process name.** Launched as
+  `dotnet …\ErpSystem.Api.dll` the process is named **`dotnet`**, so
+  `Get-Process -Name ErpSystem.Api` reports "not running" while it still holds every output DLL and
+  the next build fails on a file lock. Use
+  `Get-CimInstance Win32_Process -Filter "Name='dotnet.exe'" | Where-Object { $_.CommandLine -like '*ErpSystem.Api\bin*' }`,
+  and `dotnet build-server shutdown` if a lock persists.
 - Kill the running `ErpSystem.Api` process before asking for a rebuild — it locks its own output
   DLLs (`stop-backend-before-user-builds`).
 
@@ -217,8 +223,8 @@ Correct split for all three: **reads on plain `[Authorize]`, writes on `MedicalW
 |---|---|---|---|
 | F-01 | **critical** | Role fallback grants any `HR.*` permission regardless of verb | ✅ **fixed slice 1** |
 | F-02 | **high** | 3 controllers still on bare `[Authorize]` | ✅ **fixed slice 1** |
-| F-03 | **high** | `ProcessApprovalAsync` never checks the claim's tenant | open → slice 2 |
-| F-04 | medium | `CreateMedicalExpenseClaimDto.Items` silently discarded | open → slice 2 |
+| F-03 | **high** | `ProcessApprovalAsync` never checks the claim's tenant | ✅ **fixed slice 2** |
+| F-04 | medium | `CreateMedicalExpenseClaimDto.Items` silently discarded | ✅ **fixed slice 2** |
 | F-05 | medium | Claim create/approve/note demand an employee-linked *caller* | ◐ **create fixed slice 1**; approve/note → slice 3 |
 | F-06 | medium | On-behalf-of branch unreachable (permission + actor) | ✅ **fixed slice 1** |
 | F-07 | low | ~40 reads filter tenant in memory after `GetAllAsync()` | open → deferred |
@@ -321,9 +327,30 @@ Closed F-01, F-02, F-06, and the create half of F-05. Harness: `dev-harness/hr-m
 
 ---
 
-### Slice 2 — Cross-tenant adjudication + claim contract
+### Slice 2 — Cross-tenant adjudication + claim contract ✅ green 2026-08-17, 26 assertions
 
-**Target ~40 assertions.** Closes F-03, F-04.
+Closed F-03, F-04. Harness: `dev-harness/hr-medical/run-slice2.mjs`.
+
+**The sweep resolved §8's biggest unknown.** Every fetch in `MedicalServices.cs` was checked
+mechanically: **84 `GetByIdAsync` call sites, exactly 1 without a tenant check**; 71 other
+single-entity fetches, 1 flagged and it is a false positive (line ~1532 loads a provider network
+scoped by a policy that was tenant-checked two lines above). F-03 is isolated — the area's tenant
+discipline is otherwise sound, and slice 2 did not grow.
+
+**Cross-tenant probing needs a real second tenant.** `TenantId` carries an FK, so moving a row to a
+made-up GUID fails with 547 rather than proving anything. The harness creates a real second
+`Tenants` row (idempotent, every *default-tenant* flag OFF so it cannot disturb login routing) and
+moves claims into it.
+
+⚠ **Two harness traps found the hard way, both now fixed in `run-slice2.mjs`:**
+- `sqlcmd` **exits 0 on SQL errors**. Without `-b`, a failed statement returns its error text as if
+  it were a result and the assertions compare against garbage — the first run reported §1 failures
+  that were really an invalid GUID literal (`a11f0re1…`, `r` is not hex) silently doing nothing.
+- `sqlcmd` runs with **`QUOTED_IDENTIFIER OFF`**, and `Tenants` has indexes that refuse an INSERT
+  under it (Msg 1934). The helper now prefixes `SET QUOTED_IDENTIFIER ON`.
+
+**`ClaimStatus.Approved = 6`**, not 4 — the enum has review states in between (Pending=1,
+Submitted=2, SupervisorReview=3, HrReview=4, FinanceReview=5, Approved=6, Rejected=7, Paid=8).
 
 **Changes**
 
