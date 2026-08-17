@@ -1517,6 +1517,40 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = movement.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "STAFF_TRAVEL_REQUEST", "StaffTravelRequest", "Staff Travel Request"))
+        {
+            var travel = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Staff travel request not found");
+
+            // Cost and exposure are the routing thresholds here. A GHS 400 taxi to Kumasi and a
+            // two-week trip to Lagos costing GHS 40,000 are not the same decision, and neither are
+            // a domestic trip and one needing a visa into a high-risk destination. The currency is
+            // carried alongside the amount deliberately — a threshold rule that compares bare
+            // numbers across currencies is wrong, and the definition author needs to see which one
+            // this is.
+            context["requestNumber"] = travel.RequestNumber;
+            context["employeeId"] = travel.EmployeeId;
+            context["initiatedById"] = travel.InitiatedById;
+            context["initiatedByRole"] = travel.InitiatedByRole.ToString();
+            context["organizationUnitId"] = travel.OrganizationUnitId;
+            context["travelType"] = travel.TravelType.ToString();
+            context["travelPurpose"] = travel.TravelPurpose.ToString();
+            context["priority"] = travel.Priority.ToString();
+            context["estimatedTotalCost"] = travel.EstimatedTotalCost;
+            context["currencyCode"] = travel.CurrencyCode;
+            context["isInternational"] = travel.IsInternational;
+            context["requiresVisa"] = travel.RequiresVisa;
+            context["requiresHealthClearance"] = travel.RequiresHealthClearance;
+            context["riskLevel"] = travel.RiskLevel.ToString();
+            context["destinationCountryId"] = travel.DestinationCountryId;
+            context["originCountryId"] = travel.OriginCountryId;
+            context["travelStartDate"] = travel.TravelStartDate;
+            context["travelEndDate"] = travel.TravelEndDate;
+            context["travelDays"] = travel.TravelEndDate.DayNumber - travel.TravelStartDate.DayNumber + 1;
+            context["status"] = travel.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_DISCIPLINARY_ACTION", "StaffDisciplinaryAction", "Staff Disciplinary Action"))
         {
             var disciplinaryCase = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()

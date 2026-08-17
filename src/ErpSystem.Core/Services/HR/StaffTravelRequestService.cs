@@ -28,6 +28,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -38,6 +40,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<StaffTravelRequestService> logger)
     {
         _requestRepository = requestRepository;
@@ -47,7 +51,29 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The workflow entity type. Approval authority comes from the published definition, not from a
+    /// role attribute — which is the point of being on the engine: a travel approver is usually the
+    /// traveller's line manager or head of department, not HR.
+    /// </summary>
+    private const string EntityType = "StaffTravelRequest";
+
+    /// <summary>
+    /// The engine identifies approvers by ApplicationUser id, not Employee id. The entity's own
+    /// actor columns (CancelledById) are Employee FKs and are set separately — see the actor split
+    /// that slice 1 had to untangle.
+    /// </summary>
+    private Guid RequireUserId()
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("No user is associated with the current request.");
+        return userId;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -519,17 +545,33 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (entity.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
             throw new InvalidOperationException("Only draft or returned requests can be submitted.");
 
-        entity.Status = StaffTravelRequestStatus.Submitted;
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the travel approval workflow.");
+
+        // The adapter owns the status. A definition with one Approval step approves on submission
+        // (the documented single-step trap), so this can legitimately come back Approved.
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, RequireUserId());
+
         entity.SubmittedAt = submitDto.SubmittedAt;
-        entity.UpdatedBy = submitDto.SubmittedById.ToString();
+        entity.UpdatedBy = RequireUserId().ToString();
         entity.UpdatedAt = DateTime.UtcNow;
+        if (entity.Status == StaffTravelRequestStatus.Approved)
+            entity.ApprovedAt ??= DateTime.UtcNow;
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request submitted: {RequestNumber}", entity.RequestNumber);
 
-        await PublishLifecycleAsync(entity, "Submitted", cancellationToken);
+        // Announce what actually happened, not what was asked for: a single-step definition
+        // approves on submission, and a notification saying "awaiting approval" about a request
+        // that is already approved is worse than none.
+        await PublishLifecycleAsync(entity,
+            entity.Status == StaffTravelRequestStatus.Approved ? "Approved" : "Submitted",
+            cancellationToken);
 
         return true;
     }
@@ -541,18 +583,39 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (entity.Status != StaffTravelRequestStatus.Submitted)
             throw new InvalidOperationException("Only submitted requests can be approved.");
 
-        entity.Status = StaffTravelRequestStatus.Approved;
-        entity.ApprovedAt = approveDto.ApprovedAt;
-        entity.ApprovedBudget = approveDto.ApprovedBudget ?? entity.EstimatedTotalCost;
-        entity.UpdatedBy = approveDto.ApprovedById.ToString();
+        var userId = RequireUserId();
+
+        // The engine decides who may approve, against the published definition. The bespoke chain
+        // this replaces took the approver from the request body, so a caller could record a
+        // decision in someone else's name.
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, userId, "Approve", approveDto.Notes);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+
+        // The approved budget is the domain's own decision, not the engine's, so it is applied only
+        // once the engine says the request is actually approved.
+        if (entity.Status == StaffTravelRequestStatus.Approved)
+            entity.ApprovedBudget = approveDto.ApprovedBudget ?? entity.EstimatedTotalCost;
+
+        entity.UpdatedBy = userId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Staff travel request approved: {RequestNumber}", entity.RequestNumber);
+        _logger.LogInformation("Staff travel approval step processed: {RequestNumber}", entity.RequestNumber);
 
-        await PublishLifecycleAsync(entity, "Approved", cancellationToken);
+        // A multi-step definition leaves the request Submitted after an intermediate approval, so
+        // only announce approval when the engine says it is approved.
+        if (entity.Status == StaffTravelRequestStatus.Approved)
+            await PublishLifecycleAsync(entity, "Approved", cancellationToken);
 
         return true;
     }
@@ -564,9 +627,20 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (entity.Status != StaffTravelRequestStatus.Submitted)
             throw new InvalidOperationException("Only submitted requests can be rejected.");
 
-        entity.Status = StaffTravelRequestStatus.Rejected;
-        entity.CancellationReason = reason;
-        entity.UpdatedBy = rejectedByUserId.ToString();
+        var userId = RequireUserId();
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, userId, "Reject", reason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, reason);
+
+        entity.UpdatedBy = userId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _requestRepository.UpdateAsync(entity);
@@ -574,7 +648,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         _logger.LogInformation("Staff travel request rejected: {RequestNumber}", entity.RequestNumber);
 
-        await PublishLifecycleAsync(entity, "Rejected", cancellationToken);
+        if (entity.Status == StaffTravelRequestStatus.Rejected)
+            await PublishLifecycleAsync(entity, "Rejected", cancellationToken);
 
         return true;
     }

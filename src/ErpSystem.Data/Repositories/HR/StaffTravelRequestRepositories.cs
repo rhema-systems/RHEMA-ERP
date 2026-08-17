@@ -24,6 +24,9 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .FirstOrDefaultAsync(r => r.RequestNumber == requestNumber && !r.IsDeleted);
     }
 
+    // ApprovalInstances -> Decisions -> Approver was removed in slice 2: travel approval moved to
+    // the generic workflow engine, so the live approval state is the workflow record's, not this
+    // graph's. That is three of the includes behind the 8060 failure gone with it.
     public async Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid tenantId, Guid id)
     {
         return await _dbSet
@@ -42,7 +45,6 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .Include(r => r.Comments).ThenInclude(c => c.Author)
             .Include(r => r.Attachments).ThenInclude(a => a.UploadedBy)
             .Include(r => r.Itineraries).ThenInclude(i => i.Legs).ThenInclude(l => l.Activities)
-            .Include(r => r.ApprovalInstances).ThenInclude(a => a.Decisions).ThenInclude(d => d.Approver)
             .Include(r => r.FlightBookings).ThenInclude(f => f.Segments)
             .Include(r => r.FlightBookings).ThenInclude(f => f.Vendor)
             .Include(r => r.HotelBookings).ThenInclude(h => h.Vendor)

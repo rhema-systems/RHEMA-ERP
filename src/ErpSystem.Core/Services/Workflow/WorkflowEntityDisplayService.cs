@@ -242,6 +242,22 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("StaffTravelRequest") || key == Normalize("STAFF_TRAVEL_REQUEST") || key == Normalize("Staff Travel Request"))
+            {
+                var travel = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffTravelRequest";
+                info.EntityNumber = travel?.RequestNumber;
+                // Route and dates, because that is what decides whether an approver must act today:
+                // travel approved after the departure date is worthless. The purpose is left out on
+                // purpose — see the notification templates for why.
+                info.EntityName = travel == null
+                    ? null
+                    : $"{travel.OriginCity} to {travel.DestinationCity}, {travel.TravelStartDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/travel/requests/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("StaffDisciplinaryAction") || key == Normalize("STAFF_DISCIPLINARY_ACTION") || key == Normalize("Staff Disciplinary Action"))
             {
                 var disciplinaryCase = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()

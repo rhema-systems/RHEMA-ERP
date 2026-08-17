@@ -46,6 +46,7 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("JobOffer", "Human Resources", "Employment offers approved before they are issued to a candidate", "FileSignature", "#0284C7", 79),
             new("StaffMovement", "Human Resources", "Promotions, transfers, demotions, secondments and acting appointments approved before they take effect", "ArrowRightLeft", "#9333EA", 79),
             new("StaffDisciplinaryAction", "Human Resources", "Disciplinary decisions confirmed before the sanction takes effect", "Gavel", "#DC2626", 79),
+            new("StaffTravelRequest", "Human Resources", "Staff travel requests approved before flights, hotels or advances are committed", "Plane", "#0EA5E9", 79),
             new("Project", "Projects", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Projects", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Projects", "Project closure approval and close-out governance", "Flag", "#15803D", 84),

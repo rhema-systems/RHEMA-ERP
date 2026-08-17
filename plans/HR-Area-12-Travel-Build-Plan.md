@@ -31,7 +31,7 @@ is the first time the area ever executed.
 | Detail read | ✅ **alive** — `AsSplitQuery`, slice 0 |
 | Gating | ✅ **`HR.Travel.*`** — slice 0; seed verified, HR is not an administrator |
 | Tenant scoping | ⚠ repositories unscoped, **services compensate** — no leak; see §3.6 (corrected) |
-| Approvals | bespoke chain, **not** on the workflow engine |
+| Approvals | ✅ **on the workflow engine** — slice 2; bespoke chain retired |
 | Cross-module | ❌ **isolated** — duplicates 3 masters, 0 GL/AP/budget links, no events, no reminders (§7) |
 | Finance scope here | **master data only** — `Currency` + `ExchangeRate`; GL/AP deferred to the post-module sweep (D-4) |
 | Frontend | **0 files** |
@@ -282,7 +282,7 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-01** | Travel-request create, detail read and update are all dead — SQL 8618 | ✅ **fixed slice 0** | §3.3, reproduced |
 | **F-02** | All 8 controllers ungated; a plain employee reads claims, advances, passports | ✅ **fixed slice 0** | §3.5, reproduced |
 | **F-03** | ~~0/29 repository reads tenant-scoped~~ → **corrected**: services scope every read; residue is 5 load-all-then-filter reads + no defence in depth | ~~high~~ **medium** | §3.6 |
-| **F-04** | Approvals are a bespoke chain, off the workflow engine | medium | §3.7 |
+| **F-04** | Approvals are a bespoke chain, off the workflow engine | ✅ **fixed slice 2** | §3.7 |
 | **F-05** | Create requires the *caller* to be employee-linked | ✅ **fixed slice 0** (33 sites) | §4.4 |
 | **F-06** | Uneven `.Include` coverage across sibling reads | medium | 55 in requests repo, 0 in configuration |
 | **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | **high** | §7.2 |
@@ -691,15 +691,51 @@ earlier slice's harness is the first place to look for what that change actually
 medical receipts. Wire `IAppEventBus` / `EntityActivityEvent` for the lifecycle transitions —
 this is the area's first real notification, and everything downstream depends on the seam.
 
-### Slice 2 — Approvals **onto the workflow engine**
-18 endpoints. F-04 is decided, not open: **retire the bespoke chain**. The engine already carries
-movements, discipline and medical; a fifth bespoke chain is a fifth thing to maintain and the
-travel one has never run. Follow the 4-step recipe — `IWorkflowIntegrationService`,
-`IWorkflowStatusAdapterRegistry`, the entity-type seed, and the status adapter. Watch the two
-known traps: single-step definitions silently auto-approve, and the entity-type seed must match.
+### Slice 2 — Approvals onto the workflow engine ✅ **green 2026-08-17, 19 assertions**
 
-Retiring the four bespoke tables (`...WorkflowTemplate`, `...WorkflowStep`, `...ApprovalInstance`,
-`...ApprovalDecision`) also removes four of the 25 includes behind F-01.
+`run-slice2.mjs`, 19/19. Regression: slice 0 53/53, slice 1 32/32, slice 1a 18/18. **122 total.**
+
+The 4-step recipe, seventh application, held unchanged:
+
+1. **Entity type** `StaffTravelRequest` in the catalog, seeded via
+   `POST api/Workflow/entity-types/seed`, verified as `STAFF_TRAVEL_REQUEST`.
+2. **Status adapter** `HrStaffTravelWorkflowStatusAdapters.cs`, auto-discovered. Following the
+   requisition precedent, **checked the enum before adding to it** — `Submitted` already means
+   "out for approval", so no enum change.
+3. **Routing context** in `SimpleWorkflowService`: cost, currency, international, visa, risk,
+   priority, trip length. The currency travels *with* the amount deliberately — a threshold rule
+   comparing bare numbers across currencies is wrong.
+4. **Display resolver** giving route and dates, because that is what decides whether an approver
+   must act today. Purpose omitted, same reasoning as the slice-1 templates.
+
+**The actor hole is closed by construction, not patched.** `RecordDecisionAsync` took the approver
+from the request body; that code path no longer exists. The engine resolves the approver from the
+authenticated user against the published definition, and `CanUserApproveAsync` gates approve and
+reject alike.
+
+**The bespoke chain is retired.** `StaffTravelApprovalsController` (18 endpoints) removed. Evidence
+it was safe: **0 steps, 0 instances, 0 decisions** on the reference database — it had never
+executed; the only rows were 8 templates the content audit's own fixture created. Nothing in the
+frontend referenced it.
+
+⚠ **The four entities and their tables are deliberately left in place.** Dropping them is a
+destructive migration for no benefit while they are empty. The service and repositories are now
+dead code behind a removed surface — flagged rather than swept into this slice. **Owed: a cleanup
+migration when the area closes.**
+
+`ApprovalInstances → Decisions → Approver` came out of the full-details query: the live approval
+state is the workflow record's now. Down to **24 includes + 15 ThenIncludes**.
+
+⚠ **Two field-name traps, one of each kind.** The step order field is `Order`, not `stepOrder` —
+that one fails loudly ("Step orders must be sequential starting from 1"), which is the *lucky*
+case. The approver rule's role field is `Role`, not `roleName` — that one fails **silently**: the
+definition publishes, looks correct, and can never be approved. The harness asserts
+`pendingApprovers` is non-empty for exactly that reason.
+
+⚠ **Retiring the controller broke two harnesses, correctly.** Slice 0 asserted a plain employee
+got 403 on `/approvals/templates` (now 404), and the content audit created a template through it.
+Both were fixed by pointing at reality rather than by loosening the assertion. **When a slice
+retires a surface, the earlier harnesses are where you find out what depended on it.**
 
 ### Slice 3 — Itineraries and bookings
 41 endpoints. Legs and activities, flights/hotels/ground/car-rental.
