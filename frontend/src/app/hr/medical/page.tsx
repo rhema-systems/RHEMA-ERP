@@ -1,6 +1,15 @@
 'use client';
 
-import { Hospital, Stethoscope, ShieldPlus, Layers, FileHeart } from 'lucide-react';
+import {
+  Hospital,
+  Stethoscope,
+  ShieldPlus,
+  Layers,
+  FileHeart,
+  LayoutDashboard,
+  Receipt,
+  Landmark,
+} from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -21,6 +30,32 @@ export default function MedicalHomePage() {
 
       <NavCardGrid
         items={[
+          {
+            title: 'Dashboard',
+            description:
+              'Claims awaiting a decision, insurance exposure and upcoming clinical activity.',
+            href: '/hr/medical/dashboard',
+            icon: LayoutDashboard,
+          },
+          {
+            title: 'Medical Claims',
+            description:
+              'The reimbursement caseload — claims awaiting a decision, flagged claims, and the full register.',
+            href: '/hr/medical/claims',
+            icon: Receipt,
+          },
+          {
+            title: 'My Medical Claims',
+            description: 'File and follow your own claims, and attach your receipts.',
+            href: '/hr/medical/my-claims',
+            icon: Receipt,
+          },
+          {
+            title: 'NHIS Claims',
+            description: 'Claims made to the National Health Insurance Scheme, and their settlement.',
+            href: '/hr/medical/nhis',
+            icon: Landmark,
+          },
           {
             title: 'Health Records',
             description:

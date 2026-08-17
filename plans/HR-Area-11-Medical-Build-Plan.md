@@ -40,7 +40,7 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | 3a | Claim documents onto the upload gate (F-08) | ☑ **green 2026-08-17** | **22** |
 | 4 | UI — reference & config | ☑ **green 2026-08-17** | tsc + lint clean, 17 routes verified |
 | 5 | UI — health records | ☑ **green 2026-08-17** | tsc + lint clean, 10 routes verified |
-| 6 | UI — claims, NHIS, dashboard | ☐ not started | target ~60 |
+| 6 | UI — claims, NHIS, dashboard | ☑ **green 2026-08-17** | tsc + lint clean, 18 routes verified |
 | 7 | UI — clinical | ☐ not started | target ~40 |
 
 Slices 1–3 are the backend hardening block and must land in order. 4–7 are the
@@ -488,7 +488,7 @@ Each slice: `types/hr/<x>.ts` → `services/hr/<x>.service.ts` → pages → sid
 |---|---|---|
 | 4 ✅ | Reference & config | facilities, physicians, providers/plans, schemes/tiers |
 | 5 ✅ | Health records | profiles, conditions, allergies, exams + document upload |
-| 6 | Claims | expense claims, adjudication queue, NHIS, dashboard |
+| 6 ✅ | Claims | expense claims, adjudication queue, NHIS, dashboard |
 | 7 | Clinical | pre-authorisations, referrals, appointments |
 
 **4 must come first** — the registers are empty and everything downstream needs a facility to
@@ -551,6 +551,35 @@ condition and allergy creates exercised as its fixtures.
 
 **The dashboard (slice 6)** is already correct and tenant-scoped in SQL with proper `.Include`s.
 It only needs a screen.
+
+#### Slice 6 as-built (2026-08-17)
+
+`services/hr/medical-claims.service.ts` (four services: HR caseload, self-service, NHIS,
+dashboard) · `app/hr/medical/` — `dashboard`, `claims` + `[id]`, `my-claims`, `nhis`.
+
+- **The decisions from slices 1–3 are what the UI is shaped around.** Adjudication controls
+  disappear once a decision exists rather than being offered and refused, because the API answers
+  a second decision with 422. Payment appears only on an approved claim. NHIS submit shows only on
+  a draft, settle only once the scheme has decided.
+- **`my-claims` is a separate screen from `claims`, and that is the point** — the function raising
+  a claim must not be the function approving it. Self-service has no approve, pay, flag or note
+  affordance anywhere, and its sidebar entry is deliberately outside the medical-permission group
+  because the API scopes it by token.
+- **Flagging is never disclosed to the claimant.** The flag banner says so explicitly, and
+  `OwnMedicalClaimSummary` has no flag field to leak.
+- **A lines-vs-total mismatch is surfaced** on the claim detail before approval — the itemised
+  lines and the stated total are independent inputs and disagreeing is worth seeing.
+- Two **stale-state bugs were caught in review, not by the compiler**: the approve/reject buttons
+  originally set state then fired the mutation in a `setTimeout`, and the NHIS dialogs read the
+  selected claim back out of state. Both now pass the value as a mutation argument. `tsc` accepted
+  both versions — this is the class of bug only reading catches.
+- Claim document uploads are recorded as **`Receipt`**; per-type upload needs a custom control
+  rather than the shared `AttachmentsPanel`, whose upload callback carries only a description.
+  Worth revisiting if TDC wants invoices and discharge summaries distinguished.
+
+**Verification:** `tsc` clean (same 19 pre-existing inventory errors), `eslint` clean, and
+`route-check-claims.mjs` confirms all **18** paths resolve — 13 as the HR actor and 5 as an
+ordinary employee against the self-service surface.
 
 **Housekeeping during slice 4:** update `PermissionGate.tsx` — its "HR permissions are not seeded
 yet, prefer `roles`" note is now **false** and will mislead the W3 sweep.

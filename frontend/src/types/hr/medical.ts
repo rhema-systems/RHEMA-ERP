@@ -652,3 +652,453 @@ export interface EmployeeMedicalExamDocument {
   description?: string | null;
   uploadDate: string;
 }
+
+// ── Medical expense claims (slice 6) ─────────────────────────────────────────
+
+export type ClaimStatus =
+  | 'Pending'
+  | 'Submitted'
+  | 'SupervisorReview'
+  | 'HrReview'
+  | 'FinanceReview'
+  | 'Approved'
+  | 'Rejected'
+  | 'Paid'
+  | 'Cancelled';
+
+export type MedicalExpenseType =
+  | 'Consultation'
+  | 'Medication'
+  | 'LaboratoryTests'
+  | 'Imaging'
+  | 'Surgery'
+  | 'Hospitalization'
+  | 'DentalCare'
+  | 'OpticalCare'
+  | 'Physiotherapy'
+  | 'EmergencyCare'
+  | 'MaternityCare'
+  | 'MentalHealth'
+  | 'Vaccination'
+  | 'HealthScreening'
+  | 'MedicalEquipment'
+  | 'AmbulanceService'
+  | 'Other';
+
+export const MEDICAL_EXPENSE_TYPE_OPTIONS: { value: MedicalExpenseType; label: string }[] = [
+  { value: 'Consultation', label: 'Consultation' },
+  { value: 'Medication', label: 'Medication' },
+  { value: 'LaboratoryTests', label: 'Laboratory tests' },
+  { value: 'Imaging', label: 'X-ray / imaging' },
+  { value: 'Surgery', label: 'Surgery' },
+  { value: 'Hospitalization', label: 'Hospitalisation' },
+  { value: 'DentalCare', label: 'Dental care' },
+  { value: 'OpticalCare', label: 'Optical care' },
+  { value: 'Physiotherapy', label: 'Physiotherapy' },
+  { value: 'EmergencyCare', label: 'Emergency care' },
+  { value: 'MaternityCare', label: 'Maternity care' },
+  { value: 'MentalHealth', label: 'Mental health' },
+  { value: 'Vaccination', label: 'Vaccination' },
+  { value: 'HealthScreening', label: 'Health screening' },
+  { value: 'MedicalEquipment', label: 'Medical equipment' },
+  { value: 'AmbulanceService', label: 'Ambulance' },
+  { value: 'Other', label: 'Other' },
+];
+
+export type MedicalItemType =
+  | 'ConsultationFee'
+  | 'LaboratoryTest'
+  | 'Imaging'
+  | 'Medication'
+  | 'Procedure'
+  | 'Surgery'
+  | 'HospitalBed'
+  | 'MedicalSupply'
+  | 'MedicalEquipment'
+  | 'TherapySession'
+  | 'ProfessionalFee'
+  | 'FacilityFee'
+  | 'Other';
+
+export const MEDICAL_ITEM_TYPE_OPTIONS: { value: MedicalItemType; label: string }[] = [
+  { value: 'ConsultationFee', label: 'Consultation fee' },
+  { value: 'LaboratoryTest', label: 'Laboratory test' },
+  { value: 'Imaging', label: 'Imaging' },
+  { value: 'Medication', label: 'Medication' },
+  { value: 'Procedure', label: 'Procedure' },
+  { value: 'Surgery', label: 'Surgery' },
+  { value: 'HospitalBed', label: 'Hospital bed' },
+  { value: 'MedicalSupply', label: 'Medical supply' },
+  { value: 'MedicalEquipment', label: 'Medical equipment' },
+  { value: 'TherapySession', label: 'Therapy session' },
+  { value: 'ProfessionalFee', label: 'Professional fee' },
+  { value: 'FacilityFee', label: 'Facility fee' },
+  { value: 'Other', label: 'Other' },
+];
+
+export type MedicalDocumentType =
+  | 'Receipt'
+  | 'Invoice'
+  | 'Prescription'
+  | 'MedicalReport'
+  | 'LabResults'
+  | 'ImagingResults'
+  | 'DischargeSummary'
+  | 'ReferralLetter'
+  | 'InsuranceClaimForm'
+  | 'Other';
+
+export const MEDICAL_DOCUMENT_TYPE_OPTIONS: { value: MedicalDocumentType; label: string }[] = [
+  { value: 'Receipt', label: 'Receipt' },
+  { value: 'Invoice', label: 'Invoice' },
+  { value: 'Prescription', label: 'Prescription' },
+  { value: 'MedicalReport', label: 'Medical report' },
+  { value: 'LabResults', label: 'Lab results' },
+  { value: 'ImagingResults', label: 'Imaging results' },
+  { value: 'DischargeSummary', label: 'Discharge summary' },
+  { value: 'ReferralLetter', label: 'Referral letter' },
+  { value: 'InsuranceClaimForm', label: 'Insurance claim form' },
+  { value: 'Other', label: 'Other' },
+];
+
+export type PaymentMethod =
+  | 'BankTransfer'
+  | 'Cash'
+  | 'Cheque'
+  | 'MobileMoney'
+  | 'DirectDeposit'
+  | 'SalaryDeduction';
+
+export const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
+  { value: 'BankTransfer', label: 'Bank transfer' },
+  { value: 'MobileMoney', label: 'Mobile money' },
+  { value: 'Cheque', label: 'Cheque' },
+  { value: 'Cash', label: 'Cash' },
+  { value: 'DirectDeposit', label: 'Direct deposit' },
+  { value: 'SalaryDeduction', label: 'Salary deduction' },
+];
+
+export interface MedicalExpenseClaimSummary {
+  id: string;
+  claimNumber: string;
+  employeeName: string;
+  isForDependent: boolean;
+  dependentName?: string | null;
+  claimDate: string;
+  serviceDate: string;
+  expenseType: MedicalExpenseType;
+  facilityName: string;
+  amountRequested: number;
+  amountApproved?: number | null;
+  status: ClaimStatus;
+  isFlaggedForReview: boolean;
+}
+
+export interface MedicalExpenseClaim {
+  id: string;
+  claimNumber: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  isForDependent: boolean;
+  dependentName?: string | null;
+  claimDate: string;
+  serviceDate: string;
+  serviceEndDate?: string | null;
+  expenseType: MedicalExpenseType;
+  description: string;
+  facilityId: string;
+  facilityName: string;
+  physicianId?: string | null;
+  physicianName?: string | null;
+  diagnosis?: string | null;
+  icdCode?: string | null;
+  treatmentReceived?: string | null;
+  isEmergency: boolean;
+  requiredHospitalization: boolean;
+  totalAmount: number;
+  amountRequested: number;
+  amountApproved?: number | null;
+  insurancePolicyId?: string | null;
+  insurancePolicyNumber?: string | null;
+  status: ClaimStatus;
+  isFlaggedForReview: boolean;
+  additionalNotes?: string | null;
+}
+
+export interface MedicalExpenseClaimCreateRequest {
+  /** Required on the HR endpoint; ignored by self-service, which uses the token's employee. */
+  employeeId?: string | null;
+  serviceDate: string;
+  serviceEndDate?: string | null;
+  expenseType: MedicalExpenseType;
+  description: string;
+  facilityId: string;
+  physicianId?: string | null;
+  diagnosis?: string | null;
+  isEmergency: boolean;
+  requiredHospitalization: boolean;
+  totalAmount: number;
+  amountRequested: number;
+  insurancePolicyId?: string | null;
+  additionalNotes?: string | null;
+  /** Lines submitted with the claim. Honoured since slice 2 — before that they were dropped. */
+  items?: MedicalExpenseItemCreateRequest[];
+}
+
+export interface MedicalExpenseItem {
+  id: string;
+  claimId: string;
+  description: string;
+  itemType: MedicalItemType;
+  quantity: number;
+  unitCost: number;
+  remarks?: string | null;
+}
+
+export interface MedicalExpenseItemCreateRequest {
+  claimId?: string;
+  description: string;
+  itemType: MedicalItemType;
+  quantity: number;
+  unitCost: number;
+  remarks?: string | null;
+}
+
+export interface MedicalExpenseDocument {
+  id: string;
+  claimId: string;
+  fileName: string;
+  description?: string | null;
+  type: MedicalDocumentType;
+  uploadDate: string;
+}
+
+export type MedicalExpenseClaimNoteType =
+  | 'General'
+  | 'InternalHR'
+  | 'FinanceNote'
+  | 'InsuranceCorrespondence'
+  | 'EmployeeComment';
+
+export const CLAIM_NOTE_TYPE_OPTIONS: { value: MedicalExpenseClaimNoteType; label: string }[] = [
+  { value: 'General', label: 'General' },
+  { value: 'InternalHR', label: 'Internal HR' },
+  { value: 'FinanceNote', label: 'Finance' },
+  { value: 'InsuranceCorrespondence', label: 'Insurer correspondence' },
+  { value: 'EmployeeComment', label: 'Employee comment' },
+];
+
+export interface MedicalExpenseClaimNote {
+  id: string;
+  claimId: string;
+  authorId: string;
+  authorName: string;
+  noteType: MedicalExpenseClaimNoteType;
+  content: string;
+  isInternal: boolean;
+  noteDate: string;
+}
+
+export interface ProcessClaimRequest {
+  claimId: string;
+  status: 'Approved' | 'Rejected';
+  amountApproved?: number | null;
+  comments?: string | null;
+}
+
+export interface ProcessClaimPaymentRequest {
+  claimId: string;
+  paymentMethod: PaymentMethod;
+  paymentReference: string;
+  paymentDate: string;
+}
+
+/** What a claimant sees of their own claim — the HR contract minus adjudication internals. */
+export interface OwnMedicalClaim {
+  id: string;
+  claimNumber: string;
+  claimDate: string;
+  serviceDate: string;
+  serviceEndDate?: string | null;
+  expenseType: MedicalExpenseType;
+  description: string;
+  facilityId: string;
+  facilityName: string;
+  physicianName?: string | null;
+  isEmergency: boolean;
+  requiredHospitalization: boolean;
+  totalAmount: number;
+  amountRequested: number;
+  amountApproved?: number | null;
+  status: ClaimStatus;
+}
+
+export interface OwnMedicalClaimSummary {
+  id: string;
+  claimNumber: string;
+  claimDate: string;
+  serviceDate: string;
+  expenseType: MedicalExpenseType;
+  facilityName: string;
+  status: ClaimStatus;
+  amountRequested: number;
+  amountApproved?: number | null;
+}
+
+// ── NHIS claims ──────────────────────────────────────────────────────────────
+
+export type NHISClaimStatus =
+  | 'Draft'
+  | 'Submitted'
+  | 'UnderReview'
+  | 'Approved'
+  | 'PartiallyApproved'
+  | 'Rejected'
+  | 'Paid'
+  | 'Appealed';
+
+export const NHIS_CLAIM_STATUS_OPTIONS: { value: NHISClaimStatus; label: string }[] = [
+  { value: 'Draft', label: 'Draft' },
+  { value: 'Submitted', label: 'Submitted' },
+  { value: 'UnderReview', label: 'Under review' },
+  { value: 'Approved', label: 'Approved' },
+  { value: 'PartiallyApproved', label: 'Partially approved' },
+  { value: 'Rejected', label: 'Rejected' },
+  { value: 'Paid', label: 'Paid' },
+  { value: 'Appealed', label: 'Appealed' },
+];
+
+export type MedicalServiceType =
+  | 'Consultation'
+  | 'EmergencyCare'
+  | 'InpatientCare'
+  | 'OutpatientCare'
+  | 'Surgery'
+  | 'LaboratoryServices'
+  | 'ImagingRadiology'
+  | 'Pharmacy'
+  | 'Physiotherapy'
+  | 'DentalCare'
+  | 'OpticalCare'
+  | 'MaternityCare'
+  | 'Vaccination'
+  | 'HealthScreening'
+  | 'MentalHealth'
+  | 'AmbulanceService'
+  | 'Other';
+
+export const MEDICAL_SERVICE_TYPE_OPTIONS: { value: MedicalServiceType; label: string }[] = [
+  { value: 'Consultation', label: 'Consultation' },
+  { value: 'OutpatientCare', label: 'Outpatient care' },
+  { value: 'InpatientCare', label: 'Inpatient care' },
+  { value: 'EmergencyCare', label: 'Emergency care' },
+  { value: 'Surgery', label: 'Surgery' },
+  { value: 'LaboratoryServices', label: 'Laboratory' },
+  { value: 'ImagingRadiology', label: 'Imaging / radiology' },
+  { value: 'Pharmacy', label: 'Pharmacy' },
+  { value: 'Physiotherapy', label: 'Physiotherapy' },
+  { value: 'DentalCare', label: 'Dental care' },
+  { value: 'OpticalCare', label: 'Optical care' },
+  { value: 'MaternityCare', label: 'Maternity care' },
+  { value: 'Vaccination', label: 'Vaccination' },
+  { value: 'HealthScreening', label: 'Health screening' },
+  { value: 'MentalHealth', label: 'Mental health' },
+  { value: 'AmbulanceService', label: 'Ambulance' },
+  { value: 'Other', label: 'Other' },
+];
+
+export interface NHISClaimSummary {
+  id: string;
+  claimNumber: string;
+  employeeName: string;
+  serviceDate: string;
+  totalCost: number;
+  status: NHISClaimStatus;
+}
+
+export interface NHISClaim extends NHISClaimSummary {
+  employeeId: string;
+  nhisMembershipNumber: string;
+  facilityId: string;
+  facilityName: string;
+  physicianId?: string | null;
+  physicianName?: string | null;
+  serviceType: MedicalServiceType;
+  serviceDescription: string;
+  diagnosis?: string | null;
+  icdCode?: string | null;
+  nhisCoveredAmount?: number | null;
+  coPayAmount?: number | null;
+  batchNumber?: string | null;
+  submissionDate?: string | null;
+  approvalDate?: string | null;
+  approvedAmount?: number | null;
+  rejectionDate?: string | null;
+  rejectionReason?: string | null;
+  paymentDate?: string | null;
+  paymentReference?: string | null;
+  linkedMedicalClaimNumber?: string | null;
+}
+
+export interface NHISClaimCreateRequest {
+  employeeId: string;
+  nhisMembershipNumber: string;
+  facilityId: string;
+  physicianId?: string | null;
+  serviceDate: string;
+  serviceType: MedicalServiceType;
+  serviceDescription: string;
+  diagnosis?: string | null;
+  totalCost: number;
+  nhisCoveredAmount?: number | null;
+  coPayAmount?: number | null;
+}
+
+export interface NHISClaimUpdateRequest extends NHISClaimCreateRequest {
+  id: string;
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
+
+export interface MedicalClaimSpotlight {
+  id: string;
+  claimNumber: string;
+  employeeName: string;
+  expenseType: MedicalExpenseType;
+  status: ClaimStatus;
+  amountRequested: number;
+  claimDate: string;
+}
+
+export interface MedicalAppointmentSpotlight {
+  id: string;
+  appointmentNumber: string;
+  employeeName: string;
+  facilityName: string;
+  appointmentDateTime: string;
+  status: string;
+}
+
+export interface MedicalDashboard {
+  totalClaims: number;
+  pendingClaims: number;
+  flaggedClaims: number;
+  approvedClaims: number;
+  paidClaims: number;
+  totalReimbursedAmount: number;
+  pendingClaimsAmount: number;
+  activePolicies: number;
+  expiringPolicies: number;
+  overduePremiums: number;
+  overduePremiumAmount: number;
+  pendingPreAuthorizations: number;
+  pendingReferrals: number;
+  upcomingAppointments: number;
+  examsDue: number;
+  claimsByStatus: { status: ClaimStatus; count: number }[];
+  monthlyClaimTrend: { year: number; month: number; label: string; count: number }[];
+  recentClaims: MedicalClaimSpotlight[];
+  pendingApprovalClaims: MedicalClaimSpotlight[];
+  upcomingAppointmentList: MedicalAppointmentSpotlight[];
+}

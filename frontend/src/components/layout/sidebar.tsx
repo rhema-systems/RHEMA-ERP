@@ -720,6 +720,12 @@ export const navigationItems: NavItem[] = [
         href: '/hr/medical',
         icon: HeartPulse,
         children: [
+          { title: 'Dashboard', href: '/hr/medical/dashboard', icon: LayoutDashboard },
+          { title: 'Medical Claims', href: '/hr/medical/claims', icon: Receipt },
+          // Employee-facing: scoped to the signed-in employee by the API, so it needs no
+          // medical permission — everyone gets it.
+          { title: 'My Medical Claims', href: '/hr/medical/my-claims', icon: Receipt },
+          { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark },
           { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart },
           { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital },
           { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope },
