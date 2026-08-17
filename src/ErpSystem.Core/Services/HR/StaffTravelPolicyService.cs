@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -107,8 +108,10 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
     public async Task<IEnumerable<StaffTravelPolicySummaryDto>> GetAllPoliciesAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _policyRepository.GetAllAsync())
-            .Where(p => p.TenantId == tenantId)
+        return (await _policyRepository.GetQueryable()
+                .Where(p => p.TenantId == tenantId && !p.IsDeleted)
+                .Include(p => p.Rules)
+                .ToListAsync(cancellationToken))
             .Select(p => p.ToSummaryDto())
             .ToList();
     }
@@ -281,8 +284,9 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
     public async Task<IEnumerable<StaffTravelVendorSummaryDto>> GetAllVendorsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _vendorRepository.GetAllAsync())
-            .Where(v => v.TenantId == tenantId)
+        return (await _vendorRepository.GetQueryable()
+                .Where(v => v.TenantId == tenantId && !v.IsDeleted)
+                .ToListAsync(cancellationToken))
             .Select(v => v.ToSummaryDto())
             .ToList();
     }

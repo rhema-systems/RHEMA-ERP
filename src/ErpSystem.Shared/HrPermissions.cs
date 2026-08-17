@@ -23,6 +23,7 @@ public sealed record HrPermissionDefinition(
 public static class HrPermissions
 {
     public const string CategoryMedical = "HR - Occupational Health";
+    public const string CategoryTravel = "HR - Staff Travel";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -35,6 +36,14 @@ public static class HrPermissions
     public const string MedicalWritePolicy = "HR.Policy.MedicalWrite";
     public const string MedicalAdminPolicy = "HR.Policy.MedicalAdmin";
 
+    public const string ViewTravel = "HR.Travel.Read";
+    public const string MaintainTravel = "HR.Travel.Write";
+    public const string AdministerTravel = "HR.Travel.Admin";
+
+    public const string TravelReadPolicy = "HR.Policy.TravelRead";
+    public const string TravelWritePolicy = "HR.Policy.TravelWrite";
+    public const string TravelAdminPolicy = "HR.Policy.TravelAdmin";
+
     public static readonly HrPermissionDefinition[] All =
     {
         new(ViewMedicalRecords, "View Medical Records",
@@ -45,16 +54,37 @@ public static class HrPermissions
             CategoryMedical),
         new(AdministerMedical, "Administer Medical Records",
             "Delete medical records and administer occupational-health configuration.",
-            CategoryMedical)
+            CategoryMedical),
+
+        new(ViewTravel, "View Staff Travel",
+            "View travel requests, itineraries, bookings, advances, expense claims, travel documents and policies.",
+            CategoryTravel),
+        new(MaintainTravel, "Maintain Staff Travel",
+            "Raise and amend travel requests on behalf of staff, make bookings, and process advances and expense claims.",
+            CategoryTravel),
+        new(AdministerTravel, "Administer Staff Travel",
+            "Delete travel records and administer travel policies, per-diem rates, vendors and approval templates.",
+            CategoryTravel)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
 
     /// <summary>
-    /// What HR staff hold: they maintain occupational-health records but do not administer them,
-    /// so deleting a medical record stays with tenant administrators.
+    /// What HR staff hold: they maintain records but do not administer them, so deleting a
+    /// medical record or a paid travel claim stays with tenant administrators.
     /// </summary>
-    private static readonly string[] HrStaffGrants = { ViewMedicalRecords, MaintainMedicalRecords };
+    /// <remarks>
+    /// Travel follows medical deliberately. HR raises travel on behalf of staff and processes
+    /// advances and claims (Write), but deleting travel records and setting the policies,
+    /// per-diem rates and approval templates that govern their own spending authority is
+    /// administration (Admin) — the same separation that stopped an HR-role user deleting a paid
+    /// medical claim.
+    /// </remarks>
+    private static readonly string[] HrStaffGrants =
+    {
+        ViewMedicalRecords, MaintainMedicalRecords,
+        ViewTravel, MaintainTravel
+    };
 
     /// <summary>
     /// Per-role HR permission grants. This is the single source for both the database seed

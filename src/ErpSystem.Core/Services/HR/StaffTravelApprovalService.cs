@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -99,8 +100,10 @@ public class StaffTravelApprovalService : IStaffTravelApprovalService
     public async Task<IEnumerable<StaffTravelApprovalWorkflowTemplateSummaryDto>> GetAllTemplatesAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _templateRepository.GetAllAsync())
-            .Where(t => t.TenantId == tenantId)
+        return (await _templateRepository.GetQueryable()
+                .Where(t => t.TenantId == tenantId && !t.IsDeleted)
+                .Include(t => t.Steps)
+                .ToListAsync(cancellationToken))
             .ToSummaryDtoList();
     }
 

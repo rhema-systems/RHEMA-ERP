@@ -24,9 +24,11 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .FirstOrDefaultAsync(r => r.RequestNumber == requestNumber && !r.IsDeleted);
     }
 
-    public async Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid id)
+    public async Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid tenantId, Guid id)
     {
         return await _dbSet
+            .AsSplitQuery()
+            .Where(r => r.TenantId == tenantId)
             .Include(r => r.Employee)
             .Include(r => r.InitiatedBy)
             .Include(r => r.CancelledBy)
@@ -58,6 +60,7 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     public async Task<IEnumerable<StaffTravelRequest>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
+            .Include(r => r.Employee)
             .Include(r => r.DestinationCountry)
             .Where(r => r.EmployeeId == employeeId && !r.IsDeleted)
             .OrderByDescending(r => r.TravelStartDate)
@@ -67,6 +70,7 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     public async Task<IEnumerable<StaffTravelRequest>> GetByEmployeeAndStatusAsync(Guid employeeId, StaffTravelRequestStatus status)
     {
         return await _dbSet
+            .Include(r => r.Employee)
             .Include(r => r.DestinationCountry)
             .Where(r => r.EmployeeId == employeeId && r.Status == status && !r.IsDeleted)
             .OrderByDescending(r => r.TravelStartDate)
@@ -97,6 +101,7 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     {
         return await _dbSet
             .Include(r => r.Employee)
+            .Include(r => r.DestinationCountry)
             .Where(r => r.GroupTravelId == groupTravelId && !r.IsDeleted)
             .OrderBy(r => r.Employee.FirstName)
             .ToListAsync();
@@ -105,6 +110,8 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
     public async Task<IEnumerable<StaffTravelRequest>> GetChildRequestsAsync(Guid parentRequestId)
     {
         return await _dbSet
+            .Include(r => r.Employee)
+            .Include(r => r.DestinationCountry)
             .Where(r => r.ParentRequestId == parentRequestId && !r.IsDeleted)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync();

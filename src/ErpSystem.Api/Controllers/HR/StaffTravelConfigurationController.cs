@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,25 +9,23 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/configuration")]
-[Authorize]
-public class StaffTravelConfigurationController : ControllerBase
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelConfigurationController : HrControllerBase
 {
     private readonly IStaffTravelConfigurationService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelConfigurationController(IStaffTravelConfigurationService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
+    /// <summary>
+    /// Tenant + platform user id for audit fields. Deliberately does not require an employee
+    /// link — see <see cref="HrControllerBase"/>.
+    /// </summary>
     private (Guid tenantId, Guid userId)? ResolveContext()
-    {
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null || userId is null) return null;
-        return (tenantId.Value, userId.Value);
-    }
+        => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
 
     // =========================================================================
     // CURRENCY EXCHANGE RATES
@@ -50,6 +49,7 @@ public class StaffTravelConfigurationController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelCurrencyExchangeRateDto>>> GetRatesByDate([FromQuery] DateOnly rateDate)
         => Ok(await _service.GetRatesByDateAsync(rateDate));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("exchange-rates")]
     public async Task<ActionResult<StaffTravelCurrencyExchangeRateDto>> Create([FromBody] CreateStaffTravelCurrencyExchangeRateDto dto)
     {
@@ -61,6 +61,7 @@ public class StaffTravelConfigurationController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("exchange-rates/{id:guid}")]
     public async Task<ActionResult<StaffTravelCurrencyExchangeRateDto>> Update(Guid id, [FromBody] UpdateStaffTravelCurrencyExchangeRateDto dto)
     {
@@ -72,6 +73,7 @@ public class StaffTravelConfigurationController : ControllerBase
         return Ok(await _service.UpdateRateAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("exchange-rates/{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

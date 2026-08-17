@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,16 +10,15 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/approvals")]
-[Authorize]
-public class StaffTravelApprovalsController : ControllerBase
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelApprovalsController : HrControllerBase
 {
     private readonly IStaffTravelApprovalService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelApprovalsController(IStaffTravelApprovalService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
     // =========================================================================
@@ -37,32 +37,31 @@ public class StaffTravelApprovalsController : ControllerBase
     public async Task<ActionResult<StaffTravelApprovalWorkflowTemplateDto>> GetTemplateById(Guid id)
         => Ok(await _service.GetTemplateByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("templates")]
     public async Task<ActionResult<StaffTravelApprovalWorkflowTemplateDto>> CreateTemplate([FromBody] CreateStaffTravelApprovalWorkflowTemplateDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
-        var created = await _service.CreateTemplateAsync(dto, tenantId.Value, userId.Value);
+        var created = await _service.CreateTemplateAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetTemplateById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("templates/{id:guid}")]
     public async Task<ActionResult<StaffTravelApprovalWorkflowTemplateDto>> UpdateTemplate(Guid id, [FromBody] UpdateStaffTravelApprovalWorkflowTemplateDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateTemplateAsync(dto, userId.Value));
+        return Ok(await _service.UpdateTemplateAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("templates/{id:guid}")]
     public async Task<IActionResult> DeleteTemplate(Guid id)
     {
@@ -78,32 +77,31 @@ public class StaffTravelApprovalsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelApprovalWorkflowStepDto>>> GetSteps(Guid templateId)
         => Ok(await _service.GetStepsAsync(templateId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("templates/{templateId:guid}/steps")]
     public async Task<ActionResult<StaffTravelApprovalWorkflowStepDto>> AddStep(Guid templateId, [FromBody] CreateStaffTravelApprovalWorkflowStepDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
         dto.WorkflowTemplateId = templateId;
-        return Ok(await _service.AddStepAsync(dto, tenantId.Value, userId.Value));
+        return Ok(await _service.AddStepAsync(dto, tenantId, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("steps/{stepId:guid}")]
     public async Task<ActionResult<StaffTravelApprovalWorkflowStepDto>> UpdateStep(Guid stepId, [FromBody] UpdateStaffTravelApprovalWorkflowStepDto dto)
     {
         if (stepId != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateStepAsync(dto, userId.Value));
+        return Ok(await _service.UpdateStepAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("steps/{stepId:guid}")]
     public async Task<IActionResult> DeleteStep(Guid stepId)
     {
@@ -131,17 +129,15 @@ public class StaffTravelApprovalsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelApprovalInstanceSummaryDto>>> GetInstancesByStatus(TravelApprovalInstanceStatus status)
         => Ok(await _service.GetInstancesByStatusAsync(status));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("instances")]
     public async Task<ActionResult<StaffTravelApprovalInstanceDto>> Initiate([FromBody] CreateStaffTravelApprovalInstanceDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
-        var created = await _service.InitiateAsync(dto, tenantId.Value, userId.Value);
+        var created = await _service.InitiateAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetInstanceById), new { id = created.Id }, created);
     }
 
@@ -157,18 +153,16 @@ public class StaffTravelApprovalsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelApprovalDecisionDto>>> GetPendingDecisions(Guid approverId)
         => Ok(await _service.GetPendingDecisionsForApproverAsync(approverId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("instances/{instanceId:guid}/decisions")]
     public async Task<ActionResult<StaffTravelApprovalDecisionDto>> RecordDecision(Guid instanceId, [FromBody] RecordStaffTravelApprovalDecisionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
         dto.ApprovalInstanceId = instanceId;
-        if (dto.ApproverId == Guid.Empty) dto.ApproverId = userId.Value;
-        return Ok(await _service.RecordDecisionAsync(dto, tenantId.Value));
+        if (dto.ApproverId == Guid.Empty) dto.ApproverId = userId;
+        return Ok(await _service.RecordDecisionAsync(dto, tenantId));
     }
 }

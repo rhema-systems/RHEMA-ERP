@@ -1292,6 +1292,24 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerMedical)));
 
+            // HR staff-travel policies. Same story as medical: all eight travel controllers
+            // carried a bare [Authorize], so any authenticated employee could read colleagues'
+            // passport and visa records, the cash-advance register and the expense-claim ledger.
+            // Same ladder — Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.TravelReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewTravel,
+                        HrPermissions.MaintainTravel,
+                        HrPermissions.AdministerTravel)))
+                .AddPolicy(HrPermissions.TravelWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainTravel,
+                        HrPermissions.AdministerTravel)))
+                .AddPolicy(HrPermissions.TravelAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerTravel)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

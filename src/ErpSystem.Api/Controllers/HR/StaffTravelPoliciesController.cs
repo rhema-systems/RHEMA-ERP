@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,25 +10,23 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/policies")]
-[Authorize]
-public class StaffTravelPoliciesController : ControllerBase
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelPoliciesController : HrControllerBase
 {
     private readonly IStaffTravelPolicyService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelPoliciesController(IStaffTravelPolicyService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
+    /// <summary>
+    /// Tenant + platform user id for audit fields. Deliberately does not require an employee
+    /// link — see <see cref="HrControllerBase"/>.
+    /// </summary>
     private (Guid tenantId, Guid userId)? ResolveContext()
-    {
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null || userId is null) return null;
-        return (tenantId.Value, userId.Value);
-    }
+        => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
 
     // =========================================================================
     // POLICIES
@@ -50,6 +49,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<StaffTravelPolicyDto>> GetById(Guid id)
         => Ok(await _service.GetPolicyByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffTravelPolicyDto>> Create([FromBody] CreateStaffTravelPolicyDto dto)
     {
@@ -61,6 +61,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffTravelPolicyDto>> Update(Guid id, [FromBody] UpdateStaffTravelPolicyDto dto)
     {
@@ -72,6 +73,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.UpdatePolicyAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -91,6 +93,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelPolicyRuleDto>>> GetActiveRules(Guid policyId)
         => Ok(await _service.GetActiveRulesAsync(policyId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{policyId:guid}/rules")]
     public async Task<ActionResult<StaffTravelPolicyRuleDto>> AddRule(Guid policyId, [FromBody] CreateStaffTravelPolicyRuleDto dto)
     {
@@ -102,6 +105,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.AddRuleAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("rules/{ruleId:guid}")]
     public async Task<ActionResult<StaffTravelPolicyRuleDto>> UpdateRule(Guid ruleId, [FromBody] UpdateStaffTravelPolicyRuleDto dto)
     {
@@ -113,6 +117,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.UpdateRuleAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("rules/{ruleId:guid}")]
     public async Task<IActionResult> DeleteRule(Guid ruleId)
     {
@@ -132,6 +137,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelPolicyExceptionDto>>> GetPendingExceptions()
         => Ok(await _service.GetPendingExceptionsAsync());
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("exceptions")]
     public async Task<ActionResult<StaffTravelPolicyExceptionDto>> CreateException([FromBody] CreateStaffTravelPolicyExceptionDto dto)
     {
@@ -142,15 +148,15 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.CreateExceptionAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("exceptions/{id:guid}/decide")]
     public async Task<IActionResult> DecideException(Guid id, [FromBody] DecideStaffTravelPolicyExceptionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
         dto.ExceptionId = id;
-        dto.ApprovedById = userId.Value;
+        dto.ApprovedById = userId;
         await _service.DecideExceptionAsync(dto);
         return Ok(new { message = "Policy exception decision recorded." });
     }
@@ -183,6 +189,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<StaffTravelVendorDto?>> GetVendorByCode(string vendorCode)
         => Ok(await _service.GetVendorByCodeAsync(vendorCode));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("vendors")]
     public async Task<ActionResult<StaffTravelVendorDto>> CreateVendor([FromBody] CreateStaffTravelVendorDto dto)
     {
@@ -194,6 +201,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return CreatedAtAction(nameof(GetVendorById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("vendors/{id:guid}")]
     public async Task<ActionResult<StaffTravelVendorDto>> UpdateVendor(Guid id, [FromBody] UpdateStaffTravelVendorDto dto)
     {
@@ -205,6 +213,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.UpdateVendorAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("vendors/{id:guid}")]
     public async Task<IActionResult> DeleteVendor(Guid id)
     {

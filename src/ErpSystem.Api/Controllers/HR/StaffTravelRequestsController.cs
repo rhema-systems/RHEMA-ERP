@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,16 +11,15 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/requests")]
-[Authorize]
-public class StaffTravelRequestsController : ControllerBase
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelRequestsController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelRequestsController(IStaffTravelRequestService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
     // =========================================================================
@@ -80,32 +80,31 @@ public class StaffTravelRequestsController : ControllerBase
     // CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffTravelRequestDto>> Create([FromBody] CreateStaffTravelRequestDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
-        var created = await _service.CreateAsync(dto, tenantId.Value, userId.Value);
+        var created = await _service.CreateAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffTravelRequestDto>> Update(Guid id, [FromBody] UpdateStaffTravelRequestDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateAsync(dto, userId.Value));
+        return Ok(await _service.UpdateAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -117,59 +116,59 @@ public class StaffTravelRequestsController : ControllerBase
     // WORKFLOW
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/submit")]
     public async Task<IActionResult> Submit(Guid id)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.SubmitAsync(new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = userId.Value });
+        await _service.SubmitAsync(new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = userId });
         return Ok(new { message = "Travel request submitted." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveStaffTravelRequestDto dto)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
         dto.RequestId = id;
-        dto.ApprovedById = userId.Value;
+        dto.ApprovedById = userId;
         await _service.ApproveAsync(dto);
         return Ok(new { message = "Travel request approved." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> Reject(Guid id, [FromQuery] string? reason = null)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.RejectAsync(id, userId.Value, reason);
+        await _service.RejectAsync(id, userId, reason);
         return Ok(new { message = "Travel request rejected." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelStaffTravelRequestDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
         dto.RequestId = id;
-        dto.CancelledById = userId.Value;
+        dto.CancelledById = userId;
         await _service.CancelAsync(dto);
         return Ok(new { message = "Travel request cancelled." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/complete")]
     public async Task<IActionResult> Complete(Guid id)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.MarkCompletedAsync(id, userId.Value);
+        await _service.MarkCompletedAsync(id, userId);
         return Ok(new { message = "Travel request marked as completed." });
     }
 
@@ -181,32 +180,31 @@ public class StaffTravelRequestsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestCommentDto>>> GetComments(Guid requestId)
         => Ok(await _service.GetCommentsAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/comments")]
     public async Task<ActionResult<StaffTravelRequestCommentDto>> AddComment(Guid requestId, [FromBody] CreateStaffTravelRequestCommentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
         dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddCommentAsync(dto, tenantId.Value, userId.Value));
+        return Ok(await _service.AddCommentAsync(dto, tenantId, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("comments/{commentId:guid}")]
     public async Task<ActionResult<StaffTravelRequestCommentDto>> UpdateComment(Guid commentId, [FromBody] UpdateStaffTravelRequestCommentDto dto)
     {
         if (commentId != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateCommentAsync(dto, userId.Value));
+        return Ok(await _service.UpdateCommentAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("comments/{commentId:guid}")]
     public async Task<IActionResult> DeleteComment(Guid commentId)
     {
@@ -222,20 +220,19 @@ public class StaffTravelRequestsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestAttachmentDto>>> GetAttachments(Guid requestId)
         => Ok(await _service.GetAttachmentsAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/attachments")]
     public async Task<ActionResult<StaffTravelRequestAttachmentDto>> AddAttachment(Guid requestId, [FromBody] CreateStaffTravelRequestAttachmentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
         dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddAttachmentAsync(dto, tenantId.Value, userId.Value));
+        return Ok(await _service.AddAttachmentAsync(dto, tenantId, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("attachments/{attachmentId:guid}")]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
     {
@@ -259,32 +256,31 @@ public class StaffTravelRequestsController : ControllerBase
     public async Task<ActionResult<StaffGroupTravelDto>> GetGroupById(Guid id)
         => Ok(await _service.GetGroupTravelByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("groups")]
     public async Task<ActionResult<StaffGroupTravelDto>> CreateGroup([FromBody] CreateStaffGroupTravelDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
-        var created = await _service.CreateGroupTravelAsync(dto, tenantId.Value, userId.Value);
+        var created = await _service.CreateGroupTravelAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetGroupById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("groups/{id:guid}")]
     public async Task<ActionResult<StaffGroupTravelDto>> UpdateGroup(Guid id, [FromBody] UpdateStaffGroupTravelDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateGroupTravelAsync(dto, userId.Value));
+        return Ok(await _service.UpdateGroupTravelAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("groups/{id:guid}")]
     public async Task<IActionResult> DeleteGroup(Guid id)
     {
@@ -292,20 +288,19 @@ public class StaffTravelRequestsController : ControllerBase
         return NoContent();
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("groups/{id:guid}/participants")]
     public async Task<ActionResult<StaffGroupTravelDto>> AddGroupParticipants(Guid id, [FromBody] AddGroupTravelParticipantsDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
         dto.GroupTravelId = id;
-        return Ok(await _service.AddGroupParticipantsAsync(dto, tenantId.Value, userId.Value));
+        return Ok(await _service.AddGroupParticipantsAsync(dto, tenantId, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("groups/{groupId:guid}/participants/{requestId:guid}")]
     public async Task<IActionResult> RemoveGroupParticipant(Guid groupId, Guid requestId)
     {

@@ -100,8 +100,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     public async Task<StaffTravelRequestDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _requestRepository.GetWithFullDetailsAsync(id);
-        if (entity == null || entity.TenantId != tenantId)
+        var entity = await _requestRepository.GetWithFullDetailsAsync(tenantId, id);
+        if (entity == null)
             throw new ArgumentException($"Staff travel request with ID '{id}' not found.");
         return entity.ToDto();
     }
@@ -118,8 +118,11 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     public async Task<IEnumerable<StaffTravelRequestSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _requestRepository.GetAllAsync())
-            .Where(r => r.TenantId == tenantId)
+        return (await _requestRepository.GetQueryable()
+                .Where(r => r.TenantId == tenantId && !r.IsDeleted)
+                .Include(r => r.Employee)
+                .Include(r => r.DestinationCountry)
+                .ToListAsync(cancellationToken))
             .ToSummaryDtoList();
     }
 
@@ -130,10 +133,14 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             .Where(r => r.TenantId == tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // Includes go on the page, not on `query` — `query` is also used for the count, and
+        // counting through joins is wasted work. The summary DTO resolves both of these names.
         var items = await query
             .OrderByDescending(r => r.CreatedAt)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
+            .Include(r => r.Employee)
+            .Include(r => r.DestinationCountry)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<StaffTravelRequestSummaryDto>
@@ -318,14 +325,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         _logger.LogInformation("Staff travel request created: {RequestNumber}", entity.RequestNumber);
 
-        var refreshed = await _requestRepository.GetWithFullDetailsAsync(entity.Id);
-        if (refreshed == null || refreshed.TenantId != GetTenantId())
+        var refreshed = await _requestRepository.GetWithFullDetailsAsync(tenantId, entity.Id);
+        if (refreshed == null)
             throw new ArgumentException($"Staff travel request with ID '{entity.Id}' not found.");
         return refreshed.ToDto();
     }
 
     public async Task<StaffTravelRequestDto> UpdateAsync(UpdateStaffTravelRequestDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await GetOwnedRequestAsync(updateDto.Id);
 
         if (entity.Status is StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Closed)
@@ -338,8 +346,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         _logger.LogInformation("Staff travel request updated: {RequestNumber}", entity.RequestNumber);
 
-        var refreshed = await _requestRepository.GetWithFullDetailsAsync(entity.Id);
-        if (refreshed == null || refreshed.TenantId != GetTenantId())
+        var refreshed = await _requestRepository.GetWithFullDetailsAsync(tenantId, entity.Id);
+        if (refreshed == null)
             throw new ArgumentException($"Staff travel request with ID '{entity.Id}' not found.");
         return refreshed.ToDto();
     }
@@ -548,8 +556,11 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     public async Task<IEnumerable<StaffGroupTravelSummaryDto>> GetAllGroupTravelsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _groupTravelRepository.GetAllAsync())
-            .Where(g => g.TenantId == tenantId)
+        return (await _groupTravelRepository.GetQueryable()
+                .Where(g => g.TenantId == tenantId && !g.IsDeleted)
+                .Include(g => g.LeadEmployee)
+                .Include(g => g.Requests)
+                .ToListAsync(cancellationToken))
             .ToSummaryDtoList();
     }
 

@@ -18,7 +18,18 @@ public interface IStaffTravelRequestRepository : IGenericRepository<StaffTravelR
     /// Returns a fully-loaded request including itineraries, bookings, approvals, expenses,
     /// advances, budget, visas, risk assessments and insurance.
     /// </summary>
-    Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid id);
+    /// <summary>
+    /// Loads a travel request with every child collection, scoped to <paramref name="tenantId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Runs as a split query. As a single query the 25 includes — several three levels deep —
+    /// produced a worktable whose minimum row size exceeded SQL Server's 8060-byte limit, so it
+    /// failed at plan compilation with error 8618 for every caller, on every row, including no
+    /// rows at all. That took out create, update and the detail read together, which is why the
+    /// area had never executed. Keep <c>AsSplitQuery</c> here, and think twice before adding
+    /// another include.
+    /// </remarks>
+    Task<StaffTravelRequest?> GetWithFullDetailsAsync(Guid tenantId, Guid id);
 
     /// <summary>Returns all requests raised for (or on behalf of) the given traveller, newest-first.</summary>
     Task<IEnumerable<StaffTravelRequest>> GetByEmployeeIdAsync(Guid employeeId);

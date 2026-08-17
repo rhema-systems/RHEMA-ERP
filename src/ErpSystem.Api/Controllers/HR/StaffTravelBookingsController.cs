@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,25 +10,23 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/bookings")]
-[Authorize]
-public class StaffTravelBookingsController : ControllerBase
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelBookingsController : HrControllerBase
 {
     private readonly IStaffTravelBookingService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelBookingsController(IStaffTravelBookingService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
+    /// <summary>
+    /// Tenant + platform user id for audit fields. Deliberately does not require an employee
+    /// link — see <see cref="HrControllerBase"/>.
+    /// </summary>
     private (Guid tenantId, Guid userId)? ResolveContext()
-    {
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null || userId is null) return null;
-        return (tenantId.Value, userId.Value);
-    }
+        => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
 
     // =========================================================================
     // FLIGHT BOOKINGS
@@ -45,6 +44,7 @@ public class StaffTravelBookingsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelFlightBookingSummaryDto>>> GetFlightsByStatus(TravelBookingStatus status)
         => Ok(await _service.GetFlightsByStatusAsync(status));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("flights")]
     public async Task<ActionResult<StaffTravelFlightBookingDto>> CreateFlight([FromBody] CreateStaffTravelFlightBookingDto dto)
     {
@@ -56,6 +56,7 @@ public class StaffTravelBookingsController : ControllerBase
         return CreatedAtAction(nameof(GetFlightById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("flights/{id:guid}")]
     public async Task<ActionResult<StaffTravelFlightBookingDto>> UpdateFlight(Guid id, [FromBody] UpdateStaffTravelFlightBookingDto dto)
     {
@@ -67,6 +68,7 @@ public class StaffTravelBookingsController : ControllerBase
         return Ok(await _service.UpdateFlightAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("flights/{id:guid}")]
     public async Task<IActionResult> DeleteFlight(Guid id)
     {
@@ -80,6 +82,7 @@ public class StaffTravelBookingsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelFlightSegmentDto>>> GetSegments(Guid flightBookingId)
         => Ok(await _service.GetSegmentsAsync(flightBookingId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("flights/{flightBookingId:guid}/segments")]
     public async Task<ActionResult<StaffTravelFlightSegmentDto>> AddSegment(Guid flightBookingId, [FromBody] CreateStaffTravelFlightSegmentDto dto)
     {
@@ -91,6 +94,7 @@ public class StaffTravelBookingsController : ControllerBase
         return Ok(await _service.AddSegmentAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("segments/{segmentId:guid}")]
     public async Task<ActionResult<StaffTravelFlightSegmentDto>> UpdateSegment(Guid segmentId, [FromBody] UpdateStaffTravelFlightSegmentDto dto)
     {
@@ -102,6 +106,7 @@ public class StaffTravelBookingsController : ControllerBase
         return Ok(await _service.UpdateSegmentAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("segments/{segmentId:guid}")]
     public async Task<IActionResult> DeleteSegment(Guid segmentId)
     {
@@ -121,6 +126,7 @@ public class StaffTravelBookingsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelHotelBookingSummaryDto>>> GetHotelsByRequest(Guid requestId)
         => Ok(await _service.GetHotelsByRequestAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("hotels")]
     public async Task<ActionResult<StaffTravelHotelBookingDto>> CreateHotel([FromBody] CreateStaffTravelHotelBookingDto dto)
     {
@@ -132,6 +138,7 @@ public class StaffTravelBookingsController : ControllerBase
         return CreatedAtAction(nameof(GetHotelById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("hotels/{id:guid}")]
     public async Task<ActionResult<StaffTravelHotelBookingDto>> UpdateHotel(Guid id, [FromBody] UpdateStaffTravelHotelBookingDto dto)
     {
@@ -143,6 +150,7 @@ public class StaffTravelBookingsController : ControllerBase
         return Ok(await _service.UpdateHotelAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("hotels/{id:guid}")]
     public async Task<IActionResult> DeleteHotel(Guid id)
     {
@@ -162,6 +170,7 @@ public class StaffTravelBookingsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelGroundTransportDto>>> GetGroundTransportsByRequest(Guid requestId)
         => Ok(await _service.GetGroundTransportsByRequestAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("ground-transport")]
     public async Task<ActionResult<StaffTravelGroundTransportDto>> CreateGroundTransport([FromBody] CreateStaffTravelGroundTransportDto dto)
     {
@@ -173,6 +182,7 @@ public class StaffTravelBookingsController : ControllerBase
         return CreatedAtAction(nameof(GetGroundTransportById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("ground-transport/{id:guid}")]
     public async Task<ActionResult<StaffTravelGroundTransportDto>> UpdateGroundTransport(Guid id, [FromBody] UpdateStaffTravelGroundTransportDto dto)
     {
@@ -184,6 +194,7 @@ public class StaffTravelBookingsController : ControllerBase
         return Ok(await _service.UpdateGroundTransportAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("ground-transport/{id:guid}")]
     public async Task<IActionResult> DeleteGroundTransport(Guid id)
     {
@@ -203,6 +214,7 @@ public class StaffTravelBookingsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelCarRentalBookingDto>>> GetCarRentalsByRequest(Guid requestId)
         => Ok(await _service.GetCarRentalsByRequestAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("car-rentals")]
     public async Task<ActionResult<StaffTravelCarRentalBookingDto>> CreateCarRental([FromBody] CreateStaffTravelCarRentalBookingDto dto)
     {
@@ -214,6 +226,7 @@ public class StaffTravelBookingsController : ControllerBase
         return CreatedAtAction(nameof(GetCarRentalById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("car-rentals/{id:guid}")]
     public async Task<ActionResult<StaffTravelCarRentalBookingDto>> UpdateCarRental(Guid id, [FromBody] UpdateStaffTravelCarRentalBookingDto dto)
     {
@@ -225,6 +238,7 @@ public class StaffTravelBookingsController : ControllerBase
         return Ok(await _service.UpdateCarRentalAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("car-rentals/{id:guid}")]
     public async Task<IActionResult> DeleteCarRental(Guid id)
     {

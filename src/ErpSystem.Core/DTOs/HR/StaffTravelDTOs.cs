@@ -304,6 +304,21 @@ public class CancelStaffTravelRequestDto
     public string CancellationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Withdrawing your own travel request, from the self-service surface.
+/// </summary>
+/// <remarks>
+/// Carries the reason and nothing else. <c>RequestId</c> comes from the route and
+/// <c>CancelledById</c> from the token, so neither appears here — accepting either from the body
+/// would let a caller withdraw someone else's travel, or claim someone else did.
+/// </remarks>
+public class CancelMyStaffTravelRequestDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string CancellationReason { get; set; } = string.Empty;
+}
+
 #endregion
 
 #region Staff Group Travel

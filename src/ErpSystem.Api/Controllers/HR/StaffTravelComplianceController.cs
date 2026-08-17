@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,25 +10,23 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/compliance")]
-[Authorize]
-public class StaffTravelComplianceController : ControllerBase
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelComplianceController : HrControllerBase
 {
     private readonly IStaffTravelComplianceService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelComplianceController(IStaffTravelComplianceService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
+    /// <summary>
+    /// Tenant + platform user id for audit fields. Deliberately does not require an employee
+    /// link — see <see cref="HrControllerBase"/>.
+    /// </summary>
     private (Guid tenantId, Guid userId)? ResolveContext()
-    {
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null || userId is null) return null;
-        return (tenantId.Value, userId.Value);
-    }
+        => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
 
     // =========================================================================
     // TRAVEL DOCUMENTS
@@ -49,6 +48,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelDocumentDto>>> GetExpiringDocuments([FromQuery] int daysAhead = 90)
         => Ok(await _service.GetExpiringDocumentsAsync(daysAhead));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("documents")]
     public async Task<ActionResult<StaffTravelDocumentDto>> CreateDocument([FromBody] CreateStaffTravelDocumentDto dto)
     {
@@ -60,6 +60,7 @@ public class StaffTravelComplianceController : ControllerBase
         return CreatedAtAction(nameof(GetDocumentById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("documents/{id:guid}")]
     public async Task<ActionResult<StaffTravelDocumentDto>> UpdateDocument(Guid id, [FromBody] UpdateStaffTravelDocumentDto dto)
     {
@@ -71,16 +72,17 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateDocumentAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("documents/{id:guid}/verify")]
     public async Task<IActionResult> VerifyDocument(Guid id)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.VerifyDocumentAsync(new VerifyStaffTravelDocumentDto { DocumentId = id, VerifiedById = userId.Value });
+        await _service.VerifyDocumentAsync(new VerifyStaffTravelDocumentDto { DocumentId = id, VerifiedById = userId });
         return Ok(new { message = "Document verified." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("documents/{id:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid id)
     {
@@ -101,6 +103,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelVisaRequirementDto>>> GetVisaRequirementsByDestination(Guid destinationCountryId)
         => Ok(await _service.GetVisaRequirementsByDestinationAsync(destinationCountryId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("visa-requirements")]
     public async Task<ActionResult<StaffTravelVisaRequirementDto>> CreateVisaRequirement([FromBody] CreateStaffTravelVisaRequirementDto dto)
     {
@@ -111,6 +114,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.CreateVisaRequirementAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("visa-requirements/{id:guid}")]
     public async Task<ActionResult<StaffTravelVisaRequirementDto>> UpdateVisaRequirement(Guid id, [FromBody] UpdateStaffTravelVisaRequirementDto dto)
     {
@@ -122,6 +126,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateVisaRequirementAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("visa-requirements/{id:guid}")]
     public async Task<IActionResult> DeleteVisaRequirement(Guid id)
     {
@@ -157,6 +162,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelVisaApplicationSummaryDto>>> GetExpiringVisas([FromQuery] int daysAhead = 90)
         => Ok(await _service.GetExpiringVisasAsync(daysAhead));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("visa-applications")]
     public async Task<ActionResult<StaffTravelVisaApplicationDto>> CreateVisaApplication([FromBody] CreateStaffTravelVisaApplicationDto dto)
     {
@@ -168,6 +174,7 @@ public class StaffTravelComplianceController : ControllerBase
         return CreatedAtAction(nameof(GetVisaApplicationById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("visa-applications/{id:guid}")]
     public async Task<ActionResult<StaffTravelVisaApplicationDto>> UpdateVisaApplication(Guid id, [FromBody] UpdateStaffTravelVisaApplicationDto dto)
     {
@@ -179,6 +186,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateVisaApplicationAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("visa-applications/{id:guid}")]
     public async Task<IActionResult> DeleteVisaApplication(Guid id)
     {
@@ -206,6 +214,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRiskAssessmentDto>>> GetAssessmentsRequiringAcknowledgement()
         => Ok(await _service.GetAssessmentsRequiringAcknowledgementAsync());
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("risk-assessments")]
     public async Task<ActionResult<StaffTravelRiskAssessmentDto>> CreateRiskAssessment([FromBody] CreateStaffTravelRiskAssessmentDto dto)
     {
@@ -217,6 +226,7 @@ public class StaffTravelComplianceController : ControllerBase
         return CreatedAtAction(nameof(GetRiskAssessmentById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("risk-assessments/{id:guid}")]
     public async Task<ActionResult<StaffTravelRiskAssessmentDto>> UpdateRiskAssessment(Guid id, [FromBody] UpdateStaffTravelRiskAssessmentDto dto)
     {
@@ -228,6 +238,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateRiskAssessmentAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("risk-assessments/{id:guid}/acknowledge")]
     public async Task<IActionResult> AcknowledgeRiskAssessment(Guid id)
     {
@@ -235,6 +246,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(new { message = "Risk assessment acknowledged." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("risk-assessments/{id:guid}")]
     public async Task<IActionResult> DeleteRiskAssessment(Guid id)
     {
@@ -262,6 +274,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelAlertSummaryDto>>> GetCurrentAlertsForCountry(Guid countryId)
         => Ok(await _service.GetCurrentAlertsForCountryAsync(countryId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("alerts")]
     public async Task<ActionResult<StaffTravelAlertDto>> CreateAlert([FromBody] CreateStaffTravelAlertDto dto)
     {
@@ -273,6 +286,7 @@ public class StaffTravelComplianceController : ControllerBase
         return CreatedAtAction(nameof(GetAlertById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("alerts/{id:guid}")]
     public async Task<ActionResult<StaffTravelAlertDto>> UpdateAlert(Guid id, [FromBody] UpdateStaffTravelAlertDto dto)
     {
@@ -284,6 +298,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateAlertAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("alerts/{id:guid}")]
     public async Task<IActionResult> DeleteAlert(Guid id)
     {
@@ -301,6 +316,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelAlertNotificationDto>>> GetUnacknowledgedNotifications(Guid employeeId)
         => Ok(await _service.GetUnacknowledgedNotificationsAsync(employeeId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("alert-notifications")]
     public async Task<ActionResult<StaffTravelAlertNotificationDto>> CreateAlertNotification([FromBody] CreateStaffTravelAlertNotificationDto dto)
     {
@@ -311,6 +327,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.CreateAlertNotificationAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("alert-notifications/{id:guid}/acknowledge")]
     public async Task<IActionResult> AcknowledgeNotification(Guid id)
     {
@@ -330,6 +347,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelInsurancePolicyDto>>> GetInsuranceByRequest(Guid requestId)
         => Ok(await _service.GetInsuranceByRequestAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("insurance")]
     public async Task<ActionResult<StaffTravelInsurancePolicyDto>> CreateInsurance([FromBody] CreateStaffTravelInsurancePolicyDto dto)
     {
@@ -341,6 +359,7 @@ public class StaffTravelComplianceController : ControllerBase
         return CreatedAtAction(nameof(GetInsuranceById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("insurance/{id:guid}")]
     public async Task<ActionResult<StaffTravelInsurancePolicyDto>> UpdateInsurance(Guid id, [FromBody] UpdateStaffTravelInsurancePolicyDto dto)
     {
@@ -352,6 +371,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateInsuranceAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("insurance/{id:guid}")]
     public async Task<IActionResult> DeleteInsurance(Guid id)
     {
@@ -379,6 +399,7 @@ public class StaffTravelComplianceController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelHealthRequirementDto>>> GetActiveHealthRequirements()
         => Ok(await _service.GetActiveHealthRequirementsAsync());
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("health-requirements")]
     public async Task<ActionResult<StaffTravelHealthRequirementDto>> CreateHealthRequirement([FromBody] CreateStaffTravelHealthRequirementDto dto)
     {
@@ -390,6 +411,7 @@ public class StaffTravelComplianceController : ControllerBase
         return CreatedAtAction(nameof(GetHealthRequirementById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("health-requirements/{id:guid}")]
     public async Task<ActionResult<StaffTravelHealthRequirementDto>> UpdateHealthRequirement(Guid id, [FromBody] UpdateStaffTravelHealthRequirementDto dto)
     {
@@ -401,6 +423,7 @@ public class StaffTravelComplianceController : ControllerBase
         return Ok(await _service.UpdateHealthRequirementAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("health-requirements/{id:guid}")]
     public async Task<IActionResult> DeleteHealthRequirement(Guid id)
     {

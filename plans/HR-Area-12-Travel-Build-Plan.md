@@ -10,9 +10,13 @@ Read §2 and §3 before touching anything. §3 is measured, not inferred — eve
 from a live call against the running API on 2026-08-17, and the commands that produced it are in
 `D:\Rhema\TDC ERPS\dev-harness\hr-travel\`.
 
-The single most important thing in this document is **F-01**: the central entity of the area
-cannot be created, read in detail, or updated, and never could. Do not plan any screen work
-around the travel request until that is fixed and proven.
+§3 records the area **as found**, before slice 0. It is deliberately not rewritten as slices land —
+the findings register (§6) and the slice log (§8) carry current state. Two entries in §3 have been
+corrected in place where they were *wrong when written*, not merely superseded; both say so.
+
+The single most important thing in this document **was** F-01: the central entity of the area
+could not be created, read in detail, or updated, and never had been. ✅ Fixed in slice 0, which
+is the first time the area ever executed.
 
 ---
 
@@ -22,11 +26,11 @@ around the travel request until that is fixed and proven.
 |---|---|
 | Backend surface | **8 controllers, 220 endpoints, 34 entities, 33 DbSets** |
 | Backend wiring | ✅ complete — 8/8 services and 33/33 repositories DI-registered |
-| Reads | ⚠ 31/33 parameter-free GETs return 200; **30 of the 31 return empty** |
-| Writes | ❌ **dead** — the travel-request create has never once executed |
-| Detail read | ❌ **dead** — same query, same failure |
-| Gating | ❌ **absent** — all 8 controllers carry a bare class-level `[Authorize]` |
-| Tenant scoping | ❌ **absent** — 0 of 29 repository read methods take a tenant id |
+| Reads | ⚠ 31/33 parameter-free GETs return 200; **30 of the 31 returned empty** pre-slice-0 |
+| Writes | ✅ **alive** — slice 0; create→read→list→submit green, 54 assertions |
+| Detail read | ✅ **alive** — `AsSplitQuery`, slice 0 |
+| Gating | ✅ **`HR.Travel.*`** — slice 0; seed verified, HR is not an administrator |
+| Tenant scoping | ⚠ repositories unscoped, **services compensate** — no leak; see §3.6 (corrected) |
 | Approvals | bespoke chain, **not** on the workflow engine |
 | Cross-module | ❌ **isolated** — duplicates 3 masters, 0 GL/AP/budget links, no events, no reminders (§7) |
 | Finance scope here | **master data only** — `Currency` + `ExchangeRate`; GL/AP deferred to the post-module sweep (D-4) |
@@ -104,22 +108,45 @@ management and finance read listed in that script returns 200. That includes
 `finance/claims`, `finance/advances`, `finance/claims/unpaid-approved`,
 `compliance/documents` (passport and visa records), `requests/all` and `requests/dashboard`.
 
-### 3.6 Tenant scoping
+### 3.6 Tenant scoping — ⚠ **corrected 2026-08-17, read this carefully**
 
-**0 of 29** repository read methods in the eight travel repository files take a `tenantId`
-parameter, and none filter on `TenantId` in the query.
+**The repository layer is unscoped, but the service layer compensates, so there is no
+cross-tenant leak.** An earlier draft of this document claimed there was. That was wrong, and the
+correction matters because it changes slice 0's scope substantially.
 
-The global filter does not save this. `ApplicationDbContext.ApplyGlobalFilters` applies
-`e => !e.IsDeleted && e.TenantId == tenantId` **only when `_tenantId.HasValue`** — and the
-constructor that would populate it from `ICurrentUserProvider` is commented out at
-`ApplicationDbContext.cs:60` as *"TEMPORARILY DISABLED - was causing hangs during login"*. In the
-normal DI path `_tenantId` is null, so the tenant filter is never applied. This is the read-side
-face of the documented tenancy gap; the write-side stamp at line 8297 is disabled by the same
-condition.
+What is true:
 
-Note the contrast with area 8's equivalent, which does it correctly:
-`StaffMovementRepository.GetWithFullDetailsAsync(Guid tenantId, Guid id)` filters
-`m.TenantId == tenantId` explicitly.
+- **0 of 29** repository read methods take a `tenantId` or filter on `TenantId`.
+- The global filter does **not** save them. `ApplicationDbContext.ApplyGlobalFilters` applies
+  `e => !e.IsDeleted && e.TenantId == tenantId` **only when `_tenantId.HasValue`**, and the
+  constructor that would populate it from `ICurrentUserProvider` is commented out at
+  `ApplicationDbContext.cs:60` — *"TEMPORARILY DISABLED - was causing hangs during login"*. In
+  the normal DI path `_tenantId` is null, so **the tenant query filter is inert codebase-wide**.
+  This is the read-side face of the documented tenancy gap; the write-side stamp at line 8297 is
+  disabled by the same condition. **This fact is worth carrying to every remaining area.**
+
+What is **not** true, and was asserted in error:
+
+- Travel reads are **not** cross-tenant. Every travel service read is tenant-scoped — either
+  directly (`if (entity.TenantId != tenantId) throw`) or through one of **33 `GetOwned*`
+  ownership helpers, all 33 of which check `TenantId`** (verified individually). A by-id read of
+  another tenant's row raises "not found". **Genuinely unchecked reads: 0.**
+
+The residue that is real, and small:
+
+1. **5 reads load every tenant's rows into memory and then filter** —
+   `StaffTravelRequestService` (all requests, group travel), `StaffTravelPolicyService`
+   (policies, vendors), `StaffTravelApprovalService` (templates). Correct, but it does not scale
+   and it is trivially fixable.
+2. **Defence in depth.** The scoping lives only in the service layer, so any future consumer of
+   these repositories inherits no protection. Worth threading properly when a slice touches a
+   repository anyway — but not worth 29 signature changes on its own.
+
+⚠ **Method note.** This correction, and two others in §6.1, came from naive regex pattern-matching
+that did not survive reading the source. Nested generics break `Task<[^>]*>`, filtered includes
+break `.Include(x => x.Nav)`, and a read that looks unscoped may delegate to a helper that scopes
+it. **In this codebase, confirm every statically-derived finding by reading the method before
+recording it as a defect.**
 
 ### 3.7 Approvals
 
@@ -135,8 +162,24 @@ engine in its slice 2.
 
 ### 4.1 Running API
 
-`http://localhost:5000`, already running. **Do not run `dotnet build`** — stop the
-`ErpSystem.Api` process first and hand the build to the user; it locks its own output DLLs.
+`http://localhost:5000`. **Do not run `dotnet build`** — stop the `ErpSystem.Api` process first
+and hand the build to the user; it locks its own output DLLs.
+
+⚠ **Staging needs the JWT signing key passed in, or every request 400s.** `JwtSettings:SecretKey`
+is empty in `appsettings.json`, so `AddErpSystemJwtAuthentication` throws
+`IDX10703: key length is zero` on **every** request — including `/health`, and including login.
+The failure presents as `400 "Invalid argument provided."` on every endpoint, which reads like a
+bad payload rather than a missing configuration, and the log line that explains it is buried
+under a secondary FK-547 error from the exception-persisting middleware. Start it like this:
+
+```bash
+ASPNETCORE_ENVIRONMENT=Staging \
+JwtSettings__SecretKey='<any 32+ char key, distinct from PortalSecretKey>' \
+  dotnet bin/Debug/net8.0/ErpSystem.Api.dll
+```
+
+Staging rather than Development because the dev exception page masks status codes, which makes
+every `rejects()` assertion meaningless.
 
 ### 4.2 Harness
 
@@ -236,11 +279,11 @@ particular) need a back-fill pass into that register before the sweep begins.
 
 | id | finding | severity | evidence |
 |---|---|---|---|
-| **F-01** | Travel-request create, detail read and update are all dead — SQL 8618 | **blocking** | §3.3, reproduced |
-| **F-02** | All 8 controllers ungated; a plain employee reads claims, advances, passports | **high** | §3.5, reproduced |
-| **F-03** | 0/29 repository reads are tenant-scoped, and the global filter is inert | **high** | §3.6 |
+| **F-01** | Travel-request create, detail read and update are all dead — SQL 8618 | ✅ **fixed slice 0** | §3.3, reproduced |
+| **F-02** | All 8 controllers ungated; a plain employee reads claims, advances, passports | ✅ **fixed slice 0** | §3.5, reproduced |
+| **F-03** | ~~0/29 repository reads tenant-scoped~~ → **corrected**: services scope every read; residue is 5 load-all-then-filter reads + no defence in depth | ~~high~~ **medium** | §3.6 |
 | **F-04** | Approvals are a bespoke chain, off the workflow engine | medium | §3.7 |
-| **F-05** | Create requires the *caller* to be employee-linked | medium | §4.4 |
+| **F-05** | Create requires the *caller* to be employee-linked | ✅ **fixed slice 0** (33 sites) | §4.4 |
 | **F-06** | Uneven `.Include` coverage across sibling reads | medium | 55 in requests repo, 0 in configuration |
 | **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | **high** | §7.2 |
 | **F-08** | Travel moves money with **no** GL / AP / budget artifact whatsoever | **high** ⏸ deferred (D-4) | §7.4 |
@@ -453,19 +496,53 @@ endpoints exist and return data to nobody. Follow the area-9 pattern, including 
 Sequencing rule: **nothing renders until the spine runs**. Slice 0 makes the area executable and
 safe; slices 1–3 make it correct; 4+ build the screens.
 
-### Slice 0 — Resurrect the spine, gate the area, scope it to a tenant
+### Slice 0 — Resurrect the spine, gate the area ✅ **green 2026-08-17, 54 assertions**
 
-The one slice that cannot be reordered.
+The one slice that cannot be reordered. `run-slice0.mjs`, 54/54.
 
-1. **F-01** — `.AsSplitQuery()` on `GetWithFullDetailsAsync`, plus a tenant parameter. Prove
-   create → read-back → update → submit end-to-end. This is the first time the area will ever
-   have executed.
+**The area executed for the first time.** Create → detail read → list → submit all work.
+
+Delivered: `.AsSplitQuery()` + tenant on `GetWithFullDetailsAsync` (F-01); `HR.Travel.Read/Write/
+Admin` seeded and applied across all 8 controllers — class-level Read, 80 Write gates, 30 Admin,
+no bare `[Authorize]` left (F-02); 33 actor blocks moved onto the audit context (F-05); the
+`api/staff-travel/me` self-service surface; the 5 load-all-then-filter reads (F-03 residue).
+
+Seed verified live: `HR` holds Read+Write and **not** Admin; SuperAdmin/TenantAdmin hold all
+three. So the gate is enforced by the database permission, not merely by the role fallback.
+
+⚠ **The one failing assertion was worth more than the other 53.** `list read: employeeName` came
+back `""`, which pulled the uneven-siblings thread: **nine repository reads feed
+`StaffTravelRequestSummaryDto` and four were missing an include** — `GetByEmployeeIdAsync` and
+`GetByEmployeeAndStatusAsync` had no `Employee`, `GetByGroupTravelIdAsync` no
+`DestinationCountry`, `GetChildRequestsAsync` neither. `GetPagedAsync` had none either, and it is
+the primary list endpoint. `GetByEmployeeIdAsync` powers the self-service list, so every
+employee's own travel list would have shown a blank name.
+
+⚠ **And the fix for F-03 introduced two of them.** Converting `GetAllAsync()` to
+`GetQueryable()` removed the repository's includes along with the load-everything behaviour. A
+status-code harness would have shipped it: all five reads returned 200 with the right rows and
+the wrong contents. The harness now asserts resolved names on **five** list reads plus the
+self-service list rather than one; had it done so originally it would have caught all four
+sibling defects in the first run.
+
+**Left deliberately for later slices:** two actor holes of the area-9 shape —
+`RecordDecisionAsync` takes the approver from the DTO, and comment `AuthorId` comes from the
+payload, so a caller can declare who acted. Slices 2 and 1 respectively.
+
+1. **F-01** — `.AsSplitQuery()` on `GetWithFullDetailsAsync`, plus a tenant parameter on that one
+   method. Prove create → read-back → update → submit end-to-end. This is the first time the area
+   will ever have executed.
 2. **F-02** — `HR.Travel.Read` / `.Write` / `.Admin` seeded and applied across all 8 controllers,
-   with the role→permission fallback map extended the way area 11 slice 1 did it. Self-service
-   paths resolve the actor from the token's `EmployeeId`.
-3. **F-03** — tenant parameter threaded through the 29 repository reads.
-4. **F-05** — drop the caller-must-be-employee-linked requirement from create, keeping an
-   explicit `employeeId`.
+   with the role→permission fallback map extended the way area 11 slice 1 did it.
+3. **Self-service** — gating an area whose core use case is "employees or managers create travel
+   requests" locks employees out unless a self-service surface exists. Follow the area-11 slice-3
+   pattern: a separate `api/staff-travel/me` controller, no employee id in any route or query,
+   every id-addressed operation through one ownership helper, someone else's record a **404 not
+   403** so ids cannot be enumerated, and no privileged operation routed there at all.
+4. **F-05** — drop the caller-must-be-employee-linked requirement from the HR create path,
+   keeping an explicit `employeeId`.
+5. **F-03 residue** — fix the 5 load-all-then-filter reads (§3.6). Not the 29-signature rewrite
+   the earlier draft called for; that was based on a finding since corrected.
 
 Harness: `run-slice0.mjs`. Assert the spine *works* (not that it returns 200), and assert the
 plain actor is now refused everywhere it succeeded in §3.5.
