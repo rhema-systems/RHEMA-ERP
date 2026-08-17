@@ -1059,6 +1059,112 @@ export interface NHISClaimUpdateRequest extends NHISClaimCreateRequest {
   id: string;
 }
 
+// ── Clinical: pre-authorisations, referrals, appointments (slice 7) ──────────
+
+export type ClaimPreAuthorizationStatus =
+  | 'Draft'
+  | 'Requested'
+  | 'Approved'
+  | 'PendingApproval'
+  | 'Rejected'
+  | 'Expired'
+  | 'Cancelled';
+
+export interface MedicalPreAuthorizationSummary {
+  id: string;
+  authorizationNumber: string;
+  employeeName: string;
+  serviceType: MedicalServiceType;
+  status: ClaimPreAuthorizationStatus;
+  plannedServiceDate?: string | null;
+  estimatedCost?: number | null;
+}
+
+export interface MedicalPreAuthorizationCreateRequest {
+  employeeId: string;
+  policyId: string;
+  facilityId?: string | null;
+  physicianId?: string | null;
+  serviceType: MedicalServiceType;
+  isEmergency: boolean;
+  diagnosis: string;
+  proposedTreatment: string;
+  plannedServiceDate?: string | null;
+  estimatedCost?: number | null;
+  notes?: string | null;
+}
+
+/** Priority is declared without explicit values in the enum, so order is Routine/Urgent/Emergency. */
+export type MedicalReferralPriority = 'Routine' | 'Urgent' | 'Emergency';
+
+export const REFERRAL_PRIORITY_OPTIONS: { value: MedicalReferralPriority; label: string }[] = [
+  { value: 'Routine', label: 'Routine' },
+  { value: 'Urgent', label: 'Urgent' },
+  { value: 'Emergency', label: 'Emergency' },
+];
+
+export type MedicalReferralStatus =
+  | 'Pending'
+  | 'Issued'
+  | 'Accepted'
+  | 'Completed'
+  | 'Cancelled'
+  | 'Expired';
+
+export interface MedicalReferralSummary {
+  id: string;
+  referralNumber: string;
+  employeeName: string;
+  priority: MedicalReferralPriority;
+  status: MedicalReferralStatus;
+  referralDate: string;
+}
+
+export interface MedicalReferralCreateRequest {
+  employeeId: string;
+  referringFacilityId?: string | null;
+  referringPhysicianId?: string | null;
+  referredToFacilityId?: string | null;
+  referredToPhysicianId?: string | null;
+  referralDate: string;
+  expiryDate?: string | null;
+  priority: MedicalReferralPriority;
+  diagnosis?: string | null;
+  reasonForReferral: string;
+  notes?: string | null;
+}
+
+export type MedicalAppointmentStatus =
+  | 'Draft'
+  | 'Scheduled'
+  | 'Confirmed'
+  | 'CheckedIn'
+  | 'InProgress'
+  | 'Completed'
+  | 'NoShow'
+  | 'Cancelled'
+  | 'Rescheduled';
+
+export interface MedicalAppointmentSummary {
+  id: string;
+  appointmentNumber: string;
+  employeeName: string;
+  facilityName: string;
+  appointmentDateTime: string;
+  status: MedicalAppointmentStatus;
+}
+
+export interface MedicalAppointmentCreateRequest {
+  employeeId: string;
+  facilityId: string;
+  physicianId?: string | null;
+  appointmentDateTime: string;
+  durationMinutes?: number | null;
+  serviceType: MedicalServiceType;
+  purpose: string;
+  notes?: string | null;
+}
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
 export interface MedicalClaimSpotlight {

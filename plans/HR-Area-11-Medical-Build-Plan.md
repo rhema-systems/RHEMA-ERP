@@ -41,7 +41,10 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | 4 | UI — reference & config | ☑ **green 2026-08-17** | tsc + lint clean, 17 routes verified |
 | 5 | UI — health records | ☑ **green 2026-08-17** | tsc + lint clean, 10 routes verified |
 | 6 | UI — claims, NHIS, dashboard | ☑ **green 2026-08-17** | tsc + lint clean, 18 routes verified |
-| 7 | UI — clinical | ☐ not started | target ~40 |
+| 7 | UI — clinical | ☑ **green 2026-08-17** | tsc + lint clean, 9 routes verified |
+
+**Area 11 build plan complete.** Backend harnesses: **171 assertions** (93 + 26 + 30 + 22), all
+re-run green on 2026-08-17. Residue and follow-ups are in §11.
 
 Slices 1–3 are the backend hardening block and must land in order. 4–7 are the
 `hr-frontend-port-plan` W1 recipe applied an eighth time, and 4 must precede 5–7 because every
@@ -489,7 +492,7 @@ Each slice: `types/hr/<x>.ts` → `services/hr/<x>.service.ts` → pages → sid
 | 4 ✅ | Reference & config | facilities, physicians, providers/plans, schemes/tiers |
 | 5 ✅ | Health records | profiles, conditions, allergies, exams + document upload |
 | 6 ✅ | Claims | expense claims, adjudication queue, NHIS, dashboard |
-| 7 | Clinical | pre-authorisations, referrals, appointments |
+| 7 ✅ | Clinical | pre-authorisations, referrals, appointments |
 
 **4 must come first** — the registers are empty and everything downstream needs a facility to
 point at.
@@ -583,6 +586,24 @@ ordinary employee against the self-service surface.
 
 **Housekeeping during slice 4:** update `PermissionGate.tsx` — its "HR permissions are not seeded
 yet, prefer `roles`" note is now **false** and will mislead the W3 sweep.
+⚠ **Not done** — still open, see §11.
+
+#### Slice 7 as-built (2026-08-17)
+
+`services/hr/medical-clinical.service.ts` · `app/hr/medical/clinical/page.tsx` (three tabs:
+pre-authorisations, referrals, appointments) · hub card + sidebar entry.
+
+- **One page with three tabs, not three pages.** These are the same job at three points in a
+  visit's life, and each list is modest; splitting them would have meant three sidebar entries for
+  what an HR officer thinks of as one screen.
+- **Actions appear only where the record's state admits them** — approve/reject on an undecided
+  request, complete on a live referral, check-in on a booked appointment and check-out only once
+  checked in. Offering them elsewhere would simply be refused by the service.
+- **Create forms were not built.** Pre-authorisations need a policy, referrals need two
+  facility/physician pairs, and appointments need a slot — all three are better authored from the
+  employee's own record than from a global register, and the API supports it. See §11.
+
+**Verification:** `tsc` clean, `eslint` clean, **9** clinical routes resolve.
 
 ---
 
@@ -628,6 +649,10 @@ than dropping a deferral into a commit message.
 | **SHE ↔ Medical bridge by reference** | The slice-9 call in `she-medical-ownership-boundary` was never built; surveillance has no link to `EmployeeHealthProfile` / `EmployeeMedicalExam` | **Trigger:** slice 5 (health records UI), where the absence becomes visible. Note SHE surveillance already FKs `HealthcareFacility`, so slice 4 partially unblocks it |
 | **Workflow engine for claim approval** | Currently bespoke single-step, same shape as the `goal-approval-stays-bespoke` exception | **Trigger:** TDC asking for multi-step medical approval. Recipe in `workflow-engine-integration` |
 | **Which payment route TDC operates** | All three tables were empty, so it cannot be inferred | Open question §9 — does not block, but shapes slice 6's UI |
+| **Clinical create forms** (pre-auth, referral, appointment) | Slice 7 shipped the registers and the workflow actions but no authoring forms; all three are better raised from an employee's own record than a global list | **Trigger:** first time HR needs to raise one in the system rather than record one already raised |
+| **`PermissionGate.tsx` stale note** | Says "HR permissions are not seeded yet, prefer `roles`", which has been false since the medical seed went live | **Trigger:** the W3 sweep, which it will otherwise mislead. One-line fix |
+| **Per-type claim document upload** | `AttachmentsPanel`'s upload callback carries only a description, so every claim document is recorded as `Receipt` | **Trigger:** TDC wanting invoices and discharge summaries distinguished |
+| **No frontend test coverage** | This environment has no browser automation, so UI verification was types + lint + route resolution only | **Trigger:** a UI regression, or the first e2e harness in `e2e-tests/` |
 
 ## 10. Correction log
 

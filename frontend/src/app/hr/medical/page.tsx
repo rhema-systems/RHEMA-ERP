@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Receipt,
   Landmark,
+  ClipboardCheck,
 } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
@@ -55,6 +56,13 @@ export default function MedicalHomePage() {
             description: 'Claims made to the National Health Insurance Scheme, and their settlement.',
             href: '/hr/medical/nhis',
             icon: Landmark,
+          },
+          {
+            title: 'Clinical',
+            description:
+              'Pre-authorisations, referrals and appointments — what happens before a claim exists.',
+            href: '/hr/medical/clinical',
+            icon: ClipboardCheck,
           },
           {
             title: 'Health Records',

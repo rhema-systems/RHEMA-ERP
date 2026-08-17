@@ -726,6 +726,7 @@ export const navigationItems: NavItem[] = [
           // medical permission — everyone gets it.
           { title: 'My Medical Claims', href: '/hr/medical/my-claims', icon: Receipt },
           { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark },
+          { title: 'Clinical', href: '/hr/medical/clinical', icon: ClipboardCheck },
           { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart },
           { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital },
           { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope },
