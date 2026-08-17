@@ -1617,9 +1617,24 @@ public class MedicalExpenseDocument : TenantEntity
     [MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Legacy storage path. This was previously supplied directly by the API caller, which made it
+    /// a path-injection sink — the same defect <see cref="EmployeeMedicalExamDocument"/> was fixed
+    /// for. Receipts are now uploaded as multipart content through the controlled boundary and this
+    /// stays empty on new rows.
+    /// </summary>
     [Required]
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     public MedicalDocumentType Type { get; set; }
 

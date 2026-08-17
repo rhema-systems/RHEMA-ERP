@@ -31,6 +31,7 @@ public static class ControlledFileUploadCategories
     public const string HrStaffMovementAttachments = "hr-staff-movement-attachments";
     public const string HrOfferLetters = "hr-offer-letters";
     public const string HrMedicalExamDocuments = "hr-medical-exam-documents";
+    public const string HrMedicalClaimDocuments = "hr-medical-claim-documents";
     public const string HrAppraisalAttachments = "hr-appraisal-attachments";
 
     /// <summary>
@@ -86,6 +87,7 @@ public static class ControlledFileUploadCategories
                 HrStaffMovementAttachments,
                 HrOfferLetters,
                 HrMedicalExamDocuments,
+                HrMedicalClaimDocuments,
                 HrAppraisalAttachments,
                 HrRecruitmentAttachments,
                 HrPreEmploymentDocuments,

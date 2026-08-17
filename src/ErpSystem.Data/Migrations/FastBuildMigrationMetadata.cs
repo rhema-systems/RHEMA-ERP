@@ -179,3 +179,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260816201802_AddDisciplineQueryOpportunityWaiver")] partial class AddDisciplineQueryOpportunityWaiver { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260816225939_AddStaffGrievances")] partial class AddStaffGrievances { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260817002137_AddDisciplineReminderEngine")] partial class AddDisciplineReminderEngine { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260817083522_AddMedicalClaimDocumentControlledUpload")] partial class AddMedicalClaimDocumentControlledUpload { }

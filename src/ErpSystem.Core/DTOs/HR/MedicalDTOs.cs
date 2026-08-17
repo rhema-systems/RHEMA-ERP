@@ -2398,14 +2398,34 @@ public class MedicalExpenseDocumentDto : BaseDto
     public DateTime UploadDate { get; set; }
 }
 
+/// <summary>
+/// Internal carrier for a claim document that has already been through the controlled-upload gate.
+/// </summary>
+/// <remarks>
+/// <b>Not a request body.</b> Receipts arrive as multipart content on
+/// <c>POST api/medical-expense-claims/{claimId}/documents</c>, which scans and stores the bytes and
+/// then fills this in. <c>FilePath</c> is retained only for rows written before that gate existed and
+/// is left empty on new ones; it was previously accepted from the caller, which made it a
+/// path-injection sink.
+/// </remarks>
 public class CreateMedicalExpenseDocumentDto : CreateDtoBase
 {
     [Required]
     public Guid ClaimId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [Required]
     public MedicalDocumentType Type { get; set; }
     [MaxLength(500)]

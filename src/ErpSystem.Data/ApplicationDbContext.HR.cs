@@ -594,6 +594,9 @@ public partial class ApplicationDbContext
         builder.Entity<EmployeeMedicalExamDocument>(entity =>
             entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
 
+        builder.Entity<MedicalExpenseDocument>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
         builder.Entity<JobOffer>(entity =>
         {
             entity.HasIndex(item => new { item.TenantId, item.OfferLetterFileUploadRecordId });

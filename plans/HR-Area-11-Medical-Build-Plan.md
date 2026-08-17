@@ -37,7 +37,7 @@ delete it. Add new findings as they're discovered, with evidence. When a slice c
 | 1 | Finish the gating job | ☑ **green 2026-08-17** | **93** |
 | 2 | Cross-tenant adjudication + claim contract | ☑ **green 2026-08-17** | **26** |
 | 3 | Self-service claims + actor hole | ☑ **green 2026-08-17** | **30** |
-| 3a | **Claim documents onto the upload gate** (F-08) | ☐ not started — **blocks slice 6** | target ~35 |
+| 3a | Claim documents onto the upload gate (F-08) | ☑ **green 2026-08-17** | **22** |
 | 4 | UI — reference & config | ☐ not started | target ~40 |
 | 5 | UI — health records | ☐ not started | target ~50 |
 | 6 | UI — claims, NHIS, dashboard | ☐ not started | target ~60 |
@@ -230,7 +230,7 @@ Correct split for all three: **reads on plain `[Authorize]`, writes on `MedicalW
 | F-05 | medium | Claim create/approve/note demand an employee-linked *caller* | ✅ **fixed slices 1 + 3** |
 | F-06 | medium | On-behalf-of branch unreachable (permission + actor) | ✅ **fixed slice 1** |
 | F-07 | low | ~40 reads filter tenant in memory after `GetAllAsync()` | open → **deferred, see §11** |
-| F-08 | **high** | Claim documents take a caller-supplied `FilePath` | open → **slice 3a** |
+| F-08 | **high** | Claim documents take a caller-supplied `FilePath` | ✅ **fixed slice 3a** |
 | F-09 | **high** | A claim could draw down another employee's insurance policy | ✅ **fixed slice 3** |
 
 ### F-01 — Role fallback ignores the verb ✅ *empirically confirmed*
@@ -423,10 +423,33 @@ account *can* file on behalf but gets a specific refusal on approve ✓
 
 ---
 
-### Slice 3a — Claim documents onto the controlled-upload gate (F-08)
+### Slice 3a — Claim documents onto the controlled-upload gate ✅ green 2026-08-17, 22 assertions
 
-**Target ~35 assertions. Blocks slice 6** — a claims UI without receipt upload is a half-feature,
-and self-service filing without receipts is worse than that.
+Closed F-08. Harness: `run-slice3a.mjs` — **needs `node clamd-stub.mjs` alongside the API.**
+
+**As-built beyond the plan below:** `HrMedicalClaimDocuments` was added to
+`ControlledFileUploadCategories.SystemCleanScanRequired`. Every other HR personal-data category is
+in that set, including `HrMedicalExamDocuments`; a receipt carries diagnosis, facility and amount,
+so leaving it out would have let a tenant policy permit unscanned medical uploads. This is why the
+harness needs a scanner where slices 1–3 did not.
+
+**Not `HrAttachmentUpload`.** That helper resolves an uploading employee from the token and refuses
+when there is none, because the rows it writes carry a required `UploadedById` Employee FK.
+`MedicalExpenseDocument` has no such column, so reusing it would have locked out unlinked
+administrative accounts — the same mistake F-05 was about. `MedicalClaimDocumentUpload` exists for
+that reason and says so in its XML doc; do not "consolidate" the two.
+
+⚠ **`apply-migrations` reports success against a stale assembly.** A migration must be compiled
+into `ErpSystem.Data.dll` before `MigrateAsync` can see it — running the previously-built DLL prints
+"Database migrations completed successfully" and applies nothing. It cost a false green here.
+**Always verify against the database**, not the exit message:
+`SELECT COL_LENGTH(...)` plus a `__EFMigrationsHistory` check.
+
+⚠ **Register every scaffolded migration in `FastBuildMigrationMetadata.cs`.** Fast Debug builds
+strip `Migrations\*.Designer.cs`, where a scaffolded migration keeps its `[Migration]` attribute —
+without the entry it is invisible to startup `MigrateAsync`. It is `<Compile Remove>`d in the
+default item group, so the entry is inert in a normal build and there is no duplicate-attribute
+risk.
 
 **The defect.** `POST api/medical-expense-claims/{claimId}/documents` takes
 `CreateMedicalExpenseDocumentDto` with a caller-supplied **`FilePath`** — a client naming a path on
@@ -518,7 +541,7 @@ than dropping a deferral into a commit message.
 
 | What | Why deferred | Where it lands |
 |---|---|---|
-| **F-08** — claim documents on a caller-supplied path | Needs 3 new columns + a migration + a new upload category; too much inside a security slice | **Slice 3a**, and it **blocks slice 6** |
+| ~~**F-08** — claim documents on a caller-supplied path~~ | ~~Needs 3 new columns + a migration~~ | ✅ **done, slice 3a** — slice 6 unblocked |
 | **F-07** — ~40 reads filter tenant in memory after `GetAllAsync()` | Correct, just wasteful; invisible at current data volumes (every medical table was empty) | No slice yet. **Trigger:** the first list screen that feels slow in slice 4–7, or the first tenant with real claim volume |
 | **Employee edit / withdraw of their own claim** | D-1's scope line was file / list / read / items / documents. A claim filed in error currently needs HR to delete it | **Trigger:** first UI feedback in slice 6. Small — an update route through `LoadOwnClaimAsync`, restricted to `Pending` |
 | **SHE ↔ Medical bridge by reference** | The slice-9 call in `she-medical-ownership-boundary` was never built; surveillance has no link to `EmployeeHealthProfile` / `EmployeeMedicalExam` | **Trigger:** slice 5 (health records UI), where the absence becomes visible. Note SHE surveillance already FKs `HealthcareFacility`, so slice 4 partially unblocks it |

@@ -1,11 +1,16 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -18,11 +23,25 @@ namespace ErpSystem.Api.Controllers.HR;
 public class MedicalExpenseClaimsController : MedicalControllerBase
 {
     private readonly IMedicalExpenseClaimService _service;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
 
-    public MedicalExpenseClaimsController(IMedicalExpenseClaimService service, ICurrentUserService currentUser)
+    public MedicalExpenseClaimsController(
+        IMedicalExpenseClaimService service,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
     }
 
     // =========================================================================
@@ -222,20 +241,62 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetDocumentsAsync(claimId, ct));
 
+    /// <summary>Uploads a supporting document — typically a receipt — against a claim.</summary>
+    /// <remarks>
+    /// This used to be a JSON endpoint taking a caller-supplied <c>FilePath</c>, which let any
+    /// authenticated user with write access attach arbitrary bytes on disk — including another
+    /// tenant's — to a claim. It is now a real multipart upload routed through the shared gate, so
+    /// the file is malware-scanned and stored outside the publicly served web root. Same fix, same
+    /// shape, as medical exam documents.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/documents")]
-    public async Task<ActionResult<MedicalExpenseDocumentDto>> AddDocument(
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    [ProducesResponseType(typeof(MedicalExpenseDocumentDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> AddDocument(
         Guid claimId,
-        [FromBody] CreateMedicalExpenseDocumentDto dto,
+        IFormFile file,
+        [FromForm] MedicalDocumentType type,
+        [FromForm] string? description,
         CancellationToken ct)
     {
-        dto.ClaimId = claimId;
-        if (!ModelState.IsValid) return BadRequest(ModelState);
         if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
-        var created = await _service.AddDocumentAsync(dto, tenantId, userId, ct);
-        return CreatedAtAction(nameof(GetById), new { id = claimId }, created);
+        var claim = await LoadClaimInTenantAsync(claimId, tenantId, ct);
+        if (claim is null) return NotFound("Medical expense claim not found.");
+
+        return await MedicalClaimDocumentUpload.ExecuteAsync(
+            this, _hrDocuments, _service, claimId, file, type, description,
+            tenantId, userId, CurrentUser.UserName, ct);
     }
+
+    /// <summary>Streams a document attached to a claim.</summary>
+    [HttpGet("documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id, CancellationToken ct)
+    {
+        if (TryGetWriteContext(out var tenantId, out _) is { } error) return error;
+
+        var document = await _db.Set<MedicalExpenseDocument>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (document is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Confirms a claim exists in this tenant before anything is stored against it.</summary>
+    private Task<MedicalExpenseClaim?> LoadClaimInTenantAsync(Guid claimId, Guid tenantId, CancellationToken ct)
+        => _db.Set<MedicalExpenseClaim>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == claimId && item.TenantId == tenantId && !item.IsDeleted, ct);
 
     [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("documents/{id:guid}")]

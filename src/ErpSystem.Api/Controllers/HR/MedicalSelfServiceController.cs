@@ -1,9 +1,15 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Medical;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -25,11 +31,11 @@ namespace ErpSystem.Api.Controllers.HR;
 ///
 /// <para><b>Deliberately absent.</b> Approval, payment, flagging and claim notes are HR actions and
 /// have no route here; notes in particular carry adjudicator commentary marked internal, so this
-/// controller never calls the note service at all rather than relying on a flag. Receipt <i>upload</i>
-/// is also absent, and that one is a gap rather than a boundary: the claim-document endpoint still
-/// takes a caller-supplied file path, so it is not fit to expose to employees until it is moved onto
-/// the controlled-upload gate the way medical exam documents already are. Documents attached by HR
-/// are readable here in the meantime.</para>
+/// controller never calls the note service at all rather than relying on a flag.</para>
+///
+/// <para>Receipts are uploaded as multipart content through the same controlled gate the HR endpoint
+/// uses — scanned, registered in the DMS, and stored outside the web root. Ownership is checked
+/// before the file is accepted, so an unowned claim id cannot even cause a file to be scanned.</para>
 /// </remarks>
 [ApiController]
 [Route("api/medical/me")]
@@ -37,11 +43,25 @@ namespace ErpSystem.Api.Controllers.HR;
 public class MedicalSelfServiceController : MedicalControllerBase
 {
     private readonly IMedicalExpenseClaimService _claims;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
 
-    public MedicalSelfServiceController(IMedicalExpenseClaimService claims, ICurrentUserService currentUser)
+    public MedicalSelfServiceController(
+        IMedicalExpenseClaimService claims,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _claims = claims;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
     }
 
     /// <summary>Files a claim for the authenticated employee.</summary>
@@ -154,6 +174,61 @@ public class MedicalSelfServiceController : MedicalControllerBase
             document.Description,
             document.UploadDate,
         }));
+    }
+
+    /// <summary>Attaches a receipt to one of the authenticated employee's own claims.</summary>
+    [HttpPost("expense-claims/{id:guid}/documents")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<IActionResult> AddOwnClaimDocument(
+        Guid id,
+        IFormFile file,
+        [FromForm] MedicalDocumentType type,
+        [FromForm] string? description,
+        CancellationToken ct)
+    {
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
+
+        // Ownership before storage: an unowned claim id must not even cause a file to be scanned
+        // and registered, let alone attached.
+        var owned = await LoadOwnClaimAsync(id, ct);
+        if (owned.Error != null) return owned.Error;
+
+        return await MedicalClaimDocumentUpload.ExecuteAsync(
+            this, _hrDocuments, _claims, id, file, type, description,
+            tenantId, userId, CurrentUser.UserName, ct);
+    }
+
+    /// <summary>Streams a document attached to one of the authenticated employee's own claims.</summary>
+    [HttpGet("expense-claims/{id:guid}/documents/{documentId:guid}/download")]
+    public async Task<IActionResult> DownloadOwnClaimDocument(
+        Guid id,
+        Guid documentId,
+        CancellationToken ct)
+    {
+        if (TryGetWriteContext(out var tenantId, out _) is { } contextError) return contextError;
+
+        var owned = await LoadOwnClaimAsync(id, ct);
+        if (owned.Error != null) return owned.Error;
+
+        // The document is resolved through the owned claim, so a document id belonging to somebody
+        // else's claim is a lookup miss rather than a disclosure. The claim id in the route is not
+        // decoration — it is what makes that join possible.
+        var document = await _db.Set<MedicalExpenseDocument>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == documentId &&
+                        item.ClaimId == id &&
+                        item.TenantId == tenantId &&
+                        !item.IsDeleted, ct);
+        if (document is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
     }
 
     /// <summary>
