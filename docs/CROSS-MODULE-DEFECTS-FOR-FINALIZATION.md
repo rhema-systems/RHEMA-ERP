@@ -111,6 +111,75 @@ should be revisited.
 
 ---
 
+## 2. Finance — currency conversion is inverted
+
+**Severity: blocking for any multi-currency amount, anywhere in the system.** Found 2026-08-17
+while retiring HR travel's duplicate exchange-rate table onto Finance's (area 12, slice 6).
+
+### What is broken
+
+`GET /api/finance/currencies/convert` returns the reciprocal of the correct answer. Measured
+against the running API:
+
+```
+1 USD -> GHS = 0.08     (should be ~12.5)
+1 GHS -> USD = 12.5     (should be ~0.08)
+1 EUR -> GHS = 0.076    (should be ~13.2)
+```
+
+### Why
+
+Two halves of Finance disagree about what `ExchangeRate.Rate` means, and the seed data follows the
+opposite convention to the code that reads it.
+
+- **`ExchangeRate.cs` documentation** — *"1 unit of TargetCurrency = ExchangeRate units of
+  BaseCurrency… Example: 1 USD = 15.25 GHS, BaseCurrencyCode = GHS, TargetCurrencyCode = USD,
+  ExchangeRate = 15.25"*. So `Rate` is **target → base**.
+- **`CurrencyService.ConvertAsync`** agrees with that documentation: when the row is
+  `(base = to, target = from)` it returns `amount * rate.Rate`.
+- **`FinanceDataSeeder.cs` (~line 284)** writes the opposite, and its own comment says so:
+
+```csharp
+// GHS to USD
+BaseCurrencyCode = "GHS",
+TargetCurrencyCode = "USD",
+Rate = 0.08m,            // author's intent: 1 GHS = 0.08 USD  (base -> target)
+InverseRate = 12.5m,     // 1 / 0.08
+```
+
+`Rate` and `InverseRate` are transposed relative to the code that consumes them. Every conversion
+in the system is therefore out by the reciprocal — a factor of ~156 for USD/GHS.
+
+### What it blocks
+
+Any multi-currency figure the system computes. It surfaced in HR travel because slice 6 made
+expense-claim lines take their rate from Finance instead of from the caller: a 100 USD hotel bill
+is currently valued at **8 GHS instead of ~1,250**.
+
+### The HR decision taken, and why
+
+**HR travel delegates to `CurrencyService.ConvertAsync` and inherits the error deliberately.**
+Reading `InverseRate` directly would make travel numerically right today and put it in open
+disagreement with every other module — two truths about the same trip, which is worse than one
+shared, fixable error, and is precisely the divergence slice 6 existed to remove. The reasoning is
+recorded in `StaffTravelCurrencyBridge.GetRateToBaseAsync`, and the travel harness asserts
+*agreement with Finance* rather than any fixed number, so it stays correct once this is fixed.
+
+**Fixing Finance fixes travel with no change on the HR side.**
+
+### What a fix needs
+
+1. Decide which convention is canonical — the documentation and `ConvertAsync` already agree with
+   each other, so the seeder is the odd one out and the smaller change.
+2. If the documentation stands: swap `Rate` and `InverseRate` in `FinanceDataSeeder` for all three
+   seeded pairs, and correct any existing rows.
+3. Check every other writer of `ExchangeRate` for the same transposition — the seeder is unlikely
+   to be the only place the ambiguity was resolved the wrong way.
+4. Re-run `dev-harness/hr-travel/run-slice6.mjs`; it prints the effective rate and warns when it is
+   implausible, so it will confirm the fix without needing an edit.
+
+---
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

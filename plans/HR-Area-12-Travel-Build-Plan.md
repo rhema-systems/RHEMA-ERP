@@ -285,7 +285,7 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-04** | Approvals are a bespoke chain, off the workflow engine | ✅ **fixed slice 2** | §3.7 |
 | **F-05** | Create requires the *caller* to be employee-linked | ✅ **fixed slice 0** (33 sites) | §4.4 |
 | **F-06** | Uneven `.Include` coverage across sibling reads | medium | 55 in requests repo, 0 in configuration |
-| **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | ⚠ **supplier fixed slice 3**; currency/FX owed slice 6 | §7.2 |
+| **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | ✅ **CLOSED** — supplier slice 3, currency/FX slice 6 | §7.2 |
 | **F-08** | Travel moves money with **no** GL / AP / budget artifact whatsoever | **high** ⏸ deferred (D-4) | §7.4 |
 | **F-09** | Travel alert notifications are never sent; `NotificationSentAt` is set by the caller | ✅ **fixed slice 5** | §7.5 |
 | **F-10** | No travel reminder sweep, though three other HR areas have one | ✅ **fixed slice 5a** | §7.5 |
@@ -922,11 +922,56 @@ references across the whole tenant and forcing a sweep is administrative. The ha
 notice that still allows a Ghanaian passport renewal, since a 30-day warning about a six-week
 document is not a warning. Belongs in §9 with the other assumed windows.
 
-### Slice 6 — Configuration → **retire onto Finance**
-7 endpoints, and the outcome is deletion rather than screens. Drop
-`StaffTravelCurrencyExchangeRate` and its 3 endpoints; read `/api/finance/exchange-rates`. FK the
-11 `CurrencyCode` fields to Finance `Currency` so amounts can be formatted correctly (§7.2).
-Note the two 400s in §3.2 are required query params, not defects.
+### Slice 6 — Currency and rates retired onto Finance ✅ **green 2026-08-17, 25 assertions**
+
+`run-slice6.mjs`, 25/25. Regression: **252 assertions across nine slices, 0 failures.** Audit 0.
+
+`StaffTravelConfigurationController` is gone — all seven endpoints were duplicate-rate CRUD.
+`StaffTravelCurrencyBridge` replaces it as a **read-only** window onto Finance: nothing in it
+creates a currency or a rate, because a missing rate should be added in Finance, not invented by
+travel, which is exactly what the retired table allowed.
+
+**Currency codes validated on all 11 money-bearing creates** — request, four bookings, visa
+application, insurance, claim, advance, budget, per-diem rate. A bare `char(3)` that nothing
+checked meant a claim could be filed in "XYZ" and totted up.
+
+⚠ **The visa fee currency is genuinely optional** (`string?`), unlike the other ten. Blanket
+validation would have rejected a valid visa application with no fee recorded; the bridge takes an
+`optional` flag, and only that site uses it. Enumerating the nullability beat pattern-matching on
+the field name.
+
+**The exchange rate now comes from Finance**, closing slice 4's residue: that slice stopped the
+caller declaring the converted *amount*, this one stops them declaring the *rate*.
+
+⚠ **No `CurrencyId` FK columns were added**, despite §7.2 hinting at it. Finance's uniqueness is
+`(TenantId, Code)`, so a real FK would be composite across eleven travel tables — a large migration
+that turns a currency re-code into a schema problem, for little beyond what validation gives. The
+parallel *copy* was the rate table, and that is gone; a validated code is a reference, not a
+duplicate.
+
+### ⚠ Finance's currency conversion is inverted — found here, inherited deliberately
+
+Measured live: `1 USD → GHS = 0.08` (should be ~12.5), `1 GHS → USD = 12.5`. `FinanceDataSeeder`
+writes `Rate = 0.08` meaning "1 GHS = 0.08 USD", while both the `ExchangeRate` documentation and
+`CurrencyService.ConvertAsync` read `Rate` as "1 Target = Rate Base". **Rate and InverseRate are
+transposed relative to the code that consumes them**, so every conversion in the system is out by
+the reciprocal.
+
+**Travel delegates to `ConvertAsync` and inherits the error on purpose.** Reading `InverseRate`
+directly would make travel right today and put it in open disagreement with every other module —
+two truths about the same trip, which is worse than one shared, fixable error and is precisely the
+divergence this slice existed to remove. Fixing Finance fixes travel with no change here. Full
+reproduction: `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §2.
+
+The harness asserts **agreement with Finance** rather than any constant, so it stays correct once
+Finance is fixed, and prints a warning naming the defect on every run.
+
+⚠ **Slice 6 broke slice 4's harness, and the breakage was instructive.** Slice 4 asserted that a
+line with `exchangeRate: 0` is refused — true then, obsolete now that the caller's rate is ignored.
+The assertion stopped failing, so the line it posted was **created**, and the extra 50 USD silently
+inflated every total below it. **A stale assertion is not merely noise: it can manufacture the
+state it was meant to forbid.** Slice 4 now derives its expected totals from Finance's live rate
+rather than a constant.
 
 ### Slices 7+ — UI
 The W1 recipe again. Operational screens under `/hr/travel/...`; setup and reference under

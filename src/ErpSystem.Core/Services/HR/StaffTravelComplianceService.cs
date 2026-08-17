@@ -31,6 +31,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     private readonly IStaffTravelHealthRequirementRepository _healthRequirementRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly IEmployeeRepository _employeeRepository;
+    private readonly StaffTravelCurrencyBridge _currency;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -47,6 +48,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         IStaffTravelHealthRequirementRepository healthRequirementRepository,
         IStaffTravelRequestRepository requestRepository,
         IEmployeeRepository employeeRepository,
+        StaffTravelCurrencyBridge currency,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
@@ -62,6 +64,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         _healthRequirementRepository = healthRequirementRepository;
         _requestRepository = requestRepository;
         _employeeRepository = employeeRepository;
+        _currency = currency;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
@@ -336,6 +339,9 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelVisaApplicationDto> CreateVisaApplicationAsync(CreateStaffTravelVisaApplicationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        // A visa application may record no fee, so the currency is optional here — but if one
+        // is given it still has to be a currency Finance holds.
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken, optional: true);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         await RequireOwnedEmployeeAsync(createDto.EmployeeId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -719,6 +725,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelInsurancePolicyDto> CreateInsuranceAsync(CreateStaffTravelInsurancePolicyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _insuranceRepository.AddAsync(entity);

@@ -21,6 +21,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IStaffTravelExpenseClaimLineRepository _lineRepository;
     private readonly IStaffTravelAdvanceRepository _advanceRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
+    private readonly StaffTravelCurrencyBridge _currency;
     private readonly IStaffTravelPerDiemRateRepository _perDiemRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
@@ -32,6 +33,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IStaffTravelExpenseClaimLineRepository lineRepository,
         IStaffTravelAdvanceRepository advanceRepository,
         IStaffTravelRequestRepository requestRepository,
+        StaffTravelCurrencyBridge currency,
         IStaffTravelPerDiemRateRepository perDiemRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
@@ -42,6 +44,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         _lineRepository = lineRepository;
         _advanceRepository = advanceRepository;
         _requestRepository = requestRepository;
+        _currency = currency;
         _perDiemRepository = perDiemRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
@@ -120,6 +123,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelBudgetDto> CreateBudgetAsync(CreateStaffTravelBudgetDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
 
         var existing = await _budgetRepository.GetByRequestIdAsync(createDto.StaffTravelRequestId);
@@ -209,6 +213,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelExpenseClaimDto> CreateClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -328,7 +333,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await GetOwnedClaimAsync(createDto.StaffTravelExpenseClaimId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
-        ApplyBaseCurrencyAmount(entity);
+        await ApplyBaseCurrencyAmountAsync(entity, cancellationToken);
         await _lineRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -464,6 +469,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelAdvanceDto> CreateAdvanceAsync(CreateStaffTravelAdvanceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -584,6 +590,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     public async Task<StaffTravelPerDiemRateDto> CreatePerDiemRateAsync(CreateStaffTravelPerDiemRateDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _perDiemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -624,13 +631,18 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// ⚠ The RATE is still caller-supplied. Sourcing it from Finance's ExchangeRate is slice 6
     /// (§7.2); this only stops the product disagreeing with its own factors.
     /// </remarks>
-    private static void ApplyBaseCurrencyAmount(StaffTravelExpenseClaimLine line)
+    private async Task ApplyBaseCurrencyAmountAsync(
+        StaffTravelExpenseClaimLine line, CancellationToken cancellationToken)
     {
-        if (line.ExchangeRate <= 0m)
-            throw new InvalidOperationException(
-                "An exchange rate greater than zero is required to convert a claim line to the base currency.");
+        // Slice 4 stopped the caller declaring the converted AMOUNT. This stops them declaring the
+        // RATE as well: it is read from Finance's ExchangeRate for the expense date, so a claim is
+        // valued at the organisation's own published rate and cannot disagree with what Finance
+        // reports the trip cost.
+        line.ExchangeRate = await _currency.GetRateToBaseAsync(
+            line.CurrencyOriginal, line.ExpenseDate, cancellationToken);
 
-        line.AmountBaseCurrency = decimal.Round(line.AmountOriginal * line.ExchangeRate, 2, MidpointRounding.AwayFromZero);
+        line.AmountBaseCurrency = decimal.Round(
+            line.AmountOriginal * line.ExchangeRate, 2, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>

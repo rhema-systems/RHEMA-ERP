@@ -25,6 +25,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     private readonly IStaffTravelCarRentalBookingRepository _carRentalRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly IFleetTripService _fleetTrips;
+    private readonly StaffTravelCurrencyBridge _currency;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelBookingService> _logger;
@@ -37,6 +38,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         IStaffTravelCarRentalBookingRepository carRentalRepository,
         IStaffTravelRequestRepository requestRepository,
         IFleetTripService fleetTrips,
+        StaffTravelCurrencyBridge currency,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelBookingService> logger)
@@ -48,6 +50,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         _carRentalRepository = carRentalRepository;
         _requestRepository = requestRepository;
         _fleetTrips = fleetTrips;
+        _currency = currency;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -156,6 +159,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelFlightBookingDto> CreateFlightAsync(CreateStaffTravelFlightBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _flightRepository.AddAsync(entity);
@@ -246,6 +250,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelHotelBookingDto> CreateHotelAsync(CreateStaffTravelHotelBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _hotelRepository.AddAsync(entity);
@@ -292,6 +297,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelGroundTransportDto> CreateGroundTransportAsync(CreateStaffTravelGroundTransportDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -377,6 +383,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelCarRentalBookingDto> CreateCarRentalAsync(CreateStaffTravelCarRentalBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _carRentalRepository.AddAsync(entity);

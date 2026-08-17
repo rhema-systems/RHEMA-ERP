@@ -30,6 +30,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IAppEventBus _appEventBus;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly StaffTravelCurrencyBridge _currency;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -42,6 +43,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IAppEventBus appEventBus,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        StaffTravelCurrencyBridge currency,
         ILogger<StaffTravelRequestService> logger)
     {
         _requestRepository = requestRepository;
@@ -53,6 +55,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _appEventBus = appEventBus;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _currency = currency;
         _logger = logger;
     }
 
@@ -485,6 +488,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     public async Task<StaffTravelRequestDto> CreateAsync(CreateStaffTravelRequestDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
         entity.Status = StaffTravelRequestStatus.Draft;

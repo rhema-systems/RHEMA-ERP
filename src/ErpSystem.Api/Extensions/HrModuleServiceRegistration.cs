@@ -617,6 +617,9 @@ public static class HrModuleServiceRegistration
         // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
         services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
         services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
+        // Travel's read-only window onto Finance's currency and exchange-rate masters —
+        // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
+        services.AddScoped<StaffTravelCurrencyBridge>();
 
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();
