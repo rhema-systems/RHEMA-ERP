@@ -1,0 +1,94 @@
+# HR ↔ Finance Integration Backlog
+
+**Opened 2026-08-17.** The worklist for the comprehensive Finance-integration sweep that runs
+**after the whole HR module is complete**.
+
+---
+
+## Why this file exists
+
+The Finance integration is deliberately split in two (Area 12 plan, decision D-4):
+
+| | when | what |
+|---|---|---|
+| **Master data** | **now, per area** | Read Finance's `Currency` and `ExchangeRate`. Never keep a parallel HR copy. |
+| **Accounting** | **once, after the module** | GL posting, AP artifacts, receivables, budget consumption, payroll routing. |
+
+The reasoning: **GL posting is one accounting design, not twenty-seven.** If each HR area invents
+its own treatment while the module is mid-build, the sweep becomes a reconciliation of
+twenty-seven inconsistent decisions rather than one design applied consistently. Master data is
+the opposite case — it diverges by sitting still, so it is fixed as we go.
+
+**The deferral is only safe if the sweep starts with a complete worklist.** That is this file.
+
+## Rules while the deferral is in force
+
+1. **Record every money-touching point here as its area is built.** An amount that is disbursed,
+   paid, accrued, claimed, budgeted or recovered belongs in the register below.
+2. **Do not invent an HR-side posting mechanism** — no parallel ledger, no private
+   payment-status machine, no HR "journal" to fill the gap. Anything built to paper over the
+   missing GL link is work the sweep must unpick.
+3. **Leave the plain records alone.** Fields like `PaymentMethod`, `PaymentReference`, `PaidAt`
+   stay as the simple records they are; the sweep decides what they become.
+4. **Master data is not deferred.** If an area needs a currency, a rate, a supplier or a payment
+   term, it reads the canonical one. That work happens in the area, not here.
+
+---
+
+## Register
+
+Status key: 🔲 to record · ✅ recorded, awaiting the sweep · ⏳ area not yet built
+
+### Area 12 — Staff Travel ✅ *(surveyed 2026-08-17; area not yet built)*
+
+Source: `plans/HR-Area-12-Travel-Build-Plan.md` §7.4. Measured fact: **zero** references to
+`GLAccount`, cost centre, `ProjectId`, `Payroll`, `BudgetEntry` or `SupplierId` across all 34
+travel entities.
+
+| # | money event | entity | what is missing |
+|---|---|---|---|
+| 12.1 | Expense claim paid | `StaffTravelExpenseClaim` | No GL posting, no AP document. `PaymentMethod` is a travel-private enum, `PaymentReference` free text, `PaidAt` an HR timestamp. `FinanceReviewedById` is an **`Employee`** FK, so the finance review is an HR fact invisible to Finance. |
+| 12.2 | Cash advance disbursed | `StaffTravelAdvance` | No GL entry. An outstanding advance is an **employee receivable**: `UnsettledAmount` is a balance-sheet figure living only in HR, appearing in no trial balance and no ageing. |
+| 12.3 | Advance settled against a claim | `StaffTravelExpenseClaim.AdvanceDeducted` | The contra-entry that clears the receivable has no accounting counterpart. |
+| 12.4 | Trip budget committed / consumed | `StaffTravelBudget` | Per-trip envelope (flight / accommodation / per-diem / transport / misc) with no link to `BudgetEntry`, `UnitBudget`, a GL account or a cost centre. The breakdown is legitimately travel-owned; the missing part is that it must **consume from** the department's finance budget. |
+| 12.5 | Booking cost committed | `StaffTravel{Flight,Hotel,GroundTransport,CarRental}Booking` | `EstimatedCost` / `ActualCost` per booking, no commitment accounting. |
+
+**Open questions this area raises for the sweep** (also in the area-12 plan §9):
+
+- **Is a travel expense reimbursed through payroll or as a direct payment?** Decides where 12.1
+  posts. Payroll is another developer's module — read-only from HR — so a payroll answer makes
+  this a hand-off rather than something HR builds. **Needs TDC.**
+- **Cost attribution.** Travel has no `ProjectId` and no cost centre. If TDC charges travel to
+  projects or departments, the dimension has to come from somewhere.
+
+### Areas already closed — back-fill needed 🔲
+
+These were built before this register existed. Each needs a pass **before the sweep begins**, or
+the sweep is a re-survey after all.
+
+| area | likely money events | status |
+|---|---|---|
+| 2 — Leave | leave encashment on separation (FR-HR-152 caps it) | 🔲 to record |
+| 4 — Compensation | pay components, allowances, the payroll boundary | 🔲 to record |
+| 7 — Training | training budget, costs, vendor payments, `costPerCompletion` | 🔲 to record |
+| 11 — Medical | claim create → approve → **pay**; insurance utilisation; NHIS | 🔲 to record |
+| 10 — SHE | any compensation or remediation spend | 🔲 to record |
+
+⚠ **Area 11 is the priority back-fill** — it has a live, working claim→approve→**pay** path, so it
+is the closest analogue to travel 12.1 and the two must post the same way.
+
+### Areas not yet built ⏳
+
+13 succession · 14 awards · 16 assets · 17 competency · 18–23 · 25–27 portals · plus the deferred
+separation/exit module, whose **final settlement** is unavoidably an accounting event.
+
+---
+
+## Before the sweep starts
+
+- [ ] Back-fill the five closed areas above.
+- [ ] Get TDC's answer on payroll-vs-direct-payment reimbursement.
+- [ ] Get TDC's answer on cost attribution (project / cost centre dimensions).
+- [ ] Confirm the Finance module's posting entry point and who owns it — Finance is not this
+      module's to modify without agreement, the same rule that governs payroll.
+- [ ] Decide the treatment **once**, then apply it across every row in the register.
