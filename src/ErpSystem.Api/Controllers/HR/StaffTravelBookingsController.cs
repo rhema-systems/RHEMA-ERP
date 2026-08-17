@@ -16,11 +16,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelBookingsController : HrControllerBase
 {
     private readonly IStaffTravelBookingService _service;
+    private readonly IAuthorizationService _authorization;
 
-    public StaffTravelBookingsController(IStaffTravelBookingService service, ICurrentUserService currentUser)
+    public StaffTravelBookingsController(
+        IStaffTravelBookingService service,
+        IAuthorizationService authorization,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _authorization = authorization;
     }
 
     /// <summary>
@@ -29,6 +34,23 @@ public class StaffTravelBookingsController : HrControllerBase
     /// </summary>
     private (Guid tenantId, Guid userId)? ResolveContext()
         => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
+
+    /// <summary>
+    /// Whether this caller may authorise a booking above the travel policy's cap.
+    /// </summary>
+    /// <remarks>
+    /// <para>Booking is <c>HR.Travel.Write</c>; approving a breach of the policy is
+    /// <c>HR.Travel.Admin</c>, which HR deliberately does not hold. Without this split the
+    /// exception flag was a plain boolean on the payload — the caller booked over the cap and
+    /// ticked their own approval in the same request.</para>
+    ///
+    /// <para>Evaluated through <see cref="IAuthorizationService"/> against the same policy object
+    /// the <c>[Authorize]</c> attributes use, so a change to how the permission is granted (seeded
+    /// permission today, role fallback for HR actors) is honoured here automatically rather than
+    /// re-derived from claims.</para>
+    /// </remarks>
+    private async Task<bool> CallerMayApproveExceptionsAsync()
+        => (await _authorization.AuthorizeAsync(User, HrPermissions.TravelAdminPolicy)).Succeeded;
 
     // =========================================================================
     // FLIGHT BOOKINGS
@@ -54,7 +76,8 @@ public class StaffTravelBookingsController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        var created = await _service.CreateFlightAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
+        var created = await _service.CreateFlightAsync(
+            dto, ctx.Value.tenantId, ctx.Value.userId, await CallerMayApproveExceptionsAsync());
         return CreatedAtAction(nameof(GetFlightById), new { id = created.Id }, created);
     }
 
@@ -67,7 +90,8 @@ public class StaffTravelBookingsController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        return Ok(await _service.UpdateFlightAsync(dto, ctx.Value.userId));
+        return Ok(await _service.UpdateFlightAsync(
+            dto, ctx.Value.userId, await CallerMayApproveExceptionsAsync()));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
@@ -136,7 +160,8 @@ public class StaffTravelBookingsController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        var created = await _service.CreateHotelAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
+        var created = await _service.CreateHotelAsync(
+            dto, ctx.Value.tenantId, ctx.Value.userId, await CallerMayApproveExceptionsAsync());
         return CreatedAtAction(nameof(GetHotelById), new { id = created.Id }, created);
     }
 
@@ -149,7 +174,8 @@ public class StaffTravelBookingsController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        return Ok(await _service.UpdateHotelAsync(dto, ctx.Value.userId));
+        return Ok(await _service.UpdateHotelAsync(
+            dto, ctx.Value.userId, await CallerMayApproveExceptionsAsync()));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]

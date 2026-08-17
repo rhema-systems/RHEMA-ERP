@@ -1124,9 +1124,18 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     [Required]
     public FlightCabinClass BookingClass { get; set; }
 
-    [Required]
+    /// <summary>
+    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
+    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
+    /// declared what the policy permitted them to book.
+    /// </summary>
     public FlightCabinClass PolicyAllowedClass { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
+    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
+    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1167,9 +1176,18 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     [Required]
     public FlightCabinClass BookingClass { get; set; }
 
-    [Required]
+    /// <summary>
+    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
+    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
+    /// declared what the policy permitted them to book.
+    /// </summary>
     public FlightCabinClass PolicyAllowedClass { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
+    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
+    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1196,6 +1214,11 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     [Required]
     public TravelBookingStatus Status { get; set; }
 
+    /// <summary>
+    /// <b>Server-stamped from <see cref="Status"/>.</b> Both were client inputs, so a caller
+    /// asserted that a booking had been made or cancelled and nothing checked — the same fiction
+    /// shape as F-09's <c>NotificationSentAt</c>. Kept on the DTO because the mapper reads them.
+    /// </summary>
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
 
@@ -1263,7 +1286,11 @@ public class CreateStaffTravelFlightSegmentDto : CreateDtoBase
     [MaxLength(10)]
     public string? ArrivalTerminal { get; set; }
 
-    [Range(0, int.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two datetimes above; anything sent here is overwritten. It
+    /// was a client input sitting beside the values that define it, so a segment could claim any
+    /// length at all — and the itinerary reads it.
+    /// </summary>
     public int DurationMinutes { get; set; }
 
     [MaxLength(50)]
@@ -1314,7 +1341,11 @@ public class UpdateStaffTravelFlightSegmentDto : UpdateDtoBase
     [MaxLength(10)]
     public string? ArrivalTerminal { get; set; }
 
-    [Range(0, int.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two datetimes above; anything sent here is overwritten. It
+    /// was a client input sitting beside the values that define it, so a segment could claim any
+    /// length at all — and the itinerary reads it.
+    /// </summary>
     public int DurationMinutes { get; set; }
 
     [MaxLength(50)]
@@ -1417,7 +1448,11 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
+    /// client input beside the dates that determine it, so a three-night stay could be recorded as
+    /// one and every report downstream would believe it.
+    /// </summary>
     public int NumberOfNights { get; set; }
 
     [MaxLength(100)]
@@ -1426,16 +1461,25 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
+    /// </summary>
     public decimal? PolicyMaxRatePerNight { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
+    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
+    /// the right is 403.
+    /// </summary>
     public bool RateExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1483,7 +1527,11 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
+    /// client input beside the dates that determine it, so a three-night stay could be recorded as
+    /// one and every report downstream would believe it.
+    /// </summary>
     public int NumberOfNights { get; set; }
 
     [MaxLength(100)]
@@ -1492,16 +1540,25 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
+    /// </summary>
     public decimal? PolicyMaxRatePerNight { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
+    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
+    /// the right is 403.
+    /// </summary>
     public bool RateExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1518,6 +1575,7 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [MaxLength(1000)]
     public string? CancellationPolicy { get; set; }
 
+    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
 
@@ -1694,7 +1752,9 @@ public class CreateStaffTravelCarRentalBookingDto : CreateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
@@ -1739,7 +1799,9 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
@@ -1756,6 +1818,7 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     [Required]
     public TravelBookingStatus Status { get; set; }
 
+    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
     public DateTime? BookedAt { get; set; }
 }
 

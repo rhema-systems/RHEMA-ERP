@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
@@ -33,6 +34,24 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Current policies covering a staff level, organisation unit and date, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <paramref name="staffLevelId"/> was previously accepted and <b>never used</b> — the method
+    /// took the parameter, filtered on unit and date only, and then ordered by whether a level
+    /// range happened to be set. So a policy written for senior management applied to everyone.
+    /// It matters now that bookings are refused against these caps.
+    ///
+    /// <para>The range is compared on <see cref="StaffLevel.Rank"/>, not on the level ids: the
+    /// policy names the two ends of a band, and the traveller sits inside it or does not. A
+    /// traveller with no staff level (no position, or a position with no level) matches only
+    /// unbanded policies — the organisation-wide default — rather than being excluded entirely.</para>
+    ///
+    /// <para>Tenant scoping is the caller's, per this area's convention (the DbContext's global
+    /// filter is inert — see <c>ApplicationDbContext</c>). <c>StaffTravelPolicyGuard</c> filters
+    /// the result before any cap is applied.</para>
+    /// </remarks>
     public async Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate)
     {
         var candidates = await _dbSet
@@ -42,10 +61,44 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
                      && (p.AppliesToOrganizationUnitId == null || p.AppliesToOrganizationUnitId == organizationUnitId))
             .ToListAsync();
 
-        // Most-specific first (policies scoped to a unit / level rank above org-wide defaults).
+        if (candidates.Count == 0) return candidates;
+
+        int? travellerRank = staffLevelId is Guid levelId
+            ? await _context.Set<StaffLevel>()
+                .Where(l => l.Id == levelId && !l.IsDeleted)
+                .Select(l => (int?)l.Rank)
+                .FirstOrDefaultAsync()
+            : null;
+
+        var bandIds = candidates
+            .SelectMany(p => new[] { p.AppliesToLevelFromId, p.AppliesToLevelToId })
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+
+        var ranks = bandIds.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await _context.Set<StaffLevel>()
+                .Where(l => bandIds.Contains(l.Id))
+                .ToDictionaryAsync(l => l.Id, l => l.Rank);
+
+        bool Covers(StaffTravelPolicy p)
+        {
+            if (p.AppliesToLevelFromId is null && p.AppliesToLevelToId is null) return true;
+            if (travellerRank is not int rank) return false; // banded policy, unplaced traveller
+
+            if (p.AppliesToLevelFromId is Guid from && ranks.TryGetValue(from, out var fromRank)
+                && rank < fromRank) return false;
+            if (p.AppliesToLevelToId is Guid to && ranks.TryGetValue(to, out var toRank)
+                && rank > toRank) return false;
+            return true;
+        }
+
+        // Most-specific first (policies scoped to a unit / level band rank above org-wide defaults).
         return candidates
+            .Where(Covers)
             .OrderByDescending(p => p.AppliesToOrganizationUnitId != null ? 1 : 0)
-            .ThenByDescending(p => p.AppliesToLevelFromId != null ? 1 : 0)
+            .ThenByDescending(p => p.AppliesToLevelFromId != null || p.AppliesToLevelToId != null ? 1 : 0)
             .ThenByDescending(p => p.EffectiveFrom)
             .ToList();
     }

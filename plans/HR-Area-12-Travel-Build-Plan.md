@@ -273,6 +273,25 @@ consistently. Master data is the opposite case: it diverges by sitting still, so
 starts with a complete worklist rather than a re-survey. Areas already closed (2, 4, 11 in
 particular) need a back-fill pass into that register before the sweep begins.
 
+### D-5. A booking above the travel policy's cap is refused, and only an admin may authorise one
+
+**Decided by the user 2026-08-17**, on finding that the booking policy gate gated nothing (slice 8).
+
+**The rule:** the server resolves the cap from the applicable `StaffTravelPolicy` and refuses a
+breach with 422 naming it. The `*ExceptionApproved` flag asks for authority to proceed and is
+honoured only for a caller holding **`HR.Travel.Admin`** — which HR deliberately does not hold — so
+a travel clerk with Write cannot approve their own breach. 403 otherwise.
+
+**Rejected:** routing every breach through a `StaffTravelPolicyException` record decided by the
+existing approval path. Stronger audit trail, but that entity keys on `PolicyRuleId` — a free-form
+rule list that does **not** line up with the cap fields on the policy — so it would have required
+inventing a rule-code convention mapping `MaxFlightClassInternational` to a `RuleCode`. Also
+rejected: recording the breach without refusing it (visibility, no control).
+
+**Consequence, and the thing to watch:** this makes `HR.Travel.Admin` a *financial* authority, not
+just a destructive one. It already gated deletes; it now also gates spending above policy. If TDC
+wants those separated, that is a new permission rather than a change to this rule.
+
 ---
 
 ## 6. Findings register
@@ -294,6 +313,12 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | ✅ **CLOSED slice 5** — audit 0 findings | §6.2 |
 | **F-14** | Sibling reads include unevenly; 4 bespoke reads miss a nav their DTO declares | ✅ **fixed slice 0** (request repo); other repos unaudited | §6.1 |
 | **F-15** | `RecordDecisionAsync` is AddAsync-then-UpdateAsync (dead-path shape 3) | medium | §6.1 |
+| **F-16** | **`InitiatedById` on the desk create is caller-declared** — travel could be filed under a colleague's name | ✅ **fixed slice 7** | found by the form; the browser has no employee id |
+| **F-17** | **The booking policy gate gates nothing** — service has 0 references to any policy field; caps and exception flags all caller-supplied | ✅ **fixed slice 8** (D-5) | §8 slice 8, reproduced |
+| **F-18** | `GetApplicablePoliciesAsync` **ignores its `staffLevelId`** (a senior-management policy applied to everyone) and is unscoped by tenant | ✅ **fixed slice 8** | read while wiring F-17 |
+| **F-19** | Derived money is caller-declared: hotel nights + total, car-rental total, segment duration | ✅ **fixed slice 8** | §8 slice 8 |
+| **F-20** | `BookedAt` / `CancelledAt` are caller-declared (F-09's fiction shape, on bookings) | ✅ **fixed slice 8** | §8 slice 8 |
+| **F-21** | Both itinerary reads omit their legs' country includes, which the leg repo's own reads have | ✅ **fixed slice 8** | found by `run-slice8-ui.mjs` |
 
 ### 6.1 Defect sweep — what has and has not been done
 
@@ -1026,6 +1051,89 @@ re-run unchanged (252).
 
 Currency is bound to `GET /api/finance/currencies` and countries to `/api/Country` — travel keeps
 no list of either, per §7.
+
+#### Slice 8 — Itineraries and bookings ✅ **green 2026-08-17, 56 + 24 assertions**
+
+Two tabs on the request detail (`Itinerary`, `Bookings`), `TravelItineraryPanel` and
+`TravelBookingsPanel`, plus `types/hr/travel-bookings.ts` and
+`services/hr/travel-bookings.service.ts` over both controllers (~40 endpoints).
+
+**⚠ THE HEADLINE: the booking policy gate gated nothing.** `StaffTravelBookingService` contained
+**zero references to any policy field**, while every booking DTO carried `PolicyAllowedClass` /
+`PolicyMaxRatePerNight` and a `ClassExceptionApproved` / `RateExceptionApproved` boolean — all four
+caller-supplied. A caller could book First class, declare that the policy allowed First, tick their
+own exception, and nothing refused it. The real caps were on `StaffTravelPolicy` the whole time
+(`MaxFlightClassDomestic/International`, `MaxHotelRateDomestic/International`) and
+`GetApplicablePoliciesAsync` already resolved the right policy; it was simply never called from a
+booking path. **The area-5 `RequireCalibration` shape: the code reads as built precisely because so
+much of it mentions the policy.** Ask which method actually *refuses* something.
+
+**Decision D-5 (user, 2026-08-17): a breach is refused, and authorising one is `HR.Travel.Admin`.**
+Rejected alternatives: routing breaches through `StaffTravelPolicyException` (its `PolicyRuleId`
+keys to a free-form rule list that does not line up with the cap fields, so it needed a new
+rule-code convention invented), and recording-without-refusing (visibility, no control).
+
+Delivered as `StaffTravelPolicyGuard`, a focused collaborator beside `StaffTravelCurrencyBridge`:
+
+1. **Caps are resolved, never declared.** From the policy in force for the traveller's staff level,
+   org unit and departure date. Domestic vs international is the *request's* `IsInternational` — the
+   trip already knows, and a booking does not get a second opinion.
+2. **A breach is 422 naming the cap; asking for an exception without Admin is 403.** The controller
+   evaluates `HR.Travel.Admin` through `IAuthorizationService` against the same policy object the
+   `[Authorize]` attributes use, and passes the answer in — a service that inspects the caller's
+   identity behind the controller's back is how these fields became spoofable. An approved exception
+   must also record why.
+3. **No policy configured means no cap.** A fresh tenant can still book travel. Refusing everything
+   until someone writes a policy is how unmaintained reference data turned a rule into an obstacle
+   in area 8.
+
+**Two more defects found while wiring it.** `GetApplicablePoliciesAsync` **took `staffLevelId` and
+never used it** — it filtered on unit and date, then merely *ordered* by whether a level band
+happened to be set, so a policy written for senior management applied to everyone. It now compares
+on `StaffLevel.Rank`. It was also unscoped by tenant, which mattered far more once bookings were
+being refused against these caps: another tenant's policy would have decided what yours may book.
+
+**Derived values stopped being the client's arithmetic:** hotel `NumberOfNights` and `TotalCost`,
+car-rental `TotalCost`, segment `DurationMinutes`, and `BookedAt`/`CancelledAt` (stamped from status
+— the F-09 fiction shape). ⚠ One ordering subtlety: the timestamps are captured **before** the
+mapper runs, because `UpdateEntity` still copies them off the DTO, so reading them afterwards would
+read the client's value back.
+
+⚠ **Segment duration clamps at zero rather than refusing a negative.** Both datetimes are local to
+their own airports, so an arrival before departure is a legitimate westward crossing, not an error;
+only a duration computed from UTC would be meaningful. An honest zero beats a fabricated number, and
+carrying the offsets is the real fix.
+
+⚠ **The hotel rate cap compares numbers in whatever currency each side carries.** `StaffTravelPolicy`
+stores no currency beside `MaxHotelRateDomestic/International`, so there is nothing to convert from.
+Sound only while caps and bookings share a currency. Giving the policy a currency is the fix; it is a
+schema change beyond this slice. Recorded rather than silently assumed.
+
+**⚠ THE UI PROBE EARNED ITS KEEP — `run-slice8-ui.mjs`, and it found a defect no other check could.**
+The screens send a different shape from the rest of the harness: enums as **strings** (`"Economy"`,
+not `1`), datetimes as **local wall-clock strings** from `<input type="datetime-local">` (no zone, no
+seconds), and `null` rather than `""` for an untouched optional datetime. `tsc` is satisfied either
+way and there is no browser here. It caught: **`GET /itineraries/{id}` did not resolve its legs'
+country names while `POST .../legs` did** — the leg repository's own reads had the two includes and
+both itinerary reads did not. The timeline renders from the nested read, so every leg would have
+printed a blank country and the row just added would look right only until a refresh. The
+uneven-siblings shape from slice 0, one level down. Fixed on both reads via a shared `WithLegDetail`
+with `AsSplitQuery`.
+
+**A wrinkle worth knowing, not a defect:** a freshly stamped `DateTime.UtcNow` serialises with a `Z`
+(Kind=Utc); the same value read back from SQL Server does not (`datetime2` carries no offset, so EF
+returns Kind=Unspecified). So `...3576655Z` and `...3576655` are one moment written two ways,
+depending only on whether the response was reloaded. The first draft of that assertion compared
+strings and reported a defect that was not there. Consequence for any client:
+`new Date("...3576655")` reads it as **local** time. Platform-wide by construction, not travel's.
+
+**UI notes worth keeping:** the two "authorise above the cap" switches are shown to **everyone** and
+answer 403 for a caller without Admin — hiding them would turn "you may not do this" into "this does
+not exist", which is a worse thing to tell someone. Nights and hire-day totals are previewed with the
+same arithmetic the server runs, labelled as previews, so a disagreement is visible rather than
+silent (the [[hr-appraisal-scoring-model]] lesson). Itinerary versions are created alongside the
+current one and **promoted as a separate act** — a trip gets re-planned and the desk needs what was
+agreed before, not only what is agreed now.
 
 ---
 

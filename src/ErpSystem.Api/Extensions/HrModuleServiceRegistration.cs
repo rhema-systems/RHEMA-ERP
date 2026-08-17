@@ -620,6 +620,8 @@ public static class HrModuleServiceRegistration
         // Travel's read-only window onto Finance's currency and exchange-rate masters —
         // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
         services.AddScoped<StaffTravelCurrencyBridge>();
+        // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
+        services.AddScoped<StaffTravelPolicyGuard>();
 
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();
