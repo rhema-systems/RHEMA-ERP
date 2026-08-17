@@ -339,6 +339,11 @@ public partial class ApplicationDbContext
     // conflating them would put the two under one set of read rules.
     public DbSet<StaffGrievance> StaffGrievances { get; set; } = null!;
     public DbSet<StaffGrievanceStep> StaffGrievanceSteps { get; set; } = null!;
+
+    // Area 9 slice 8 — the discipline reminder sweep. Covers both halves of the area, which is why
+    // it sits with the grievance sets rather than the disciplinary ones.
+    public DbSet<DisciplineReminderRun> DisciplineReminderRuns { get; set; } = null!;
+    public DbSet<DisciplineReminderDispatchLog> DisciplineReminderDispatchLogs { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
     public DbSet<SheIncidentTypeCorrectiveAction> SheIncidentTypeCorrectiveActions { get; set; } = null!;
     public DbSet<SheInjuryType> SheInjuryTypes { get; set; } = null!;
@@ -8506,6 +8511,21 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.RespondedById)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- Discipline reminder engine (area 9 slice 8) ----
+        builder.Entity<DisciplineReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<DisciplineReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ---- StaffDisciplineTermination ----

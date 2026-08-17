@@ -59,3 +59,26 @@ public interface IStaffGrievanceService
     /// <summary>The griever withdraws. Also theirs alone.</summary>
     Task<StaffGrievanceDto> WithdrawAsync(Guid grievanceId, WithdrawGrievanceDto dto, Guid grieverEmployeeId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// The discipline reminder sweep — area 9 slice 8.
+/// </summary>
+/// <remarks>
+/// Covers both halves of the area: the disciplinary clocks (written query, investigation, hearing,
+/// appeal windows, corrective actions, warnings, fines) and grievances sitting at an unanswered rung.
+/// Scoped rather than owned by the background host, so the daily sweep and the HR-gated run-now
+/// endpoint execute exactly the same code — the SHE/movements structure.
+/// </remarks>
+public interface IDisciplineReminderService
+{
+    Task<DisciplineReminderRunResultDto> RunSweepForTenantAsync(
+        Guid tenantId, string trigger, Guid? triggeredByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>What a sweep run at <paramref name="asOf"/> would fire. Reads only — claims nothing.</summary>
+    Task<IEnumerable<DisciplineReminderPreviewItemDto>> PreviewSweepAsync(
+        DateTime? asOf, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<DisciplineReminderRunDto>> GetRecentRunsAsync(int count = 20, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<DisciplineReminderLogEntryDto>> GetRecentLogAsync(int days = 14, CancellationToken cancellationToken = default);
+}

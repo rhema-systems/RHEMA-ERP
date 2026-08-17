@@ -613,6 +613,10 @@ public static class HrModuleServiceRegistration
         // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.
         services.AddScoped<IStaffGrievanceService, StaffGrievanceService>();
 
+        // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
+        // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
+        services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
+
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();
         services.AddScoped<IStaffDisciplinaryCaseService, StaffDisciplinaryCaseService>();

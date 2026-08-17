@@ -119,3 +119,91 @@ public class StaffGrievanceStep : TenantEntity
 
     public GrievanceStepOutcome Outcome { get; set; } = GrievanceStepOutcome.AwaitingResponse;
 }
+
+// =============================================================================
+// REMINDER ENGINE (area 9 slice 8)
+//
+// The area computes a great many queues and tells nobody about any of them: the
+// 48-hour written query, the four-week investigation, hearings coming up, the
+// five-working-day appeal window, appeals past their ten working days, overdue
+// corrective actions, expiring warnings, unpaid fines, and grievances sitting at a
+// rung nobody has answered. Every one of those is a deadline visible only to
+// someone who happens to open the right screen on the right day — and in this area
+// a missed deadline is not an inconvenience, it is the thing that makes a sanction
+// or a dismissal indefensible.
+//
+// Structure mirrors the staff-movement engine (area 8 slice 5), which mirrors SHE's
+// (area 10 slice 13): all logic in the service so the daily host and the HR-gated
+// run-now endpoint share exactly one code path, and a dispatch log whose unique
+// (TenantId, DedupeKey) index is the send-once guarantee.
+//
+// They live in this file rather than the discipline entities file because the sweep
+// covers BOTH halves of the area — disciplinary cases and grievances — and putting
+// it with the narrower of the two would misdescribe it.
+// =============================================================================
+
+/// <summary>One execution of the discipline reminder sweep, scheduled or run by hand.</summary>
+public class DisciplineReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+
+    public virtual ICollection<DisciplineReminderDispatchLog> DispatchLogs { get; set; }
+        = new List<DisciplineReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a sweep.
+/// </summary>
+/// <remarks>
+/// The unique (TenantId, DedupeKey) index is the send-once guarantee: a key encodes the item, the
+/// reminder kind, the due date and the ladder rung or escalation tier reached, so each rung fires
+/// exactly once — and moving a due date re-arms the ladder, because it produces fresh keys.
+///
+/// ⚠ Nothing here carries the allegation, the grievance statement, or the employee's name. A
+/// reminder travels further than the record it is about — into notification lists and, one day,
+/// email — so it says a case number and a deadline and makes the reader open the record to learn
+/// anything else. The same reasoning governs the workflow display resolver for this area.
+/// </remarks>
+public class DisciplineReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual DisciplineReminderRun Run { get; set; } = null!;
+
+    /// <summary>Machine kind, e.g. "WrittenQueryDue", "AppealDecisionOverdue", "GrievanceUnanswered".</summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Disciplinary case", "Grievance".</summary>
+    [MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>What the notification shows: the case or grievance number, and nothing more.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
+}

@@ -1719,6 +1719,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Sweep logic is scoped (IStaffMovementReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffMovementReminderBackgroundService>();
 
+            // Discipline reminder engine (area 9 slice 8): daily sweep — the 48-hour written query,
+            // the four-week investigation, hearings coming up, both appeal windows, corrective
+            // actions, expiring warnings, unpaid fines, and grievances at an unanswered rung.
+            // Sweep logic is scoped (IDisciplineReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.DisciplineReminderBackgroundService>();
+
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,
                 ErpSystem.Api.Services.TransactionalEmailQueue>();

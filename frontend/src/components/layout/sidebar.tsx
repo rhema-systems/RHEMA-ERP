@@ -1566,6 +1566,15 @@ export const navigationItems: NavItem[] = [
             icon: ArrowRightLeft,
           },
           {
+            // The discipline reminder sweep: run-now, the preview, run history and the dispatch log.
+            // Operational case and grievance screens live under HR; this is the engine's admin
+            // surface — and muting a reminder means deactivating a notification topic, which is
+            // administration's to do rather than the notified party's.
+            title: 'Discipline',
+            href: '/administration/hr/discipline/reminders',
+            icon: Gavel,
+          },
+          {
             title: 'Safety (SHE)',
             href: '/administration/hr/safety',
             icon: HardHat,
