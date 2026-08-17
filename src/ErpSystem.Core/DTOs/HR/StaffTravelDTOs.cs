@@ -1933,9 +1933,7 @@ public class ReviewStaffTravelExpenseClaimDto
 {
     [Required]
     public Guid ClaimId { get; set; }
-
-    [Required]
-    public Guid FinanceReviewedById { get; set; }
+    // FinanceReviewedById removed: stamped from the caller's token, never accepted from the body.
 
     public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
 
@@ -2066,9 +2064,7 @@ public class ReviewStaffTravelExpenseClaimLineDto
 {
     [Required]
     public Guid LineId { get; set; }
-
-    [Required]
-    public Guid ReviewedById { get; set; }
+    // ReviewedById removed: stamped from the caller's token, never accepted from the body.
 
     public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
 
@@ -2173,9 +2169,7 @@ public class ApproveStaffTravelAdvanceDto
 {
     [Required]
     public Guid AdvanceId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
+    // ApprovedById removed: stamped from the caller's token, never accepted from the body.
 
     [Range(0, double.MaxValue)]
     public decimal ApprovedAmount { get; set; }
@@ -2185,9 +2179,7 @@ public class DisburseStaffTravelAdvanceDto
 {
     [Required]
     public Guid AdvanceId { get; set; }
-
-    [Required]
-    public Guid DisbursedById { get; set; }
+    // DisbursedById removed: stamped from the caller's token, never accepted from the body.
 
     public DateTime DisbursedAt { get; set; } = DateTime.UtcNow;
 }

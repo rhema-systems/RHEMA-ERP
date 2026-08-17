@@ -49,9 +49,17 @@ travel entities.
 |---|---|---|---|
 | 12.1 | Expense claim paid | `StaffTravelExpenseClaim` | No GL posting, no AP document. `PaymentMethod` is a travel-private enum, `PaymentReference` free text, `PaidAt` an HR timestamp. `FinanceReviewedById` is an **`Employee`** FK, so the finance review is an HR fact invisible to Finance. |
 | 12.2 | Cash advance disbursed | `StaffTravelAdvance` | No GL entry. An outstanding advance is an **employee receivable**: `UnsettledAmount` is a balance-sheet figure living only in HR, appearing in no trial balance and no ageing. |
-| 12.3 | Advance settled against a claim | `StaffTravelExpenseClaim.AdvanceDeducted` | The contra-entry that clears the receivable has no accounting counterpart. |
+| 12.3 | Advance settled against a claim | `StaffTravelExpenseClaim.AdvanceDeducted` | The contra-entry that clears the receivable has no accounting counterpart. **⚠ Note: the travel-side arithmetic now EXISTS as of slice 4** — paying a claim deducts and settles the linked advance, capped at the outstanding balance. Before that, nothing wrote `AdvanceDeducted` or `SettledAmount` at all, so employees were paid in full despite holding an advance and the advance stayed outstanding for ever. The sweep therefore inherits correct travel-side numbers to post from, not a blank field. |
 | 12.4 | Trip budget committed / consumed | `StaffTravelBudget` | Per-trip envelope (flight / accommodation / per-diem / transport / misc) with no link to `BudgetEntry`, `UnitBudget`, a GL account or a cost centre. The breakdown is legitimately travel-owned; the missing part is that it must **consume from** the department's finance budget. |
 | 12.5 | Booking cost committed | `StaffTravel{Flight,Hotel,GroundTransport,CarRental}Booking` | `EstimatedCost` / `ActualCost` per booking, no commitment accounting. |
+
+⚠ **What slice 4 already fixed, so the sweep does not re-litigate it.** The travel-side money
+arithmetic is now correct and tested against known quantities: advance settlement exists and is
+capped, `NetPayable` has one formula rather than two, and `AmountBaseCurrency` is derived from
+`AmountOriginal × ExchangeRate` rather than declared by the caller. **What remains for the sweep is
+the accounting, not the arithmetic** — the GL entries, the AP artifact, the receivable, the budget
+consumption. The exchange RATE is still caller-supplied; sourcing it from Finance's `ExchangeRate`
+is area 12 slice 6, not the sweep.
 
 **Open questions this area raises for the sweep** (also in the area-12 plan §9):
 

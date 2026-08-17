@@ -140,11 +140,13 @@ public class StaffTravelFinanceController : HrControllerBase
     public async Task<IActionResult> ReviewClaim(Guid id, [FromBody] ReviewStaffTravelExpenseClaimDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // FinanceReviewedById is an Employee FK — this is one of the travel writes that genuinely
+        // needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reviewing an expense claim") is { } contextError) return contextError;
 
         dto.ClaimId = id;
-        dto.FinanceReviewedById = userId;
-        await _service.ReviewClaimAsync(dto);
+        await _service.ReviewClaimAsync(dto, employeeId);
         return Ok(new { message = "Expense claim reviewed." });
     }
 
@@ -193,11 +195,13 @@ public class StaffTravelFinanceController : HrControllerBase
     public async Task<IActionResult> ReviewClaimLine(Guid lineId, [FromBody] ReviewStaffTravelExpenseClaimLineDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // ReviewedById is an Employee FK — this is one of the travel writes that genuinely
+        // needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reviewing a claim line") is { } contextError) return contextError;
 
         dto.LineId = lineId;
-        dto.ReviewedById = userId;
-        await _service.ReviewClaimLineAsync(dto);
+        await _service.ReviewClaimLineAsync(dto, employeeId);
         return Ok(new { message = "Expense line reviewed." });
     }
 
@@ -282,11 +286,13 @@ public class StaffTravelFinanceController : HrControllerBase
     public async Task<IActionResult> ApproveAdvance(Guid id, [FromBody] ApproveStaffTravelAdvanceDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // ApprovedById is an Employee FK — this is one of the travel writes that genuinely
+        // needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Approving a travel advance") is { } contextError) return contextError;
 
         dto.AdvanceId = id;
-        dto.ApprovedById = userId;
-        await _service.ApproveAdvanceAsync(dto);
+        await _service.ApproveAdvanceAsync(dto, employeeId);
         return Ok(new { message = "Advance approved." });
     }
 
@@ -295,11 +301,13 @@ public class StaffTravelFinanceController : HrControllerBase
     public async Task<IActionResult> DisburseAdvance(Guid id, [FromBody] DisburseStaffTravelAdvanceDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        // DisbursedById is an Employee FK — this is one of the travel writes that genuinely
+        // needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Disbursing a travel advance") is { } contextError) return contextError;
 
         dto.AdvanceId = id;
-        dto.DisbursedById = userId;
-        await _service.DisburseAdvanceAsync(dto);
+        await _service.DisburseAdvanceAsync(dto, employeeId);
         return Ok(new { message = "Advance disbursed." });
     }
 

@@ -796,19 +796,49 @@ vehicle are seeded directly in SQL (`fixtures.json` carries the supplier id). Th
 *category* to have `AssetType = 'Vehicle'` — Fleet checks the category, not `IsFleetAsset` — and
 `Status = 0` (Active); `1` is Inactive and is refused.
 
-### Slice 4 — Finance
-41 endpoints. Budgets, advances, expense claims and lines, per-diem rates. Assert aggregates
-against a fixture of known quantities — the area-7 lesson about wrong numbers reading
-confidently.
+### Slice 4 — Finance ✅ **green 2026-08-17, 29 assertions, first run**
 
-**Integration: none. ⏸ Deferred by D-4.** GL posting, AP artifacts, the advance as a receivable
-and budget consumption all belong to the post-module Finance sweep. Build the travel-side
-behaviour correctly and record the money-touching points in
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md`. Do **not** invent an HR-side posting mechanism to fill
-the gap — that is work the sweep would have to undo.
+`run-slice4.mjs`, 29/29. Regression: **180 assertions across six slices, 0 failures.** Content
+audit 27 → 25.
 
-The one thing that does land here: claim and advance amounts read `Currency` for formatting and
-`ExchangeRate` for conversion (§7.2), same as everywhere else.
+The area-7 lesson governed this slice: a blank cell announces itself, a **wrong total renders
+confidently**. Every figure is asserted against a fixture of known quantities — advance 3,000,
+lines of 1,200 GHS @1.0 and 100 USD @12.5, approved down to 2,200 — with the advance deliberately
+**larger** than the claim, because partial settlement is the case a naive implementation gets
+wrong by over-recovering or going negative.
+
+**Three money defects found, all of the render-confidently kind:**
+
+1. ⚠ **The advance was never settled — employees were paid twice.**
+   `StaffTravelExpenseClaim.AdvanceDeducted` and `StaffTravelAdvance.SettledAmount` were
+   **read-only fields with no writer anywhere in the solution**. Draw a 3,000 advance, claim
+   4,000, and you were paid the full 4,000 because `AdvanceDeducted` was 0. Meanwhile the
+   advance's `UnsettledAmount` never moved, so it sat on `advances/overdue-settlements`
+   **permanently** — the register said the money was outstanding while the traveller had
+   effectively had it twice. Settlement now runs on the pay path, capped at the outstanding
+   balance so it cannot over-recover, moving the advance to `PartiallySettled`/`FullySettled`.
+   The harness asserts the invariant `settled + unsettled = approved`.
+
+2. ⚠ **`NetPayable` had two formulas.** `CreateClaim` computed it from *claimed*;
+   `RecomputeClaimTotals` from *approved*. One field, two meanings depending on which path last
+   touched it — the area-7 "two screens disagree about one figure" shape. Both now route through
+   one helper: approved once anything has been reviewed, claimed before that (otherwise a fresh
+   claim reads *minus the advance*).
+
+3. ⚠ **`AmountBaseCurrency` was caller-declared**, and `TotalClaimed` sums it — so a caller could
+   claim 100 USD at rate 12.5 and declare the base amount to be anything. Now derived server-side
+   as `AmountOriginal × ExchangeRate`, 2dp. **The rate is still caller-supplied**; sourcing it
+   from Finance's `ExchangeRate` is slice 6.
+
+**Four more actor holes closed** — `FinanceReviewedById`, `ReviewedById`, `ApprovedById`,
+`DisbursedById`, all Employee FKs taken from the request body, so a caller could record that
+someone else approved or disbursed money. Stamped from the token, removed from the DTOs.
+
+**Three parent guards** added to budget, claim and advance creates.
+
+**Integration: none, per D-4.** No GL posting was added; the accounting side stays registered as
+items 12.1–12.3 in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, and the settlement code says so in
+its own remarks so a later reader does not mistake the travel-side arithmetic for the accounting.
 
 ### Slice 5 — Policies and compliance
 78 endpoints, the largest pair. Policy rules and exceptions; documents, visa requirements and
