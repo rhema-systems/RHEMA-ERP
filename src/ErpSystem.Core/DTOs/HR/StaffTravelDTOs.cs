@@ -1527,6 +1527,9 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
 
 public class StaffTravelGroundTransportDto : BaseDto
 {
+    /// <summary>The fleet trip reserving a company vehicle; null for external transport.</summary>
+    public Guid? FleetTripId { get; set; }
+
     public Guid StaffTravelRequestId { get; set; }
     public GroundTransportType TransportType { get; set; }
     public string TransportTypeName => TransportType.ToString();
@@ -1547,6 +1550,15 @@ public class StaffTravelGroundTransportDto : BaseDto
 
 public class CreateStaffTravelGroundTransportDto : CreateDtoBase
 {
+    /// <summary>
+    /// Company vehicle to reserve. Required when <c>TransportType</c> is <c>CompanyVehicle</c> —
+    /// that mode books a real vehicle through Fleet rather than recording a note.
+    /// </summary>
+    public Guid? VehicleAssetId { get; set; }
+
+    /// <summary>Optional driver for the reserved vehicle.</summary>
+    public Guid? DriverEmployeeId { get; set; }
+
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 

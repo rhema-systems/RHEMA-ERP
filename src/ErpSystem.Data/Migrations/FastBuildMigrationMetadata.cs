@@ -181,3 +181,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260817002137_AddDisciplineReminderEngine")] partial class AddDisciplineReminderEngine { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260817083522_AddMedicalClaimDocumentControlledUpload")] partial class AddMedicalClaimDocumentControlledUpload { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260817130709_AddStaffTravelAttachmentControlledUpload")] partial class AddStaffTravelAttachmentControlledUpload { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260817145232_AddStaffTravelSupplierAndFleetTripLinks")] partial class AddStaffTravelSupplierAndFleetTripLinks { }

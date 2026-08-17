@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities.Procurement;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 
@@ -558,7 +559,7 @@ public class StaffTravelFlightBooking : TenantEntity
 
     public TravelBookingChannel BookedBy { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [Column(TypeName = "decimal(14,2)")]
     public decimal TotalFare { get; set; }
@@ -586,7 +587,7 @@ public class StaffTravelFlightBooking : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 
     public virtual ICollection<StaffTravelFlightSegment> Segments { get; set; } = new List<StaffTravelFlightSegment>();
 }
@@ -695,7 +696,7 @@ public class StaffTravelHotelBooking : TenantEntity
     [MaxLength(1000)]
     public string? RateExceptionReason { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     public TravelBookingChannel BookedBy { get; set; }
 
@@ -718,7 +719,7 @@ public class StaffTravelHotelBooking : TenantEntity
     public virtual Country Country { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelGroundTransport : TenantEntity
@@ -727,7 +728,20 @@ public class StaffTravelGroundTransport : TenantEntity
 
     public GroundTransportType TransportType { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (nullable)
+    /// <summary>
+    /// The fleet trip reserving a company vehicle for this leg. Null for every external mode —
+    /// taxi, rideshare, bus, train, metro, private hire — which stay travel-owned against a
+    /// supplier.
+    /// </summary>
+    /// <remarks>
+    /// Fleet already models a trip properly: vehicle, driver (an HR Employee FK, so the seam was
+    /// half-built), origin, destination, planned window, expected mileage and cost. Recording a
+    /// company-vehicle journey as free text here meant two people could be promised the same
+    /// vehicle and neither system would know.
+    /// </remarks>
+    public Guid? FleetTripId { get; set; }
+
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(100)]
     public string? BookingReference { get; set; }
@@ -761,14 +775,14 @@ public class StaffTravelGroundTransport : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelCarRentalBooking : TenantEntity
 {
     public Guid StaffTravelRequestId { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (rental company)
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(100)]
     public string? BookingReference { get; set; }
@@ -813,7 +827,7 @@ public class StaffTravelCarRentalBooking : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 // =========================================================================
@@ -1379,7 +1393,7 @@ public class StaffTravelVisaApplication : TenantEntity
     [Column(TypeName = "char(3)")]
     public string? CurrencyCode { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (visa processing agency)
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -1394,7 +1408,7 @@ public class StaffTravelVisaApplication : TenantEntity
     public virtual Country DestinationCountry { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelRiskAssessment : TenantEntity
@@ -1504,7 +1518,7 @@ public class StaffTravelInsurancePolicy : TenantEntity
 {
     public Guid StaffTravelRequestId { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (insurer)
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(100)]
     public string? PolicyNumber { get; set; }
@@ -1534,7 +1548,7 @@ public class StaffTravelInsurancePolicy : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelHealthRequirement : TenantEntity

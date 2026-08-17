@@ -285,11 +285,11 @@ particular) need a back-fill pass into that register before the sweep begins.
 | **F-04** | Approvals are a bespoke chain, off the workflow engine | ✅ **fixed slice 2** | §3.7 |
 | **F-05** | Create requires the *caller* to be employee-linked | ✅ **fixed slice 0** (33 sites) | §4.4 |
 | **F-06** | Uneven `.Include` coverage across sibling reads | medium | 55 in requests repo, 0 in configuration |
-| **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | **high** | §7.2 |
+| **F-07** | Travel duplicates Finance currency/exchange-rate and Procurement supplier masters | ⚠ **supplier fixed slice 3**; currency/FX owed slice 6 | §7.2 |
 | **F-08** | Travel moves money with **no** GL / AP / budget artifact whatsoever | **high** ⏸ deferred (D-4) | §7.4 |
 | **F-09** | Travel alert notifications are never sent; `NotificationSentAt` is set by the caller | **high** | §7.5 |
 | **F-10** | No travel reminder sweep, though three other HR areas have one | medium | §7.5 |
-| **F-11** | Company-vehicle transport bypasses Fleet, which already models trips | medium | §7.3 |
+| **F-11** | Company-vehicle transport bypasses Fleet, which already models trips | ✅ **fixed slice 3** | §7.3 |
 | **F-12** | **44 write methods return the unreloaded entity** — blank nav names on every create/update response | **high** ✅ *confirmed live, 14/14* | §6.2 |
 | **F-13** | **39 reads go through the generic repository**, which has no includes, feeding nav-dependent DTOs | **high** ✅ *confirmed live, 7/7 by-id* | §6.2 |
 | **F-14** | Sibling reads include unevenly; 4 bespoke reads miss a nav their DTO declares | ✅ **fixed slice 0** (request repo); other repos unaudited | §6.1 |
@@ -737,13 +737,64 @@ got 403 on `/approvals/templates` (now 404), and the content audit created a tem
 Both were fixed by pointing at reality rather than by loosening the assertion. **When a slice
 retires a surface, the earlier harnesses are where you find out what depended on it.**
 
-### Slice 3 — Itineraries and bookings
-41 endpoints. Legs and activities, flights/hotels/ground/car-rental.
+### Slice 3 — Itineraries, bookings, and both cross-module retirements ✅ **green 2026-08-17, 30 assertions**
 
-**Integration (§7.2, §7.3):** `StaffTravelVendor` → Procurement `Supplier`. Bridge
-`GroundTransportType.CompanyVehicle` to a **Fleet trip reservation** (`api/maintenance/fleet/trips`)
-rather than free text — Fleet's `FleetTrip` already carries an HR `DriverEmployeeId`, so the seam
-is half-built. External transport modes stay travel-owned against a `Supplier`.
+`run-slice3.mjs`, 30/30. Regression: **151 assertions across five slices, 0 failures.** Content
+audit 29 → 27.
+
+**Five missing parent guards.** The four top-level booking creates and the itinerary create took
+`StaffTravelRequestId` straight from the payload and never checked it — a flight could be booked
+against any request id, including another tenant's. Neither service could even *see* the request;
+both needed `IStaffTravelRequestRepository` injected. `AddSegment` and `AddLeg` already guarded
+their immediate parents.
+
+**Seven F-12 reloads** via four new tenant-scoped by-id reads. `UpdateFlightAsync` already
+reloaded correctly and was left alone.
+
+**Vendor master retired onto Procurement (§7.2).** Six `VendorId` FKs — flights, hotels, ground,
+car rentals, visa applications, insurance — repointed at `Suppliers`; `VendorName` resolves from
+`Supplier.Name`; the travel-side vendor CRUD is gone. Safe because it was measured first: 12
+travel vendors (all harness fixtures), **0 suppliers, 0 bookings referencing a vendor**.
+
+**Fleet bridge (§7.3).** `StaffTravelGroundTransport` gains `FleetTripId`. A `CompanyVehicle` leg
+now reserves a real vehicle through `IFleetTripService`; a company-vehicle leg with **no** vehicle
+is refused rather than silently recorded as a note. Every external mode stays travel-owned.
+
+⚠ **Fleet's exception vocabulary was leaking into travel's contract.** `FleetTripService` throws
+`ArgumentException` for *validation* failures ("Selected asset is not a vehicle"). Travel's error
+contract reads `ArgumentException` as "not found" and answered **404**, so a wrong vehicle told the
+caller their *travel request* was missing. Now translated at the seam to 422 "The vehicle could not
+be reserved: …". **A module boundary must not import another module's exception semantics** — and
+this only surfaced because the bridge was exercised for real.
+
+⚠ **Procurement's `SuppliersController` is dead, and has always been.** **Two** repositories are
+never DI-registered — `ISupplierContactRepository` and `ISupplierItemCatalogRepository` — so DI
+cannot activate the controller and **every endpoint on it answers 400**. DI reports only the first,
+which is why the second is easy to miss. Pre-existing and unrelated to this work.
+
+Registration was trialled and **is necessary but not sufficient**: the reads then work correctly,
+but `POST /api/Suppliers` returns **201 Created with an empty body and writes nothing** —
+`GenericRepository.AddAsync` never calls `SaveChangesAsync`, and the handler also never sets
+`TenantId`. The trial was **reverted**; nothing in Procurement is modified.
+
+Full reproduction, evidence and fix list: `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §1.
+**Travel's vendor selection cannot work until that controller does.**
+
+⚠ **CORRECTION.** An earlier draft of this section said supplier creation is gated behind a staged
+master-data change, and that the travel desk therefore cannot add vendors. **That was wrong** — the
+400 was the DI failure, identical to every other endpoint on the controller; the
+`GuardDirectMutationAsync` check returned *allowed* and blocks nothing. The one operational
+consequence that IS real: `Suppliers` is empty, so travel has no selectable vendors until suppliers
+are onboarded — and they cannot be onboarded through the API while the create is dead.
+
+⚠ **Retiring the vendor endpoints broke slice 0's harness again**, exactly as slice 2 did — it
+gated a `/policies/vendors` read that no longer exists. Same fix, same lesson: **the earlier
+harnesses are where you learn what a retirement actually cost.**
+
+**Harness fixtures:** `Suppliers` and `MaintenanceAssets` were both empty, so a supplier and a
+vehicle are seeded directly in SQL (`fixtures.json` carries the supplier id). The vehicle needs its
+*category* to have `AssetType = 'Vehicle'` — Fleet checks the category, not `IsFleetAsset` — and
+`Status = 0` (Active); `1` is Inactive and is refused.
 
 ### Slice 4 — Finance
 41 endpoints. Budgets, advances, expense claims and lines, per-diem rates. Assert aggregates
@@ -792,6 +843,12 @@ than something Area 12 builds. Ask before slice 4, not after.
 (§7.2) means an airline becomes a supplier record that Procurement's process governs — onboarding,
 performance, payment terms. Confirm the travel desk is content to raise vendors through
 Procurement rather than keep a private list.
+
+**⚠ For Procurement's owner, not TDC:** `SuppliersController` is entirely non-functional — two
+missing DI registrations stop it activating at all, and its create is a dead path that answers 201
+and writes nothing. Reproduced, trialled and reverted; the full report is in
+`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` §1. **Travel's vendor selection cannot work until
+it is fixed.**
 
 **Does TDC operate staff travel in the ERP at all, and if so how much of it?** The system now
 carries a full corporate travel suite — per-diem rate tables, visa tracking, travel insurance,

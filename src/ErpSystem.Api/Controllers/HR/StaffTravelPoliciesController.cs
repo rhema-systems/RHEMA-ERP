@@ -164,62 +164,17 @@ public class StaffTravelPoliciesController : HrControllerBase
     }
 
     // =========================================================================
-    // VENDORS
+    // VENDORS — retired in slice 3
     // =========================================================================
+    //
+    // Travel vendors were a second supplier master: VendorCode, VendorName, contact, account
+    // number, contract dates, IsPreferred, Rating and PaymentTerms as free text — all of which
+    // Procurement's Supplier already models, with SupplierPerformanceMetric behind the rating and
+    // PaymentTerm as a real entity rather than a string. An airline paid through travel and the
+    // same airline paid through procurement must not be two records that can disagree.
+    //
+    // The six VendorId columns across flights, hotels, ground transport, car rentals, visa
+    // applications and insurance now point at Suppliers. Onboard a travel vendor through
+    // Procurement; there is deliberately no travel-side create.
 
-    [HttpGet("vendors")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetAllVendors()
-        => Ok(await _service.GetAllVendorsAsync());
-
-    [HttpGet("vendors/active")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetActiveVendors()
-        => Ok(await _service.GetActiveVendorsAsync());
-
-    [HttpGet("vendors/type/{vendorType}")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetVendorsByType(TravelVendorType vendorType)
-        => Ok(await _service.GetVendorsByTypeAsync(vendorType));
-
-    [HttpGet("vendors/preferred")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetPreferredVendors([FromQuery] TravelVendorType? vendorType = null)
-        => Ok(await _service.GetPreferredVendorsAsync(vendorType));
-
-    [HttpGet("vendors/{id:guid}")]
-    public async Task<ActionResult<StaffTravelVendorDto>> GetVendorById(Guid id)
-        => Ok(await _service.GetVendorByIdAsync(id));
-
-    [HttpGet("vendors/code/{vendorCode}")]
-    public async Task<ActionResult<StaffTravelVendorDto?>> GetVendorByCode(string vendorCode)
-        => Ok(await _service.GetVendorByCodeAsync(vendorCode));
-
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPost("vendors")]
-    public async Task<ActionResult<StaffTravelVendorDto>> CreateVendor([FromBody] CreateStaffTravelVendorDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var ctx = ResolveContext();
-        if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
-
-        var created = await _service.CreateVendorAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
-        return CreatedAtAction(nameof(GetVendorById), new { id = created.Id }, created);
-    }
-
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPut("vendors/{id:guid}")]
-    public async Task<ActionResult<StaffTravelVendorDto>> UpdateVendor(Guid id, [FromBody] UpdateStaffTravelVendorDto dto)
-    {
-        if (id != dto.Id) return BadRequest("ID mismatch.");
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var ctx = ResolveContext();
-        if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
-
-        return Ok(await _service.UpdateVendorAsync(dto, ctx.Value.userId));
-    }
-
-    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
-    [HttpDelete("vendors/{id:guid}")]
-    public async Task<IActionResult> DeleteVendor(Guid id)
-    {
-        await _service.DeleteVendorAsync(id);
-        return NoContent();
-    }
 }

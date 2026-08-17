@@ -853,7 +853,7 @@ public static class StaffTravelMappingExtensions
             ClassExceptionReason = entity.ClassExceptionReason,
             BookedBy = entity.BookedBy,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             TotalFare = entity.TotalFare,
             TaxesAndFees = entity.TaxesAndFees,
             CurrencyCode = entity.CurrencyCode,
@@ -1043,7 +1043,7 @@ public static class StaffTravelMappingExtensions
             RateExceptionApproved = entity.RateExceptionApproved,
             RateExceptionReason = entity.RateExceptionReason,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             BookedBy = entity.BookedBy,
             Status = entity.Status,
             CancellationPolicy = entity.CancellationPolicy,
@@ -1141,6 +1141,7 @@ public static class StaffTravelMappingExtensions
     {
         return new StaffTravelGroundTransportDto
         {
+            FleetTripId = entity.FleetTripId,
             Id = entity.Id,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy,
@@ -1149,7 +1150,7 @@ public static class StaffTravelMappingExtensions
             StaffTravelRequestId = entity.StaffTravelRequestId,
             TransportType = entity.TransportType,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             BookingReference = entity.BookingReference,
             PickupLocation = entity.PickupLocation,
             DropoffLocation = entity.DropoffLocation,
@@ -1218,7 +1219,7 @@ public static class StaffTravelMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             StaffTravelRequestId = entity.StaffTravelRequestId,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             BookingReference = entity.BookingReference,
             PickupLocation = entity.PickupLocation,
             DropoffLocation = entity.DropoffLocation,
@@ -2137,7 +2138,7 @@ public static class StaffTravelMappingExtensions
             ProcessingFee = entity.ProcessingFee,
             CurrencyCode = entity.CurrencyCode,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             Notes = entity.Notes,
         };
     }
@@ -2402,7 +2403,7 @@ public static class StaffTravelMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             StaffTravelRequestId = entity.StaffTravelRequestId,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             PolicyNumber = entity.PolicyNumber,
             InsuranceType = entity.InsuranceType,
             CoverageType = entity.CoverageType,

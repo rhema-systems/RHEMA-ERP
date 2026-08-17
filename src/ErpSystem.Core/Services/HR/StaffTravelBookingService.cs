@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.DTOs.Maintenance;
+using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using Microsoft.Extensions.Logging;
@@ -21,6 +23,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     private readonly IStaffTravelHotelBookingRepository _hotelRepository;
     private readonly IStaffTravelGroundTransportRepository _groundRepository;
     private readonly IStaffTravelCarRentalBookingRepository _carRentalRepository;
+    private readonly IStaffTravelRequestRepository _requestRepository;
+    private readonly IFleetTripService _fleetTrips;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelBookingService> _logger;
@@ -31,6 +35,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         IStaffTravelHotelBookingRepository hotelRepository,
         IStaffTravelGroundTransportRepository groundRepository,
         IStaffTravelCarRentalBookingRepository carRentalRepository,
+        IStaffTravelRequestRepository requestRepository,
+        IFleetTripService fleetTrips,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelBookingService> logger)
@@ -40,6 +46,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         _hotelRepository = hotelRepository;
         _groundRepository = groundRepository;
         _carRentalRepository = carRentalRepository;
+        _requestRepository = requestRepository;
+        _fleetTrips = fleetTrips;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -62,6 +70,18 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
         return current;
+    }
+
+    /// <summary>
+    /// Confirms the travel request exists in the caller's tenant before anything is hung off it.
+    /// The four top-level booking creates took StaffTravelRequestId straight from the payload, so a
+    /// flight could be booked against any request id at all — including another tenant's.
+    /// </summary>
+    private async Task RequireOwnedRequestAsync(Guid requestId)
+    {
+        var request = await _requestRepository.GetByIdAsync(requestId);
+        if (request == null || request.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
     }
 
     private async Task<StaffTravelFlightBooking> GetOwnedFlightAsync(Guid id)
@@ -136,10 +156,12 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelFlightBookingDto> CreateFlightAsync(CreateStaffTravelFlightBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _flightRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _flightRepository.GetWithDetailsAsync(tenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelFlightBookingDto> UpdateFlightAsync(UpdateStaffTravelFlightBookingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -223,10 +245,12 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelHotelBookingDto> CreateHotelAsync(CreateStaffTravelHotelBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _hotelRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _hotelRepository.GetWithDetailsAsync(tenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelHotelBookingDto> UpdateHotelAsync(UpdateStaffTravelHotelBookingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -235,7 +259,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _hotelRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _hotelRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteHotelAsync(Guid id, CancellationToken cancellationToken = default)
@@ -266,10 +291,51 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelGroundTransportDto> CreateGroundTransportAsync(CreateStaffTravelGroundTransportDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // A company vehicle is a real, finite resource — reserve it in Fleet rather than writing a
+        // note here. Every other mode is somebody else's vehicle and stays travel-owned.
+        if (createDto.TransportType == GroundTransportType.CompanyVehicle)
+        {
+            if (createDto.VehicleAssetId is not Guid vehicleAssetId || vehicleAssetId == Guid.Empty)
+                throw new InvalidOperationException(
+                    "A company-vehicle leg must name the vehicle to reserve. Choose a vehicle, or pick a different transport type.");
+
+            var request = await _requestRepository.GetByIdAsync(createDto.StaffTravelRequestId);
+
+            FleetTripDto trip;
+            try
+            {
+                trip = await _fleetTrips.CreateTripAsync(new CreateFleetTripDto
+                {
+                    VehicleAssetId = vehicleAssetId,
+                    DriverEmployeeId = createDto.DriverEmployeeId,
+                    Purpose = $"Staff travel {request?.RequestNumber}".Trim(),
+                    Origin = createDto.PickupLocation,
+                    Destination = createDto.DropoffLocation,
+                    PlannedStartAt = createDto.PickupDatetime,
+                    PlannedEndAt = createDto.DropoffDatetime,
+                    Notes = createDto.Notes,
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                // Fleet uses ArgumentException for VALIDATION failures — "Vehicle not found",
+                // "Selected asset is not a vehicle". Travel's error contract reads ArgumentException
+                // as "the travel record does not exist" and answers 404, so letting Fleet's
+                // exception through told the caller their travel request was missing when in fact
+                // their vehicle choice was wrong. Translate at the seam: another module's exception
+                // vocabulary must not leak into this one's contract.
+                throw new InvalidOperationException($"The vehicle could not be reserved: {ex.Message}");
+            }
+
+            entity.FleetTripId = trip.Id;
+        }
         await _groundRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _groundRepository.GetWithDetailsAsync(tenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelGroundTransportDto> UpdateGroundTransportAsync(UpdateStaffTravelGroundTransportDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -278,7 +344,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _groundRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _groundRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteGroundTransportAsync(Guid id, CancellationToken cancellationToken = default)
@@ -309,10 +376,12 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     public async Task<StaffTravelCarRentalBookingDto> CreateCarRentalAsync(CreateStaffTravelCarRentalBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _carRentalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _carRentalRepository.GetWithDetailsAsync(tenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<StaffTravelCarRentalBookingDto> UpdateCarRentalAsync(UpdateStaffTravelCarRentalBookingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -321,7 +390,8 @@ public class StaffTravelBookingService : IStaffTravelBookingService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _carRentalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _carRentalRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteCarRentalAsync(Guid id, CancellationToken cancellationToken = default)
