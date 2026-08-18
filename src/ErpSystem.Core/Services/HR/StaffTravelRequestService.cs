@@ -396,6 +396,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 RiskLevel = r.RiskLevel,
                 IsInternational = r.IsInternational,
                 EstimatedTotalCost = r.EstimatedTotalCost,
+                CurrencyCode = r.CurrencyCode,
                 ApprovedBudget = r.ApprovedBudget,
                 CreatedAt = r.CreatedAt,
             })
@@ -422,6 +423,23 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             TotalEstimatedCost   = rows.Where(r => IsActive(r.Status)).Sum(r => r.EstimatedTotalCost),
             TotalApprovedBudget  = rows.Where(r => IsActive(r.Status)).Sum(r => r.ApprovedBudget ?? 0m),
         };
+
+        // ⚠ Split by currency because the two scalar totals above add them together. A tenant that
+        // costs one trip in GHS and another in USD gets a headline "total" of neither. Not converted
+        // here: travel does not invent a rate, and Finance's conversion is currently inverted, so a
+        // converted headline would be confidently wrong rather than visibly incomplete.
+        dto.CostByCurrency = rows
+            .Where(r => IsActive(r.Status))
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.CurrencyCode) ? "—" : r.CurrencyCode)
+            .Select(g => new StaffTravelCurrencyTotalDto
+            {
+                CurrencyCode = g.Key,
+                EstimatedTotal = g.Sum(r => r.EstimatedTotalCost),
+                ApprovedBudget = g.Sum(r => r.ApprovedBudget ?? 0m),
+                RequestCount = g.Count(),
+            })
+            .OrderByDescending(c => c.EstimatedTotal)
+            .ToList();
 
         dto.ByStatus = rows
             .GroupBy(r => r.Status)
@@ -479,6 +497,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         public TravelRiskLevel RiskLevel { get; set; }
         public bool IsInternational { get; set; }
         public decimal EstimatedTotalCost { get; set; }
+        public string CurrencyCode { get; set; } = string.Empty;
         public decimal? ApprovedBudget { get; set; }
         public DateTime CreatedAt { get; set; }
     }

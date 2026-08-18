@@ -631,6 +631,7 @@ export const navigationItems: NavItem[] = [
           // Claims get their own entry because the finance desk works a queue ACROSS trips —
           // "approved and unpaid" — which no single travel request can show.
           { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
+          { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard },
         ],
       },
       {

@@ -163,6 +163,30 @@ export interface StaffGroupTravel extends StaffGroupTravelSummary {
   requests?: StaffTravelRequestSummary[];
 }
 
+/** One month of the trailing six-month trend, by creation date. */
+export interface StaffTravelMonthlyCount {
+  year: number;
+  month: number;
+  label: string;
+  count: number;
+}
+
+/**
+ * ⚠ Travel cost for ONE currency.
+ *
+ * `totalEstimatedCost` and `totalApprovedBudget` on the dashboard add every request's figure
+ * together regardless of the currency it was costed in, so they are only meaningful when a tenant
+ * travels in one. They are not converted to a base currency: travel does not invent a rate, and
+ * Finance's conversion is currently inverted, so a converted headline would be confidently wrong
+ * rather than visibly incomplete. Show one figure for one currency and this breakdown otherwise.
+ */
+export interface StaffTravelCurrencyTotal {
+  currencyCode: string;
+  estimatedTotal: number;
+  approvedBudget: number;
+  requestCount: number;
+}
+
 export interface StaffTravelDashboard {
   totalRequests: number;
   draftCount: number;
@@ -170,11 +194,25 @@ export interface StaffTravelDashboard {
   approvedCount: number;
   inProgressCount: number;
   completedCount: number;
+  rejectedCount: number;
+  cancelledCount: number;
+  internationalCount: number;
+  domesticCount: number;
+  highRiskCount: number;
+  /** The COUNT of upcoming trips; `upcomingTrips` below is the list. */
+  upcomingTripCount: number;
+  /** ⚠ Sums across currencies — see StaffTravelCurrencyTotal. */
   totalEstimatedCost: number;
   totalApprovedBudget: number;
-  upcomingTrips: number;
-  recentRequests?: StaffTravelRequestSummary[];
+  byStatus: { status: StaffTravelRequestStatus; statusName: string; count: number }[];
+  byTravelType: { travelType: StaffTravelType; travelTypeName: string; count: number }[];
+  monthlyTrend: StaffTravelMonthlyCount[];
+  costByCurrency: StaffTravelCurrencyTotal[];
+  pendingApprovals: StaffTravelRequestSummary[];
+  upcomingTrips: StaffTravelRequestSummary[];
+  recentRequests: StaffTravelRequestSummary[];
 }
+
 
 // ── Write models ─────────────────────────────────────────────────────────────
 
