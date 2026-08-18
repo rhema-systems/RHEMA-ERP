@@ -230,7 +230,11 @@ public interface ITalentReviewSessionService
     // CRUD
     Task<TalentReviewSessionDto> CreateAsync(CreateTalentReviewSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<TalentReviewSessionDto> UpdateAsync(UpdateTalentReviewSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, CancellationToken cancellationToken = default);
+    /// <summary>Performance suggested from the latest scored appraisal, plus the previous
+    /// nine-box placement. A suggestion only — see decision D-4.</summary>
+    Task<TalentRatingSuggestionDto> GetRatingSuggestionAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, Guid finalizedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Rating operations
@@ -243,7 +247,7 @@ public interface ITalentReviewSessionService
     Task<IEnumerable<TalentReviewRatingSummaryDto>> GetCalibratedRatingsAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<IEnumerable<TalentReviewRatingSummaryDto>> GetPendingCalibrationAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<TalentReviewRatingDto> UpdateRatingAsync(UpdateTalentReviewRatingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, CancellationToken cancellationToken = default);
+    Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, Guid confirmedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteRatingAsync(Guid ratingId, CancellationToken cancellationToken = default);
 }
 

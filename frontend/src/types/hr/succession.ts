@@ -718,3 +718,139 @@ export interface CreateTalentPoolMember {
 export interface RemoveTalentPoolMember {
   removalReason: string;
 }
+
+// ── Talent reviews and the nine box (slice 7) ────────────────────────────────
+
+export interface TalentReviewRatingSummary {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeePosition?: string | null;
+  performance: PerformanceRating;
+  potential: PotentialRating;
+  previousPerformance?: PerformanceRating | null;
+  previousPotential?: PotentialRating | null;
+  calibrationConfirmed: boolean;
+}
+
+export interface TalentReviewRating {
+  id: string;
+  tenantId: string;
+  sessionId: string;
+  sessionName: string;
+  reviewYear: number;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  employeePosition?: string | null;
+  talentPoolMemberId?: string | null;
+  talentPoolName?: string | null;
+  performance: PerformanceRating;
+  potential: PotentialRating;
+  previousRatingSessionId?: string | null;
+  previousSessionName?: string | null;
+  previousPerformance?: PerformanceRating | null;
+  previousPotential?: PotentialRating | null;
+  justification?: string | null;
+  keyStrengths?: string | null;
+  developmentPriorities?: string | null;
+  /** Which manager gave the score. Caller-set: a fact being recorded, not an act by the caller. */
+  ratedById?: string | null;
+  ratedByName?: string | null;
+  calibrationConfirmed: boolean;
+  /** ⚠ Server-set from the token. Confirming publishes the placement to the talent pool member. */
+  calibrationConfirmedById?: string | null;
+  calibrationConfirmedByName?: string | null;
+  calibrationConfirmedDate?: string | null;
+  calibrationNotes?: string | null;
+}
+
+export interface TalentReviewSession {
+  id: string;
+  tenantId: string;
+  sessionName: string;
+  reviewYear: number;
+  sessionDate: string;
+  location?: string | null;
+  /** Who chaired. Caller-set — a desk may record a session someone else ran. */
+  facilitatedById?: string | null;
+  facilitatedByName?: string | null;
+  agenda?: string | null;
+  sessionNotes?: string | null;
+  organizationLevelId?: string | null;
+  organizationLevelName?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  /** ⚠ Once true the session is FROZEN — no new ratings, no edits, not even uncalibrated ones. */
+  isFinalized: boolean;
+  finalizedDate?: string | null;
+  /** ⚠ Server-set. This was a required body field the client could not know, and it 500'd. */
+  finalizedById?: string | null;
+  finalizedByName?: string | null;
+  ratings: TalentReviewRatingSummary[];
+}
+
+export interface TalentReviewSessionSummary {
+  id: string;
+  sessionName: string;
+  reviewYear: number;
+  sessionDate: string;
+  facilitatedByName?: string | null;
+  organizationUnitName?: string | null;
+  isFinalized: boolean;
+  ratingCount: number;
+}
+
+export interface CreateTalentReviewSession {
+  sessionName: string;
+  reviewYear: number;
+  sessionDate: string;
+  location?: string | null;
+  facilitatedById?: string | null;
+  agenda?: string | null;
+  organizationLevelId?: string | null;
+  organizationUnitId?: string | null;
+}
+
+export interface CreateTalentReviewRating {
+  sessionId: string;
+  employeeId: string;
+  talentPoolMemberId?: string | null;
+  performance: PerformanceRating;
+  potential: PotentialRating;
+  justification?: string | null;
+  keyStrengths?: string | null;
+  developmentPriorities?: string | null;
+  ratedById?: string | null;
+}
+
+/** ⚠ Carries no confirmer and no date — both come from the token and the clock. */
+export interface ConfirmCalibration {
+  ratingId: string;
+  calibrationNotes?: string | null;
+}
+
+/** ⚠ Carries no actor. `finalizedById` used to be required here and was unknowable. */
+export interface FinalizeTalentReviewSession {
+  sessionId: string;
+  sessionNotes?: string | null;
+}
+
+/**
+ * What the grid can suggest before anyone types — decision D-4.
+ *
+ * ⚠ There is no `suggestedPotential`, and there never will be: `PotentialRating` does not exist in
+ * area 5. One axis of the nine box has no source outside a human judgement, which is what settled
+ * D-4 — the grid could not have been a projection of appraisal data even if we had wanted it.
+ */
+export interface TalentRatingSuggestion {
+  employeeId: string;
+  suggestedPerformance?: PerformanceRating | null;
+  sourceAppraisalId?: string | null;
+  sourceAppraisalNumber?: string | null;
+  sourceOverallScore?: number | null;
+  sourceAppraisalDate?: string | null;
+  previousPerformance?: PerformanceRating | null;
+  previousPotential?: PotentialRating | null;
+  previousSessionName?: string | null;
+}

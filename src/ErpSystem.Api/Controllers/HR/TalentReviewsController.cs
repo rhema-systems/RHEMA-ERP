@@ -99,8 +99,15 @@ public class TalentReviewsController : ControllerBase
     public async Task<IActionResult> Finalize(Guid id, [FromBody] FinalizeTalentReviewSessionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        // Who finalized is the signed-in user. It used to be a REQUIRED body field the client had
+        // no way to know, so omitting it sent Guid.Empty and the save died on a foreign key.
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.SessionId = id;
-        await _service.FinalizeAsync(dto);
+        await _service.FinalizeAsync(dto, employeeId.Value);
         return Ok(new { message = "Talent review session finalized." });
     }
 
@@ -181,13 +188,33 @@ public class TalentReviewsController : ControllerBase
         return Ok(await _service.UpdateRatingAsync(dto, employeeId.Value));
     }
 
+    /// <summary>
+    /// What the grid can suggest for this employee before anyone types — decision D-4.
+    /// </summary>
+    /// <remarks>
+    /// Performance is suggested from the employee's latest scored appraisal and the response names
+    /// the appraisal it came from, so the screen can show its working. **Potential is never
+    /// suggested**: it does not exist in area 5, which is why the nine box could never have been a
+    /// projection of appraisal data.
+    /// </remarks>
+    [HttpGet("rating-suggestion/{employeeId:guid}")]
+    public async Task<ActionResult<TalentRatingSuggestionDto>> GetRatingSuggestion(Guid employeeId)
+        => Ok(await _service.GetRatingSuggestionAsync(employeeId));
+
     [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPost("ratings/{ratingId:guid}/confirm-calibration")]
     public async Task<IActionResult> ConfirmCalibration(Guid ratingId, [FromBody] ConfirmCalibrationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        // Confirming calibration publishes the nine-box placement to the talent pool member, so
+        // its provenance matters. The confirmer is the signed-in user, not a body field.
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.RatingId = ratingId;
-        await _service.ConfirmCalibrationAsync(dto);
+        await _service.ConfirmCalibrationAsync(dto, employeeId.Value);
         return Ok(new { message = "Calibration confirmed." });
     }
 

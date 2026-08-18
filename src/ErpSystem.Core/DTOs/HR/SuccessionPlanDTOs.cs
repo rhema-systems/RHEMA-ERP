@@ -1473,15 +1473,20 @@ public class UpdateTalentReviewSessionDto : UpdateDtoBase
     public Guid? OrganizationUnitId { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>FinalizedById</c> and <c>FinalizedDate</c> were removed, and this one was not merely
+/// spoofable — it was **the reason the endpoint crashed**. <c>FinalizedById</c> was a *required*
+/// Guid the client had no way to know, so a caller that omitted it sent <c>Guid.Empty</c> and the
+/// save died on <c>FK_TalentReviewSessions_Employees_FinalizedById</c> with a 500. Measured
+/// 2026-08-18.
+///
+/// The clearest statement of the rule this area keeps rediscovering: a value the client cannot know
+/// is a value the client should not be sending. Here the client could not even guess it.
+/// </remarks>
 public class FinalizeTalentReviewSessionDto
 {
     [Required]
     public Guid SessionId { get; set; }
-
-    [Required]
-    public Guid FinalizedById { get; set; }
-
-    public DateTime FinalizedDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(4000)]
     public string? SessionNotes { get; set; }
@@ -1604,15 +1609,55 @@ public class UpdateTalentReviewRatingDto : UpdateDtoBase
     public Guid? RatedById { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>ConfirmedById</c> and <c>ConfirmedDate</c> removed. Measured 2026-08-18: a confirmation
+/// naming an unrelated employee and dated <c>2020-01-01</c> was stored exactly as sent. Confirming
+/// calibration is what publishes a nine-box placement to the talent pool member, so a forged
+/// confirmer is a forged provenance on a rating that then feeds promotion decisions.
+///
+/// ⚠ Note what is deliberately KEPT caller-set on the neighbouring DTOs: <c>FacilitatedById</c> on a
+/// session and <c>RatedById</c> on a rating. Those are business facts being recorded — who chaired
+/// the meeting, which manager gave the score — and a desk may legitimately record them on someone
+/// else's behalf. The line is not "every Guid ending in Id", it is: **an act performed by the
+/// caller at the moment of the call comes from the token; a fact about someone else does not.**
+/// </remarks>
+/// <summary>
+/// What the nine-box grid can suggest for an employee before a rater types anything.
+/// </summary>
+/// <remarks>
+/// <para><b>Performance only, and only ever a suggestion.</b> Decision D-4: the review pre-fills
+/// Performance from the employee's latest scored appraisal and lets the rater override it with a
+/// justification. A calibration session exists precisely to disagree with what the paperwork says,
+/// so locking the axis would defeat it.</para>
+///
+/// <para>⚠ <b>Potential is absent by necessity, not oversight.</b> <c>PotentialRating</c> exists
+/// nowhere in area 5 — appraisals carry an <c>OverallScore</c> and nothing about potential — so one
+/// axis of the nine box simply cannot be derived. That fact is what settled D-4: the grid could not
+/// have been a projection of appraisal data even if we had wanted it to be.</para>
+/// </remarks>
+public class TalentRatingSuggestionDto
+{
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>Null when the employee has no scored appraisal — the grid then starts empty.</summary>
+    public PerformanceRating? SuggestedPerformance { get; set; }
+
+    /// <summary>The appraisal the suggestion came from, so the UI can say where it got it.</summary>
+    public Guid? SourceAppraisalId { get; set; }
+    public string? SourceAppraisalNumber { get; set; }
+    public decimal? SourceOverallScore { get; set; }
+    public DateTime? SourceAppraisalDate { get; set; }
+
+    /// <summary>The employee's last confirmed nine-box placement, if any, for trend context.</summary>
+    public PerformanceRating? PreviousPerformance { get; set; }
+    public PotentialRating? PreviousPotential { get; set; }
+    public string? PreviousSessionName { get; set; }
+}
+
 public class ConfirmCalibrationDto
 {
     [Required]
     public Guid RatingId { get; set; }
-
-    [Required]
-    public Guid ConfirmedById { get; set; }
-
-    public DateTime ConfirmedDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(2000)]
     public string? CalibrationNotes { get; set; }

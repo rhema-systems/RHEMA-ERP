@@ -67,6 +67,7 @@ import {
   Gavel,
   Network,
   Users2,
+  Grid3x3,
   Award,
   Star,
   Target,
@@ -649,6 +650,9 @@ export const navigationItems: NavItem[] = [
           // their own entry rather than living inside one. Note that area 5 writes into the
           // "Appraisal Nominations" pool on its own, without anyone opening this screen.
           { title: 'Talent Pools', href: '/hr/succession/pools', icon: Users2 },
+          // Calibration sessions and the nine box. Separate from plans and pools because a session
+          // is an EVENT with a close, not a register: finalizing freezes it for good.
+          { title: 'Talent Reviews', href: '/hr/succession/reviews', icon: Grid3x3 },
         ],
         // No "my succession" entry, and there must never be one: readiness, retention risk and
         // nine-box placement are assessments made ABOUT a candidate, not records belonging to them.

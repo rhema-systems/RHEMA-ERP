@@ -300,6 +300,48 @@ is refused with "Only this employee's manager, or HR, can propose an outcome"; a
 4,328 rows**. The second is area 5's to fix, recorded here so the next person does not assume
 `.items`.
 
+### 3.18 ⚠ The finalize endpoint was dead, and it names the rule exactly
+
+`FinalizeTalentReviewSessionDto.FinalizedById` was a **required** Guid the client had no way to
+know. Omitting it sent `Guid.Empty`; the save died on
+`FK_TalentReviewSessions_Employees_FinalizedById` with a 500. So the endpoint that closes a
+calibration session could not be called at all — not merely spoofable, **unusable**. Confirming
+calibration had the same shape and additionally accepted a backdated `2020-01-01`, stored verbatim.
+
+This is the clearest statement of the rule the area kept rediscovering, and slice 7 wrote the line
+down in the code:
+
+> **An act performed by the caller at the moment of the call comes from the token. A fact about
+> someone else does not.**
+
+By that test `FinalizedById` and `ConfirmedById` had to go, while `FacilitatedById` (who chaired the
+meeting) and `RatedById` (which manager gave the score) **stay caller-set** — a desk may legitimately
+record either on someone else's behalf. The line is not "every Guid ending in Id".
+
+### 3.19 ⚠ Half the freeze was missing — and a correction
+
+`AddRatingAsync` already refused a finalized session. `UpdateRatingAsync` and `DeleteRatingAsync`
+checked only `CalibrationConfirmed`, so an **uncalibrated** rating inside a closed session stayed
+editable — which is the half that matters, since that is exactly the row someone would be tempted to
+tidy up after the meeting.
+
+> ⚠ **A correction to my own probe.** It reported "a finalized session can still be edited", which
+> was wrong: the session had never finalized, because finalize itself was 500ing. **When a probe
+> reports two defects at once, check whether the first one invalidates the second's premise.**
+
+### 3.20 ⚠ "Latest confirmed" was non-deterministic
+
+`GetLatestConfirmedRatingForEmployeeAsync` ordered by `Session.SessionDate` alone. Two sessions held
+on the same day tie, and the winner was whatever the database returned first. Not cosmetic: this
+value becomes the employee's cached rating on their talent pool member and the *previous placement*
+a later session shows as their trend — so someone's trend could change between two reads with no
+data having changed.
+
+⚠ Found because the same harness **passed and then failed on identical input**. I had already
+dismissed one failure of that assertion as my own fixture assumption and "fixed" the harness. Running
+it twice is what proved the second failure was the product. **A test that passes and fails on
+identical input is data, not noise.**
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -343,9 +385,15 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 - **D-3 — approvals onto the workflow engine?** The bespoke Draft → UnderReview → Approved chain is
   the same shape travel had before slice 2. Recommendation: port it, per
   [[workflow-engine-integration]].
-- **D-4 — nine-box source of truth.** `TalentReviewRating` carries performance and potential
-  ratings that area 5 also computes. Is the review a manual calibration that may override the
-  appraisal score, or a projection of it? Affects whether the grid is editable.
+- **D-4 — nine-box source of truth. ✅ SETTLED 2026-08-18 (slice 7): a manual calibration that
+  pre-fills Performance from the latest scored appraisal and lets the rater override it.**
+  The premise of the question was half wrong: area 5 does **not** compute both ratings.
+  `PotentialRating` exists nowhere outside `SuccessionPlanningEntities.cs` — appraisals carry an
+  `OverallScore` and nothing about potential — so **one axis of the grid has no source in area 5 at
+  all** and the nine box could never have been a projection. Performance is suggested via
+  `GET /api/talent-reviews/rating-suggestion/{employeeId}`, which names the appraisal it came from;
+  moving away from it prompts for a justification, because a calibration session exists to disagree
+  with the paperwork and the disagreement is the part worth recording.
 - **D-5 — Finance. ❌ WRONG WHEN WRITTEN, corrected 2026-08-18 in slice 5.** It said "no money in
   this area on inspection". There is money: `EstimatedCost`, `ActualCost` and `CurrencyCode` on
   **`SuccessionDevelopmentActivity`**. The survey missed it because it looked at the plan and the
@@ -370,7 +418,7 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-02 | `ReviewedById` / `ApprovedById` caller-declared on the approve path (§3.5) | **High** | **fixed, slice 1** |
 | F-03 | ~~Duplicate-plan rule surfaces as an unexplained 500~~ — **misdiagnosed**, see F-09 | Medium | superseded |
 | F-04 | Create response omits resolved `positionTitle` (§3.7) | Medium | **fixed, slice 2** |
-| F-05 | `NominatedById` / `FacilitatedById` / `SnapshotCreatedById` caller-declared (§3.5) | Medium | **`AssessedById` slice 4, `NominatedById` slice 6**; `FacilitatedById` remains for slice 7 |
+| F-05 | Caller-declared actors across the area (§3.5) | Medium | **closed** — `AssessedById` s4, `NominatedById` s6, `FinalizedById`+`ConfirmedById` s7. `FacilitatedById` / `RatedById` **kept** by design, see §3.18 |
 | F-13 | A caller-declared assessor could manufacture a recommendation, which gates selection (§3.12) | **High** | **fixed, slice 4** |
 | F-09 | **A soft delete does not release a unique index** — three faces, all 500s (§3.9) | **Critical** | **fixed, slice 2** |
 | F-10 | The detail read 500s once a plan is approved — 8060-byte row (§3.10) | **Critical** | **fixed, slice 2** |
@@ -384,7 +432,12 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-16 | Activity ownership rules threw `ArgumentException`, whose message the middleware discards | Medium | **fixed, slice 5** |
 | F-17 | Pool detail reported **0 members** for a pool with members — a count from an unloaded nav (§3.16) | **High** | **fixed, slice 6** |
 | F-18 | Once removed from a pool an employee could **never rejoin it** — unique index vs soft removal (§3.16) | **High** | **fixed, slice 6** |
-| F-19 | `NominatedById` caller-declared on pool membership — the last of F-05's succession-side actors | Medium | **fixed, slice 6** |
+| F-19 | `NominatedById` caller-declared on pool membership | Medium | **fixed, slice 6** |
+| F-20 | **`finalize` was dead** — a required, unknowable `FinalizedById` sent `Guid.Empty` and 500'd on an FK (§3.18) | **Critical** | **fixed, slice 7** |
+| F-21 | Calibration confirm honoured a caller-named confirmer and a backdated `2020-01-01` (§3.18) | **High** | **fixed, slice 7** |
+| F-22 | A finalized session's **uncalibrated** ratings stayed editable (§3.19) | Medium | **fixed, slice 7** |
+| F-23 | `latest-confirmed` ordered by session date **with no tie-break** — non-deterministic (§3.20) | Medium | **fixed, slice 7** |
+| F-24 | Review session detail and rating writes returned blank names — the wrong-loader mistake again | Medium | **fixed, slice 7** |
 
 ⚠ **F-08 is deliberately not fixed here.** Both controllers were measured ungated alongside the
 other seven, but they belong to closed areas (7 training, 6 recruitment) that have no permission
@@ -609,3 +662,23 @@ nominator was *this run's* actor, but the handler is idempotent and returned a m
 an earlier probe run, nominated by that run's actor. The product was right. It now picks an appraisal
 whose employee is not already pooled. **Absolute assertions against a fixture you did not create
 will fail eventually** — the same root as `versionNumber === 2` and the fixed-index positions.
+
+### Slice 7 — talent reviews, calibration and the nine box (2026-08-18)
+
+Closes **F-20**, **F-21**, **F-22**, **F-23**, **F-24**, and the last of **F-05**. Settles **D-4**.
+Harness `run-slice7.mjs` — **46 passed, 0 failed**, and run three times consecutively to prove the
+tie-break. All seven green: 32 + 27 + 49 + 34 + 36 + 44 + 46 = **268 assertions**. `tsc` and
+`eslint` clean.
+
+Backend: finalize and confirm-calibration take their actor from the token and their date from the
+clock; the session-level freeze extended to rating update and delete; `latest-confirmed` given a
+deterministic tie-break; session detail and rating writes moved onto the loaders that resolve names;
+`GET /api/talent-reviews/rating-suggestion/{employeeId}` added for D-4.
+
+Frontend: `/hr/succession/reviews` register, `[id]` detail with the grid and a ratings table, plus
+`NineBoxGrid`, `TalentReviewFormDialog` and `TalentRatingDialog`.
+
+⚠ **A UI decision worth recording: performance has five values and the grid has three columns.**
+`Unsatisfactory` folds into the left column and `Outstanding` into the right. Without that fold, a
+rating at either extreme would **vanish from the grid** — the worst possible failure for the one
+screen whose entire job is showing where people sit. Cell counts include the folded rows.

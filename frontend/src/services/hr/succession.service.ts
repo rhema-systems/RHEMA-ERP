@@ -28,6 +28,15 @@ import type {
   UpdateTalentPool,
   CreateTalentPoolMember,
   RemoveTalentPoolMember,
+  TalentReviewSession,
+  TalentReviewSessionSummary,
+  TalentReviewRating,
+  TalentReviewRatingSummary,
+  TalentRatingSuggestion,
+  CreateTalentReviewSession,
+  CreateTalentReviewRating,
+  ConfirmCalibration,
+  FinalizeTalentReviewSession,
   SuccessionPlanSummary,
   SuccessionPlanStatus,
   PositionCriticality,
@@ -559,3 +568,132 @@ class TalentPoolTypeService {
 }
 
 export const talentPoolTypeService = new TalentPoolTypeService();
+
+/**
+ * Talent review sessions, calibration and the nine box. Backend route: api/talent-reviews.
+ *
+ * ⚠ **Finalizing freezes the session.** After it, no rating can be added, edited or deleted — not
+ * even an uncalibrated one. A calibration record that can change after the meeting closed is not a
+ * record of what the meeting decided.
+ *
+ * ⚠ **Confirming calibration publishes the placement** onto the employee's talent pool member
+ * (`latestPerformanceRating` / `latestPotentialRating`). That is why the confirmer comes from the
+ * token rather than the body: it is the provenance of a number that feeds promotion decisions.
+ */
+class TalentReviewService {
+  private readonly baseUrl = '/talent-reviews';
+
+  getPaged(params: { pageNumber?: number; pageSize?: number } = {}) {
+    return apiService.get<PagedResult<TalentReviewSessionSummary>>(this.baseUrl, params);
+  }
+
+  getAll() {
+    return apiService.get<TalentReviewSessionSummary[]>(`${this.baseUrl}/all`);
+  }
+
+  getById(id: string) {
+    return apiService.get<TalentReviewSession>(`${this.baseUrl}/${id}`);
+  }
+
+  getWithRatings(id: string) {
+    return apiService.get<TalentReviewSession>(`${this.baseUrl}/${id}/with-ratings`);
+  }
+
+  getByYear(reviewYear: number) {
+    return apiService.get<TalentReviewSessionSummary[]>(`${this.baseUrl}/year/${reviewYear}`);
+  }
+
+  getByUnit(organizationUnitId: string) {
+    return apiService.get<TalentReviewSessionSummary[]>(`${this.baseUrl}/unit/${organizationUnitId}`);
+  }
+
+  getFinalized() {
+    return apiService.get<TalentReviewSessionSummary[]>(`${this.baseUrl}/finalized`);
+  }
+
+  getPending() {
+    return apiService.get<TalentReviewSessionSummary[]>(`${this.baseUrl}/pending`);
+  }
+
+  create(data: CreateTalentReviewSession) {
+    return apiService.post<TalentReviewSession>(this.baseUrl, data);
+  }
+
+  update(id: string, data: CreateTalentReviewSession & { id: string }) {
+    return apiService.put<TalentReviewSession>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /** ⚠ Admin. Irreversible: the session is frozen afterwards. */
+  finalize(id: string, data: FinalizeTalentReviewSession) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/finalize`, data);
+  }
+
+  /** ⚠ Admin. */
+  remove(id: string) {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
+  // ── Ratings ────────────────────────────────────────────────────────────────
+
+  getRatings(id: string) {
+    return apiService.get<TalentReviewRatingSummary[]>(`${this.baseUrl}/${id}/ratings`);
+  }
+
+  getRatingById(ratingId: string) {
+    return apiService.get<TalentReviewRating>(`${this.baseUrl}/ratings/${ratingId}`);
+  }
+
+  getCalibratedRatings(id: string) {
+    return apiService.get<TalentReviewRatingSummary[]>(`${this.baseUrl}/${id}/ratings/calibrated`);
+  }
+
+  getPendingCalibration(id: string) {
+    return apiService.get<TalentReviewRatingSummary[]>(`${this.baseUrl}/${id}/ratings/pending-calibration`);
+  }
+
+  /** One cell of the grid. An empty cell is an empty array, not an error. */
+  getNineBoxCell(id: string, performance: string, potential: string) {
+    return apiService.get<TalentReviewRatingSummary[]>(
+      `${this.baseUrl}/${id}/ratings/nine-box`,
+      { performance, potential },
+    );
+  }
+
+  getRatingsForEmployee(employeeId: string) {
+    return apiService.get<TalentReviewRating[]>(`${this.baseUrl}/ratings/employee/${employeeId}`);
+  }
+
+  getLatestConfirmedForEmployee(employeeId: string) {
+    return apiService.get<TalentReviewRating | null>(
+      `${this.baseUrl}/ratings/employee/${employeeId}/latest-confirmed`,
+    );
+  }
+
+  /** D-4: performance suggested from the latest scored appraisal. Never potential. */
+  getRatingSuggestion(employeeId: string) {
+    return apiService.get<TalentRatingSuggestion>(`${this.baseUrl}/rating-suggestion/${employeeId}`);
+  }
+
+  addRating(id: string, data: CreateTalentReviewRating) {
+    return apiService.post<TalentReviewRating>(`${this.baseUrl}/${id}/ratings`, data);
+  }
+
+  updateRating(ratingId: string, data: Partial<CreateTalentReviewRating> & { id: string }) {
+    return apiService.put<TalentReviewRating>(`${this.baseUrl}/ratings/${ratingId}`, data);
+  }
+
+  /** ⚠ Admin, and one-way: a confirmed rating can no longer be edited or deleted. */
+  confirmCalibration(ratingId: string, data: ConfirmCalibration) {
+    return apiService.post<{ message: string }>(
+      `${this.baseUrl}/ratings/${ratingId}/confirm-calibration`,
+      data,
+    );
+  }
+
+  /** ⚠ Admin. */
+  removeRating(ratingId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/ratings/${ratingId}`);
+  }
+}
+
+export const talentReviewService = new TalentReviewService();

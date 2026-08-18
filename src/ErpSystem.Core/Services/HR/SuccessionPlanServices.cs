@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
@@ -2481,6 +2482,8 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     private readonly ITalentReviewSessionRepository _sessionRepository;
     private readonly ITalentReviewRatingRepository _ratingRepository;
     private readonly ITalentPoolMemberRepository _memberRepository;
+    private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly IPerformanceRatingResolver _ratingResolver;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TalentReviewSessionService> _logger;
@@ -2489,6 +2492,8 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         ITalentReviewSessionRepository sessionRepository,
         ITalentReviewRatingRepository ratingRepository,
         ITalentPoolMemberRepository memberRepository,
+        IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IPerformanceRatingResolver ratingResolver,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TalentReviewSessionService> logger)
@@ -2496,6 +2501,8 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         _sessionRepository = sessionRepository;
         _ratingRepository = ratingRepository;
         _memberRepository = memberRepository;
+        _appraisalRepository = appraisalRepository;
+        _ratingResolver = ratingResolver;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -2544,9 +2551,29 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         return entity;
     }
 
+    /// <summary>
+    /// A rating with its employee, rater and calibration navigations loaded, for write responses.
+    /// </summary>
+    /// <remarks>
+    /// The bare lookup leaves the mapper producing <c>employeeName: ""</c> and
+    /// <c>ratedByName: null</c> — a grid that renders the response would show a nameless row.
+    /// </remarks>
+    private async Task<TalentReviewRating> GetOwnedRatingWithDetailsAsync(Guid id)
+    {
+        var entity = await GetOwnedRatingAsync(id);
+        var loaded = await _ratingRepository.GetBySessionAndEmployeeAsync(entity.SessionId, entity.EmployeeId);
+        return loaded ?? entity;
+    }
+
+    /// <remarks>
+    /// ⚠ Loads the navigations. This used the bare <c>GetOwnedSessionAsync</c>, so the detail read
+    /// of a finalized session showed <c>finalizedByName: null</c> — the audit trail of who closed a
+    /// calibration meeting, blank — while <c>with-ratings</c> beside it resolved it. The same
+    /// wrong-loader mistake as the talent pool detail in slice 6.
+    /// </remarks>
     public async Task<TalentReviewSessionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedSessionAsync(id);
+        var entity = await GetOwnedSessionWithRatingsAsync(id);
         return entity.ToDto();
     }
 
@@ -2627,7 +2654,9 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
         _logger.LogInformation("Talent review session created: {SessionName}", entity.SessionName);
 
-        return entity.ToDto();
+        // Re-read so facilitatedByName and the org-unit name resolve. Fifth entity in this area
+        // with the stale-nav shape; the loader already existed and simply was not used.
+        return (await GetOwnedSessionWithRatingsAsync(entity.Id)).ToDto();
     }
 
     public async Task<TalentReviewSessionDto> UpdateAsync(UpdateTalentReviewSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -2645,16 +2674,76 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         return entity.ToDto();
     }
 
-    public async Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// What the grid can suggest for an employee before anyone types — decision D-4.
+    /// </summary>
+    /// <remarks>
+    /// A suggestion, never an answer. The rater may disagree, which is what a calibration session is
+    /// for. Potential is never suggested because area 5 has no notion of it.
+    /// </remarks>
+    public async Task<TalentRatingSuggestionDto> GetRatingSuggestionAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        // The most recent appraisal that actually carries a score. An unscored draft suggests
+        // nothing — better an empty grid than a number derived from a blank.
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.EmployeeId == employeeId && a.OverallScore != null)
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var previous = await _ratingRepository.GetLatestConfirmedRatingForEmployeeAsync(employeeId);
+        if (previous != null && previous.TenantId != tenantId) previous = null;
+
+        return new TalentRatingSuggestionDto
+        {
+            EmployeeId = employeeId,
+            SuggestedPerformance = appraisal == null
+                ? null
+                : await _ratingResolver.ResolveAsync(appraisal.OverallScore, cancellationToken),
+            SourceAppraisalId = appraisal?.Id,
+            SourceAppraisalNumber = appraisal?.AppraisalNumber,
+            SourceOverallScore = appraisal?.OverallScore,
+            SourceAppraisalDate = appraisal?.CreatedAt,
+            PreviousPerformance = previous?.Performance,
+            PreviousPotential = previous?.Potential,
+            PreviousSessionName = previous?.Session?.SessionName,
+        };
+    }
+
+    /// <summary>
+    /// Refuses a change to a session that has been finalized.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Measured 2026-08-18: a finalized session still accepted new ratings and edits to existing
+    /// ones. That makes <c>IsFinalized</c> decorative — a calibration record that can be changed
+    /// after the meeting closed is not a record of what the meeting decided, and confirming
+    /// calibration publishes those numbers onto the talent pool member.
+    ///
+    /// Frozen-on-finalize matches the rules this codebase already applies elsewhere: an approved
+    /// succession plan cannot be edited (slice 2), and SHE's monthly environmental report freezes
+    /// on submit.
+    /// </remarks>
+    private static void RequireNotFinalized(TalentReviewSession session, string action)
+    {
+        if (session.IsFinalized)
+            throw new SuccessionConflictException(
+                $"'{session.SessionName}' was finalized on {session.FinalizedDate:d} and can no longer be changed. " +
+                $"Run a new review session to {action}.");
+    }
+
+    public async Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, Guid finalizedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(finalizeDto.SessionId);
 
         if (entity.IsFinalized)
-            throw new InvalidOperationException("This talent review session is already finalized.");
+            throw new SuccessionConflictException(
+                $"'{entity.SessionName}' was already finalized on {entity.FinalizedDate:d}.");
 
         entity.IsFinalized = true;
-        entity.FinalizedDate = finalizeDto.FinalizedDate;
-        entity.FinalizedById = finalizeDto.FinalizedById;
+        entity.FinalizedDate = DateTime.UtcNow;
+        entity.FinalizedById = finalizedByEmployeeId;
         entity.SessionNotes = finalizeDto.SessionNotes;
 
         await _sessionRepository.UpdateAsync(entity);
@@ -2687,13 +2776,13 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         tenantId = RequireCurrentTenant(tenantId);
         var session = await GetOwnedSessionAsync(createDto.SessionId);
 
-        if (session.IsFinalized)
-            throw new InvalidOperationException("Cannot add ratings to a finalized talent review session.");
+        RequireNotFinalized(session, "rate someone new");
 
         // Check if this employee already has a rating in this session
         var existing = await _ratingRepository.GetBySessionAndEmployeeAsync(createDto.SessionId, createDto.EmployeeId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("This employee already has a rating in this session. Update the existing rating instead.");
+            throw new SuccessionConflictException(
+                $"{existing.Employee?.FullName ?? "That employee"} already has a rating in '{session.SessionName}'. Update it instead of adding another.");
 
         // Look up previous rating for trend tracking (same tenant)
         var previousRating = await _ratingRepository.GetLatestConfirmedRatingForEmployeeAsync(createDto.EmployeeId);
@@ -2714,7 +2803,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
         _logger.LogInformation("Talent review rating added for employee '{EmployeeId}' in session '{SessionId}'", createDto.EmployeeId, createDto.SessionId);
 
-        return entity.ToDto();
+        return (await GetOwnedRatingWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetRatingsForSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -2783,27 +2872,35 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     {
         var entity = await GetOwnedRatingAsync(updateDto.Id);
 
+        // ⚠ The session-level freeze was missing here. AddRatingAsync refused a finalized session
+        // but this did not, so an unconfirmed rating inside a closed session stayed editable —
+        // which is the half of the freeze that actually matters, since an uncalibrated row is
+        // exactly the one someone would be tempted to "tidy up" after the meeting.
+        var session = await GetOwnedSessionAsync(entity.SessionId);
+        RequireNotFinalized(session, "change a rating");
+
         if (entity.CalibrationConfirmed)
-            throw new InvalidOperationException("A calibration-confirmed rating cannot be modified.");
+            throw new SuccessionConflictException(
+                "This rating has been calibration-confirmed and can no longer be modified.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _ratingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await GetOwnedRatingWithDetailsAsync(entity.Id)).ToDto();
     }
 
-    public async Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, Guid confirmedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRatingAsync(confirmDto.RatingId);
 
         if (entity.CalibrationConfirmed)
-            throw new InvalidOperationException("Calibration is already confirmed for this rating.");
+            throw new SuccessionConflictException("Calibration is already confirmed for this rating.");
 
         entity.CalibrationConfirmed = true;
-        entity.CalibrationConfirmedById = confirmDto.ConfirmedById;
-        entity.CalibrationConfirmedDate = confirmDto.ConfirmedDate;
+        entity.CalibrationConfirmedById = confirmedByEmployeeId;
+        entity.CalibrationConfirmedDate = DateTime.UtcNow;
         entity.CalibrationNotes = confirmDto.CalibrationNotes;
 
         await _ratingRepository.UpdateAsync(entity);
@@ -2832,8 +2929,12 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     {
         var entity = await GetOwnedRatingAsync(ratingId);
 
+        var session = await GetOwnedSessionAsync(entity.SessionId);
+        RequireNotFinalized(session, "remove a rating");
+
         if (entity.CalibrationConfirmed)
-            throw new InvalidOperationException("A calibration-confirmed rating cannot be deleted.");
+            throw new SuccessionConflictException(
+                "This rating has been calibration-confirmed and can no longer be deleted.");
 
         await _ratingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

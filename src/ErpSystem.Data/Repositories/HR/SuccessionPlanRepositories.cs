@@ -899,12 +899,20 @@ public class TalentReviewRatingRepository : GenericRepository<TalentReviewRating
 
     public async Task<TalentReviewRating?> GetLatestConfirmedRatingForEmployeeAsync(Guid employeeId)
     {
+        // ⚠ The tie-break is load-bearing. Ordering by SessionDate alone leaves two sessions held on
+        // the same day resolved arbitrarily by the database, and this value is not cosmetic: it
+        // becomes the employee's cached rating on their talent pool member and the "previous
+        // placement" a later session shows as their trend. An arbitrary winner means the trend can
+        // change between two reads with no data having changed. Measured 2026-08-18, when the same
+        // harness run twice produced different answers.
         return await _dbSet
             .Include(r => r.Session)
             .Where(r => r.EmployeeId == employeeId
                      && r.CalibrationConfirmed
                      && !r.IsDeleted)
             .OrderByDescending(r => r.Session.SessionDate)
+            .ThenByDescending(r => r.CalibrationConfirmedDate)
+            .ThenByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
     }
 
