@@ -102,7 +102,9 @@ public static class SuccessionPlanMappingExtensions
             CurrentIncumbentId = dto.CurrentIncumbentId,
             PlanYear = dto.PlanYear,
             VersionNumber = 1,
-            IsActiveVersion = true,
+            // A draft holds no active-version slot; approval raises it. The service sets this
+            // explicitly too — see SuccessionPlanService.CreateAsync and section 3.9 of the plan.
+            IsActiveVersion = false,
             Status = SuccessionPlanStatus.Draft,
             Criticality = dto.Criticality,
             RiskLevel = dto.RiskLevel,
@@ -1028,7 +1030,7 @@ public static class SuccessionPlanMappingExtensions
             Strengths = dto.Strengths,
             DevelopmentGaps = dto.DevelopmentGaps,
             EnrolledDate = dto.EnrolledDate,
-            NominatedById = dto.NominatedById,
+            // NominatedById is set by the service from the authenticated employee, not the body.
             NominationNotes = dto.NominationNotes,
             IsActive = true,
             CreatedBy = userId.ToString(),

@@ -20,6 +20,14 @@ import type {
   CreateSuccessionDevelopmentActivity,
   UpdateSuccessionDevelopmentActivity,
   CreateSuccessionDevelopmentMilestone,
+  TalentPool,
+  TalentPoolSummary,
+  TalentPoolMember,
+  TalentPoolTypeDefinition,
+  CreateTalentPool,
+  UpdateTalentPool,
+  CreateTalentPoolMember,
+  RemoveTalentPoolMember,
   SuccessionPlanSummary,
   SuccessionPlanStatus,
   PositionCriticality,
@@ -430,3 +438,124 @@ class SuccessionDevelopmentService {
 }
 
 export const successionDevelopmentService = new SuccessionDevelopmentService();
+
+/**
+ * Employee talent pools. Backend route: api/talent-pools.
+ *
+ * ⚠ **Not to be confused with `api/talent-pool` (singular)**, which is recruitment's *candidate*
+ * CRM — segments, engagement events, vacancy matching. Two unrelated concepts sharing a word; area 6
+ * owns that one. See §4 of the build plan.
+ *
+ * ⚠ **One pool is written by area 5, not by this UI.** Approving an appraisal outcome recommendation
+ * of type `SuccessionNomination` find-or-creates the pool named in appraisal settings (by default
+ * "Appraisal Nominations") and adds the appraised employee to it. Members can arrive here without
+ * anyone opening this screen.
+ */
+class TalentPoolService {
+  private readonly baseUrl = '/talent-pools';
+
+  getPaged(params: { pageNumber?: number; pageSize?: number } = {}) {
+    return apiService.get<PagedResult<TalentPoolSummary>>(this.baseUrl, params);
+  }
+
+  getAll() {
+    return apiService.get<TalentPoolSummary[]>(`${this.baseUrl}/all`);
+  }
+
+  getActive() {
+    return apiService.get<TalentPoolSummary[]>(`${this.baseUrl}/active`);
+  }
+
+  /** Carries its members and a correct `currentMemberCount`. */
+  getById(id: string) {
+    return apiService.get<TalentPool>(`${this.baseUrl}/${id}`);
+  }
+
+  getWithMembers(id: string) {
+    return apiService.get<TalentPool>(`${this.baseUrl}/${id}/with-members`);
+  }
+
+  getByType(poolTypeId: string) {
+    return apiService.get<TalentPoolSummary[]>(`${this.baseUrl}/type/${poolTypeId}`);
+  }
+
+  getByOwner(ownerEmployeeId: string) {
+    return apiService.get<TalentPoolSummary[]>(`${this.baseUrl}/owner/${ownerEmployeeId}`);
+  }
+
+  getMembers(id: string) {
+    return apiService.get<TalentPoolMember[]>(`${this.baseUrl}/${id}/members`);
+  }
+
+  getMemberById(memberId: string) {
+    return apiService.get<TalentPoolMember>(`${this.baseUrl}/members/${memberId}`);
+  }
+
+  getMembersByReadiness(id: string, readiness: ReadinessLevel) {
+    return apiService.get<TalentPoolMember[]>(`${this.baseUrl}/${id}/members/readiness/${readiness}`);
+  }
+
+  /** A desk queue across every pool, not one pool's members. */
+  getMembersDueForReview() {
+    return apiService.get<TalentPoolMember[]>(`${this.baseUrl}/members/due-for-review`);
+  }
+
+  create(data: CreateTalentPool) {
+    return apiService.post<TalentPool>(this.baseUrl, data);
+  }
+
+  update(id: string, data: UpdateTalentPool) {
+    return apiService.put<TalentPool>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /** ⚠ Admin. */
+  remove(id: string) {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
+  /**
+   * ⚠ **409** if the employee is already an active member — the message names the pool.
+   * Re-adding someone previously removed revives their old membership instead of duplicating it.
+   */
+  addMember(id: string, data: CreateTalentPoolMember) {
+    return apiService.post<TalentPoolMember>(`${this.baseUrl}/${id}/members`, data);
+  }
+
+  updateMember(memberId: string, data: Partial<TalentPoolMember> & { id: string }) {
+    return apiService.put<TalentPoolMember>(`${this.baseUrl}/members/${memberId}`, data);
+  }
+
+  /** A soft removal: the row stays with `isActive: false`, keeping the history. */
+  removeMember(memberId: string, data: RemoveTalentPoolMember) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/members/${memberId}/remove`, data);
+  }
+}
+
+export const talentPoolService = new TalentPoolService();
+
+/** Tenant-configurable pool types. Six are seeded. ⚠ All writes are Admin. */
+class TalentPoolTypeService {
+  private readonly baseUrl = '/talent-pool-types';
+
+  getAll() {
+    return apiService.get<TalentPoolTypeDefinition[]>(this.baseUrl);
+  }
+
+  getById(id: string) {
+    return apiService.get<TalentPoolTypeDefinition>(`${this.baseUrl}/${id}`);
+  }
+
+  create(data: Omit<TalentPoolTypeDefinition, 'id'>) {
+    return apiService.post<TalentPoolTypeDefinition>(this.baseUrl, data);
+  }
+
+  update(id: string, data: TalentPoolTypeDefinition) {
+    return apiService.put<TalentPoolTypeDefinition>(`${this.baseUrl}/${id}`, data);
+  }
+
+  remove(id: string) {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+}
+
+export const talentPoolTypeService = new TalentPoolTypeService();

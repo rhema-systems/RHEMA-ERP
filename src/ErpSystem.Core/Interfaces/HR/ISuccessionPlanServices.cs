@@ -189,7 +189,7 @@ public interface ITalentPoolService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Member operations
-    Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, Guid nominatedByEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersAsync(Guid poolId, CancellationToken cancellationToken = default);
     Task<TalentPoolMemberDto> GetMemberByIdAsync(Guid memberId, CancellationToken cancellationToken = default);
     Task<TalentPoolMemberDto> UpdateMemberAsync(UpdateTalentPoolMemberDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);

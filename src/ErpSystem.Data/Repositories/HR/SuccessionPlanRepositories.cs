@@ -758,7 +758,9 @@ public class TalentPoolMemberRepository : GenericRepository<TalentPoolMember>, I
     {
         return await _dbSet
             .Include(m => m.Employee)
-            .Include(m => m.TalentPool)
+            // ThenInclude the pool's type: the member DTO carries TalentPoolTypeName, which is
+            // two hops away and came back blank while the pool's own name resolved.
+            .Include(m => m.TalentPool).ThenInclude(p => p.PoolType)
             .Include(m => m.NominatedBy)
             .Include(m => m.ReviewRatings).ThenInclude(r => r.Session)
             .Include(m => m.ReviewRatings).ThenInclude(r => r.RatedBy)

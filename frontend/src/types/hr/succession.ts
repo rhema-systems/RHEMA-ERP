@@ -580,3 +580,141 @@ export interface CreateSuccessionDevelopmentMilestone {
   targetDate: string;
   notes?: string | null;
 }
+
+// ── Talent pools (slice 6) ───────────────────────────────────────────────────
+
+export interface TalentPoolTypeDefinition {
+  id: string;
+  name: string;
+  description?: string | null;
+  colorHex?: string | null;
+  isActive: boolean;
+  displayOrder: number;
+}
+
+export interface TalentPoolMemberSummary {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  employeePosition?: string | null;
+  rank: number;
+  readiness: ReadinessLevel;
+  readinessName: string;
+  latestPerformanceRating?: PerformanceRating | null;
+  latestPotentialRating?: PotentialRating | null;
+  isActive: boolean;
+  enrolledDate: string;
+}
+
+export interface TalentPoolMember {
+  id: string;
+  tenantId: string;
+  talentPoolId: string;
+  talentPoolName: string;
+  talentPoolTypeName: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  employeePosition?: string | null;
+  employeeDepartment?: string | null;
+  rank: number;
+  readiness: ReadinessLevel;
+  readyByDate?: string | null;
+  justification?: string | null;
+  strengths?: string | null;
+  developmentGaps?: string | null;
+  enrolledDate: string;
+  /** ⚠ Server-set from the token. Not on the create payload — see {@link CreateTalentPoolMember}. */
+  nominatedById?: string | null;
+  nominatedByName?: string | null;
+  nominationNotes?: string | null;
+  lastReviewDate?: string | null;
+  nextReviewDate?: string | null;
+  reviewNotes?: string | null;
+  latestPerformanceRating?: PerformanceRating | null;
+  latestPotentialRating?: PotentialRating | null;
+  ratingLastUpdated?: string | null;
+  removedDate?: string | null;
+  removalReason?: string | null;
+  isActive: boolean;
+  developmentActivities: SuccessionDevelopmentActivitySummary[];
+  documents: SuccessionDocument[];
+}
+
+export interface TalentPool {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string | null;
+  poolTypeId: string;
+  poolTypeName: string;
+  poolTypeColor?: string | null;
+  targetPositionId?: string | null;
+  targetPositionTitle?: string | null;
+  targetSize: number;
+  validFrom?: string | null;
+  validTo?: string | null;
+  isActive: boolean;
+  ownerId: string;
+  ownerName: string;
+  /** ⚠ Counts ACTIVE members only, and is derived server-side from the loaded collection. */
+  currentMemberCount: number;
+  members: TalentPoolMemberSummary[];
+}
+
+export interface TalentPoolSummary {
+  id: string;
+  name: string;
+  poolTypeId: string;
+  poolTypeName: string;
+  poolTypeColor?: string | null;
+  targetSize: number;
+  isActive: boolean;
+  ownerName: string;
+  currentMemberCount: number;
+  validFrom?: string | null;
+  validTo?: string | null;
+}
+
+export interface CreateTalentPool {
+  name: string;
+  description?: string | null;
+  poolTypeId: string;
+  targetPositionId?: string | null;
+  targetSize: number;
+  validFrom?: string | null;
+  validTo?: string | null;
+  isActive: boolean;
+  /** The manager who owns the pool — a business assignment, not an actor claim. */
+  ownerId: string;
+}
+
+export interface UpdateTalentPool extends CreateTalentPool {
+  id: string;
+}
+
+/**
+ * ⚠ Carries no `nominatedById`. Who nominated someone into a pool is the signed-in user; the field
+ * arrived on the body and was honoured until slice 6.
+ *
+ * ⚠ Re-adding a previously removed employee **revives their old membership** rather than creating a
+ * second one, so their original enrolment and removal history survive.
+ */
+export interface CreateTalentPoolMember {
+  talentPoolId: string;
+  employeeId: string;
+  rank: number;
+  readiness: ReadinessLevel;
+  readyByDate?: string | null;
+  justification?: string | null;
+  strengths?: string | null;
+  developmentGaps?: string | null;
+  /** Caller-set on purpose: a desk may legitimately back-record when someone joined. */
+  enrolledDate: string;
+  nominationNotes?: string | null;
+}
+
+export interface RemoveTalentPoolMember {
+  removalReason: string;
+}

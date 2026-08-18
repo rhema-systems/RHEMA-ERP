@@ -135,7 +135,8 @@ public class TalentPoolsController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
 
         dto.TalentPoolId = id;
-        var created = await _service.AddMemberAsync(dto, tenantId.Value, employeeId.Value);
+        // The nominator is the signed-in user. It used to arrive on the body and was honoured.
+        var created = await _service.AddMemberAsync(dto, tenantId.Value, employeeId.Value, employeeId.Value);
         return CreatedAtAction(nameof(GetMemberById), new { memberId = created.Id }, created);
     }
 

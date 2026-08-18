@@ -262,6 +262,44 @@ than "fixing":
 - **`generate-from-position` returns `[]`** and will until area 17 lands. Empty is the correct
   answer, not a failure; the screen says so.
 
+### 3.16 ⚠ Two more faces of the same disagreement, in talent pools
+
+**A count derived from an unloaded navigation is silently zero — and zero looks like a fact.**
+`GET /api/talent-pools/{id}` used a loader with no includes, and the mapper computes
+`CurrentMemberCount` from `entity.Members`. A pool with one member reported **0 members, no type and
+no owner**, while `with-members` sitting beside it reported all three correctly. The blank strings
+are the familiar stale-nav shape; the *number* is worse, because a manager reading "0 members" does
+not investigate, they conclude the pool is empty.
+
+**Once removed from a pool, an employee could never rejoin it.** `RemoveMemberAsync` is a soft
+removal — `IsActive = false`, row stays — and the duplicate check filters on `IsActive`, so it
+passes. But `IX_TalentPoolMember_Tenant_Pool_Employee` is unique on `(TenantId, PoolId, EmployeeId)`
+with **no filter**, so the insert hit the index and 500'd. Permanently, from an ordinary Remove.
+
+That is the **fifth** instance in this area of one root cause: *the code's idea of "exists" and the
+schema's disagree*. Plan numbering, the active-version slot, approval write-ordering, pool
+membership, and the soft-deleted-membership variant underneath it. Re-joining now revives the
+existing row, which is also the better record — it keeps the original enrolment and why they left.
+
+### 3.17 ✅ The area-5 join runs — first execution ever
+
+Driven end to end in `probe-area5-join.mjs` and asserted in `run-slice6.mjs`. Approving an appraisal
+outcome recommendation of type `SuccessionNomination` returns status **`Actioned`** — the
+controller documents `Approved`-but-not-`Actioned` as dispatch failure — with
+`targetEntityType: TalentPoolMember`. The handler find-or-created the **"Appraisal Nominations"**
+pool from `AppraisalSettings.SuccessionPoolName`, enrolled the employee at the configured default
+readiness, attributed the nomination to whoever approved the recommendation, carried the notes
+across, and proved idempotent on a repeat.
+
+⚠ **Sound-on-inspection is not the same as executed.** This handler read as correct code for as long
+as the area has existed and had never once run.
+
+⚠ Two things learned driving it: area 5 gates on the **`HR` role by name**, so a `TenantAdmin` actor
+is refused with "Only this employee's manager, or HR, can propose an outcome"; and
+`/api/PerformanceAppraisals` **ignores `pageNumber`/`pageSize` and returns a bare array of all
+4,328 rows**. The second is area 5's to fix, recorded here so the next person does not assume
+`.items`.
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -332,7 +370,7 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-02 | `ReviewedById` / `ApprovedById` caller-declared on the approve path (§3.5) | **High** | **fixed, slice 1** |
 | F-03 | ~~Duplicate-plan rule surfaces as an unexplained 500~~ — **misdiagnosed**, see F-09 | Medium | superseded |
 | F-04 | Create response omits resolved `positionTitle` (§3.7) | Medium | **fixed, slice 2** |
-| F-05 | `NominatedById` / `FacilitatedById` / `SnapshotCreatedById` caller-declared (§3.5) | Medium | partly — **`AssessedById` fixed, slice 4**; the rest belong to slices 6 and 7 |
+| F-05 | `NominatedById` / `FacilitatedById` / `SnapshotCreatedById` caller-declared (§3.5) | Medium | **`AssessedById` slice 4, `NominatedById` slice 6**; `FacilitatedById` remains for slice 7 |
 | F-13 | A caller-declared assessor could manufacture a recommendation, which gates selection (§3.12) | **High** | **fixed, slice 4** |
 | F-09 | **A soft delete does not release a unique index** — three faces, all 500s (§3.9) | **Critical** | **fixed, slice 2** |
 | F-10 | The detail read 500s once a plan is approved — 8060-byte row (§3.10) | **Critical** | **fixed, slice 2** |
@@ -344,6 +382,9 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-14 | `currencyCode: "ZZZ"` accepted and stored; nothing checked it against Finance (§3.14) | **High** | **fixed, slice 5** |
 | F-15 | Activity create/update responses omit resolved names — the stale-nav shape, third time | Medium | **fixed, slice 5** |
 | F-16 | Activity ownership rules threw `ArgumentException`, whose message the middleware discards | Medium | **fixed, slice 5** |
+| F-17 | Pool detail reported **0 members** for a pool with members — a count from an unloaded nav (§3.16) | **High** | **fixed, slice 6** |
+| F-18 | Once removed from a pool an employee could **never rejoin it** — unique index vs soft removal (§3.16) | **High** | **fixed, slice 6** |
+| F-19 | `NominatedById` caller-declared on pool membership — the last of F-05's succession-side actors | Medium | **fixed, slice 6** |
 
 ⚠ **F-08 is deliberately not fixed here.** Both controllers were measured ungated alongside the
 other seven, but they belong to closed areas (7 training, 6 recruitment) that have no permission
@@ -540,3 +581,31 @@ occurrence of `CreateAsync(` deleted **seven read methods** that sat in between,
 it as seven missing interface members. A text-range delete anchored on a pattern that recurs is not
 a delete, it is a gamble. Recovered with `git show HEAD:<file>`, which is why committing each slice
 before starting the next one is worth the ceremony.
+
+### Slice 6 — talent pools and the area-5 join (2026-08-18)
+
+Closes **F-17**, **F-18**, **F-19**, and the succession side of **F-05**. Harness `run-slice6.mjs` —
+**44 passed, 0 failed**. All six green: 32 + 27 + 49 + 34 + 36 + 44 = **222 assertions**. `tsc` and
+`eslint` clean.
+
+Backend:
+- Pool detail loads its members, so `currentMemberCount` is real; create/update/add-member re-read
+  so names resolve, including `talentPoolTypeName`, which is **two hops out** and needed a
+  `ThenInclude` the member loader did not have.
+- Re-joining a pool revives the existing membership instead of inserting past a unique index; the
+  lookup deliberately includes soft-deleted rows, because `GetMembershipAsync` filters them out
+  while the index does not.
+- The nominator comes from the token. Area 5's handler is the one legitimate exception — it writes
+  `TalentPoolMember` directly and sets the nominator to whoever approved the recommendation.
+- The duplicate-member rule returns **409 naming the pool** instead of the middleware's
+  "The operation is not valid for the current state of the object."
+
+Frontend: `/hr/succession/pools` register, `[id]` detail with member management, and two dialogs.
+The register states plainly that area 5 adds members on its own — a screen whose contents can change
+without anyone using it should say so.
+
+⚠ **The harness caught itself again, and it is the same mistake a third time.** It asserted the
+nominator was *this run's* actor, but the handler is idempotent and returned a membership created by
+an earlier probe run, nominated by that run's actor. The product was right. It now picks an appraisal
+whose employee is not already pooled. **Absolute assertions against a fixture you did not create
+will fail eventually** — the same root as `versionNumber === 2` and the fixed-index positions.

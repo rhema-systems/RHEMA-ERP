@@ -66,6 +66,7 @@ import {
   FileCheck,
   Gavel,
   Network,
+  Users2,
   Award,
   Star,
   Target,
@@ -644,6 +645,10 @@ export const navigationItems: NavItem[] = [
         icon: Network,
         children: [
           { title: 'Plans', href: '/hr/succession', icon: Network },
+          // Pools are NOT tied to a post, which is what separates them from a plan — so they get
+          // their own entry rather than living inside one. Note that area 5 writes into the
+          // "Appraisal Nominations" pool on its own, without anyone opening this screen.
+          { title: 'Talent Pools', href: '/hr/succession/pools', icon: Users2 },
         ],
         // No "my succession" entry, and there must never be one: readiness, retention risk and
         // nine-box placement are assessments made ABOUT a candidate, not records belonging to them.

@@ -2129,9 +2129,19 @@ public class TalentPoolService : ITalentPoolService
         return entity;
     }
 
+    /// <remarks>
+    /// ⚠ Loads the members deliberately. This used to call <c>GetOwnedPoolAsync</c>, which includes
+    /// nothing, and the mapper derives <c>CurrentMemberCount</c> from <c>entity.Members</c> — so the
+    /// detail read of a pool with one member reported **zero members, no pool type and no owner**,
+    /// while <c>with-members</c> beside it reported all three correctly.
+    ///
+    /// A blank string at least looks like missing data. **A count derived from an unloaded
+    /// collection is silently `0`, which looks like a fact** — a manager reading this screen would
+    /// conclude the pool was empty.
+    /// </remarks>
     public async Task<TalentPoolDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedPoolAsync(id);
+        var entity = await GetOwnedPoolWithMembersAsync(id);
         return entity.ToDto();
     }
 
@@ -2211,7 +2221,9 @@ public class TalentPoolService : ITalentPoolService
 
         _logger.LogInformation("Talent pool created: {PoolName}", entity.Name);
 
-        return entity.ToDto();
+        // Re-read so the response carries poolTypeName and ownerName. Same stale-nav shape as the
+        // plan create in slice 2 and the activity create in slice 5.
+        return (await GetOwnedPoolWithMembersAsync(entity.Id)).ToDto();
     }
 
     public async Task<TalentPoolDto> UpdateAsync(UpdateTalentPoolDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -2225,7 +2237,7 @@ public class TalentPoolService : ITalentPoolService
 
         _logger.LogInformation("Talent pool updated: {PoolName}", entity.Name);
 
-        return entity.ToDto();
+        return (await GetOwnedPoolWithMembersAsync(entity.Id)).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -2242,25 +2254,91 @@ public class TalentPoolService : ITalentPoolService
 
     #region Member Operations
 
-    public async Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<TalentPoolMemberDto> AddMemberAsync(
+        CreateTalentPoolMemberDto createDto,
+        Guid tenantId,
+        Guid createdByUserId,
+        Guid nominatedByEmployeeId,
+        CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedPoolAsync(createDto.TalentPoolId);
+        var pool = await GetOwnedPoolAsync(createDto.TalentPoolId);
 
-        // Check if employee is already an active member of this pool
-        var existing = await _memberRepository.GetMembershipAsync(createDto.TalentPoolId, createDto.EmployeeId);
-        if (existing != null && existing.TenantId == tenantId && existing.IsActive)
-            throw new InvalidOperationException("This employee is already an active member of the talent pool.");
+        // ⚠ Deleted rows included on purpose. GetMembershipAsync filters IsDeleted out, but
+        // IX_TalentPoolMember_Tenant_Pool_Employee does not — so a soft-deleted membership holds the
+        // slot with nothing visible to explain why the insert fails. Look for whatever the index
+        // can see, not whatever the repository is willing to show.
+        var existing = await _memberRepository
+            .GetQueryableIncludingDeleted(m => m.TenantId == tenantId
+                                            && m.TalentPoolId == createDto.TalentPoolId
+                                            && m.EmployeeId == createDto.EmployeeId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // Already a member? InvalidOperationException would have had its message replaced with
+        // "The operation is not valid for the current state of the object." — true, and useless.
+        if (existing != null && existing.TenantId == tenantId && existing.IsActive && !existing.IsDeleted)
+            throw new SuccessionConflictException(
+                $"That employee is already an active member of '{pool.Name}'.");
+
+        // A row that is IsActive but IsDeleted is a contradiction left by a cascading pool delete.
+        // Treat it as revivable rather than reporting a conflict the user cannot see or resolve.
+        if (existing != null && existing.TenantId == tenantId && existing.IsDeleted)
+            existing.IsActive = false;
+
+        // ⚠ Re-joining a pool REVIVES the old row; it does not insert a second one.
+        //
+        // Removing a member is a soft removal — the row stays with IsActive = false — but
+        // IX_TalentPoolMember_Tenant_Pool_Employee is unique on (TenantId, PoolId, EmployeeId) with
+        // no filter, so an inactive row occupies the slot just as firmly as a live one. Inserting
+        // hit that index and 500'd, which meant **once someone left a pool they could never rejoin
+        // it**. Measured 2026-08-18. Same disagreement between the code's idea of "exists" and the
+        // schema's that produced the plan-numbering and active-version defects in section 3.9.
+        //
+        // Reviving is also the better record: it keeps the original enrolment and the history of
+        // why they left, instead of pretending this is the first time.
+        if (existing != null && existing.TenantId == tenantId && !existing.IsActive)
+        {
+            existing.IsActive = true;
+            existing.IsDeleted = false;
+            existing.RemovedDate = null;
+            existing.RemovalReason = null;
+            existing.Rank = createDto.Rank;
+            existing.Readiness = createDto.Readiness;
+            existing.ReadyByDate = createDto.ReadyByDate;
+            existing.Justification = createDto.Justification;
+            existing.Strengths = createDto.Strengths;
+            existing.DevelopmentGaps = createDto.DevelopmentGaps;
+            existing.NominatedById = nominatedByEmployeeId;
+            existing.NominationNotes = createDto.NominationNotes;
+
+            await _memberRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Employee '{EmployeeId}' rejoined talent pool '{PoolId}' (membership revived)",
+                createDto.EmployeeId, createDto.TalentPoolId);
+
+            return (await GetOwnedMemberWithDetailsAsync(existing.Id)).ToDto();
+        }
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.IsActive = true;
+
+        // ⚠ Who nominated someone into a pool is a fact about the signed-in user, not a field the
+        // caller gets to choose. It arrived on the body and was honoured — the same shape as the
+        // approval actor in slice 1 and the assessor in slice 4.
+        //
+        // The one legitimate exception is area 5's SuccessionNominationHandler, which does not come
+        // through here: it writes TalentPoolMember directly and sets NominatedById to the person
+        // who approved the appraisal recommendation, which is the right answer for that path.
+        entity.NominatedById = nominatedByEmployeeId;
 
         await _memberRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Employee '{EmployeeId}' added to talent pool '{PoolId}'", createDto.EmployeeId, createDto.TalentPoolId);
 
-        return entity.ToDto();
+        return (await GetOwnedMemberWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersAsync(Guid poolId, CancellationToken cancellationToken = default)

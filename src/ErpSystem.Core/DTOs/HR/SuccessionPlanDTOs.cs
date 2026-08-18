@@ -1328,10 +1328,15 @@ public class CreateTalentPoolMemberDto : CreateDtoBase
     [MaxLength(2000)]
     public string? DevelopmentGaps { get; set; }
 
+    /// <summary>
+    /// When the employee joined the pool. Caller-set on purpose — unlike the nominator, this is a
+    /// business fact the desk may legitimately be back-recording.
+    /// </summary>
     [Required]
     public DateTime EnrolledDate { get; set; }
 
-    public Guid? NominatedById { get; set; }
+    // ⚠ NominatedById was removed. It arrived on the body and was honoured, so a desk actor could
+    // record a nomination under a colleague's name. The nominator is the signed-in user.
 
     [MaxLength(2000)]
     public string? NominationNotes { get; set; }
