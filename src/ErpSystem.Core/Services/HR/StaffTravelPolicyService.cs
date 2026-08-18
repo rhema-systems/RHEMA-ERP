@@ -20,7 +20,6 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
     private readonly IStaffTravelPolicyRepository _policyRepository;
     private readonly IStaffTravelPolicyRuleRepository _ruleRepository;
     private readonly IStaffTravelPolicyExceptionRepository _exceptionRepository;
-    private readonly IStaffTravelVendorRepository _vendorRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelPolicyService> _logger;
@@ -29,7 +28,6 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         IStaffTravelPolicyRepository policyRepository,
         IStaffTravelPolicyRuleRepository ruleRepository,
         IStaffTravelPolicyExceptionRepository exceptionRepository,
-        IStaffTravelVendorRepository vendorRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelPolicyService> logger)
@@ -37,7 +35,6 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         _policyRepository = policyRepository;
         _ruleRepository = ruleRepository;
         _exceptionRepository = exceptionRepository;
-        _vendorRepository = vendorRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -86,13 +83,6 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         return entity;
     }
 
-    private async Task<StaffTravelVendor> GetOwnedVendorAsync(Guid id)
-    {
-        var entity = await _vendorRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Vendor with ID '{id}' not found.");
-        return entity;
-    }
 
     // ---- Policies ----------------------------------------------------------
 
@@ -394,86 +384,6 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         return true;
     }
 
-    // ---- Vendors -----------------------------------------------------------
-
-    public async Task<StaffTravelVendorDto> GetVendorByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var entity = await GetOwnedVendorAsync(id);
-        return entity.ToDto();
-    }
-
-    public async Task<StaffTravelVendorDto?> GetVendorByCodeAsync(string vendorCode, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entity = await _vendorRepository.GetByVendorCodeAsync(vendorCode);
-        if (entity == null || entity.TenantId != tenantId)
-            return null;
-        return entity.ToDto();
-    }
-
-    public async Task<IEnumerable<StaffTravelVendorSummaryDto>> GetAllVendorsAsync(CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        return (await _vendorRepository.GetQueryable()
-                .Where(v => v.TenantId == tenantId && !v.IsDeleted)
-                .ToListAsync(cancellationToken))
-            .Select(v => v.ToSummaryDto())
-            .ToList();
-    }
-
-    public async Task<IEnumerable<StaffTravelVendorSummaryDto>> GetActiveVendorsAsync(CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        return (await _vendorRepository.GetActiveVendorsAsync())
-            .Where(v => v.TenantId == tenantId)
-            .Select(v => v.ToSummaryDto())
-            .ToList();
-    }
-
-    public async Task<IEnumerable<StaffTravelVendorSummaryDto>> GetVendorsByTypeAsync(TravelVendorType vendorType, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        return (await _vendorRepository.GetByTypeAsync(vendorType))
-            .Where(v => v.TenantId == tenantId)
-            .Select(v => v.ToSummaryDto())
-            .ToList();
-    }
-
-    public async Task<IEnumerable<StaffTravelVendorSummaryDto>> GetPreferredVendorsAsync(TravelVendorType? vendorType = null, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        return (await _vendorRepository.GetPreferredVendorsAsync(vendorType))
-            .Where(v => v.TenantId == tenantId)
-            .Select(v => v.ToSummaryDto())
-            .ToList();
-    }
-
-    public async Task<StaffTravelVendorDto> CreateVendorAsync(CreateStaffTravelVendorDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
-    {
-        tenantId = RequireCurrentTenant(tenantId);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
-        await _vendorRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Travel vendor created: {VendorCode}", entity.VendorCode);
-        return entity.ToDto();
-    }
-
-    public async Task<StaffTravelVendorDto> UpdateVendorAsync(UpdateStaffTravelVendorDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
-    {
-        var entity = await GetOwnedVendorAsync(updateDto.Id);
-        entity.UpdateEntity(updateDto, updatedByUserId);
-        await _vendorRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
-    }
-
-    public async Task<bool> DeleteVendorAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var entity = await GetOwnedVendorAsync(id);
-        await _vendorRepository.DeleteAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return true;
-    }
 }
 
 #endregion

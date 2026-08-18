@@ -130,8 +130,6 @@ public class StaffTravelRequest : TenantEntity
 
     public virtual ICollection<StaffTravelItinerary> Itineraries { get; set; } = new List<StaffTravelItinerary>();
 
-    public virtual ICollection<StaffTravelApprovalInstance> ApprovalInstances { get; set; } = new List<StaffTravelApprovalInstance>();
-
     public virtual ICollection<StaffTravelFlightBooking> FlightBookings { get; set; } = new List<StaffTravelFlightBooking>();
 
     public virtual ICollection<StaffTravelHotelBooking> HotelBookings { get; set; } = new List<StaffTravelHotelBooking>();
@@ -395,142 +393,6 @@ public class StaffTravelItineraryActivity : TenantEntity
     [ForeignKey(nameof(StaffTravelItineraryLegId))]
     public virtual StaffTravelItineraryLeg ItineraryLeg { get; set; } = null!;
 }
-
-
-// =========================================================================
-//  GROUP 3 — APPROVAL WORKFLOW
-// =========================================================================
-
-public class StaffTravelApprovalWorkflowTemplate : TenantEntity
-{
-    [Required]
-    [MaxLength(200)]
-    public string Name { get; set; } = null!;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-
-    public StaffTravelType? TravelType { get; set; }
-
-    public Guid? AppliesToLevelFromId { get; set; }       // FK -> StaffLevel
-
-    public Guid? AppliesToLevelToId { get; set; }         // FK -> StaffLevel
-
-    [Column(TypeName = "decimal(14,2)")]
-    public decimal? MinBudgetThreshold { get; set; }
-
-    [Column(TypeName = "decimal(14,2)")]
-    public decimal? MaxBudgetThreshold { get; set; }
-
-    public bool? IsInternational { get; set; }
-
-    public TravelRiskLevel? RiskLevel { get; set; }
-
-    public bool IsActive { get; set; }
-
-    [ForeignKey(nameof(AppliesToLevelFromId))]
-    public virtual StaffLevel? AppliesToLevelFrom { get; set; }
-
-    [ForeignKey(nameof(AppliesToLevelToId))]
-    public virtual StaffLevel? AppliesToLevelTo { get; set; }
-
-    public virtual ICollection<StaffTravelApprovalWorkflowStep> Steps { get; set; } = new List<StaffTravelApprovalWorkflowStep>();
-
-    public virtual ICollection<StaffTravelApprovalInstance> Instances { get; set; } = new List<StaffTravelApprovalInstance>();
-}
-
-public class StaffTravelApprovalWorkflowStep : TenantEntity
-{
-    public Guid WorkflowTemplateId { get; set; }
-
-    public int StepOrder { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string StepName { get; set; } = null!;
-
-    public TravelApproverType ApproverType { get; set; }
-
-    [MaxLength(100)]
-    public string? ApproverRole { get; set; }   // when ApproverType = RoleBased
-
-    public Guid? SpecificApproverId { get; set; }               // FK -> Employee, when SpecificPerson
-
-    public bool IsMandatory { get; set; }
-
-    public bool CanDelegate { get; set; }
-
-    public int? SlaHours { get; set; }
-
-    public Guid? EscalationApproverId { get; set; }             // FK -> Employee
-
-    [ForeignKey(nameof(WorkflowTemplateId))]
-    public virtual StaffTravelApprovalWorkflowTemplate WorkflowTemplate { get; set; } = null!;
-
-    [ForeignKey(nameof(SpecificApproverId))]
-    public virtual Employee? SpecificApprover { get; set; }
-
-    [ForeignKey(nameof(EscalationApproverId))]
-    public virtual Employee? EscalationApprover { get; set; }
-}
-
-public class StaffTravelApprovalInstance : TenantEntity
-{
-    public Guid StaffTravelRequestId { get; set; }
-
-    public Guid WorkflowTemplateId { get; set; }                // template the instance was created from
-
-    public int CurrentStepOrder { get; set; }
-
-    public TravelApprovalInstanceStatus Status { get; set; }
-
-    public DateTime InitiatedAt { get; set; }
-
-    public DateTime? CompletedAt { get; set; }
-
-    [ForeignKey(nameof(StaffTravelRequestId))]
-    public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
-
-    [ForeignKey(nameof(WorkflowTemplateId))]
-    public virtual StaffTravelApprovalWorkflowTemplate WorkflowTemplate { get; set; } = null!;
-
-    public virtual ICollection<StaffTravelApprovalDecision> Decisions { get; set; } = new List<StaffTravelApprovalDecision>();
-}
-
-public class StaffTravelApprovalDecision : TenantEntity
-{
-    public Guid ApprovalInstanceId { get; set; }
-
-    public int StepOrder { get; set; }
-
-    public Guid ApproverId { get; set; }                        // actual approver (may differ if delegated)
-
-    public Guid? OriginalApproverId { get; set; }               // template-defined approver
-
-    public TravelApprovalDecision Decision { get; set; }
-
-    [MaxLength(2000)]
-    public string? Comments { get; set; }
-
-    public DateTime? DecidedAt { get; set; }
-
-    public bool IsEscalated { get; set; }
-
-    public DateTime? EscalatedAt { get; set; }
-
-    public DateTime? SlaDeadline { get; set; }
-
-    [ForeignKey(nameof(ApprovalInstanceId))]
-    public virtual StaffTravelApprovalInstance ApprovalInstance { get; set; } = null!;
-
-    [ForeignKey(nameof(ApproverId))]
-    public virtual Employee Approver { get; set; } = null!;
-
-    [ForeignKey(nameof(OriginalApproverId))]
-    public virtual Employee? OriginalApprover { get; set; }
-}
-
-
 // =========================================================================
 //  GROUP 4 — BOOKINGS
 // =========================================================================
@@ -1253,53 +1115,6 @@ public class StaffTravelPolicyException : TenantEntity
     public virtual Employee? ApprovedBy { get; set; }
 }
 
-public class StaffTravelVendor : TenantEntity
-{
-    [Required]
-    [MaxLength(30)]
-    public string VendorCode { get; set; } = null!;
-
-    [Required]
-    [MaxLength(300)]
-    public string VendorName { get; set; } = null!;
-
-    public TravelVendorType VendorType { get; set; }
-
-    public Guid? CountryId { get; set; }                            // FK -> Country
-
-    [MaxLength(200)]
-    [EmailAddress]
-    public string? ContactEmail { get; set; }
-
-    [MaxLength(50)]
-    [Phone]
-    public string? ContactPhone { get; set; }
-
-    [MaxLength(100)]
-    public string? AccountNumber { get; set; }
-
-    public DateOnly? ContractStartDate { get; set; }
-
-    public DateOnly? ContractEndDate { get; set; }
-
-    public bool IsPreferred { get; set; }
-
-    public bool IsActive { get; set; }
-
-    [Range(0, 5)]
-    [Column(TypeName = "decimal(3,1)")]
-    public decimal? Rating { get; set; }
-
-    [MaxLength(200)]
-    public string? PaymentTerms { get; set; }
-
-    [ForeignKey(nameof(CountryId))]
-    public virtual Country? Country { get; set; }
-}
-
-// =========================================================================
-//  GROUP 7 — COMPLIANCE & SAFETY
-// =========================================================================
 
 public class StaffTravelDocument : TenantEntity
 {
@@ -1581,31 +1396,6 @@ public class StaffTravelHealthRequirement : TenantEntity
 
 // =========================================================================
 //  GROUP 8 — CONFIGURATION
-// =========================================================================
-
-public class StaffTravelCurrencyExchangeRate : TenantEntity
-{
-    [Required]
-    [Column(TypeName = "char(3)")]
-    public string FromCurrency { get; set; } = null!;
-
-    [Required]
-    [Column(TypeName = "char(3)")]
-    public string ToCurrency { get; set; } = null!;
-
-    [Column(TypeName = "decimal(18,8)")]
-    public decimal Rate { get; set; }
-
-    public DateOnly RateDate { get; set; }
-
-    [MaxLength(100)]
-    public string? RateSource { get; set; }        // ECB, XE, INTERNAL
-
-    public bool IsOfficial { get; set; }
-}
-
-// =========================================================================
-//  GROUP 9 — REMINDER ENGINE (slice 5a)
 // =========================================================================
 
 /// <summary>One execution of the staff-travel reminder sweep.</summary>

@@ -1052,7 +1052,7 @@ re-run unchanged (252).
 Currency is bound to `GET /api/finance/currencies` and countries to `/api/Country` — travel keeps
 no list of either, per §7.
 
-#### Slice 8 — Itineraries and bookings ✅ **green 2026-08-17, 56 + 24 assertions**
+#### Slice 8 — Itineraries and bookings ✅ **green 2026-08-17, 59 + 26 assertions**
 
 Two tabs on the request detail (`Itinerary`, `Bookings`), `TravelItineraryPanel` and
 `TravelBookingsPanel`, plus `types/hr/travel-bookings.ts` and
@@ -1135,6 +1135,131 @@ silent (the [[hr-appraisal-scoring-model]] lesson). Itinerary versions are creat
 current one and **promoted as a separate act** — a trip gets re-planned and the desk needs what was
 agreed before, not only what is agreed now.
 
+#### Slice 9 — Finance ✅ **green 2026-08-17, 40 + 35 assertions**
+
+Finance tab on the request (budget, advances, claims), the cross-trip claims register with its
+awaiting-payment queue, and the claim detail with lines, review and payment.
+
+**⚠ A travel budget's committed and actual spend had no writer but a client `PUT`.** `UpdateEntity`
+assigned `TotalCommitted` and `TotalActual` straight off the DTO and derived `Variance` from them,
+while the bookings and claims that constitute the spend sat unread on the same request. A
+budget-versus-actual screen showed whatever was last typed — worse than showing nothing, because a
+hand-entered actual looks exactly as authoritative as a computed one. Now `StaffTravelBudgetRollup`:
+committed = non-cancelled bookings, actual = **paid** claims, variance = `ApprovedTotal − TotalActual`
+(matching `JobAnalysisService`; the old formula was `TotalActual − TotalCommitted`, a different
+quantity with an overspend's sign inverted relative to the rest of the codebase).
+
+Two implementation notes worth keeping:
+- **Recomputed on read, not only on write.** Bookings change constantly and the budget row is written
+  rarely, so a write-time-only rollup is stale almost immediately — the same failure it replaces.
+- **Onto the DTO, never the tracked entity.** Assigning to the entity on a read path would queue an
+  `UPDATE` for whatever else in the request calls `SaveChangesAsync` — a read that silently writes.
+
+⚠ **Committed and actual measure different routes and must never be summed.** A booking paid direct
+to a vendor is committed and never becomes a claim, so neither figure contains the other. The screen
+says so in words, because two progress bars invite being read as parts of one whole.
+
+**Also fixed:** a plain `PUT` could set an advance's `ApprovedAmount`, bypassing the endpoint that
+records who approved it — money approved with nobody on record, and `UnsettledAmount` computed off
+it. Slice 4 closed the actor half of this and left the amount half. And four caller-declared
+timestamps: `DisbursedAt`, `PaidAt`, `FinanceReviewedAt`, line `ReviewedAt` — slice 4 had removed the
+*actor* from three of those and left the *moment*.
+
+**⚠ TWO OF MY OWN TYPES WERE FICTION, and only a live call could tell.** The claim-review type was
+written as `approve: boolean`; the API takes `newStatus`, because **reviewing sets the claim's status
+outright and is NOT derived from its lines**. A screen built on that type ships an Approve button
+that leaves claims stuck in `UnderReview` and unpayable, since `pay` refuses anything not `Approved`.
+The dashboard type (slice 7) had `upcomingTrips` as a number when it is the list. Both compiled
+perfectly. **A TypeScript type written from an endpoint's NAME rather than its DTO is fiction that
+type-checks.**
+
+⚠ **The advance is recovered on PAYMENT, not on approval** (`SettleLinkedAdvanceAsync` is called from
+`PayClaimAsync`). So an approved claim still reads as fully payable, and the pay dialog must not
+announce `netPayable` — the act itself changes it. It shows the anticipated split instead, computed
+with the server's own `min(outstanding, approved)` rule and labelled as anticipated; the probe
+asserts the two agree.
+
+#### Slice 10 — Compliance and policy ✅ **green 2026-08-18, 47 assertions**
+
+Compliance tab (risk assessment, visas, insurance, active destination alerts) and the travel policy
+register.
+
+**⚠ THE HEADLINE, and the lesson: slice 8 made two dormant weaknesses load-bearing.**
+`StaffTravelPolicy.ApprovedById`/`ApprovedAt` were on the entity and the read DTO with **no writer
+anywhere** — decoration, and harmless, right up until policy caps began refusing bookings. After
+that, any `HR.Travel.Write` holder could author the rule constraining everyone's travel spending with
+nothing recording who authorised it. Likewise `IsCurrentVersion` was caller-declared with no
+uniqueness guard, so two policies covering one scope could both claim to be in force and
+`StaffTravelPolicyGuard` picked between them by ordering alone. **Giving a dormant field teeth turns
+its neighbours' weaknesses into real defects — audit the neighbourhood, not just the field.**
+
+**Decision D-6 (user, 2026-08-18): a policy is a DRAFT until approved, and approving is
+`HR.Travel.Admin`.** Rejected: enforcing regardless with approval as a mere audit trail; and deferring
+the question to TDC. ⚠ **Behaviour change on deploy: every policy in every tenant is currently
+unapproved, so travel caps do not bind until each is approved.** The register shows a draft count and
+a per-row badge for exactly that reason — a list where a draft looks like a policy in force tells you
+the organisation is protected when it is not.
+
+Approving also **puts the policy in force**, superseding whichever policy covered the same scope:
+approving a rule and then separately remembering to activate it is two chances to get it wrong. An
+approved policy **cannot be edited** — raise a version — otherwise the caps could change without
+anyone approving the change.
+
+⚠ **`withdraw` was the verb the model was missing, and I created the gap by adding approval.** Once
+approval put policies in force, the only ways one could stop binding were approving a replacement
+with an *identical* scope or hard-deleting it. A policy approved in error capped everyone until
+someone drafted a matching replacement. `POST policies/{id}/withdraw` (Admin) stands it down and
+**leaves it approved** — approval is a fact about the past; what changes is whether it is in force.
+
+**Acknowledge-with-no-actor, twice.** `AcknowledgeRiskAssessment` took **no actor at all** and is
+Write-gated, so a travel clerk could set `EmployeeAcknowledged` on the employee's behalf — the record
+then asserting that someone had read a security briefing about their destination when they had not.
+Both acknowledgements now require the caller to *be* the person (traveller / addressee). The entity
+has no `AcknowledgedById` column, so rather than add one the caller is required to be who the flag
+already claimed. The risk **assessor** (`AssessedById`) was caller-declared too.
+
+⚠ **Four sibling reads feed a policy DTO and only one had any includes.** `GetCurrentVersionsAsync`
+and `GetApplicablePoliciesAsync` had none, so "which policies are in force" reported `RuleCount: 0`
+for every policy since the port; `GetWithRulesAsync` had four includes but not `ApprovedBy`, so the
+approve endpoint returned a response with a null approver — the field the call had just written.
+
+⚠ **A permission an unlinked account holds is a permission it cannot exercise.** The `admin` login is
+SuperAdmin and therefore holds `HR.Travel.Admin`, but approving stamps an Employee FK and `admin` is
+not employee-linked. Three of this area's Admin writes are like this. If TDC's travel administrators
+are unlinked service accounts, policy approval is unreachable for them — a seeding question, not a
+code one.
+
+#### Slice 11 — Dashboard and reminder admin ✅ **green 2026-08-18, 38 assertions**
+
+`/hr/travel/dashboard` and `/administration/hr/travel/reminders`.
+
+**⚠ The dashboard's two headline money figures added currencies together.** `TotalEstimatedCost`
+summed every request's estimate regardless of the currency it was costed in, and the DTO carried no
+currency at all — 5,000 GHS + 5,000 USD rendered as "10,000" of nothing, with no unit beside it.
+
+**Deliberately not fixed by converting.** Travel does not invent a rate (slice 6), Finance's
+conversion is currently inverted, and a converted headline would be *confidently wrong* rather than
+*visibly incomplete*. `CostByCurrency` splits it; the screen shows one figure for one currency and a
+breakdown otherwise, saying plainly why they are not added.
+
+The rest audited clean: both spotlight reads carry their `Employee` and `DestinationCountry` includes
+(slice 0's fix covering a fourth consumer). The reminder surface is `HR.Travel.Admin` **including the
+reads** — the log names employees against their document expiry dates. ⚠ That means the travel desk
+cannot see what the reminder engine is doing on its behalf; worth confirming with TDC.
+
+#### Area close-out — the cleanup migration
+
+Six tables retired across slices 2, 3 and 6 were left in place while they were empty. Removed on
+close: the 4 `StaffTravelApproval*` entities, `StaffTravelVendor`, `StaffTravelCurrencyExchangeRate`,
+with their services, repositories, DbSets, entity configurations, DI registrations, DTOs and mappers.
+
+Verified before cutting rather than assumed: **no controller route reaches any of it**
+(`IStaffTravelApprovalService` was registered in DI and injected nowhere — unreachable since slice 2),
+and **no live entity navigates into the dead cluster** except `StaffTravelRequest.ApprovalInstances`,
+whose removal matters because it was a FK into a table about to be dropped.
+
+---
+
 ---
 
 ## 9. Open for TDC
@@ -1169,3 +1294,53 @@ risk assessments, currency exchange rates — that no TDC requirement asks for. 
 whether to build it (§5 D-1 settles that) but which parts TDC will actually staff and maintain,
 because unmaintained reference data is what made the establishment rule advisory in area 8 and
 what blocks the org-authority model today.
+
+---
+
+## 10. Area 12 closed — 2026-08-18
+
+**506 assertions across 16 harness files, all green. Content audit: 41 fields resolved, 0 findings.**
+Frontend `tsc` clean (19 pre-existing inventory errors) and `eslint` clean throughout.
+
+| slice | | assertions |
+|---|---|---|
+| 0 | spine (8060 fix), gating, self-service | 52 |
+| 1 / 1a | requests, comments, groups, lifecycle / attachments | 32 / 18 |
+| 2 | approvals onto the workflow engine | 19 |
+| 3 | bookings, vendor→Supplier, Fleet bridge | 30 |
+| 4 | finance: settlement, totals, actors | 30 |
+| 5 / 5a | policies, compliance, F-09 / the reminder sweep | 26 / 20 |
+| 6 | currency + FX retired onto Finance | 25 |
+| 7 | **UI** requests + the initiator actor hole | 11 |
+| 8 / 8-ui | **UI** itineraries, bookings + the policy gate | 59 / 26 |
+| 9 / 9-ui | **UI** finance + the budget rollup | 40 / 35 |
+| 10 | **UI** compliance + policy approval | 47 |
+| 11 | **UI** dashboard + reminder admin | 38 |
+
+### What this area taught, beyond travel
+
+1. **Build the create form early — it is an actor audit.** Slice 7's `InitiatedById` and slice 10's
+   `AssessedById` were both found by trying to bind a form field to a value the browser cannot know.
+   *A value the client cannot know is a value the client should not be sending.*
+2. **A UI-payload probe is not optional.** Screens send string enums, local wall-clock datetimes and
+   `null`-vs-`""` that no other harness file exercises and `tsc` cannot check. It found F-21 and two
+   fiction types of mine. **Copy `run-slice8-ui.mjs` into every future UI slice.**
+3. **Giving a dormant field teeth turns its neighbours into defects.** Slice 8 made policy caps
+   enforce; slice 10 then had to fix approval, versioning and withdrawal — none of which mattered the
+   day before. Audit the neighbourhood, not the field.
+4. **Ask which method actually REFUSES something.** The booking policy gate mentioned the policy
+   everywhere and enforced nothing.
+5. **Derived money must never be the client's arithmetic**, and a figure a call is about to change
+   must not be announced before the call.
+6. **Fixture determinism is a real cost of stateful harnesses.** Two "failures" were leftovers from
+   previous runs. Fixtures now derive their scope from live state rather than taking `[0]`.
+
+### Owed after this area
+
+- **GL posting and the rest of Finance (D-4)** — `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, 18 entries;
+  areas 2, 4, 7, 10, 11 still need back-filling before the sweep starts.
+- **Two blocked cross-module defects** — Procurement's dead `SuppliersController` (travel has no
+  selectable vendors until it is fixed) and Finance's inverted conversion.
+  `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
+- **TDC questions** — §9, plus: should the travel desk be able to see the reminder log (it is
+  Admin-gated including reads), and are travel administrators employee-linked accounts?

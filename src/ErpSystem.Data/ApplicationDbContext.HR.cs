@@ -515,10 +515,6 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelItinerary> StaffTravelItineraries { get; set; } = null!;
     public DbSet<StaffTravelItineraryLeg> StaffTravelItineraryLegs { get; set; } = null!;
     public DbSet<StaffTravelItineraryActivity> StaffTravelItineraryActivities { get; set; } = null!;
-    public DbSet<StaffTravelApprovalWorkflowTemplate> StaffTravelApprovalWorkflowTemplates { get; set; } = null!;
-    public DbSet<StaffTravelApprovalWorkflowStep> StaffTravelApprovalWorkflowSteps { get; set; } = null!;
-    public DbSet<StaffTravelApprovalInstance> StaffTravelApprovalInstances { get; set; } = null!;
-    public DbSet<StaffTravelApprovalDecision> StaffTravelApprovalDecisions { get; set; } = null!;
     public DbSet<StaffTravelFlightBooking> StaffTravelFlightBookings { get; set; } = null!;
     public DbSet<StaffTravelFlightSegment> StaffTravelFlightSegments { get; set; } = null!;
     public DbSet<StaffTravelHotelBooking> StaffTravelHotelBookings { get; set; } = null!;
@@ -532,7 +528,6 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelPolicy> StaffTravelPolicies { get; set; } = null!;
     public DbSet<StaffTravelPolicyRule> StaffTravelPolicyRules { get; set; } = null!;
     public DbSet<StaffTravelPolicyException> StaffTravelPolicyExceptions { get; set; } = null!;
-    public DbSet<StaffTravelVendor> StaffTravelVendors { get; set; } = null!;
     public DbSet<StaffTravelDocument> StaffTravelDocuments { get; set; } = null!;
     public DbSet<StaffTravelVisaRequirement> StaffTravelVisaRequirements { get; set; } = null!;
     public DbSet<StaffTravelVisaApplication> StaffTravelVisaApplications { get; set; } = null!;
@@ -541,7 +536,6 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelAlertNotification> StaffTravelAlertNotifications { get; set; } = null!;
     public DbSet<StaffTravelInsurancePolicy> StaffTravelInsurancePolicies { get; set; } = null!;
     public DbSet<StaffTravelHealthRequirement> StaffTravelHealthRequirements { get; set; } = null!;
-    public DbSet<StaffTravelCurrencyExchangeRate> StaffTravelCurrencyExchangeRates { get; set; } = null!;
     public DbSet<NumberSequence> NumberSequences { get; set; } = null!;
 
     #endregion
@@ -11556,13 +11550,6 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
             entity.HasIndex(x => new { x.TenantId, x.PolicyId, x.RuleCode }).IsUnique();
         });
 
-        builder.Entity<StaffTravelVendor>(entity =>
-        {
-            entity.HasIndex(x => new { x.TenantId, x.VendorCode }).IsUnique();
-            entity.HasIndex(x => x.VendorType);
-            entity.HasIndex(x => x.IsActive);
-        });
-
         builder.Entity<StaffTravelVisaRequirement>(entity =>
         {
             entity.HasIndex(x => new { x.PassportCountryId, x.DestinationCountryId });
@@ -11577,12 +11564,6 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
         builder.Entity<StaffTravelHealthRequirement>(entity =>
         {
             entity.HasIndex(x => x.IsActive);
-        });
-
-        builder.Entity<StaffTravelCurrencyExchangeRate>(entity =>
-        {
-            entity.Property(x => x.Rate).HasColumnType("decimal(18,8)");
-            entity.HasIndex(x => new { x.TenantId, x.FromCurrency, x.ToCurrency, x.RateDate }).IsUnique();
         });
 
         // --- Delete behaviour ----------------------------------------------------

@@ -158,10 +158,6 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelItineraryRepository, StaffTravelItineraryRepository>();
         services.AddScoped<IStaffTravelItineraryLegRepository, StaffTravelItineraryLegRepository>();
         services.AddScoped<IStaffTravelItineraryActivityRepository, StaffTravelItineraryActivityRepository>();
-        services.AddScoped<IStaffTravelApprovalWorkflowTemplateRepository, StaffTravelApprovalWorkflowTemplateRepository>();
-        services.AddScoped<IStaffTravelApprovalWorkflowStepRepository, StaffTravelApprovalWorkflowStepRepository>();
-        services.AddScoped<IStaffTravelApprovalInstanceRepository, StaffTravelApprovalInstanceRepository>();
-        services.AddScoped<IStaffTravelApprovalDecisionRepository, StaffTravelApprovalDecisionRepository>();
         services.AddScoped<IStaffTravelFlightBookingRepository, StaffTravelFlightBookingRepository>();
         services.AddScoped<IStaffTravelFlightSegmentRepository, StaffTravelFlightSegmentRepository>();
         services.AddScoped<IStaffTravelHotelBookingRepository, StaffTravelHotelBookingRepository>();
@@ -175,7 +171,6 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelPolicyRepository, StaffTravelPolicyRepository>();
         services.AddScoped<IStaffTravelPolicyRuleRepository, StaffTravelPolicyRuleRepository>();
         services.AddScoped<IStaffTravelPolicyExceptionRepository, StaffTravelPolicyExceptionRepository>();
-        services.AddScoped<IStaffTravelVendorRepository, StaffTravelVendorRepository>();
         services.AddScoped<IStaffTravelDocumentRepository, StaffTravelDocumentRepository>();
         services.AddScoped<IStaffTravelVisaRequirementRepository, StaffTravelVisaRequirementRepository>();
         services.AddScoped<IStaffTravelVisaApplicationRepository, StaffTravelVisaApplicationRepository>();
@@ -184,7 +179,6 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelAlertNotificationRepository, StaffTravelAlertNotificationRepository>();
         services.AddScoped<IStaffTravelInsurancePolicyRepository, StaffTravelInsurancePolicyRepository>();
         services.AddScoped<IStaffTravelHealthRequirementRepository, StaffTravelHealthRequirementRepository>();
-        services.AddScoped<IStaffTravelCurrencyExchangeRateRepository, StaffTravelCurrencyExchangeRateRepository>();
         services.AddScoped<IJobCandidateRepository, JobCandidateRepository>();
         services.AddScoped<IJobCandidateQualificationRepository, JobCandidateQualificationRepository>();
         services.AddScoped<IJobCandidateWorkHistoryRepository, JobCandidateWorkHistoryRepository>();
@@ -560,12 +554,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOrientationDashboardService, OrientationDashboardService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
-        services.AddScoped<IStaffTravelApprovalService, StaffTravelApprovalService>();
         services.AddScoped<IStaffTravelBookingService, StaffTravelBookingService>();
         services.AddScoped<IStaffTravelFinanceService, StaffTravelFinanceService>();
         services.AddScoped<IStaffTravelPolicyService, StaffTravelPolicyService>();
         services.AddScoped<IStaffTravelComplianceService, StaffTravelComplianceService>();
-        services.AddScoped<IStaffTravelConfigurationService, StaffTravelConfigurationService>();
         services.AddScoped<IHealthcareFacilityService, HealthcareFacilityService>();
         services.AddScoped<IMedicalInsuranceService, MedicalInsuranceService>();
         services.AddScoped<IMedicalBenefitSchemeService, MedicalBenefitSchemeService>();
