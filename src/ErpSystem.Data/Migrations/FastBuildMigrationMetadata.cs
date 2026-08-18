@@ -184,3 +184,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260817145232_AddStaffTravelSupplierAndFleetTripLinks")] partial class AddStaffTravelSupplierAndFleetTripLinks { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260817172219_AddStaffTravelReminderEngine")] partial class AddStaffTravelReminderEngine { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260818101414_RetireDormantStaffTravelTables")] partial class RetireDormantStaffTravelTables { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260818204655_AddProbationReminderEngine")] partial class AddProbationReminderEngine { }

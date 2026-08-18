@@ -344,6 +344,8 @@ public partial class ApplicationDbContext
     // it sits with the grievance sets rather than the disciplinary ones.
     public DbSet<DisciplineReminderRun> DisciplineReminderRuns { get; set; } = null!;
     public DbSet<DisciplineReminderDispatchLog> DisciplineReminderDispatchLogs { get; set; } = null!;
+    public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
+    public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
     public DbSet<SheIncidentTypeCorrectiveAction> SheIncidentTypeCorrectiveActions { get; set; } = null!;
     public DbSet<SheInjuryType> SheInjuryTypes { get; set; } = null!;
@@ -8520,6 +8522,22 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
             e.HasIndex(x => new { x.TenantId, x.CreatedAt });
             e.HasIndex(x => x.RunId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Probation reminder engine (area 15b slice 7) ----
+        builder.Entity<ProbationReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<ProbationReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.HasIndex(x => x.ProbationPeriodId);
 
             e.HasOne(x => x.Run)
                 .WithMany(x => x.DispatchLogs)

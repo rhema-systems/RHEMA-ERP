@@ -1782,6 +1782,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Sweep logic is scoped (IDisciplineReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.DisciplineReminderBackgroundService>();
 
+            // Probation reminder engine (area 15b slice 7): daily sweep — FR-HR-032's confirmation
+            // form a month before the end, FR-HR-140's expiry notice at the tenant's lead time, a
+            // probation past its end date with no outcome recorded, overdue reviews, and reviews the
+            // employee has never acknowledged. Sweep logic is scoped (IProbationReminderService) so
+            // run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.ProbationReminderBackgroundService>();
+
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
 

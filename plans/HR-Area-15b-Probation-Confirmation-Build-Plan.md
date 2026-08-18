@@ -392,7 +392,7 @@ the JWT key ([[hr-harness-run-environment]]).
 ## 9. Slice log
 
 Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging** with the JWT
-key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 = 246**.
+key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 / 37 = 283**.
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -574,3 +574,41 @@ Observed while reading a rendered letter (data gaps, not defects, both on docume
 the company name renders as "Default Tenant" because `CompanyProfile` is unconfigured — that
 controller is one of the unbuilt stragglers in §2 of the area survey — and no default signatory name
 is set, so only the title prints.
+
+### Slice 7 — the reminder engine (2026-08-18) — `run-slice7.mjs`, 37 assertions
+
+The area computed nothing and told nobody anything: `ending-within` was a read no screen called, and
+`CompanyHrPolicySettings.ProbationEndLeadDays` was referenced by no probation code at all. Five
+rules now sweep daily, on the SHE / movements / discipline / travel pattern — a run log, a dispatch
+log, a manual run-now, and the `preview?asOf=` seam that makes a date-driven ladder testable inside
+one run.
+
+| Kind | Rule |
+|---|---|
+| `ConfirmationFormDue` | one month before the end — FR-HR-032's "5th month of a 6-month probation", stated so it also serves a junior's 3-month one |
+| `ProbationEndingSoon` | FR-HR-140's advance notice, at the tenant's `ProbationEndLeadDays` |
+| `ProbationOverdue` | end date passed, still Active — someone working under terms nobody closed. Tiers 1→2→3 |
+| `ReviewOverdue` | a scheduled review nobody conducted |
+| `ReviewUnacknowledged` | conducted 7+ days ago, never signed by its subject |
+
+Two deliberate limits. **The dispatch log records the item, not the person** — a reminder travels
+further than the record it is about, so it carries a name and a date and makes the reader open the
+record for anything else; the harness asserts no rating or recommendation leaks into the reference
+text. And **the recipient is not resolved here**: FR-HR-032 routes to "the head", which resolves to
+nobody for 93% of employees (§3.10), so the named confirming authority arrives with slice 8 rather
+than being invented now.
+
+⚠⚠ **The lesson, and it cost an hour: on this repo a new migration is INERT until it is listed in
+`Migrations/FastBuildMigrationMetadata.cs`, and the failure is completely silent.** Startup logged
+*"Database migration completed successfully"* in under a second, wrote no `__EFMigrationsHistory`
+row, and created no tables — while the compiled DLL demonstrably contained the migration class.
+`ErpSystem.Data.csproj` builds with `TdcFastEfBuild`, which excludes **every**
+`Migrations\*.Designer.cs` (350 MB+ of generated C#); the `[Migration("...")]` attribute lives in
+the Designer, so without a hand-written line in the shim file EF does not see the class as a
+migration at all — not pending, not applied, invisible. The csproj states the rule outright, and I
+had not followed it.
+
+**It would have reached deployment looking applied.** The remedy is a habit, not a fix: after every
+`dotnet ef migrations add`, add the shim line, then verify **in SQL** — the history row, the tables,
+and the unique index — because the log line is a claim, not evidence. Recorded in
+[[migration-ownership-and-chain]].
