@@ -2972,13 +2972,19 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
+    /// <remarks>
+    /// ⚠ Uses the loader that resolves navigations. Slice 7 gave the *write* paths a detailed
+    /// loader and left this read on the bare one, so the single-rating detail returned
+    /// <c>employeeName: ""</c>, <c>sessionName: ""</c> and <c>ratedByName: null</c> while the list
+    /// beside it resolved all three. Found by the content audit, not by any status check.
+    /// </remarks>
     public async Task<TalentReviewRatingDto?> GetRatingByIdAsync(Guid ratingId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = await _ratingRepository.GetByIdAsync(ratingId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
-        return entity.ToDto();
+        return (await GetOwnedRatingWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<TalentReviewRatingDto?> GetLatestConfirmedRatingForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)

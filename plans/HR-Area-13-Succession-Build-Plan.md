@@ -383,6 +383,32 @@ DTO. The missing two thirds — `benchStrength`, `emergencyCoverageGaps`, `cover
 `upcomingVacancies`, `overdueAlerts`, the action tallies, the status breakdown — would simply not
 have been rendered, and nothing would have failed. Rewritten from the live payload.
 
+### 3.24 ⚠⚠ The worst defect in the area, and slice 2 caused it
+
+Eleven list queries filtered on `IsActiveVersion` as a proxy for "current". That was *true* while
+every plan was active from creation — and became false the moment slice 2 fixed the versioning model
+so a draft holds no active-version slot.
+
+Measured 2026-08-18: **21 draft plans existed and `/api/succession-plans/status/Draft` returned
+zero.** So did by-year, by-criticality, by-risk, due-for-review, no-ready-now and by-incumbent. Worst
+of all, **`no-successors` — the register view whose entire purpose is finding plans with nobody on
+them — excluded every draft**, which is precisely where an empty plan lives. A brand-new plan was
+invisible to the screen most likely to be looking for it.
+
+Fixed by using the predicate that actually means "still matters": `Status != Archived`, since
+superseding sets `Archived`. `IsActiveVersion` survives only where it genuinely means the position's
+live approved version.
+
+⚠ **The transferable lesson: a fix can invalidate an assumption held somewhere else entirely.**
+Slice 2's change was correct and stayed correct; eleven queries elsewhere silently depended on the
+old meaning of the flag. Nothing failed, nothing 500'd, and seven subsequent slices passed. When you
+change what a flag *means*, grep for every reader of it — the compiler cannot help.
+
+⚠ **And the audit nearly missed it.** The first version asserted
+`if (list.length) nonBlank(list[0].positionTitle)` — which passes vacuously on an empty list. It
+reported green while the query returned nothing. Every list assertion now demands the fixture row
+**by id**. *A conditional assertion is a skipped assertion wearing a tick.*
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -483,6 +509,9 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-26 | `StaffTravelRequest` missing from the frontend's `entityTypeMapping.ts` — **area 12's**, found in passing | Low | **fixed, slice 8** |
 | F-27 | A plan could not show the movement that fulfilled it — the area-8 seam was built one way only (§3.22) | Medium | **fixed, slice 9** |
 | F-28 | `SuccessionDashboard` TS type covered ~half a 28-field DTO (§3.23) | Medium | **fixed, slice 9** |
+| F-29 | **Eleven list queries filtered on `IsActiveVersion`, hiding every draft** — regression from slice 2 (§3.24) | **Critical** | **fixed, slice 10** |
+| F-30 | `succession-candidates/employee/{id}` was the one sibling query missing its `Employee` include | Medium | **fixed, slice 10** |
+| F-31 | Single-rating detail read used the bare loader; its loader also lacked `Session` | Medium | **fixed, slice 10** |
 
 ⚠ **F-08 is deliberately not fixed here.** Both controllers were measured ungated alongside the
 other seven, but they belong to closed areas (7 training, 6 recruitment) that have no permission
@@ -781,3 +810,29 @@ green. **A skipped assertion is not a passing one**; the create is now load-bear
 would take the run down. (Area 8's DTO wants current *and* new position, org unit and salary, and
 `Category` is Voluntary/Involuntary/OrganizationalRestructure/CareerDevelopment/Administrative —
 "Vertical" was my guess and it was wrong.)
+
+### Slice 10 — the content audit (2026-08-18)
+
+Closes **F-29**, **F-30**, **F-31**. `audit-content.mjs` — **82 passed, 0 failed**, and
+**79/79 GET endpoints exercised**. All ten harnesses green:
+31 + 27 + 50 + 34 + 36 + 44 + 46 + 26 + 64 + 82 = **440 assertions**. `tsc`/`eslint` clean.
+
+The audit builds one richly-populated fixture — a plan with an incumbent, an emergency successor, a
+candidate, feedback, a development activity, a milestone, an action, a pool with a member, and a
+review session with a rating — so that a blank field can only mean *the endpoint failed to resolve
+it*, never *there was nothing to resolve*. Then it walks every read and asks the question a status
+check cannot: **does this return content, or a well-formed shell?**
+
+Three defects, none of which any slice harness could have caught, because each slice asserted the
+behaviour it had just built:
+
+- **F-29**, above — the big one, and a regression from this area's own slice 2.
+- **F-30** — `succession-candidates/employee/{id}` was the single sibling query missing
+  `.Include(c => c.Employee)`, so it alone returned `employeeName: ""`.
+- **F-31** — slice 7 gave the rating *write* paths a detailed loader and left the *read* on the bare
+  one, so single-rating detail returned three blank names. Its loader was also missing `Session`
+  entirely, so `sessionName` would have stayed blank even after switching loaders.
+
+⚠ Two harnesses **gained** assertions when F-29 was fixed (slice 12: 25→27, slice 3: 49→50). Those
+were conditional assertions that had been silently skipping over empty lists for eight slices. The
+count going *up* after a bug fix is a signal worth watching for.
