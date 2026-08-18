@@ -58,11 +58,16 @@ namespace ErpSystem.Api.Controllers.HR;
 public class ProbationController : ControllerBase
 {
     private readonly IProbationService _service;
+    private readonly IProbationLetterService _letters;
     private readonly ICurrentUserService _currentUser;
 
-    public ProbationController(IProbationService service, ICurrentUserService currentUser)
+    public ProbationController(
+        IProbationService service,
+        IProbationLetterService letters,
+        ICurrentUserService currentUser)
     {
         _service = service;
+        _letters = letters;
         _currentUser = currentUser;
     }
 
@@ -209,6 +214,23 @@ public class ProbationController : ControllerBase
         await _service.ConfirmAsync(id, RequireEmployeeId());
         return Ok(new { message = "Probation confirmed." });
     }
+
+    /// <summary>The FR-HR-032 confirmation letter for a confirmed probation.</summary>
+    /// <remarks>
+    /// <para>Rendered on demand from the HR-editable "ProbationConfirmationLetter" template, and
+    /// returned as a self-contained HTML document the caller can display or print to PDF. Nothing
+    /// is stored: every figure is read back from the probation, the employee and their position at
+    /// the moment of asking, so a saved copy could only go stale against the record it
+    /// describes.</para>
+    ///
+    /// <para>Issuing is HR's (Write), not an outcome decision — the FRD chain is <i>head confirms →
+    /// HR issues the letter</i>, so this reports a decision rather than making one, and it refuses
+    /// a probation that has not been confirmed.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.ProbationWritePolicy)]
+    [HttpGet("{id:guid}/confirmation-letter")]
+    public async Task<ActionResult<ProbationConfirmationLetterDto>> GetConfirmationLetter(Guid id)
+        => Ok(await _letters.GenerateConfirmationLetterAsync(id));
 
     [Authorize(Policy = HrPermissions.ProbationAdminPolicy)]
     [HttpPost("{id:guid}/terminate")]

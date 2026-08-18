@@ -408,6 +408,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAppraisalSettingsService, AppraisalSettingsService>();
         services.AddScoped<ICompanyHrPolicyProvider, CompanyHrPolicyProvider>();
         services.AddScoped<ICompanyHrPolicySettingsService, CompanyHrPolicySettingsService>();
+        services.AddScoped<IProbationLetterService, ProbationLetterService>();
         services.AddScoped<ICompanyProfileProvider, CompanyProfileProvider>();
         services.AddScoped<ICompanyProfileService, CompanyProfileService>();
         services.AddScoped<IAppraisalCycleService, AppraisalCycleService>();
@@ -734,6 +735,10 @@ public static class HrModuleServiceRegistration
         // HR support services (implementations outside Core/Data or outside Interfaces/HR)
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IDateTimeProvider, ErpSystem.Api.Services.SystemDateTimeProvider>();
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Recruitment.RecruitmentEmailEventCatalog>();
+        // The probation module ships one document (FR-HR-032's confirmation letter). Registering the
+        // catalog is what gives TemplatedEmailService a built-in default, so the letter renders on a
+        // tenant that has never opened the template editor.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Probation.ProbationEmailEventCatalog>();
         services.AddScoped<ErpSystem.Core.Interfaces.Common.ITemplatedEmailService, ErpSystem.Core.Services.Common.TemplatedEmailService>();
         services.AddScoped<ErpSystem.Core.Interfaces.INumberSequenceService, ErpSystem.Data.Services.NumberSequenceService>();
         services.AddScoped<ErpSystem.Core.Interfaces.ICandidateJwtService, ErpSystem.Api.Services.CandidateJwtService>();

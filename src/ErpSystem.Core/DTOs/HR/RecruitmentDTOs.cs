@@ -4287,6 +4287,23 @@ public class UpdateProbationReviewDto : UpdateDtoBase
 
 #region Probation Extension DTOs
 
+/// <summary>The rendered FR-HR-032 confirmation letter, ready to display or print to PDF.</summary>
+public class ProbationConfirmationLetterDto
+{
+    public Guid ProbationId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public DateOnly ConfirmationDate { get; set; }
+
+    /// <summary>Rendered subject line, used when the letter is emailed.</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Self-contained HTML document body, suitable for display and print-to-PDF.</summary>
+    public string HtmlBody { get; set; } = string.Empty;
+}
+
 public class ProbationExtensionDto : BaseDto
 {
     public Guid ProbationPeriodId { get; set; }

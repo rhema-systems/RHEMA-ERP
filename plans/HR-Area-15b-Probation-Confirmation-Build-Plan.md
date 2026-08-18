@@ -392,7 +392,7 @@ the JWT key ([[hr-harness-run-environment]]).
 ## 9. Slice log
 
 Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging** with the JWT
-key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 = 221**.
+key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 = 246**.
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -536,3 +536,41 @@ flag alone would not have been.
 bare `InvalidOperationException` at the throw site. Measured, it arrives as a 409 carrying its own
 message, because the controller catches it before the global handler sees it. **Reading the throw
 site is not reading the contract.**
+
+### Slice 6 — the FR-HR-032 confirmation letter (2026-08-18) — `run-slice6.mjs`, 25 assertions
+
+FR-HR-032 ends "...and generate a confirmation letter." Nothing generated anything. The letter now
+renders through the same machinery as the offer letter — an HR-editable template resolved by
+`TemplatedEmailService`, with `ProbationEmailCatalog` as the built-in default — and is returned as
+a self-contained HTML document suitable for print-to-PDF.
+
+Nothing is stored. Every figure is read back from the probation, the employee and their position at
+the moment of asking, so a saved copy could only go stale against the record it describes. The
+letter can only be produced for a **confirmed** probation: the FRD chain is *head confirms → HR
+issues the letter*, so it reports a decision rather than making one.
+
+✅ **The user asked the question that closed a real gap: "can this letter be built from the email
+template UI?"** It can — and slice 6 as first written would not have appeared there. The solution
+has a template designer (`/administration/settings/email` over `EmailTemplateController`) that
+edits **stored `EmailTemplate` rows**; the catalog is only the code-side default that
+`TemplatedEmailService` falls back to. The bridge between the two is a seeder, which I had not
+written. `ProbationEmailTemplateSeeder` now mirrors `RecruitmentEmailTemplateSeeder`.
+
+⚠ **And the seeders are switched off.** `RecruitmentEmailTemplateSeeder` sits in
+`HrSeedOrchestrator.DeferredSteps` — *"Templates are not TDC-branded yet; enable once the wording is
+agreed"* — so **no** email template rows are seeded on this deployment and every transactional email
+in recruitment runs from its code fallback too. The probation seeder is registered in the same
+deferred entry so both switch on together rather than probation quietly diverging. That same list
+explains slice 5's puzzle: `BenefitEnterpriseDataSeeder` is deferred, which is why the tenant held
+zero benefit policies and the benefit assertion had been skipping.
+
+⚠ The assertion worth copying: **no unresolved `{{Token}}` may remain in the rendered body.** A
+token named in a template but never supplied leaves a placeholder where a fact should be, and every
+other assertion about the letter would still pass. Also asserted in the negative: a probation that
+ran straight through says *nothing* about extensions, and one with no conducted review says nothing
+about a recommendation — a template that mentions absent things reads as an accusation.
+
+Observed while reading a rendered letter (data gaps, not defects, both on documented fallbacks):
+the company name renders as "Default Tenant" because `CompanyProfile` is unconfigured — that
+controller is one of the unbuilt stragglers in §2 of the area survey — and no default signatory name
+is set, so only the title prints.
