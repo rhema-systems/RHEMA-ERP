@@ -6614,6 +6614,12 @@ namespace ErpSystem.Web.Services
             await CreateTestUserAsync("financial.controller", "financial.controller@default.com", "Finance123!",
                 "Abena", "Dapaah", defaultTenant.Id, "Financial Controller", AuthenticationProvider.Local);
 
+            // Demonstrations need an identity that can inspect evidence without accidentally
+            // changing it. Keeping the auditor separate from makers, approvers and posters also
+            // lets UAT prove that read-only access is enforced rather than merely described.
+            await CreateTestUserAsync("finance.auditor", "finance.auditor@default.com", "Finance123!",
+                "Esi", "Auditor", defaultTenant.Id, "Finance Auditor", AuthenticationProvider.Local);
+
             await CreateTestUserAsync("chief.accountant", "chief.accountant@default.com", "Finance123!",
                 "Nana", "Adu", defaultTenant.Id, "Chief Accountant", AuthenticationProvider.Local);
 
@@ -6948,6 +6954,7 @@ namespace ErpSystem.Web.Services
                 new { Name = "Senior Accountant", Description = "Review role for journals, AP/AR transactions, budgets, and period activities" },
                 new { Name = "Finance Manager", Description = "Finance approval role for journals, budgets, AP/AR, and reporting" },
                 new { Name = "Financial Controller", Description = "Senior finance control role for posting, period close, and finance administration" },
+                new { Name = "Finance Auditor", Description = "Read-only Finance assurance role for ledgers, reports, workflows, close evidence, and audit review" },
                 new { Name = "Chief Accountant", Description = "Maker-checker approval role for bank deposits, returned cheques, and treasury settlement controls" },
                 new { Name = "Managing Director", Description = "Restricted executive approval role for exceptional and high-value finance transactions" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
@@ -7808,6 +7815,20 @@ namespace ErpSystem.Web.Services
                     "Finance.Reports.Schedules.View"
                 },
                 ["Financial Controller"] = FinancePermissions.AllNames,
+                ["Finance Auditor"] = new[]
+                {
+                    // Deliberately omit every create/edit/submit/approve/post/reverse permission.
+                    // The auditor can follow the accounting trail and export authorised reports,
+                    // while controller conventions and service checks keep operational records read-only.
+                    "Finance.Read",
+                    "Finance.JournalBatches.View",
+                    "Finance.AR.Collections.View",
+                    "Finance.Budgeting.Read",
+                    "Finance.BudgetRevisions.Read",
+                    "Finance.Reports.Run",
+                    "Finance.Reports.Export",
+                    "Finance.Reports.Schedules.View"
+                },
                 ["Budget Officer"] = new[]
                 {
                     "Finance.Read",

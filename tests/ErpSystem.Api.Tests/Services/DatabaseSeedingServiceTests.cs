@@ -34,6 +34,27 @@ public class DatabaseSeedingServiceTests
     }
 
     [Fact]
+    public void FinanceRoleSeeder_ShouldKeepDemoAuditorReadOnly()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var auditorStart = source.IndexOf("[\"Finance Auditor\"] = new[]", StringComparison.Ordinal);
+        var budgetOfficerStart = source.IndexOf("[\"Budget Officer\"] = new[]", auditorStart, StringComparison.Ordinal);
+
+        auditorStart.Should().BeGreaterThan(-1);
+        budgetOfficerStart.Should().BeGreaterThan(auditorStart);
+        var auditorPermissions = source[auditorStart..budgetOfficerStart];
+
+        auditorPermissions.Should().Contain("\"Finance.Read\"");
+        auditorPermissions.Should().Contain("\"Finance.Reports.Run\"");
+        auditorPermissions.Should().NotContain("\"Finance.Write\"");
+        auditorPermissions.Should().NotContain("\"Finance.Workflow.Approve\"");
+        auditorPermissions.Should().NotContain("\"Finance.JournalEntries.Post\"");
+        auditorPermissions.Should().NotContain("\"Finance.JournalEntries.Reverse\"");
+    }
+
+    [Fact]
     public async Task EnsureFinanceWorkflowsSeededAsync_ShouldPublishAndRepairPaymentRuntimeDefinitions()
     {
         await using var context = CreateContext();

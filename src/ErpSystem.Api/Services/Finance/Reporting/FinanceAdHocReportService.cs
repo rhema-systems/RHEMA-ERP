@@ -12,6 +12,7 @@ using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace ErpSystem.Api.Services.Finance.Reporting;
 
@@ -79,42 +80,64 @@ public sealed class FinanceAdHocReportService : IFinanceAdHocReportService
         var userId = UserId();
         var normalized = await ValidateAndNormalizeAsync(request, cancellationToken);
         var definitionId = Guid.NewGuid();
-        var report = new Report
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            Name = request.Name.Trim(),
-            Description = request.Description.Trim(),
-            Type = "table",
-            Status = "published",
-            Query = FinanceAdHocReportValues.QueryPrefix + definitionId,
-            Columns = JsonSerializer.Serialize(ToReportColumns(normalized), JsonOptions),
-            Tags = JsonSerializer.Serialize(new[] { "finance", "ad-hoc", normalized.DatasetCode }, JsonOptions),
-            CreatedBy = userId.ToString()
-        };
-        var definition = new FinanceAdHocReportDefinition
-        {
-            Id = definitionId,
-            TenantId = tenantId,
-            ReportId = report.Id,
-            DatasetCode = normalized.DatasetCode,
-            DefinitionJson = JsonSerializer.Serialize(normalized, JsonOptions),
-            OwnerUserId = userId,
-            Visibility = CanonicalVisibility(request.Visibility),
-            MaximumRows = request.MaximumRows,
-            CreatedBy = _currentUser.UserName ?? userId.ToString(),
-            CreatedById = userId
-        };
+        var reportId = Guid.NewGuid();
+        var reportName = request.Name.Trim();
+        var reportDescription = request.Description.Trim();
+        var definitionJson = JsonSerializer.Serialize(normalized, JsonOptions);
+        var reportColumns = JsonSerializer.Serialize(ToReportColumns(normalized), JsonOptions);
+        var reportTags = JsonSerializer.Serialize(new[] { "finance", "ad-hoc", normalized.DatasetCode }, JsonOptions);
+        var visibility = CanonicalVisibility(request.Visibility);
+        var strategy = _db.Database.CreateExecutionStrategy();
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        _db.Reports.Add(report);
-        _db.FinanceAdHocReportDefinitions.Add(definition);
-        await _db.SaveChangesAsync(cancellationToken);
-        // Keep governance evidence in the same transaction as the definition. If audit persistence
-        // fails, callers must not receive an error while an unaudited definition remains committed.
-        await AuditAsync(FinanceAuditEvents.AdHocReportCreated, definition, null, request, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return await RequiredDtoAsync(definition.Id, tenantId, cancellationToken);
+        await strategy.ExecuteInTransactionAsync(
+            async operationToken =>
+            {
+                // A retry must rebuild the tracked graph. Otherwise entities and audit rows from a
+                // rolled-back attempt can leak into the next SaveChanges call.
+                _db.ChangeTracker.Clear();
+                var report = new Report
+                {
+                    Id = reportId,
+                    TenantId = tenantId,
+                    Name = reportName,
+                    Description = reportDescription,
+                    Type = "table",
+                    Status = "published",
+                    Query = FinanceAdHocReportValues.QueryPrefix + definitionId,
+                    Columns = reportColumns,
+                    Tags = reportTags,
+                    CreatedBy = userId.ToString()
+                };
+                var definition = new FinanceAdHocReportDefinition
+                {
+                    Id = definitionId,
+                    TenantId = tenantId,
+                    ReportId = reportId,
+                    DatasetCode = normalized.DatasetCode,
+                    DefinitionJson = definitionJson,
+                    OwnerUserId = userId,
+                    Visibility = visibility,
+                    MaximumRows = request.MaximumRows,
+                    CreatedBy = _currentUser.UserName ?? userId.ToString(),
+                    CreatedById = userId
+                };
+
+                _db.Reports.Add(report);
+                _db.FinanceAdHocReportDefinitions.Add(definition);
+                await _db.SaveChangesAsync(operationToken);
+                // Keep governance evidence in the same retryable transaction as the definition.
+                await AuditAsync(FinanceAuditEvents.AdHocReportCreated, definition, null, request, operationToken);
+            },
+            async verificationToken => await _db.FinanceAdHocReportDefinitions
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == definitionId && item.TenantId == tenantId
+                    && item.ReportId == reportId && !item.IsDeleted, verificationToken),
+            IsolationLevel.ReadCommitted,
+            cancellationToken);
+
+        _db.ChangeTracker.Clear();
+        return await RequiredDtoAsync(definitionId, tenantId, cancellationToken);
     }
 
     public async Task<FinanceAdHocReportDefinitionDto> GetAsync(
@@ -129,53 +152,93 @@ public sealed class FinanceAdHocReportService : IFinanceAdHocReportService
         Guid id, UpdateFinanceAdHocReportDto request, CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId();
-        var definition = await RequiredAsync(id, tenantId, cancellationToken);
-        await EnsureCanMaintainAsync(definition, cancellationToken);
-        SetConcurrencyToken(definition, request.RowVersion);
-        var before = Map(definition);
         var normalized = await ValidateAndNormalizeAsync(request, cancellationToken);
+        var userId = UserId();
+        var updatedAt = DateTime.UtcNow;
+        var definitionJson = JsonSerializer.Serialize(normalized, JsonOptions);
+        var visibility = CanonicalVisibility(request.Visibility);
+        var reportName = request.Name.Trim();
+        var reportDescription = request.Description.Trim();
+        var reportColumns = JsonSerializer.Serialize(ToReportColumns(normalized), JsonOptions);
+        var reportTags = JsonSerializer.Serialize(new[] { "finance", "ad-hoc", normalized.DatasetCode }, JsonOptions);
+        var strategy = _db.Database.CreateExecutionStrategy();
 
-        definition.DatasetCode = normalized.DatasetCode;
-        definition.DefinitionJson = JsonSerializer.Serialize(normalized, JsonOptions);
-        definition.Visibility = CanonicalVisibility(request.Visibility);
-        definition.MaximumRows = request.MaximumRows;
-        definition.UpdatedAt = DateTime.UtcNow;
-        definition.UpdatedBy = _currentUser.UserName;
-        definition.LastModifiedById = UserId();
-        definition.Report.Name = request.Name.Trim();
-        definition.Report.Description = request.Description.Trim();
-        definition.Report.Columns = JsonSerializer.Serialize(ToReportColumns(normalized), JsonOptions);
-        definition.Report.Tags = JsonSerializer.Serialize(
-            new[] { "finance", "ad-hoc", normalized.DatasetCode }, JsonOptions);
-        definition.Report.UpdatedAt = DateTime.UtcNow;
-        definition.Report.UpdatedBy = _currentUser.UserName;
+        await strategy.ExecuteInTransactionAsync(
+            async operationToken =>
+            {
+                _db.ChangeTracker.Clear();
+                var definition = await RequiredAsync(id, tenantId, operationToken);
+                await EnsureCanMaintainAsync(definition, operationToken);
+                SetConcurrencyToken(definition, request.RowVersion);
+                var before = Map(definition);
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await SaveWithConcurrencyMessageAsync(cancellationToken);
-        await AuditAsync(FinanceAuditEvents.AdHocReportUpdated, definition, before, request, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+                definition.DatasetCode = normalized.DatasetCode;
+                definition.DefinitionJson = definitionJson;
+                definition.Visibility = visibility;
+                definition.MaximumRows = request.MaximumRows;
+                definition.UpdatedAt = updatedAt;
+                definition.UpdatedBy = _currentUser.UserName;
+                definition.LastModifiedById = userId;
+                definition.Report.Name = reportName;
+                definition.Report.Description = reportDescription;
+                definition.Report.Columns = reportColumns;
+                definition.Report.Tags = reportTags;
+                definition.Report.UpdatedAt = updatedAt;
+                definition.Report.UpdatedBy = _currentUser.UserName;
+
+                await SaveWithConcurrencyMessageAsync(operationToken);
+                await AuditAsync(FinanceAuditEvents.AdHocReportUpdated, definition, before, request, operationToken);
+            },
+            async verificationToken => await _db.FinanceAdHocReportDefinitions
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted
+                    && item.UpdatedAt == updatedAt && item.DefinitionJson == definitionJson
+                    && item.Visibility == visibility && item.MaximumRows == request.MaximumRows
+                    && item.Report.Name == reportName && item.Report.UpdatedAt == updatedAt,
+                    verificationToken),
+            IsolationLevel.ReadCommitted,
+            cancellationToken);
+
+        _db.ChangeTracker.Clear();
         return await RequiredDtoAsync(id, tenantId, cancellationToken);
     }
 
     public async Task DeleteAsync(Guid id, string rowVersion, CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId();
-        var definition = await RequiredAsync(id, tenantId, cancellationToken);
-        await EnsureCanMaintainAsync(definition, cancellationToken);
-        SetConcurrencyToken(definition, rowVersion);
-        var before = Map(definition);
         var now = DateTime.UtcNow;
-        definition.IsDeleted = true;
-        definition.DeletedAt = now;
-        definition.DeletedBy = _currentUser.UserName;
-        definition.Report.IsDeleted = true;
-        definition.Report.DeletedAt = now;
-        definition.Report.DeletedBy = _currentUser.UserName;
-        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await SaveWithConcurrencyMessageAsync(cancellationToken);
-        await AuditAsync(FinanceAuditEvents.AdHocReportDeleted, definition, before,
-            new { Reason = "Deleted through the governed Finance builder." }, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        var strategy = _db.Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteInTransactionAsync(
+            async operationToken =>
+            {
+                _db.ChangeTracker.Clear();
+                var definition = await RequiredAsync(id, tenantId, operationToken);
+                await EnsureCanMaintainAsync(definition, operationToken);
+                SetConcurrencyToken(definition, rowVersion);
+                var before = Map(definition);
+
+                definition.IsDeleted = true;
+                definition.DeletedAt = now;
+                definition.DeletedBy = _currentUser.UserName;
+                definition.Report.IsDeleted = true;
+                definition.Report.DeletedAt = now;
+                definition.Report.DeletedBy = _currentUser.UserName;
+                await SaveWithConcurrencyMessageAsync(operationToken);
+                await AuditAsync(FinanceAuditEvents.AdHocReportDeleted, definition, before,
+                    new { Reason = "Deleted through the governed Finance builder." }, operationToken);
+            },
+            async verificationToken => await _db.FinanceAdHocReportDefinitions
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == id && item.TenantId == tenantId && item.IsDeleted
+                    && item.DeletedAt == now && item.Report.IsDeleted && item.Report.DeletedAt == now,
+                    verificationToken),
+            IsolationLevel.ReadCommitted,
+            cancellationToken);
+
+        _db.ChangeTracker.Clear();
     }
 
     public bool CanHandle(string? reportQuery) => TryDefinitionId(reportQuery, out _);
