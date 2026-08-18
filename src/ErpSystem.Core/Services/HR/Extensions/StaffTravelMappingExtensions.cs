@@ -1348,9 +1348,10 @@ public static class StaffTravelMappingExtensions
         entity.PerDiemBudget = dto.PerDiemBudget;
         entity.TransportBudget = dto.TransportBudget;
         entity.MiscellaneousBudget = dto.MiscellaneousBudget;
-        entity.TotalCommitted = dto.TotalCommitted;
-        entity.TotalActual = dto.TotalActual;
-        entity.Variance = dto.TotalActual - dto.TotalCommitted;
+        // TotalCommitted / TotalActual / Variance are NOT mapped from the DTO: the service derives
+        // all three from the request's bookings and claims immediately after this runs
+        // (StaffTravelFinanceService.ApplyRollupAsync). Assigning them here as well would be
+        // harmless but misleading — a reader would think the client's figures survive.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1588,7 +1589,11 @@ public static class StaffTravelMappingExtensions
     public static void UpdateEntity(this StaffTravelAdvance entity, UpdateStaffTravelAdvanceDto dto, Guid userId)
     {
         entity.RequestedAmount = dto.RequestedAmount;
-        entity.ApprovedAmount = dto.ApprovedAmount;
+        // ⚠ ApprovedAmount is deliberately NOT mapped. Approving an advance is `ApproveAdvanceAsync`,
+        // which stamps ApprovedById from the token and checks the status; a plain PUT that could set
+        // the approved amount was a way round both, leaving an advance with money approved and no
+        // approver on record — and UnsettledAmount is computed off it. The area-5 "DTO owns too
+        // much" shape; slice 4 closed the actor half and this is the amount half.
         entity.CurrencyCode = dto.CurrencyCode;
         entity.AdvanceType = dto.AdvanceType;
         entity.SettlementDeadline = dto.SettlementDeadline;

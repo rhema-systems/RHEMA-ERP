@@ -1907,10 +1907,16 @@ public class UpdateStaffTravelBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal MiscellaneousBudget { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived; anything sent here is overwritten.</b> Committed is the value of
+    /// non-cancelled bookings on the request, actual is the value of paid expense claims, and
+    /// <c>Variance</c> is <c>ApprovedTotal - TotalActual</c>. All three were caller-declared, so a
+    /// budget-versus-actual screen showed whatever was last typed while the records that constitute
+    /// the spend sat unread on the same request. See <c>StaffTravelBudgetRollup</c>.
+    /// </summary>
     public decimal TotalCommitted { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary><b>Server-derived</b> — see <see cref="TotalCommitted"/>.</summary>
     public decimal TotalActual { get; set; }
 }
 
@@ -2219,7 +2225,11 @@ public class UpdateStaffTravelAdvanceDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RequestedAmount { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Ignored.</b> Approving an advance is <c>POST advances/{id}/approve</c>, which stamps the
+    /// approver from the token and checks the status. Accepting it here left an advance with money
+    /// approved and nobody on record as having approved it.
+    /// </summary>
     public decimal? ApprovedAmount { get; set; }
 
     [Required]
@@ -2248,6 +2258,11 @@ public class DisburseStaffTravelAdvanceDto
     public Guid AdvanceId { get; set; }
     // DisbursedById removed: stamped from the caller's token, never accepted from the body.
 
+    /// <summary>
+    /// <b>Ignored — stamped from the clock.</b> It let a caller state when the money went out, which
+    /// matters because the settlement deadline and the overdue-settlement sweep both run off dates.
+    /// Kept on the DTO so existing callers do not break; the value is not read.
+    /// </summary>
     public DateTime DisbursedAt { get; set; } = DateTime.UtcNow;
 }
 

@@ -628,6 +628,9 @@ export const navigationItems: NavItem[] = [
           { title: 'Register', href: '/hr/travel', icon: Plane },
           // Open to every employee; the register above answers 403 without HR.Travel.Read.
           { title: 'My Travel', href: '/hr/travel/mine', icon: UserCheck },
+          // Claims get their own entry because the finance desk works a queue ACROSS trips —
+          // "approved and unpaid" — which no single travel request can show.
+          { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
         ],
       },
       {

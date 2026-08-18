@@ -22,6 +22,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IStaffTravelAdvanceRepository _advanceRepository;
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly StaffTravelCurrencyBridge _currency;
+    private readonly StaffTravelBudgetRollup _budgetRollup;
     private readonly IStaffTravelPerDiemRateRepository _perDiemRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
@@ -34,6 +35,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IStaffTravelAdvanceRepository advanceRepository,
         IStaffTravelRequestRepository requestRepository,
         StaffTravelCurrencyBridge currency,
+        StaffTravelBudgetRollup budgetRollup,
         IStaffTravelPerDiemRateRepository perDiemRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
@@ -45,6 +47,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         _advanceRepository = advanceRepository;
         _requestRepository = requestRepository;
         _currency = currency;
+        _budgetRollup = budgetRollup;
         _perDiemRepository = perDiemRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
@@ -112,12 +115,33 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
     // ---- Budget ------------------------------------------------------------
 
+    /// <summary>
+    /// A request's travel budget, with its committed and actual spend recomputed as it is read.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Recomputed on read, not merely on write.</b> Bookings and claims change constantly and
+    /// the budget row is written rarely, so a rollup persisted only at write time would be stale
+    /// almost immediately — and a stale spend figure is the same failure as the hand-entered one it
+    /// replaces, just slower to notice. The write path still persists the figures so the stored row
+    /// is not nonsense for anything reading the table directly, but this read is the authority.
+    /// </remarks>
     public async Task<StaffTravelBudgetDto?> GetBudgetByRequestAsync(Guid requestId, CancellationToken cancellationToken = default)
     {
         var entity = await _budgetRepository.GetByRequestIdAsync(requestId);
         if (entity == null || entity.TenantId != GetTenantId())
             return null;
-        return entity.ToDto();
+
+        var dto = entity.ToDto();
+        var spend = await _budgetRollup.ComputeAsync(
+            entity.TenantId, entity.StaffTravelRequestId, cancellationToken);
+
+        // ⚠ Onto the DTO, NOT onto the entity. The entity here is tracked, so assigning to it would
+        // queue an UPDATE for whatever else in the request calls SaveChangesAsync — a read that
+        // silently writes. The write paths do the persisting, deliberately and visibly.
+        dto.TotalCommitted = spend.Committed;
+        dto.TotalActual = spend.Actual;
+        dto.Variance = dto.ApprovedTotal - spend.Actual;
+        return dto;
     }
 
     public async Task<StaffTravelBudgetDto> CreateBudgetAsync(CreateStaffTravelBudgetDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -131,9 +155,40 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
             throw new InvalidOperationException("A budget already exists for this request.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        await ApplyRollupAsync(entity, cancellationToken);
         await _budgetRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Recomputes a budget's committed and actual spend from the request's own bookings and claims.
+    /// </summary>
+    /// <remarks>
+    /// <para>All three figures were caller-declared — <c>UpdateEntity</c> assigned
+    /// <c>TotalCommitted</c> and <c>TotalActual</c> straight off the DTO and derived
+    /// <c>Variance</c> from them — so the budget screen showed whatever was last typed while the
+    /// records that constitute the spend sat unread on the same request. See
+    /// <see cref="StaffTravelBudgetRollup"/> for what each figure means and why they are not
+    /// summed.</para>
+    ///
+    /// <para><b>Variance is now approved-versus-actual</b> (<c>ApprovedTotal - TotalActual</c>),
+    /// which is what a budget variance means and what <c>JobAnalysisService</c> already computes
+    /// for its own budgets. It was <c>TotalActual - TotalCommitted</c> — a different quantity
+    /// entirely, with the sign of an overspend inverted relative to the rest of the codebase.</para>
+    ///
+    /// <para>Recomputed on every write rather than cached against booking changes: a travel budget
+    /// is read far less often than its bookings are edited, and a stale rollup is precisely the
+    /// failure this replaces.</para>
+    /// </remarks>
+    private async Task ApplyRollupAsync(StaffTravelBudget entity, CancellationToken cancellationToken)
+    {
+        var spend = await _budgetRollup.ComputeAsync(
+            entity.TenantId, entity.StaffTravelRequestId, cancellationToken);
+
+        entity.TotalCommitted = spend.Committed;
+        entity.TotalActual = spend.Actual;
+        entity.Variance = entity.ApprovedTotal - spend.Actual;
     }
 
     public async Task<StaffTravelBudgetDto> UpdateBudgetAsync(UpdateStaffTravelBudgetDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -141,6 +196,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         var entity = await GetOwnedBudgetAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await ApplyRollupAsync(entity, cancellationToken);
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -290,7 +346,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
         entity.Status = reviewDto.NewStatus;
         entity.FinanceReviewedById = reviewerEmployeeId;   // the caller, not a payload value
-        entity.FinanceReviewedAt = reviewDto.ReviewedAt;
+        entity.FinanceReviewedAt = DateTime.UtcNow;        // ...and the clock, not one either
+
         entity.UpdatedBy = reviewerEmployeeId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
@@ -311,7 +368,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.Status = TravelClaimStatus.Paid;
         entity.PaymentMethod = payDto.PaymentMethod;
         entity.PaymentReference = payDto.PaymentReference;
-        entity.PaidAt = payDto.PaidAt;
+        // When money left is the clock's answer, not the caller's. `PaidAt` is the date every
+        // downstream reconciliation will key off, and it was whatever the payload said.
+        entity.PaidAt = DateTime.UtcNow;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await SettleLinkedAdvanceAsync(entity, cancellationToken);
@@ -372,7 +431,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.AmountRejected = reviewDto.AmountRejected;
         entity.RejectionReason = reviewDto.RejectionReason;
         entity.ReviewedById = reviewerEmployeeId;   // the caller, not a payload value
-        entity.ReviewedAt = reviewDto.ReviewedAt;
+        entity.ReviewedAt = DateTime.UtcNow;        // ...and the clock, not one either
+
         entity.UpdatedBy = reviewerEmployeeId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
@@ -541,7 +601,10 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
 
         entity.Status = TravelAdvanceStatus.Disbursed;
         entity.DisbursedById = disburserEmployeeId;   // the caller, not a payload value
-        entity.DisbursedAt = disburseDto.DisbursedAt;
+        // ...and the clock, not a payload value either. `DisburseStaffTravelAdvanceDto.DisbursedAt`
+        // let a caller state when the money went out — the F-09 fiction shape — which matters here
+        // because the settlement deadline and the overdue-settlement sweep are both driven by dates.
+        entity.DisbursedAt = DateTime.UtcNow;
         entity.UpdatedBy = disburserEmployeeId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 

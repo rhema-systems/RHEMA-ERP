@@ -622,6 +622,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<StaffTravelCurrencyBridge>();
         // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
         services.AddScoped<StaffTravelPolicyGuard>();
+        // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).
+        services.AddScoped<StaffTravelBudgetRollup>();
 
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();

@@ -22,6 +22,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { TravelAttachmentsPanel } from '@/components/hr/travel/TravelAttachmentsPanel';
 import { TravelBookingsPanel } from '@/components/hr/travel/TravelBookingsPanel';
+import { TravelFinancePanel } from '@/components/hr/travel/TravelFinancePanel';
 import { TravelItineraryPanel } from '@/components/hr/travel/TravelItineraryPanel';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
@@ -196,6 +197,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="itinerary">Itinerary</TabsTrigger>
           <TabsTrigger value="bookings">Bookings</TabsTrigger>
+          <TabsTrigger value="finance">Finance</TabsTrigger>
           <TabsTrigger value="comments">Comments</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
           <WorkflowTabTrigger value="workflow" />
@@ -295,6 +297,10 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
 
         <TabsContent value="bookings" className="pt-4">
           <TravelBookingsPanel request={r} />
+        </TabsContent>
+
+        <TabsContent value="finance" className="pt-4">
+          <TravelFinancePanel request={r} />
         </TabsContent>
 
         <TabsContent value="comments" className="space-y-4 pt-4">
