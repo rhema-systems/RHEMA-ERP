@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
 
 namespace ErpSystem.Core.DTOs.HR;
 
@@ -1644,6 +1645,30 @@ public class UpdateTalentReviewRatingDto : UpdateDtoBase
 /// axis of the nine box simply cannot be derived. That fact is what settled D-4: the grid could not
 /// have been a projection of appraisal data even if we had wanted it to be.</para>
 /// </remarks>
+/// <summary>
+/// A staff movement raised against a succession plan — the plan's outcome, seen from the plan.
+/// </summary>
+/// <remarks>
+/// A deliberately thin projection of area 8's <c>StaffMovement</c>. Succession does not own these
+/// records and must not grow a second copy of them: what a plan needs to show is that a named
+/// successor is moving into the post, and enough to link through to the movement itself.
+/// </remarks>
+public class SuccessionPlanMovementDto
+{
+    public Guid Id { get; set; }
+    public string MovementNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public StaffMovementType MovementType { get; set; }
+    public string MovementTypeName => MovementType.ToString();
+    public string? NewPositionTitle { get; set; }
+    public DateTime RequestDate { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+
+    /// <summary>The movement's own status — succession does not interpret it, only shows it.</summary>
+    public string Status { get; set; } = string.Empty;
+}
+
 public class TalentRatingSuggestionDto
 {
     public Guid EmployeeId { get; set; }

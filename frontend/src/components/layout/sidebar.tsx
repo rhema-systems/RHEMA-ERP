@@ -653,6 +653,7 @@ export const navigationItems: NavItem[] = [
           // Calibration sessions and the nine box. Separate from plans and pools because a session
           // is an EVENT with a close, not a register: finalizing freezes it for good.
           { title: 'Talent Reviews', href: '/hr/succession/reviews', icon: Grid3x3 },
+          { title: 'Dashboard', href: '/hr/succession/dashboard', icon: LayoutDashboard },
         ],
         // No "my succession" entry, and there must never be one: readiness, retention risk and
         // nine-box placement are assessments made ABOUT a candidate, not records belonging to them.

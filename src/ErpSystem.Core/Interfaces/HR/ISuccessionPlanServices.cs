@@ -64,6 +64,9 @@ public interface ISuccessionPlanService
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
     // Dashboard
+    /// <summary>Staff movements raised against this plan — read-only across the area-8 seam.</summary>
+    Task<IEnumerable<SuccessionPlanMovementDto>> GetMovementsAsync(Guid planId, CancellationToken cancellationToken = default);
+
     Task<SuccessionDashboardDto> GetDashboardAsync(int? planYear = null, CancellationToken cancellationToken = default);
 }
 

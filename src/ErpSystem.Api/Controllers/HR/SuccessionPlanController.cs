@@ -93,6 +93,18 @@ public class SuccessionPlanController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionPlanSummaryDto>>> GetWithImpendingVacancy([FromQuery] int daysAhead = 90)
         => Ok(await _service.GetWithImpendingVacancyAsync(daysAhead));
 
+    /// <summary>
+    /// The staff movements raised against this plan — whether the successor actually moved.
+    /// </summary>
+    /// <remarks>
+    /// Read-only across the area-8 boundary. A movement already shows the plan it fulfils; this is
+    /// the reverse, which was missing — a plan could name a successor and never show that anything
+    /// came of it.
+    /// </remarks>
+    [HttpGet("{id:guid}/movements")]
+    public async Task<ActionResult<IEnumerable<SuccessionPlanMovementDto>>> GetMovements(Guid id)
+        => Ok(await _service.GetMovementsAsync(id));
+
     [HttpGet("dashboard")]
     public async Task<ActionResult<SuccessionDashboardDto>> GetDashboard([FromQuery] int? planYear = null)
         => Ok(await _service.GetDashboardAsync(planYear));

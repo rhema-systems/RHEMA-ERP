@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
@@ -29,6 +30,7 @@ public class SuccessionPlanService : ISuccessionPlanService
     private readonly ISuccessionPlanHistoryRepository _historyRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
     private readonly ICompanyHrPolicyProvider _hrPolicyProvider;
+    private readonly IStaffMovementRepository _movementRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -45,6 +47,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         ISuccessionPlanHistoryRepository historyRepository,
         ISuccessionDocumentRepository documentRepository,
         ICompanyHrPolicyProvider hrPolicyProvider,
+        IStaffMovementRepository movementRepository,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
@@ -57,6 +60,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         _historyRepository = historyRepository;
         _documentRepository = documentRepository;
         _hrPolicyProvider = hrPolicyProvider;
+        _movementRepository = movementRepository;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
@@ -744,6 +748,51 @@ public class SuccessionPlanService : ISuccessionPlanService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    /// <summary>
+    /// The staff movements raised against this succession plan — the plan's actual outcome.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ **A read-only projection across an area boundary.** `StaffMovement.SuccessionPlanId`
+    /// is area 8's column and area 8 already resolves it in both directions on its own side: a
+    /// movement's detail shows the plan number it fulfils. What was missing was the reverse — a
+    /// plan that named a successor had no way to show that the successor *actually moved into the
+    /// post*, which is the only evidence the plan ever worked.</para>
+    ///
+    /// <para>Nothing here writes to a movement. The seam is crossed by reference, the same call
+    /// made for SHE↔Medical: succession reads movements, movements own them.</para>
+    ///
+    /// <para>Deliberately unfiltered by status. A movement still awaiting approval is exactly what
+    /// someone looking at the plan wants to see — "the successor is moving" is more useful than
+    /// "the successor has moved", and the movement's own status says which.</para>
+    /// </remarks>
+    public async Task<IEnumerable<SuccessionPlanMovementDto>> GetMovementsAsync(
+        Guid planId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await GetOwnedPlanAsync(planId);   // 404s for a plan in another tenant before reading across
+
+        var movements = await _movementRepository.GetQueryable()
+            .Where(m => m.TenantId == tenantId && m.SuccessionPlanId == planId)
+            .Include(m => m.Employee)
+            .Include(m => m.NewPosition)
+            .OrderByDescending(m => m.RequestDate)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        return movements.Select(m => new SuccessionPlanMovementDto
+        {
+            Id = m.Id,
+            MovementNumber = m.MovementNumber,
+            EmployeeId = m.EmployeeId,
+            EmployeeName = m.Employee?.FullName ?? string.Empty,
+            MovementType = m.MovementType,
+            NewPositionTitle = m.NewPosition?.Title,
+            RequestDate = m.RequestDate,
+            EffectiveDate = m.EffectiveDate,
+            Status = m.Status.ToString(),
+        }).ToList();
     }
 
     public async Task<SuccessionDashboardDto> GetDashboardAsync(int? planYear = null, CancellationToken cancellationToken = default)

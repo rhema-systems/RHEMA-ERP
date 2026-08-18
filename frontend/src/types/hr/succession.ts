@@ -278,7 +278,16 @@ export interface PositionCoverageRow {
   successorCount: number;
 }
 
+/**
+ * ⚠ Rewritten from the live payload in slice 9. The first version of this interface was written
+ * from the handful of fields the ground-truth probe happened to print and covered about half of a
+ * 28-field DTO — the counters were there, but `benchStrength`, `emergencyCoverageGaps`,
+ * `coverageTrend`, `upcomingVacancies`, `overdueAlerts`, the action tallies and the status
+ * breakdown were all missing. A dashboard built against the short version would simply not have
+ * shown two thirds of what the server computes, and nothing would have failed.
+ */
 export interface SuccessionDashboard {
+  // Coverage counters
   totalActivePlans: number;
   totalCriticalPositions: number;
   positionsWithReadyNowSuccessor: number;
@@ -286,13 +295,139 @@ export interface SuccessionDashboard {
   positionsWithoutSuccessors: number;
   positionsWithoutEmergencyCover: number;
   coveragePercentage: number;
+
   riskHeatmap: RiskHeatmapCell[];
   withReadyNow: PositionCoverageRow[];
   withoutReadyNow: PositionCoverageRow[];
+
+  // Talent pool
   totalTalentPoolMembers: number;
   talentReadyNow: number;
+  talentReady1To2Years: number;
+  talentLongTerm: number;
+
+  // Actions
+  totalActions: number;
+  completedActions: number;
+  inProgressActions: number;
+  overdueActionsCount: number;
+  overdueAlerts: OverdueActionAlert[];
+
+  benchStrength: BenchStrengthRow[];
+  upcomingVacancies: UpcomingVacancyAlert[];
+  emergencyCoverageGaps: EmergencyCoverageRow[];
+  coverageTrend: CoverageTrendPoint[];
+
+  // Plan status breakdown
+  draftPlans: number;
+  underReviewPlans: number;
+  approvedPlans: number;
+
+  computedAt: string;
+  /** Null when no year filter was applied. */
+  filterYear?: number | null;
 }
 
+export interface OverdueActionAlert {
+  actionId: string;
+  actionDescription: string;
+  responsiblePersonName?: string | null;
+  dueDate: string;
+  positionTitle: string;
+}
+
+export interface BenchStrengthRow {
+  planId: string;
+  positionTitle: string;
+  successorCount: number;
+}
+
+export interface UpcomingVacancyAlert {
+  planId: string;
+  positionTitle: string;
+  currentIncumbentName?: string | null;
+  /** What is expected to cause the vacancy — retirement, an anticipated departure. */
+  kind: string;
+  eventDate: string;
+  daysUntil: number;
+  reason?: string | null;
+  hasReadyNowSuccessor: boolean;
+  riskLevel: SuccessionRisk;
+}
+
+export interface EmergencyCoverageRow {
+  planId: string;
+  positionTitle: string;
+  currentIncumbentName?: string | null;
+  criticality: PositionCriticality;
+  riskLevel: SuccessionRisk;
+  hasReadyNowSuccessor: boolean;
+}
+
+export interface CoverageTrendPoint {
+  planYear: number;
+  totalPlans: number;
+  readyNowPlans: number;
+  strongBenchPlans: number;
+}
+
+/**
+ * ⚠ `fitScore`, `fitBand` and `competencyFitPercent` are computed against the plan's competency
+ * requirements — and **no competencies exist until area 17 lands**. Today every candidate scores 0
+ * and bands as "Low" with `competencyFitPercent: null` and `requirementCount: 0`.
+ *
+ * A screen must not render that as a verdict. "Low fit" on every person in the organisation is not
+ * a judgement about them, it is an absence of data, and showing it as a badge would be worse than
+ * showing nothing. Check `requirementCount === 0` and say so.
+ */
+export interface SuccessionCandidateSearchResult {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  positionTitle?: string | null;
+  organizationUnitName?: string | null;
+  age?: number | null;
+  yearsOfService?: number | null;
+  serviceYearsLeft?: number | null;
+  retirementDate?: string | null;
+  latestPerformanceScore?: number | null;
+  latestPerformanceYear?: number | null;
+  fitScore: number;
+  fitBand: string;
+  requirementCount: number;
+  gapCount: number;
+  competencyFitPercent?: number | null;
+}
+
+export interface CandidateFit {
+  candidateId: string;
+  employeeId: string;
+  employeeName: string;
+  currentRank: number;
+  fitScore: number;
+  fitBand: string;
+  suggestedRank: number;
+}
+
+/**
+ * A staff movement raised against a plan — area 8's record, read from the succession side.
+ *
+ * ⚠ Succession does not own these. The plan shows them as evidence that a named successor actually
+ * moved into the post; everything about the movement itself lives in `/hr/movements`.
+ */
+export interface SuccessionPlanMovement {
+  id: string;
+  movementNumber: string;
+  employeeId: string;
+  employeeName: string;
+  movementType: string;
+  movementTypeName: string;
+  newPositionTitle?: string | null;
+  requestDate: string;
+  effectiveDate?: string | null;
+  /** The movement's own status. Succession displays it and does not interpret it. */
+  status: string;
+}
 /**
  * ⚠ Returns an empty list today: no competencies exist until area 17 lands. A screen that reads it
  * must render "none defined yet" rather than treating empty as a loading state.

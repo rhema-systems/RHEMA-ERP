@@ -46,6 +46,9 @@ import type {
   SuccessionActionSummary,
   SuccessionDocument,
   CompetencyLookup,
+  SuccessionCandidateSearchResult,
+  CandidateFit,
+  SuccessionPlanMovement,
   CreateSuccessionPlan,
   UpdateSuccessionPlan,
   RejectSuccessionPlan,
@@ -134,6 +137,16 @@ class SuccessionService {
 
   getWithImpendingVacancy(daysAhead = 90) {
     return apiService.get<SuccessionPlanSummary[]>(`${this.baseUrl}/impending-vacancy`, { daysAhead });
+  }
+
+  /**
+   * The staff movements raised against this plan — whether the successor actually moved.
+   *
+   * ⚠ Read-only across the area-8 boundary. Succession shows these as the plan's outcome; the
+   * movements themselves belong to `/hr/movements` and are edited there.
+   */
+  getMovements(id: string) {
+    return apiService.get<SuccessionPlanMovement[]>(`${this.baseUrl}/${id}/movements`);
   }
 
   getDashboard(planYear?: number) {
@@ -713,3 +726,30 @@ class TalentReviewService {
 }
 
 export const talentReviewService = new TalentReviewService();
+
+/**
+ * Candidate search and fit scoring. Backend route: api/succession.
+ *
+ * ⚠ **Fit is meaningless until area 17 lands.** Both endpoints score candidates against the plan's
+ * competency requirements, and no competencies exist yet — so every result comes back
+ * `fitScore: 0`, `fitBand: "Low"`, `requirementCount: 0`. That is an absence of data, not a verdict
+ * about anyone. A screen must check `requirementCount` and say so rather than rendering a badge.
+ */
+class SuccessionSearchService {
+  private readonly baseUrl = '/succession';
+
+  /** ⚠ POST, not GET — it takes a criteria object. Empty criteria returns everyone. */
+  searchCandidates(criteria: Record<string, unknown> = {}) {
+    return apiService.post<SuccessionCandidateSearchResult[]>(
+      `${this.baseUrl}/candidate-search`,
+      criteria,
+    );
+  }
+
+  /** Scores the candidates already on a plan, and suggests a ranking. */
+  scorePlanCandidates(planId: string) {
+    return apiService.get<CandidateFit[]>(`${this.baseUrl}/plans/${planId}/candidate-fit`);
+  }
+}
+
+export const successionSearchService = new SuccessionSearchService();

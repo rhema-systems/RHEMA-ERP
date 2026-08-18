@@ -81,6 +81,17 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
   };
 
   /**
+   * The area-8 seam, read from this side. A movement already shows the plan it fulfils; until
+   * slice 9 the plan could not show the movement — so a plan that named a successor had no way to
+   * record that the successor actually moved into the post, which is the only evidence the plan
+   * ever did anything.
+   */
+  const { data: movements } = useQuery({
+    queryKey: ['succession-plans', id, 'movements'],
+    queryFn: () => successionService.getMovements(id),
+  });
+
+  /**
    * ⚠ **Approval is the workflow engine's, not this page's.** Slice 8 retired the bespoke
    * submit/review/approve chain: whether a plan is out for approval, who may act on it and which
    * step it sits on are the workflow instance's business. Everything below goes through
@@ -181,6 +192,7 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
           </TabsTrigger>
           <TabsTrigger value="actions">Actions ({p.actions.length})</TabsTrigger>
           <TabsTrigger value="documents">Documents ({p.documents.length})</TabsTrigger>
+          <TabsTrigger value="movements">Outcome ({movements?.length ?? 0})</TabsTrigger>
           <WorkflowTabTrigger value="workflow" />
         </TabsList>
 
@@ -400,6 +412,53 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
                         <TableCell>{d.documentType}</TableCell>
                         <TableCell>{d.uploadedByName}</TableCell>
                         <TableCell>{fmtDate(d.uploadDate)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="movements" className="pt-4">
+          <Card>
+            <CardContent className="p-0">
+              {!movements || movements.length === 0 ? (
+                <EmptyState
+                  icon={ArrowUpRight}
+                  title="Nobody has moved yet"
+                  description="When a staff movement is raised against this plan, it appears here — that is the plan actually doing something rather than merely recording an intention."
+                />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Movement</TableHead>
+                      <TableHead>Employee</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Into</TableHead>
+                      <TableHead>Effective</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {movements.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell>
+                          {/* The movement belongs to area 8 — link out, do not re-implement it. */}
+                          <Link href={`/hr/movements/${m.id}`} className="font-medium hover:underline">
+                            {m.movementNumber}
+                            <ArrowUpRight className="ml-1 inline h-3 w-3" />
+                          </Link>
+                        </TableCell>
+                        <TableCell>{m.employeeName}</TableCell>
+                        <TableCell>{spaced(m.movementTypeName)}</TableCell>
+                        <TableCell>{m.newPositionTitle ?? '—'}</TableCell>
+                        <TableCell>{fmtDate(m.effectiveDate)}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={m.status} />
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -354,6 +354,35 @@ Worth noting the shape rather than just the instance: this is the same family as
 actors (§3.5, §3.12, §3.18). Each let the client assert something only the server should decide —
 who acted, when, and here *what the outcome was*.
 
+### 3.22 The area-8 seam was built one way, and area 8 built its half properly
+
+`StaffMovement.SuccessionPlanId` is mapped, the loader includes it, and a movement's detail resolves
+the plan number it fulfils — area 8 did its side correctly when the FK was still pointing at an
+unbuilt area. What was missing was the reverse: **a plan that named a successor had no way to show
+that the successor actually moved into the post**, which is the only evidence the plan ever did
+anything rather than recording an intention.
+
+Closed by `GET /api/succession-plans/{id}/movements`, a read-only projection. Succession reads
+movements; movements own them. Deliberately unfiltered by status — "the successor is moving" is more
+useful than waiting for "has moved", and the movement's own status says which.
+
+### 3.23 ⚠ Fit scores are zero for everyone, and that is not a verdict
+
+`candidate-search` and `candidate-fit` both work — 100 results, a scored row per candidate. But
+`fitScore` is `0`, `fitBand` is `"Low"`, `competencyFitPercent` is `null` and `requirementCount` is
+`0` for **everyone**, because fit is computed against competency requirements and none exist until
+area 17.
+
+⚠ **A "Low fit" badge on every person in the organisation is an absence of data wearing the clothes
+of a judgement.** The UI checks `requirementCount` before rendering the band at all. This is the
+same shape as the empty gap-generation in §3.15 — an endpoint that works perfectly and returns
+nothing meaningful is more dangerous than one that fails, because nothing signals the difference.
+
+⚠ Also caught here: the `SuccessionDashboard` TypeScript type covered about **half** of a 28-field
+DTO. The missing two thirds — `benchStrength`, `emergencyCoverageGaps`, `coverageTrend`,
+`upcomingVacancies`, `overdueAlerts`, the action tallies, the status breakdown — would simply not
+have been rendered, and nothing would have failed. Rewritten from the live payload.
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -452,6 +481,8 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-24 | Review session detail and rating writes returned blank names — the wrong-loader mistake again | Medium | **fixed, slice 7** |
 | F-25 | The bespoke `review` action took a **caller-chosen `NewStatus`** — a route straight to Approved, around any configured approval (§3.21) | **High** | **fixed, slice 8** |
 | F-26 | `StaffTravelRequest` missing from the frontend's `entityTypeMapping.ts` — **area 12's**, found in passing | Low | **fixed, slice 8** |
+| F-27 | A plan could not show the movement that fulfilled it — the area-8 seam was built one way only (§3.22) | Medium | **fixed, slice 9** |
+| F-28 | `SuccessionDashboard` TS type covered ~half a 28-field DTO (§3.23) | Medium | **fixed, slice 9** |
 
 ⚠ **F-08 is deliberately not fixed here.** Both controllers were measured ungated alongside the
 other seven, but they belong to closed areas (7 training, 6 recruitment) that have no permission
@@ -731,3 +762,22 @@ plan and being refused, which is now asserted with the engine's own message.
 ⚠ And a fixture lesson: the definition originally named a **specific approver user**, which meant
 only the run that published it could approve anything — every other harness was locked out of an
 endpoint that worked perfectly. It is a **role rule** now.
+
+### Slice 9 — dashboard, search and the movements seam (2026-08-18)
+
+Closes **F-27**, **F-28**. Harness `run-slice9.mjs` — **64 passed, 0 failed**. All nine green:
+31 + 25 + 49 + 34 + 36 + 44 + 46 + 26 + 64 = **355 assertions**. `tsc`/`eslint` clean.
+
+- `GET /api/succession-plans/{id}/movements` — the area-8 seam's missing direction, read-only.
+- `/hr/succession/dashboard` — KPIs, a risk × criticality heatmap, upcoming vacancies, emergency
+  coverage gaps, bench strength, overdue actions and a coverage trend, all from the real payload.
+- An **Outcome** tab on the plan detail listing the movements raised against it, linking out to
+  `/hr/movements/{id}` rather than re-implementing anything.
+
+⚠ **A harness lesson that nearly cost the whole slice.** The first run reported **56 passed, 0
+failed** — while the movement create had 400'd inside a `try/catch` and every seam assertion had
+been skipped. The harness proved nothing about the thing the slice existed to build, and said so in
+green. **A skipped assertion is not a passing one**; the create is now load-bearing and its failure
+would take the run down. (Area 8's DTO wants current *and* new position, org unit and salary, and
+`Category` is Voluntary/Involuntary/OrganizationalRestructure/CareerDevelopment/Administrative —
+"Vertical" was my guess and it was wrong.)
