@@ -2367,6 +2367,22 @@ public enum OnboardingAssetProvisionStatus
     NotRequired = 6
 }
 
+/// <summary>How an oath of secrecy reached the record (FR-HR-030).</summary>
+/// <remarks>
+/// The two are kept apart deliberately. An oath affirmed in the system carries a server-stamped
+/// time, the affirmer's IP and a tamper hash; one sworn on paper carries a witness and, usually, a
+/// scan. Collapsing them into a single "recorded" state would let an HR-entered row be mistaken
+/// later for the employee's own act — which is the distinction the whole record exists to preserve.
+/// </remarks>
+public enum OathAdministrationMethod
+{
+    /// <summary>The employee affirmed it themselves in the system.</summary>
+    Affirmed = 1,
+
+    /// <summary>Sworn on paper before a witness, and recorded afterwards by HR.</summary>
+    Administered = 2
+}
+
 public enum ProbationStatus
 {
     /// <summary>Running. Reviews are held, and the outcome has not been asked for yet.</summary>

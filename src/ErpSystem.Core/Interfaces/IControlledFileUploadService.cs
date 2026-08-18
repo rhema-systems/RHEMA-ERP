@@ -36,6 +36,14 @@ public static class ControlledFileUploadCategories
     public const string HrStaffTravelAttachments = "hr-staff-travel-attachments";
 
     /// <summary>
+    /// Signed oaths of secrecy (FR-HR-030). Its own category rather than a general HR bucket: an
+    /// oath is a legal instrument naming one person, kept for the life of their employment, and
+    /// retention and access rules that apply to it should not have to be expressed as "some of the
+    /// documents in the HR pile".
+    /// </summary>
+    public const string HrOathOfSecrecyDocuments = "hr-oath-of-secrecy-documents";
+
+    /// <summary>
     /// Recruitment paperwork attached to a requisition, vacancy or advert — org charts, budget
     /// approvals, signed job descriptions, agency terms. Kept apart from
     /// <see cref="HrCandidateDocuments"/>: that is a named person's file, this is a role's, and the
@@ -94,6 +102,7 @@ public static class ControlledFileUploadCategories
                 // a name, a number and an address. A tenant policy should not be able to permit
                 // one of those unscanned.
                 HrStaffTravelAttachments,
+                HrOathOfSecrecyDocuments,
                 HrRecruitmentAttachments,
                 HrPreEmploymentDocuments,
                 HrSheControlledDocuments

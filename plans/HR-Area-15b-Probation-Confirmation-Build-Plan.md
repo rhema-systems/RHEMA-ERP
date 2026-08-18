@@ -392,7 +392,10 @@ the JWT key ([[hr-harness-run-environment]]).
 ## 9. Slice log
 
 Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging** with the JWT
-key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 = 358**.
+key passed in ([[hr-harness-run-environment]]). Slice 9 additionally needs `node clamd-stub.mjs`
+running alongside — the controlled upload gate makes a clean scan mandatory for every hr-*
+category, so without it the code after the gate never executes. Running totals:
+**38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 / 55 = 413**.
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -685,3 +688,50 @@ next run for reasons that looked nothing like the cause. Two faults compounded: 
 list), and the retire call was wrapped in `.catch(() => {})`, so "found nothing" and "failed" both
 reported success. Now it retires the **known id** from publish — no listing — and a failure prints
 the remediation command and sets a non-zero exit. Verified in SQL after every run since.
+
+### Slice 9 — FR-HR-030, the oath of secrecy (2026-08-18) — `run-slice9.mjs`, 55 assertions
+
+`grep -ri oath src` returned nothing in HR at all. The requirement is Mandatory and sits in §A1.4
+beside probation, which is why it is here rather than logged back to a closed area 15.
+
+**A record of its own, modelled on `OrientationAcknowledgement` but not coupled to it.**
+`OnboardingTask` tracks completion by whoever was assigned it — an oath marked "done" by HR is not
+an oath. `OrientationAcknowledgement` has the right shape (immutable text, signing timestamp, IP,
+tamper hash) but hangs off an orientation enrolment, and an oath must be findable for an employee
+for the life of their employment, including staff who never had one.
+
+**Two paths, kept apart deliberately.** *Affirm* is the employee's own act — no employee id on the
+payload at all, actor from the token, date server-stamped, IP and tamper hash recorded. *Administer*
+is HR keying in a paper oath, which requires a named witness and carries **no** signature, because
+the attestation there is the witness and the scan rather than somebody clicking. Collapsing them
+into one "recorded" state would let an HR data-entry row later be mistaken for the employee's own
+act. The harness proves a supplied `employeeId` on the affirm path is **ignored, not obeyed**.
+
+Also: the wording is snapshotted onto the row, so a later reword cannot rewrite what someone swore;
+and `GET /outstanding` lists active employees with no oath — a register nobody can query for gaps
+records nothing useful.
+
+⚠ **`[Required]` on a non-nullable `Guid` is a no-op.** An omitted `witnessedById` binds to
+`Guid.Empty`, passes validation, and reached the employee lookup — so the caller who forgot a
+witness was told *"Employee '00000000-…' was not found"*. **An error about the wrong thing is worse
+than a generic one**, because it sends the reader looking in the wrong place. Both required Guids
+are now checked explicitly, with messages naming the actual omission.
+
+⚠⚠ **The user's question — "does the scan have to go through the controlled upload and the DMS?" —
+found the only broken thing in the slice, and it was asked at exactly the right moment.** My first
+draft had a `DocumentPath` string, which is the injection sink the medical exam documents, the
+medical claim documents and the travel attachments were **each** fixed for; `StaffTravelRequestAttachment`
+says so in a comment. The entity now carries `FileUploadRecordId` plus the two central-DMS ids, and
+there is no file field on either JSON write path — not a path and not an upload id, because "this id
+came from the gate" is not something a DTO can assert. The only route is `POST {id}/scan` through the
+shared `HrAttachmentUpload` helper.
+
+⚠ And enrolling the category was not enough. The upload stored the file but came back
+`VirusScanStatus = Skipped`, so central-DMS registration refused it — because membership of
+`ControlledFileUploadCategories.SystemCleanScanRequired` is **the only thing that turns scanning on
+by default**, and a new category defaults to `RequireVirusScan = false`. The codebase predicts this
+exact failure in a comment on that very set: *"a category omitted here would pass the upload gate,
+fail DMS registration, and surface as a 500."* One line to fix — but **had the harness not exercised
+the upload, it would have shipped**, with all 43 JSON assertions green and a feature that stores a
+file it can never register. And the failure arrived mute (F21 again, from a third area): only the
+Staging stack trace named it.

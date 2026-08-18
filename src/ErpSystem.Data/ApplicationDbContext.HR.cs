@@ -344,6 +344,7 @@ public partial class ApplicationDbContext
     // it sits with the grievance sets rather than the disciplinary ones.
     public DbSet<DisciplineReminderRun> DisciplineReminderRuns { get; set; } = null!;
     public DbSet<DisciplineReminderDispatchLog> DisciplineReminderDispatchLogs { get; set; } = null!;
+    public DbSet<EmployeeOathOfSecrecy> EmployeeOathsOfSecrecy { get; set; } = null!;
     public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
     public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
     public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
@@ -8528,6 +8529,29 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.DispatchLogs)
                 .HasForeignKey(x => x.RunId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Oath of secrecy (area 15b slice 9, FR-HR-030) ----
+        builder.Entity<EmployeeOathOfSecrecy>(e =>
+        {
+            // No unique index on the employee: a rehire swears again, so several per employee is
+            // normal and the current one is the latest by SwornOn.
+            e.HasIndex(x => new { x.TenantId, x.EmployeeId, x.SwornOn });
+
+            e.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.WitnessedBy)
+                .WithMany()
+                .HasForeignKey(x => x.WitnessedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---- Probation confirming authority (area 15b slice 8a, decision D-2) ----
