@@ -48,7 +48,7 @@ import type {
   CompetencyLookup,
   CreateSuccessionPlan,
   UpdateSuccessionPlan,
-  ReviewSuccessionPlan,
+  RejectSuccessionPlan,
   ApproveSuccessionPlan,
 } from '@/types/hr/succession';
 
@@ -160,23 +160,39 @@ class SuccessionService {
     return apiService.put<SuccessionPlan>(`${this.baseUrl}/${id}`, data);
   }
 
-  /** Draft → UnderReview. The submitter is the token; the call takes no body. */
+  /**
+   * Sends the plan out for approval on the generic workflow engine.
+   *
+   * ⚠ **Do not assume the resulting status.** A two-step definition leaves the plan at
+   * `UnderReview`; a definition that auto-approves lands it at `Approved`. The engine decides and
+   * the screen must re-read — never set a status itself.
+   *
+   * Draft **and Rejected** can be submitted: a rejected plan is reworked and sent back.
+   */
   submit(id: string) {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/submit`, {});
   }
 
   // ── Decisions (HR.Succession.Admin) ────────────────────────────────────────
 
-  /** ⚠ Admin, not Write. Carries no reviewer id — the reviewer is the signed-in user. */
-  review(id: string, data: ReviewSuccessionPlan) {
-    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/review`, data);
+  /**
+   * ⚠ Admin, not Write. Carries no rejector id — the rejector is the signed-in user.
+   *
+   * Replaces the old `review` action, which took a caller-chosen `newStatus` and could therefore
+   * move a plan straight to Approved, around whatever approval the organisation had configured.
+   * Rejection lands on `Rejected` (editable and re-submittable), never back on `Draft`.
+   */
+  reject(id: string, data: RejectSuccessionPlan) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/reject`, data);
   }
 
   /**
    * ⚠ Admin, not Write. Carries no approver id.
    *
-   * Approving archives whatever plan the position had before, points it at this one via
-   * `supersededByPlanId`, and makes this the active version.
+   * ⚠ **This is one approval STEP, not necessarily the decision.** A multi-step definition leaves
+   * the plan at `UnderReview` after an intermediate approval; only when the engine returns
+   * Approved does the plan supersede its predecessor, point it at this one via
+   * `supersededByPlanId`, and become the position's active version. Re-read rather than assuming.
    */
   approve(id: string, data: ApproveSuccessionPlan) {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/approve`, data);

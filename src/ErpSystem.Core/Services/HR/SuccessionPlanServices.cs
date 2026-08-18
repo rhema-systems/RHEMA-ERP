@@ -30,8 +30,13 @@ public class SuccessionPlanService : ISuccessionPlanService
     private readonly ISuccessionDocumentRepository _documentRepository;
     private readonly ICompanyHrPolicyProvider _hrPolicyProvider;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionPlanService> _logger;
+
+    /// <summary>The workflow entity type this service drives. Seeded by the catalog service.</summary>
+    private const string EntityType = "SuccessionPlan";
 
     public SuccessionPlanService(
         ISuccessionPlanRepository planRepository,
@@ -41,6 +46,8 @@ public class SuccessionPlanService : ISuccessionPlanService
         ISuccessionDocumentRepository documentRepository,
         ICompanyHrPolicyProvider hrPolicyProvider,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionPlanService> logger)
     {
@@ -51,6 +58,8 @@ public class SuccessionPlanService : ISuccessionPlanService
         _documentRepository = documentRepository;
         _hrPolicyProvider = hrPolicyProvider;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -382,40 +391,89 @@ public class SuccessionPlanService : ISuccessionPlanService
         return true;
     }
 
+    /// <summary>
+    /// Sends a plan out for approval on the generic workflow engine.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The service does not set the status itself — the engine decides the outcome and the
+    /// adapter maps it. A definition with two approval steps leaves the plan at UnderReview after
+    /// the first; one that auto-approves lands it at Approved. Writing the status here would make
+    /// the record disagree with the engine the moment a definition changed.
+    /// </remarks>
     public async Task<bool> SubmitForReviewAsync(Guid planId, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(planId);
 
-        if (entity.Status != SuccessionPlanStatus.Draft)
-            throw new InvalidOperationException("Only draft succession plans can be submitted for review.");
+        // Rejected is submittable too: a rejected plan is reworked and sent back, which is the
+        // whole reason rejection lands on Rejected rather than bouncing to Draft.
+        if (entity.Status != SuccessionPlanStatus.Draft && entity.Status != SuccessionPlanStatus.Rejected)
+            throw new SuccessionValidationException(
+                "Only draft or rejected succession plans can be submitted for approval.");
 
-        entity.Status = SuccessionPlanStatus.UnderReview;
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the succession plan approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
 
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, submittedByUserId, "Submitted for review", null, cancellationToken);
+        await CreateSnapshotAsync(entity, submittedByUserId, "Submitted for approval", null, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Succession plan submitted for review: {PlanNumber}", entity.PlanNumber);
+        _logger.LogInformation("Succession plan submitted: {PlanNumber} (now {Status})",
+            entity.PlanNumber, entity.Status);
 
         return true;
     }
 
-    public async Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, Guid reviewedByEmployeeId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Rejects a plan that is out for approval, on the engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>This replaces the bespoke <c>Review</c> action, whose <c>NewStatus</c> field let a
+    /// caller move a plan to any status it liked — including straight to Approved, bypassing
+    /// whatever approval the organisation had configured. A status the caller chooses is not an
+    /// approval decision; it is a way around one.</para>
+    ///
+    /// <para>Rejection lands on <c>Rejected</c>, not <c>Draft</c>: the author needs to see that
+    /// someone ruled against the plan rather than that it was never sent. The reason is written to
+    /// the workflow history and echoed onto the plan's risk notes by the adapter, because the notes
+    /// are what the author reads on the form they are about to rework.</para>
+    /// </remarks>
+    public async Task<bool> RejectAsync(RejectSuccessionPlanDto rejectDto, Guid rejectedByEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedPlanAsync(reviewDto.PlanId);
+        var entity = await GetOwnedPlanAsync(rejectDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
-            throw new InvalidOperationException("Only plans under review can be reviewed.");
+            throw new SuccessionValidationException(
+                "Only a plan that is out for approval can be rejected.");
 
-        entity.ReviewedById = reviewedByEmployeeId;
+        // The engine resolves approvers by ApplicationUser; everything the entity stores is an
+        // Employee FK. See hr-attendance-actor-conventions for why these are two different ids.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Reject", rejectDto.RejectionReason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, rejectDto.RejectionReason);
+
+        entity.ReviewedById = rejectedByEmployeeId;
         entity.ReviewDate = DateTime.UtcNow;
-        entity.Status = reviewDto.NewStatus;
 
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, reviewedByEmployeeId, $"Reviewed — status set to {reviewDto.NewStatus}", reviewDto.ReviewNotes, cancellationToken);
+        await CreateSnapshotAsync(entity, rejectedByEmployeeId, "Rejected", rejectDto.RejectionReason, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Succession plan reviewed: {PlanNumber}, NewStatus: {Status}", entity.PlanNumber, entity.Status);
+        _logger.LogInformation("Succession plan rejected: {PlanNumber} (now {Status})",
+            entity.PlanNumber, entity.Status);
 
         return true;
     }
@@ -425,7 +483,40 @@ public class SuccessionPlanService : ISuccessionPlanService
         var entity = await GetOwnedPlanAsync(approveDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
-            throw new InvalidOperationException("Only plans under review can be approved.");
+            throw new SuccessionValidationException(
+                "Only a plan that is out for approval can be approved.");
+
+        // The engine resolves approvers by ApplicationUser; the entity's ApprovedById is an
+        // Employee FK. Two different ids for the same human — see hr-attendance-actor-conventions.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Approve", approveDto.ApprovalNotes);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+
+        // ⚠ A multi-step definition leaves the plan at UnderReview after an intermediate approval.
+        // Superseding the previous version and raising the active-version flag are consequences of
+        // the plan being APPROVED, so they must not run until the engine says it is.
+        if (entity.Status != SuccessionPlanStatus.Approved)
+        {
+            entity.ReviewedById ??= approvedByEmployeeId;
+            entity.ReviewDate ??= DateTime.UtcNow;
+
+            await _planRepository.UpdateAsync(entity);
+            await CreateSnapshotAsync(entity, approvedByEmployeeId, "Approval step recorded", approveDto.ApprovalNotes, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Succession plan approval step processed: {PlanNumber} (now {Status})",
+                entity.PlanNumber, entity.Status);
+            return true;
+        }
 
         // Supersede any previously approved active version for the same position (same tenant).
         //
@@ -471,9 +562,9 @@ public class SuccessionPlanService : ISuccessionPlanService
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
+        // The adapter set Status and ApprovalDate. ApprovedById is the service's to stamp, because
+        // it is an Employee FK and the engine only knows the ApplicationUser.
         entity.ApprovedById = approvedByEmployeeId;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.Status = SuccessionPlanStatus.Approved;
         entity.IsActiveVersion = true;
 
         await _planRepository.UpdateAsync(entity);

@@ -342,6 +342,18 @@ dismissed one failure of that assertion as my own fixture assumption and "fixed"
 it twice is what proved the second failure was the product. **A test that passes and fails on
 identical input is data, not noise.**
 
+### 3.21 ⚠ The bespoke approval chain contained its own bypass
+
+`ReviewSuccessionPlanDto` carried a **`NewStatus` the caller chose**, and `ReviewAsync` assigned it
+directly: `entity.Status = reviewDto.NewStatus`. So a reviewer could move a plan to any state they
+liked — including straight to `Approved` — without an approver, a definition, or a record of anyone
+having decided anything. **A status the caller picks is not an approval decision; it is a way past
+one.** Retired in slice 8 and replaced by `POST {id}/reject`; approval now runs on the engine.
+
+Worth noting the shape rather than just the instance: this is the same family as the caller-declared
+actors (§3.5, §3.12, §3.18). Each let the client assert something only the server should decide —
+who acted, when, and here *what the outcome was*.
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -382,9 +394,9 @@ collision in the UI matters: two screens both called "talent pool" would be a su
   asserted by the harness (a plain actor cannot even read
   `/api/succession-plans/incumbent/{their own id}`). Any future "my development plan" screen must be
   fed by a separate, deliberately narrowed projection — never by relaxing `HrPermissions.RoleGrants`.
-- **D-3 — approvals onto the workflow engine?** The bespoke Draft → UnderReview → Approved chain is
-  the same shape travel had before slice 2. Recommendation: port it, per
-  [[workflow-engine-integration]].
+- **D-3 — approvals onto the workflow engine? ✅ SETTLED 2026-08-18 (slice 8): ported.** Seventh
+  application of the recipe in [[workflow-engine-integration]], which held unchanged. The bespoke
+  chain was worse than merely redundant — see F-25.
 - **D-4 — nine-box source of truth. ✅ SETTLED 2026-08-18 (slice 7): a manual calibration that
   pre-fills Performance from the latest scored appraisal and lets the rater override it.**
   The premise of the question was half wrong: area 5 does **not** compute both ratings.
@@ -438,6 +450,8 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-22 | A finalized session's **uncalibrated** ratings stayed editable (§3.19) | Medium | **fixed, slice 7** |
 | F-23 | `latest-confirmed` ordered by session date **with no tie-break** — non-deterministic (§3.20) | Medium | **fixed, slice 7** |
 | F-24 | Review session detail and rating writes returned blank names — the wrong-loader mistake again | Medium | **fixed, slice 7** |
+| F-25 | The bespoke `review` action took a **caller-chosen `NewStatus`** — a route straight to Approved, around any configured approval (§3.21) | **High** | **fixed, slice 8** |
+| F-26 | `StaffTravelRequest` missing from the frontend's `entityTypeMapping.ts` — **area 12's**, found in passing | Low | **fixed, slice 8** |
 
 ⚠ **F-08 is deliberately not fixed here.** Both controllers were measured ungated alongside the
 other seven, but they belong to closed areas (7 training, 6 recruitment) that have no permission
@@ -682,3 +696,38 @@ Frontend: `/hr/succession/reviews` register, `[id]` detail with the grid and a r
 `Unsatisfactory` folds into the left column and `Outstanding` into the right. Without that fold, a
 rating at either extreme would **vanish from the grid** — the worst possible failure for the one
 screen whose entire job is showing where people sit. Cell counts include the folded rows.
+
+### Slice 8 — approvals on the workflow engine (2026-08-18)
+
+Closes **F-25**, **F-26**. Settles **D-3**. Harness `run-slice8.mjs` — **26 passed, 0 failed**.
+All eight green: 31 + 25 + 49 + 34 + 36 + 44 + 46 + 26 = **291 assertions**. `tsc`/`eslint` clean.
+
+Seventh application of [[workflow-engine-integration]]'s four-step recipe, which held unchanged:
+entity type in `WorkflowEntityTypeCatalogService`, an auto-discovered
+`SuccessionPlanWorkflowStatusAdapter`, a `BuildEntityContextAsync` case carrying criticality, risk,
+successor count and emergency cover for routing, a display resolver deep-linking to
+`/hr/succession/{id}`, and the frontend `entityTypeMapping.ts` entry.
+
+Copying the requisition's lessons paid off twice: **look before adding an enum member** —
+`SuccessionPlanStatus` already had `UnderReview`, meaning exactly "out for approval" — and
+**rejection lands on `Rejected`, not `Draft`**, because a rejected plan is reworked and resubmitted,
+and the author needs to see that someone *ruled against* it rather than that it was never sent.
+
+Two things specific to this area:
+- **Approval is one STEP, not necessarily the decision.** A multi-step definition leaves the plan at
+  `UnderReview`. Superseding the predecessor and raising the active-version flag are consequences of
+  being *Approved*, so they are now gated on the engine saying so — not on the approve call
+  returning.
+- **The adapter does not write `ApprovedById`.** The engine knows the `ApplicationUser`; that column
+  is an `Employee` FK. The service stamps it — the actor-id mismatch from
+  [[hr-attendance-actor-conventions]], third area to meet it.
+
+⚠ **A harness lesson worth carrying: a refusal proves nothing unless you know which layer refused
+it.** The first version asserted "the HR author cannot approve their own plan" and passed — but
+approve is Admin-gated, so HR was refused *before the engine was ever consulted*. It proved the gate
+and said nothing about `preventInitiatorApproval`. The honest test is the **approver** authoring a
+plan and being refused, which is now asserted with the engine's own message.
+
+⚠ And a fixture lesson: the definition originally named a **specific approver user**, which meant
+only the run that published it could approve anything — every other harness was locked out of an
+endpoint that worked perfectly. It is a **role rule** now.

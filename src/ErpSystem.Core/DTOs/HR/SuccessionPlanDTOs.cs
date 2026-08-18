@@ -213,22 +213,31 @@ public class UpdateSuccessionPlanDto : UpdateDtoBase
 /// when are facts the server knows and the client cannot — the actor comes from the token and the
 /// date from the clock. See <c>plans/HR-Area-13-Succession-Build-Plan.md</c> §3.5.
 /// </remarks>
-public class ReviewSuccessionPlanDto
+/// <remarks>
+/// ⚠ Replaces <c>ReviewSuccessionPlanDto</c>, which carried a <c>NewStatus</c> the caller chose.
+/// That let a reviewer move a plan to any status they liked — including straight to Approved,
+/// around whatever approval the organisation had configured. A status the caller picks is not an
+/// approval decision, it is a way past one. Rejection is now the only non-approval outcome, and the
+/// engine owns the transition.
+/// </remarks>
+public class RejectSuccessionPlanDto
 {
     [Required]
     public Guid PlanId { get; set; }
 
-    [MaxLength(2000)]
-    public string? ReviewNotes { get; set; }
-
     [Required]
-    public SuccessionPlanStatus NewStatus { get; set; }
+    [MaxLength(2000)]
+    public string RejectionReason { get; set; } = string.Empty;
 }
 
 /// <remarks>
-/// ⚠ <c>ApprovedById</c> and <c>ApprovalDate</c> were removed for the reason given on
-/// <see cref="ReviewSuccessionPlanDto"/>. Approval names a person as the intended successor to a
-/// post; an approver the caller chose for themselves is not an approval.
+/// ⚠ <c>ApprovedById</c> and <c>ApprovalDate</c> were removed: approval names a person as the
+/// intended successor to a post, and an approver the caller chose for themselves is not an
+/// approval. The approver is the signed-in user and the date is the clock.
+///
+/// ⚠ Since slice 8 this is an **approval step on the generic workflow engine**, not a status write.
+/// A multi-step definition leaves the plan at <c>UnderReview</c> after an intermediate approval, so
+/// the caller must re-read rather than assume the plan is now Approved.
 /// </remarks>
 public class ApproveSuccessionPlanDto
 {

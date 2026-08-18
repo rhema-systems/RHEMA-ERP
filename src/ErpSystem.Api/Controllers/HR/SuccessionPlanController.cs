@@ -158,19 +158,26 @@ public class SuccessionPlanController : ControllerBase
     }
 
     [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
-    [HttpPost("{id:guid}/review")]
-    public async Task<IActionResult> Review(Guid id, [FromBody] ReviewSuccessionPlanDto dto)
+    /// <summary>
+    /// Rejects a plan that is out for approval.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the old <c>review</c> action, which took a caller-chosen <c>NewStatus</c> — a way
+    /// to reach Approved without going through the approval the organisation configured.
+    /// </remarks>
+    [HttpPost("{id:guid}/reject")]
+    public async Task<IActionResult> Reject(Guid id, [FromBody] RejectSuccessionPlanDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        // The reviewer is whoever is signed in. It used to arrive on the body.
+        // The rejector is whoever is signed in. It used to arrive on the body.
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
         dto.PlanId = id;
-        await _service.ReviewAsync(dto, employeeId.Value);
-        return Ok(new { message = "Review recorded." });
+        await _service.RejectAsync(dto, employeeId.Value);
+        return Ok(new { message = "Succession plan rejected." });
     }
 
     [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]

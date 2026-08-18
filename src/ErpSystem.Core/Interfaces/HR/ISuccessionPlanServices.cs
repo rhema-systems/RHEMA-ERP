@@ -37,7 +37,7 @@ public interface ISuccessionPlanService
 
     // Workflow
     Task<bool> SubmitForReviewAsync(Guid planId, Guid submittedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, Guid reviewedByEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(RejectSuccessionPlanDto rejectDto, Guid rejectedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, Guid approvedByEmployeeId, CancellationToken cancellationToken = default);
 
     // Competency requirement operations

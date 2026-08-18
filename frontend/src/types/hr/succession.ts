@@ -246,16 +246,18 @@ export interface UpdateSuccessionPlan extends CreateSuccessionPlan {
 }
 
 /**
- * ⚠ Carries no actor. The reviewer is the signed-in user, taken from the token — `reviewedById`
- * was removed from the DTO in slice 1 because a caller-declared reviewer is not a reviewer.
+ * ⚠ Carries no actor and no status.
+ *
+ * It replaces `ReviewSuccessionPlan`, which had a caller-chosen `newStatus` — so a reviewer could
+ * move a plan to any state including Approved, around whatever approval was configured. A status
+ * the caller picks is not an approval decision, it is a way past one.
  */
-export interface ReviewSuccessionPlan {
+export interface RejectSuccessionPlan {
   planId: string;
-  reviewNotes?: string | null;
-  newStatus: SuccessionPlanStatus;
+  rejectionReason: string;
 }
 
-/** ⚠ Carries no actor, for the reason on {@link ReviewSuccessionPlan}. */
+/** ⚠ Carries no actor: the approver is the signed-in user. */
 export interface ApproveSuccessionPlan {
   planId: string;
   approvalNotes?: string | null;

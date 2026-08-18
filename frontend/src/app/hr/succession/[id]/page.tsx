@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -12,7 +12,6 @@ import {
   History,
   Loader2,
   Pencil,
-  Send,
   ShieldAlert,
   Users,
 } from 'lucide-react';
@@ -28,13 +27,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { useToast } from '@/hooks/use-toast';
 import { successionService } from '@/services/hr/succession.service';
 import { CandidatesPanel } from '@/components/hr/succession/CandidatesPanel';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import type { SuccessionPlan } from '@/types/hr/succession';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -70,8 +70,6 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
   const { id } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [decisionNotes, setDecisionNotes] = useState('');
 
   const { data: plan, isLoading } = useQuery({
     queryKey: ['succession-plans', id],
@@ -83,46 +81,42 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
   };
 
   /**
-   * ⚠ Every one of these can answer 403 for a user who can see this page. Reading a plan needs
-   * `HR.Succession.Read`; submitting needs `Write`; **review, approve and delete need `Admin`**. An
-   * HR officer sees the buttons and is refused — which is correct, and is why the refusal is
-   * surfaced with the server's own message rather than swallowed.
+   * ⚠ **Approval is the workflow engine's, not this page's.** Slice 8 retired the bespoke
+   * submit/review/approve chain: whether a plan is out for approval, who may act on it and which
+   * step it sits on are the workflow instance's business. Everything below goes through
+   * `useWorkflowRecord`, and **nothing here ever writes a status** — a multi-step definition leaves
+   * the plan at UnderReview after an intermediate approval, so a screen that assumed Approved would
+   * be lying the moment someone configured a second step.
+   *
+   * The old `review` action is gone entirely. It took a caller-chosen status, which meant a
+   * reviewer could move a plan straight to Approved around whatever approval was configured.
    */
-  const useAct = (label: string, fn: () => Promise<unknown>) =>
-    useMutation({
-      mutationFn: fn,
-      onSuccess: async () => {
-        await refresh();
-        toast({ title: label });
-      },
-      onError: (error: any) => {
-        const status = error?.response?.status;
-        toast({
-          variant: 'destructive',
-          title:
-            status === 403
-              ? 'That decision is not yours to make'
-              : `Could not ${label.toLowerCase()}`,
-          description:
-            error?.response?.data?.detail ??
-            (status === 403
-              ? 'Approving a succession plan sits with a tenant administrator, not the HR desk.'
-              : error?.message),
-        });
-      },
-    });
-
-  const submit = useAct('Plan submitted for review', () => successionService.submit(id));
-  const review = useAct('Review recorded', () =>
-    successionService.review(id, {
-      planId: id,
-      newStatus: 'UnderReview',
-      reviewNotes: decisionNotes || null,
-    }),
-  );
-  const approve = useAct('Plan approved', () =>
-    successionService.approve(id, { planId: id, approvalNotes: decisionNotes || null }),
-  );
+  const workflow = useWorkflowRecord({
+    entityType: 'SuccessionPlan',
+    entityId: id,
+    entityLabel: 'Succession Plan',
+    entityNumber: plan?.planNumber,
+    status: plan?.status ?? 'Draft',
+    // Rejected is submittable too — a rejected plan is reworked and sent back, which is why
+    // rejection lands there rather than bouncing to Draft.
+    canSubmit: plan?.status === 'Draft' || plan?.status === 'Rejected',
+    canApproveReject: plan?.status === 'UnderReview',
+    enabled: !!plan,
+    commands: {
+      submit: () => successionService.submit(id),
+      // No approver id is sent — the server resolves the approver from the token against the
+      // published definition.
+      approve: (ctx) =>
+        successionService.approve(id, { planId: id, approvalNotes: ctx.comments || null }),
+      reject: (ctx) =>
+        successionService.reject(id, {
+          planId: id,
+          rejectionReason: ctx.comments || 'Rejected',
+        }),
+      afterAction: refresh,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
 
   if (isLoading) {
     return (
@@ -135,7 +129,6 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
   if (!plan) return null;
 
   const p: SuccessionPlan = plan;
-  const busy = submit.isPending || review.isPending || approve.isPending;
 
   return (
     <div className="space-y-6 p-6">
@@ -153,23 +146,8 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
                 </Link>
               </Button>
             )}
-            {p.status === 'Draft' && (
-              <Button onClick={() => submit.mutate()} disabled={busy}>
-                <Send className="mr-2 h-4 w-4" />
-                Submit for review
-              </Button>
-            )}
-            {p.status === 'UnderReview' && (
-              <>
-                <Button variant="outline" onClick={() => review.mutate()} disabled={busy}>
-                  Record review
-                </Button>
-                <Button onClick={() => approve.mutate()} disabled={busy}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Approve
-                </Button>
-              </>
-            )}
+            {/* Submit / approve / reject are all the engine's, rendered by the generic control. */}
+            <WorkflowApprovalActions {...workflow.actionProps} />
           </div>
         }
       />
@@ -192,26 +170,6 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
         )}
       </div>
 
-      {p.status === 'UnderReview' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Decision notes</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Textarea
-              value={decisionNotes}
-              onChange={(e) => setDecisionNotes(e.target.value)}
-              placeholder="Recorded against whichever decision you take next."
-              rows={3}
-            />
-            <p className="text-xs text-muted-foreground">
-              The reviewer and approver are taken from your sign-in — there is no field to name
-              someone else, by design.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -223,6 +181,7 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
           </TabsTrigger>
           <TabsTrigger value="actions">Actions ({p.actions.length})</TabsTrigger>
           <TabsTrigger value="documents">Documents ({p.documents.length})</TabsTrigger>
+          <WorkflowTabTrigger value="workflow" />
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
@@ -449,6 +408,19 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
             </CardContent>
           </Card>
         </TabsContent>
+
+        <WorkflowTabContent
+          value="workflow"
+          entityType="SuccessionPlan"
+          entityId={id}
+          entityLabel="Succession Plan"
+          entityNumber={p.planNumber}
+          status={p.status}
+          onAfterAction={async () => {
+            await refresh();
+            await workflow.refresh();
+          }}
+        />
       </Tabs>
     </div>
   );

@@ -333,6 +333,22 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("SuccessionPlan") || key == Normalize("SUCCESSION_PLAN") || key == Normalize("Succession Plan"))
+            {
+                var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Position);
+                info.EntityType = "SuccessionPlan";
+                info.EntityNumber = plan?.PlanNumber;
+                // The position is the subject of a succession plan, so it belongs in the name an
+                // approver reads in their queue — "SP-2026-0007" alone says nothing about what is
+                // being approved.
+                info.EntityName = plan == null
+                    ? null
+                    : $"{plan.PlanNumber} — {plan.Position?.Title ?? plan.PlanName}";
+                info.ActionUrl = $"/hr/succession/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("JobOffer") || key == Normalize("JOB_OFFER") || key == Normalize("Job Offer"))
             {
                 var offer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobOffer>()

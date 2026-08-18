@@ -1609,6 +1609,29 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = requisition.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "SUCCESSION_PLAN", "SuccessionPlan", "Succession Plan"))
+        {
+            var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Succession plan not found");
+
+            // How critical the post is, how exposed it is, and whether anyone is actually lined up
+            // are the routing thresholds. A Low-criticality post with a ready-now successor and a
+            // Critical post at HighRisk with nobody identified are not the same decision, and a
+            // definition should be able to send them to different approvers.
+            context["planNumber"] = plan.PlanNumber;
+            context["positionId"] = plan.PositionId;
+            context["planYear"] = plan.PlanYear;
+            context["criticality"] = plan.Criticality.ToString();
+            context["riskLevel"] = plan.RiskLevel.ToString();
+            context["numberOfIdentifiedSuccessors"] = plan.NumberOfIdentifiedSuccessors;
+            context["hasReadyNowSuccessor"] = plan.HasReadyNowSuccessor;
+            context["hasEmergencySuccessor"] = plan.HasEmergencySuccessor;
+            context["currentIncumbentId"] = plan.CurrentIncumbentId;
+            context["versionNumber"] = plan.VersionNumber;
+            context["status"] = plan.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "JOB_OFFER", "JobOffer", "Job Offer"))
         {
             var offer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobOffer>()
