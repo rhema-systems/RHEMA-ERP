@@ -65,6 +65,7 @@ import {
   FolderTree,
   FileCheck,
   Gavel,
+  Network,
   Award,
   Star,
   Target,
@@ -633,6 +634,20 @@ export const navigationItems: NavItem[] = [
           { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt },
           { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard },
         ],
+      },
+      {
+        // Area 13. The plan is per POSITION, not per person, and it is versioned: approving a new
+        // plan archives the one the post had before and points it at the successor. Only an
+        // approved plan is the position's active version — a draft deliberately holds no slot.
+        title: 'Succession Planning',
+        href: '/hr/succession',
+        icon: Network,
+        children: [
+          { title: 'Plans', href: '/hr/succession', icon: Network },
+        ],
+        // No "my succession" entry, and there must never be one: readiness, retention risk and
+        // nine-box placement are assessments made ABOUT a candidate, not records belonging to them.
+        // Succession inverts the self-service rule the rest of HR follows (decision D-2).
       },
       {
         // Area 9. The case is the unit of work: one record carries the allegation, the

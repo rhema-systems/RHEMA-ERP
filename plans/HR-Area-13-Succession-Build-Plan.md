@@ -383,3 +383,38 @@ Slice 2 — the write spine:
    no plan in progress.
 3. It sent `reviewedById` and `comments`, neither of which the DTOs have — **field names invented
    from the endpoint's name**, the area-12 lesson biting inside the harness rather than the UI.
+
+### Slice 3 — plans UI (2026-08-18)
+
+Harness `run-slice3-ui.mjs` — **49 passed, 0 failed**. `tsc` clean (the only errors in the tree are
+pre-existing inventory ones), `eslint` clean.
+
+Screens, all under `/hr/succession` (operational, not Administration — a succession plan is
+transactional work, not reference data):
+
+| Route | What it is |
+|---|---|
+| `/hr/succession` | Register, with five quick views: all, no successors, nobody ready now, due for review, vacancy expected |
+| `/hr/succession/new` | Create — a draft |
+| `/hr/succession/[id]` | Detail: overview, successors, competencies, actions, documents |
+| `/hr/succession/[id]/edit` | Edit, replaced by an explanation once the plan is approved |
+
+Plus `types/hr/succession.ts`, `services/hr/succession.service.ts`,
+`components/hr/succession/SuccessionPlanForm.tsx`, and a sidebar entry. **No "my succession" entry,
+and there must never be one** — D-2 is enforced in the navigation as well as the gate.
+
+⚠ **Writing the types from the DTOs rather than the endpoint names caught six inventions** that
+would all have compiled: the candidate summary has `currentReadiness`, not `readiness`; it has no
+`successionPlanId` and no `overallFitScore`; `PositionCoverageRow` is keyed by `planId` despite the
+name; competency requirements carry a `proficiencyScaleMax` so the scale is **not** assumed to be 5;
+and `CompetencyLookupDto` has `code`/`competencyCategory`, not a `category` string. Every one was a
+guess I had written down before reading the C#.
+
+⚠ **The empty-string date trap is real here, and measured:** posting `targetSuccessionDate: ""`
+returns **400**. The form's `orNull` helper is load-bearing, not defensive decoration.
+
+⚠ **The three-rung ladder is visible in the UI.** An HR officer can open a plan and see the Approve
+button, then be refused — correctly, because approval is Admin. The detail page surfaces the 403
+with the server's message rather than swallowing it, and says plainly that the decision sits with a
+tenant administrator. A screen must not hide a button on the strength of being able to read the
+record.
