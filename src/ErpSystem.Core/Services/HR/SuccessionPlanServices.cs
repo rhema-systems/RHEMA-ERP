@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Application.HR.Extensions;
@@ -1068,6 +1069,51 @@ public class SuccessionPlanService : ISuccessionPlanService
 
 #region Succession Candidate Service
 
+/// <summary>
+/// Succession&apos;s read-only window onto Finance&apos;s currency master.
+/// </summary>
+/// <remarks>
+/// <para>Measured 2026-08-18: <c>currencyCode: "ZZZ"</c> was accepted on a development activity and
+/// stored. The only thing standing between the field and nonsense was <c>MaxLength(3)</c> —
+/// "banana" was rejected for being four characters long, not for being imaginary. A development
+/// budget denominated in a currency that does not exist cannot be totalled or reported against.</para>
+///
+/// <para><b>Static, and called from two services on purpose.</b> Development activities have two
+/// write paths — <c>SuccessionDevelopmentActivityService</c>, and the AddDevelopmentActivity /
+/// UpdateDevelopmentActivity methods on <c>SuccessionCandidateService</c> — so validating only one
+/// would leave the other as a way in.</para>
+///
+/// <para><b>Read-only</b>, like travel&apos;s <c>StaffTravelCurrencyBridge</c>: Finance owns the
+/// master. A missing code is fixed by adding it in Finance, not by letting succession invent one.
+/// No FK column is added — Finance&apos;s uniqueness is (TenantId, Code), and this buys the same
+/// guarantee without making a currency re-code a schema migration.</para>
+/// </remarks>
+internal static class SuccessionCurrencyGuard
+{
+    public static async Task RequireKnownAsync(
+        ICurrencyService currencies,
+        string? currencyCode,
+        decimal? amount,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(currencyCode))
+        {
+            // A cost with no currency is not a cost anyone can act on.
+            if (amount.HasValue)
+                throw new SuccessionValidationException(
+                    "A development activity that records a cost must say which currency it is in.");
+            return;
+        }
+
+        var currency = await currencies.GetByCodeAsync(
+            currencyCode.Trim().ToUpperInvariant(), cancellationToken);
+
+        if (currency is null)
+            throw new SuccessionValidationException(
+                $"'{currencyCode}' is not a currency this organisation holds. Add it in Finance before using it here.");
+    }
+}
+
 public class SuccessionCandidateService : ISuccessionCandidateService
 {
     private readonly ISuccessionCandidateRepository _candidateRepository;
@@ -1076,6 +1122,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrencyService _currencies;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionCandidateService> _logger;
 
@@ -1095,6 +1142,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         IGenericRepository<PositionCompetency> positionCompetencyRepository,
         IGenericRepository<EmployeeCompetency> employeeCompetencyRepository,
         ICurrentUserProvider currentUserProvider,
+        ICurrencyService currencies,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionCandidateService> logger)
     {
@@ -1108,6 +1156,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         _positionCompetencyRepository = positionCompetencyRepository;
         _employeeCompetencyRepository = employeeCompetencyRepository;
         _currentUserProvider = currentUserProvider;
+        _currencies = currencies;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -1607,12 +1656,15 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         if (createDto.CandidateId == null)
             throw new ArgumentException("CandidateId is required when adding a development activity through the candidate service.");
 
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, createDto.CurrencyCode, createDto.EstimatedCost, cancellationToken);
+
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedCandidateAsync(createDto.CandidateId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _activityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReloadActivityAsync(entity);
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetDevelopmentActivitiesAsync(Guid candidateId, CancellationToken cancellationToken = default)
@@ -1628,12 +1680,31 @@ public class SuccessionCandidateService : ISuccessionCandidateService
     {
         var entity = await GetOwnedActivityAsync(updateDto.Id);
 
+        // Both costs on the update path, not just the estimate.
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, updateDto.CurrencyCode, updateDto.ActualCost ?? updateDto.EstimatedCost, cancellationToken);
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _activityRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ReloadActivityAsync(entity);
+    }
+
+    /// <summary>
+    /// Re-reads an activity with its navigations so the write response carries resolved names.
+    /// </summary>
+    /// <remarks>
+    /// Without this the tracked entity maps to <c>candidateEmployeeName: null</c> and
+    /// <c>supervisorName: null</c> while the very next read of the same row returns both — the
+    /// stale-nav shape in section 3.7, fixed on the plan create in slice 2 and here for activities.
+    /// </remarks>
+    private async Task<SuccessionDevelopmentActivityDto> ReloadActivityAsync(
+        SuccessionDevelopmentActivity entity)
+    {
+        var reloaded = await _activityRepository.GetWithFullDetailsAsync(entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteDevelopmentActivityAsync(Guid activityId, CancellationToken cancellationToken = default)
@@ -1714,6 +1785,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDevelopmentMilestoneRepository _milestoneRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrencyService _currencies;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionDevelopmentActivityService> _logger;
 
@@ -1721,12 +1793,14 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
         ISuccessionDevelopmentActivityRepository activityRepository,
         ISuccessionDevelopmentMilestoneRepository milestoneRepository,
         ICurrentUserProvider currentUserProvider,
+        ICurrencyService currencies,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionDevelopmentActivityService> logger)
     {
         _activityRepository = activityRepository;
         _milestoneRepository = milestoneRepository;
         _currentUserProvider = currentUserProvider;
+        _currencies = currencies;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -1830,11 +1904,18 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<SuccessionDevelopmentActivityDto> CreateAsync(CreateSuccessionDevelopmentActivityDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        // These were ArgumentExceptions, whose message the middleware replaces with "Invalid
+        // argument provided." — a rule that fires correctly but cannot say what to change.
         if (createDto.CandidateId == null && createDto.TalentPoolMemberId == null)
-            throw new ArgumentException("A development activity must be linked to either a candidate or a talent pool member.");
+            throw new SuccessionValidationException(
+                "A development activity must belong to either a succession candidate or a talent pool member.");
 
         if (createDto.CandidateId != null && createDto.TalentPoolMemberId != null)
-            throw new ArgumentException("A development activity cannot be linked to both a candidate and a talent pool member.");
+            throw new SuccessionValidationException(
+                "A development activity belongs to a succession candidate or a talent pool member, not both.");
+
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, createDto.CurrencyCode, createDto.EstimatedCost, cancellationToken);
 
         tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -1843,19 +1924,27 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
         _logger.LogInformation("Development activity created: {ActivityName}", entity.ActivityName);
 
-        return entity.ToDto();
+        // Re-read so the response carries resolved names. The tracked entity has never loaded its
+        // Candidate or Supervisor navigations, so ToDto() returned candidateEmployeeName: null and
+        // supervisorName: null while the very next read of the same row returned both — the same
+        // stale-nav shape as the plan create in slice 2.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SuccessionDevelopmentActivityDto> UpdateAsync(UpdateSuccessionDevelopmentActivityDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedActivityAsync(updateDto.Id);
 
+        // Both costs on the update path, not just the estimate.
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, updateDto.CurrencyCode, updateDto.ActualCost ?? updateDto.EstimatedCost, cancellationToken);
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _activityRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)

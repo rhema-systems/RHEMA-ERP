@@ -112,6 +112,15 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)HttpStatusCode.Conflict;
                 break;
 
+            // Succession domain rules the caller can act on. ArgumentException would have replaced
+            // the message with "Invalid argument provided.", which tells the user nothing.
+            case SuccessionValidationException successionValidationEx:
+                response.Title = "Bad Request";
+                response.Status = (int)HttpStatusCode.BadRequest;
+                response.Detail = successionValidationEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Status = (int)HttpStatusCode.Conflict;
@@ -374,6 +383,7 @@ public class GlobalExceptionHandlingMiddleware
             case ArgumentException:
             case MedicalWorkflowException:
             case SuccessionConflictException:
+            case SuccessionValidationException:
                 // These are expected exceptions - log as warnings
                 _logger.LogWarning(exception,
                     "Client error occurred for {RequestMethod} {RequestPath}. Context: {@LogContext}",

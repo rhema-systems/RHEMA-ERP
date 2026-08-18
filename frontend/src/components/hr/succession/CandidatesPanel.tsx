@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Loader2,
+  GraduationCap,
   MessageSquare,
   Plus,
   Star,
@@ -48,6 +49,7 @@ import {
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
 import { successionCandidateService } from '@/services/hr/succession.service';
+import { DevelopmentPanel } from '@/components/hr/succession/DevelopmentPanel';
 import type {
   SuccessionCandidate,
   SuccessionPlan,
@@ -130,6 +132,7 @@ export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
   const [assessing, setAssessing] = useState<SuccessionCandidate | null>(null);
   const [assessNotes, setAssessNotes] = useState('');
   const [recommend, setRecommend] = useState(true);
+  const [developmentFor, setDevelopmentFor] = useState<SuccessionCandidate | null>(null);
   const [feedbackFor, setFeedbackFor] = useState<SuccessionCandidate | null>(null);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [disposition, setDisposition] = useState<'Support' | 'Neutral' | 'Oppose'>('Support');
@@ -402,6 +405,15 @@ export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
                           <ClipboardCheck className="mr-1 h-3.5 w-3.5" />
                           Assess
                         </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setDevelopmentFor(c)}>
+                          <GraduationCap className="mr-1 h-3.5 w-3.5" />
+                          Development
+                          {c.developmentActivities.length > 0 && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              ({c.developmentActivities.length})
+                            </span>
+                          )}
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => setFeedbackFor(c)}>
                           <MessageSquare className="mr-1 h-3.5 w-3.5" />
                           Feedback
@@ -585,6 +597,20 @@ export function CandidatesPanel({ plan }: { plan: SuccessionPlan }) {
               Record assessment
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Development ──────────────────────────────────────────────────────── */}
+      <Dialog open={!!developmentFor} onOpenChange={(open) => !open && setDevelopmentFor(null)}>
+        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Development plan — {developmentFor?.employeeName}</DialogTitle>
+            <DialogDescription>
+              The work that turns a candidate into a successor, and the milestones it is tracked
+              against.
+            </DialogDescription>
+          </DialogHeader>
+          {developmentFor && <DevelopmentPanel candidate={developmentFor} />}
         </DialogContent>
       </Dialog>
 

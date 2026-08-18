@@ -85,16 +85,40 @@ the sweep is a re-survey after all.
 ⚠ **Area 11 is the priority back-fill** — it has a live, working claim→approve→**pay** path, so it
 is the closest analogue to travel 12.1 and the two must post the same way.
 
+### Area 13 — Succession & Talent (recorded 2026-08-18, slice 5)
+
+⚠ **The build plan's first pass said this area had no money in it. That was wrong**, and it is worth
+recording why: the money is not on the plan or the candidate, where anyone would look — it is two
+fields down on a *development activity*, the training or secondment a successor is put through.
+Cost lives where the work happens, not where the record is filed.
+
+| Money event | Where | Notes |
+|---|---|---|
+| Development activity **estimated cost** | `SuccessionDevelopmentActivity.EstimatedCost` + `CurrencyCode` | Budgeted spend on preparing a named successor — training, secondment, certification |
+| Development activity **actual cost** | `SuccessionDevelopmentActivity.ActualCost` | Recorded on the update path once the activity runs |
+
+Both write paths (`SuccessionDevelopmentActivityService` and the candidate service's
+`AddDevelopmentActivity` / `UpdateDevelopmentActivity`) now validate `CurrencyCode` against
+Finance's `ICurrencyService` — slice 5, after `"ZZZ"` was measured being accepted and stored. That
+is the **read-side** integration this module is allowed to do now. No GL posting: it waits for the
+one comprehensive sweep, like everything else in this register.
+
+⚠ **Overlap to settle during the sweep:** a development activity of type `Training` describes the
+same spend area 7 already budgets through `TrainingBudget`. If a successor's course is recorded in
+both places it will be counted twice. Decide once whether succession development costs are their
+own budget line or a projection of the training budget.
+
 ### Areas not yet built ⏳
 
-13 succession · 14 awards · 16 assets · 17 competency · 18–23 · 25–27 portals · plus the deferred
-separation/exit module, whose **final settlement** is unavoidably an accounting event.
+14 awards · 16 assets · 17 competency · 18–23 · 25–27 portals · plus the deferred separation/exit
+module, whose **final settlement** is unavoidably an accounting event.
 
 ---
 
 ## Before the sweep starts
 
 - [ ] Back-fill the five closed areas above.
+- [ ] Settle the succession-development vs training-budget double-count named under area 13.
 - [ ] Get TDC's answer on payroll-vs-direct-payment reimbursement.
 - [ ] Get TDC's answer on cost attribution (project / cost centre dimensions).
 - [ ] Confirm the Finance module's posting entry point and who owns it — Finance is not this

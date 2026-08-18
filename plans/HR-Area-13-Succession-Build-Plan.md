@@ -238,6 +238,30 @@ the plan spine, this part needed hardening, not resurrection.
 `/api/hr/Employees/paged`** — a GET 405s; and `bulk-rank` is a **PATCH taking a bare array**, not a
 wrapper object.
 
+### 3.14 ⚠ Money hiding one level down, in a currency that did not exist
+
+Measured 2026-08-18 (`probe-development.mjs`). `currencyCode: "ZZZ"` was **accepted and stored** on
+a development activity. The only thing standing between that field and nonsense was
+`MaxLength(3)` — `"banana"` was rejected for being four characters long, not for being imaginary.
+A development budget denominated in a currency Finance has never heard of cannot be totalled or
+reported against.
+
+⚠ **And there are two doors into this entity.** `SuccessionDevelopmentActivityService` has
+create/update, and `SuccessionCandidateService` has its own `AddDevelopmentActivity` /
+`UpdateDevelopmentActivity` for the same rows. Guarding one would have left the other open. I found
+the duplication only because my first edit landed in the wrong service — the two methods are nearly
+identical. **Before validating a write, count the write paths.**
+
+### 3.15 Development activities otherwise run clean
+
+Everything else worked first time: create, the by-candidate and by-status reads, milestones, the
+overdue-milestone queue, and completion stamping its date. Two behaviours worth recording rather
+than "fixing":
+
+- **Completing every milestone does not advance the activity's status** — see D-6.
+- **`generate-from-position` returns `[]`** and will until area 17 lands. Empty is the correct
+  answer, not a failure; the screen says so.
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -284,8 +308,19 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 - **D-4 — nine-box source of truth.** `TalentReviewRating` carries performance and potential
   ratings that area 5 also computes. Is the review a manual calibration that may override the
   appraisal score, or a projection of it? Affects whether the grid is editable.
-- **D-5 — Finance.** No money in this area on inspection. Confirm during slice 0 and record a nil
-  entry in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` rather than leaving it unstated.
+- **D-5 — Finance. ❌ WRONG WHEN WRITTEN, corrected 2026-08-18 in slice 5.** It said "no money in
+  this area on inspection". There is money: `EstimatedCost`, `ActualCost` and `CurrencyCode` on
+  **`SuccessionDevelopmentActivity`**. The survey missed it because it looked at the plan and the
+  candidate — **the cost lives where the work happens, not where the record is filed**. Both events
+  are now registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, along with an overlap the sweep
+  must settle: a `Training`-type activity describes the same spend area 7 budgets through
+  `TrainingBudget`, so a successor's course could be counted twice.
+- **D-6 — does completing every milestone finish its activity? NO, deliberately (slice 5).**
+  Measured: it does not, and I left it that way. Whether an activity is finished is a supervisor's
+  judgement, not arithmetic over its milestones — a secondment whose checkpoints are all ticked may
+  still be running. Auto-advancing would be inventing TDC's policy. The UI states the non-change in
+  its toast, because an unexplained absence of a status change reads as a bug. Revisit if TDC says
+  otherwise.
 
 ---
 
@@ -306,6 +341,9 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-06 | Two unrelated surfaces both named "talent pool" (§4) | Medium | open — needs D-1..D-2 |
 | F-07 | Bespoke approval chain off the workflow engine (§3.5) | Low | open — needs D-3 |
 | F-08 | `MentoringController` and `TalentPoolController` are still bare `[Authorize]` (§4) | Medium | **W3 sweep** — see below |
+| F-14 | `currencyCode: "ZZZ"` accepted and stored; nothing checked it against Finance (§3.14) | **High** | **fixed, slice 5** |
+| F-15 | Activity create/update responses omit resolved names — the stale-nav shape, third time | Medium | **fixed, slice 5** |
+| F-16 | Activity ownership rules threw `ArgumentException`, whose message the middleware discards | Medium | **fixed, slice 5** |
 
 ⚠ **F-08 is deliberately not fixed here.** Both controllers were measured ungated alongside the
 other seven, but they belong to closed areas (7 training, 6 recruitment) that have no permission
@@ -474,3 +512,31 @@ failed with `got 10`, because version numbers count every plan a position has ev
 earlier runs had left nine behind. The product was right. **An assertion on an absolute count is an
 assumption that the fixture is pristine** — assert the delta instead. Same root as the fixed-index
 position picker two slices ago.
+
+### Slice 5 — development activities and milestones (2026-08-18)
+
+Closes **F-14**, **F-15**, **F-16**. Settles **D-6**, and corrects **D-5**. Harness
+`run-slice5.mjs` — **36 passed, 0 failed**. All five green: 32 + 27 + 49 + 34 + 36 =
+**178 assertions**. `tsc` and `eslint` clean.
+
+Backend:
+- `SuccessionCurrencyGuard` — a single static guard called from **both** write paths, validating
+  `CurrencyCode` against Finance's `ICurrencyService`. Read-only, like travel's bridge; a missing
+  code is fixed in Finance, not invented here. A cost with no currency is also refused.
+- `SuccessionValidationException` → **400 with the message preserved**. The ownership rules threw
+  `ArgumentException`, which the middleware rewrites to "Invalid argument provided." — a rule that
+  fires correctly but cannot say what to change is barely a rule.
+- Activity create/update now re-read through the details loader, so responses carry
+  `candidateEmployeeName` and `supervisorName`. Third instance of the stale-nav shape in this area.
+
+Frontend: `DevelopmentPanel.tsx`, opened per candidate from the candidates table. Activities with
+their costs in the row's own currency, milestones with an overdue marker, and a currency picker fed
+from **Finance's list** rather than a free-text box — offering a text box would be offering a way to
+fail. A `Mentoring`-type activity links to `/hr/training/mentoring` and says the programme lives
+there: the §4 boundary call made visible in the UI rather than only recorded in this document.
+
+⚠ **My own mistake, worth keeping.** Removing a method by slicing from its doc comment to the next
+occurrence of `CreateAsync(` deleted **seven read methods** that sat in between, and the build caught
+it as seven missing interface members. A text-range delete anchored on a pattern that recurs is not
+a delete, it is a gamble. Recovered with `git show HEAD:<file>`, which is why committing each slice
+before starting the next one is worth the ceremony.

@@ -474,3 +474,109 @@ export interface CreateSuccessionCandidateGap {
   currentLevel: number;
   gapNotes?: string | null;
 }
+
+// ── Development activities (slice 5) ─────────────────────────────────────────
+
+export type DevelopmentActivityType =
+  | 'Training'
+  | 'Mentoring'
+  | 'JobRotation'
+  | 'ProjectAssignment'
+  | 'Shadowing'
+  | 'ActingRole'
+  | 'ExternalExperience'
+  | 'Certification'
+  | 'Other';
+
+export type DevelopmentActivityStatus =
+  | 'Planned'
+  | 'InProgress'
+  | 'Completed'
+  | 'Deferred'
+  | 'Cancelled';
+
+export interface SuccessionDevelopmentMilestone {
+  id: string;
+  activityId: string;
+  milestoneName: string;
+  targetDate: string;
+  completedDate?: string | null;
+  isCompleted: boolean;
+  notes?: string | null;
+}
+
+export interface SuccessionDevelopmentActivity {
+  id: string;
+  tenantId: string;
+  /** Exactly one of these two is set — an activity belongs to a candidate OR a pool member. */
+  candidateId?: string | null;
+  candidateEmployeeName?: string | null;
+  talentPoolMemberId?: string | null;
+  talentPoolMemberName?: string | null;
+  activityName: string;
+  type: DevelopmentActivityType;
+  description?: string | null;
+  plannedStartDate: string;
+  plannedEndDate?: string | null;
+  actualStartDate?: string | null;
+  actualEndDate?: string | null;
+  status: DevelopmentActivityStatus;
+  outcome?: string | null;
+  competencyGained: boolean;
+  /** ⚠ Money. `currencyCode` is validated against Finance's currency master — see slice 5. */
+  estimatedCost?: number | null;
+  actualCost?: number | null;
+  currencyCode?: string | null;
+  supervisorId?: string | null;
+  supervisorName?: string | null;
+  externalProviderContactId?: string | null;
+  externalProviderName?: string | null;
+  notes?: string | null;
+  milestones: SuccessionDevelopmentMilestone[];
+  addressedGaps: SuccessionCandidateGap[];
+}
+
+export interface CreateSuccessionDevelopmentActivity {
+  candidateId?: string | null;
+  talentPoolMemberId?: string | null;
+  activityName: string;
+  type: DevelopmentActivityType;
+  description?: string | null;
+  plannedStartDate: string;
+  plannedEndDate?: string | null;
+  status: DevelopmentActivityStatus;
+  estimatedCost?: number | null;
+  currencyCode?: string | null;
+  supervisorId?: string | null;
+  externalProviderContactId?: string | null;
+  externalProviderName?: string | null;
+  notes?: string | null;
+}
+
+export interface UpdateSuccessionDevelopmentActivity {
+  id: string;
+  activityName: string;
+  type: DevelopmentActivityType;
+  description?: string | null;
+  plannedStartDate: string;
+  plannedEndDate?: string | null;
+  actualStartDate?: string | null;
+  actualEndDate?: string | null;
+  status: DevelopmentActivityStatus;
+  outcome?: string | null;
+  competencyGained: boolean;
+  estimatedCost?: number | null;
+  actualCost?: number | null;
+  currencyCode?: string | null;
+  supervisorId?: string | null;
+  externalProviderContactId?: string | null;
+  externalProviderName?: string | null;
+  notes?: string | null;
+}
+
+export interface CreateSuccessionDevelopmentMilestone {
+  activityId: string;
+  milestoneName: string;
+  targetDate: string;
+  notes?: string | null;
+}

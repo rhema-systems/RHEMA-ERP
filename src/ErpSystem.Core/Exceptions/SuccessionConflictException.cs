@@ -24,3 +24,24 @@ public sealed class SuccessionConflictException : Exception
     {
     }
 }
+
+/// <summary>
+/// Thrown when a succession &amp; talent request breaks a domain rule the caller can fix — an
+/// unknown currency, an activity linked to nobody, an activity linked to two owners at once.
+/// </summary>
+/// <remarks>
+/// Maps to <b>400</b> with the message preserved, so it must be safe to display and must say what
+/// to change.
+///
+/// <para>It exists because <see cref="ArgumentException"/> — which these rules used to throw —
+/// is mapped by <c>GlobalExceptionHandlingMiddleware</c> to the fixed string "Invalid argument
+/// provided.", discarding whatever the rule had to say. A rule that fires correctly but cannot
+/// explain itself leaves the user guessing, which is the same complaint recorded against the 500s
+/// in §3.9 of the build plan.</para>
+/// </remarks>
+public sealed class SuccessionValidationException : Exception
+{
+    public SuccessionValidationException(string message) : base(message)
+    {
+    }
+}
