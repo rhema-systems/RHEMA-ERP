@@ -313,6 +313,19 @@ public class ProbationController : ControllerBase
         return Ok(await _service.GetReviewsByReviewerAsync(reviewerEmployeeId));
     }
 
+    /// <summary>The reviews the caller must conduct — their own reviewer queue.</summary>
+    /// <remarks>
+    /// ⚠ Token-derived, and not a convenience wrapper. The browser has no employee id for the
+    /// signed-in user — the client <c>User</c> object carries roles and tenants but no employee
+    /// link — so <c>reviews/reviewer/{id}</c> cannot be called by the line managers it is for.
+    /// Building the queue screen is what surfaced that, the same way building a create form
+    /// surfaced the actor holes in area 12.
+    /// </remarks>
+    [Authorize]
+    [HttpGet("reviews/to-conduct")]
+    public async Task<ActionResult<IEnumerable<ProbationReviewDto>>> GetMyReviewerQueue()
+        => Ok(await _service.GetMyReviewerQueueAsync(RequireEmployeeId()));
+
     /// <summary>The reviews of the caller's own probation.</summary>
     /// <remarks>Token-derived: there is no id here to point at someone else's record.</remarks>
     [Authorize]

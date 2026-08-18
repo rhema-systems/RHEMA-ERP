@@ -797,6 +797,13 @@ public class ProbationService : IProbationService
     }
 
     /// <inheritdoc />
+    public Task<IEnumerable<ProbationReviewDto>> GetMyReviewerQueueAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+        // The by-reviewer read already matches the named reviewer OR the second reviewer; this
+        // simply removes the caller's need to know their own employee id.
+        => GetReviewsByReviewerAsync(employeeId, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<IEnumerable<ProbationReviewDto>> GetMyReviewsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();

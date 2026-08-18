@@ -638,6 +638,24 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // Area 15b. The probation is per EMPLOYMENT TERM, not per person: a rehire gets a new one,
+        // and an employee may accumulate several over a career. Length comes from the staff
+        // category (FR-HR-031, senior 6 / junior 3), not from whoever fills in the form.
+        title: 'Probation & Confirmation',
+        href: '/hr/probation',
+        icon: UserCheck,
+        children: [
+          { title: 'Register', href: '/hr/probation', icon: UserCheck },
+          // The reviewer queue is deliberately its own entry: probation reviews are conducted by
+          // LINE MANAGERS, who hold no HR permission at all, so this is the one screen in the area
+          // most of its users will ever open.
+          { title: 'My Reviews', href: '/hr/probation/reviews', icon: ClipboardCheck },
+          // FR-HR-030. Not probation, but the same FRD section (onboarding), and it is the only
+          // other place an oath would sensibly live.
+          { title: 'Oaths of Secrecy', href: '/hr/probation/oaths', icon: ScrollText },
+        ],
+      },
+      {
         // Area 13. The plan is per POSITION, not per person, and it is versioned: approving a new
         // plan archives the one the post had before and points it at the successor. Only an
         // approved plan is the position's active version — a draft deliberately holds no slot.

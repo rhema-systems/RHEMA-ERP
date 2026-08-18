@@ -395,7 +395,8 @@ Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging
 key passed in ([[hr-harness-run-environment]]). Slice 9 additionally needs `node clamd-stub.mjs`
 running alongside — the controlled upload gate makes a clean scan mandatory for every hr-*
 category, so without it the code after the gate never executes. Running totals:
-**38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 / 55 = 413**.
+**38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 / 55 / 29 / 31 = 473**
+(the last two are the UI-payload probes, which are not optional — see slices 10 and 11).
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -735,3 +736,37 @@ fail DMS registration, and surface as a 500."* One line to fix — but **had the
 the upload, it would have shipped**, with all 43 JSON assertions green and a feature that stores a
 file it can never register. And the failure arrived mute (F21 again, from a third area): only the
 Staging stack trace named it.
+
+### Slices 10 & 11 — the screens (2026-08-18) — `run-slice10-ui.mjs` 29, `run-slice11-ui.mjs` 31
+
+Screens: `/hr/probation` (register, `new`, `[id]` with reviews/extensions/outcome tabs, `reviews`,
+`oaths`) and `/administration/hr/probation` (`confirming-authorities`, `reminders`). Types written
+from the **C# DTOs**, not from endpoint names. Type-clean and lint-clean; the only `tsc` errors in
+the repo are pre-existing ones in another team's inventory service.
+
+⚠ **Building the queue screen found a backend hole, exactly as the area-12 lesson predicts.**
+`GET reviews/reviewer/{id}` was **unusable by the people it is for**: the client `User` object
+carries roles, tenants and permissions but **no employee link**, so a line manager's browser has no
+id to put in that URL. Added `GET reviews/to-conduct`, token-derived, mirroring `reviews/mine`. The
+rule generalises: *a value the client cannot know is a value the client should not be sending* — it
+found a caller-declared actor in area 12 and an unreachable queue here.
+
+⚠ **The UI-payload probes earned their place immediately**, and neither finding was reachable by
+`tsc`:
+- The create form's "leave the length alone" path depends on `durationMonths: undefined` being
+  **dropped by `JSON.stringify`** so the key is absent — which is what makes FR-HR-031 apply. The
+  probe asserts the key really is absent and that the category length comes back.
+- An empty-string date **400s** the `DateOnly` binder, so the form must send `undefined`, never
+  `''`. Asserted so nobody "simplifies" it back.
+- The authority dialog's `'any'` sentinel must reach the API as **null**; the literal string is
+  refused, and that refusal is asserted rather than assumed.
+
+⚠ Lint caught `review!.id` inside mutation closures — TypeScript cannot narrow a captured value
+across a closure boundary and I had reached for `!`. Fixed by making the mutations **take** the
+value, which is both lint-clean and more honest about what they need.
+
+Two screen decisions worth keeping: the reminder console shows an explicit panel for confirmation
+forms with **no confirming authority**, and the authority screen warns when no tenant-wide default
+exists. Both surface the unconfigured case rather than rendering a quiet empty table — the same
+principle as the backend refusing to fall back to HR. An unconfigured tenant should look
+unconfigured, not look fine.

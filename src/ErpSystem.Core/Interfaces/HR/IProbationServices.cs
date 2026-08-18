@@ -137,6 +137,18 @@ public interface IProbationService
 
     /// <summary>The reviews of the caller own probation, so they can see what they are asked to sign.</summary>
     Task<IEnumerable<ProbationReviewDto>> GetMyReviewsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The reviews the caller must CONDUCT — their own reviewer queue.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Token-derived, and it exists because the browser cannot supply the id the by-reviewer
+    /// endpoint needs: the client `User` object carries roles, tenants and permissions but <b>no
+    /// employee link</b>. So `reviews/reviewer/{id}` is unusable by the very line managers it is
+    /// for — the same shape area 12 found when a create form had no honest value to bind an actor
+    /// field to. A value the client cannot know is a value the client should not be sending.
+    /// </remarks>
+    Task<IEnumerable<ProbationReviewDto>> GetMyReviewerQueueAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<ProbationReviewDto>> GetReviewsByStatusAsync(ProbationReviewStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<ProbationReviewDto>> GetOverdueReviewsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<ProbationReviewDto>> GetReviewsByReviewerAsync(Guid reviewerEmployeeId, CancellationToken cancellationToken = default);
