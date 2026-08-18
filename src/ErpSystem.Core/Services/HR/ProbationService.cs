@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Enums;
@@ -16,6 +17,8 @@ public class ProbationService : IProbationService
     private readonly IProbationPeriodRepository _probationRepository;
     private readonly IProbationReviewRepository _reviewRepository;
     private readonly IProbationExtensionRepository _extensionRepository;
+    private readonly IEmployeeRepository _employeeRepository;
+    private readonly ICompanyHrPolicySettingsService _policySettings;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ProbationService> _logger;
@@ -24,6 +27,8 @@ public class ProbationService : IProbationService
         IProbationPeriodRepository probationRepository,
         IProbationReviewRepository reviewRepository,
         IProbationExtensionRepository extensionRepository,
+        IEmployeeRepository employeeRepository,
+        ICompanyHrPolicySettingsService policySettings,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ProbationService> logger)
@@ -31,6 +36,8 @@ public class ProbationService : IProbationService
         _probationRepository = probationRepository;
         _reviewRepository = reviewRepository;
         _extensionRepository = extensionRepository;
+        _employeeRepository = employeeRepository;
+        _policySettings = policySettings;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -174,6 +181,70 @@ public class ProbationService : IProbationService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    // ── FR-HR-031: the length comes from the staff category ───────────────────
+
+    /// <summary>Loads the employee with the position and staff level the policy is read from.</summary>
+    private async Task<Employee> GetOwnedEmployeeAsync(Guid employeeId)
+    {
+        var employee = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw ProbationWorkflowException.NotFound($"Employee '{employeeId}' was not found.");
+        return employee;
+    }
+
+    /// <summary>
+    /// The employee, loaded so that <b>mutating it is a write</b>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>EmployeeRepository.BaseQuery</c> is <c>AsNoTracking</c> by default, so
+    /// <c>GetByIdWithDetailsAsync</c> hands back a DETACHED employee: changing it does nothing at
+    /// all, and calling <c>Update()</c> on it throws "another instance with the same key value is
+    /// already being tracked" the moment anything else in the request has loaded the same employee
+    /// (the probation reads include it). One cause, two symptoms - a silent no-op and an opaque
+    /// 500. The generic <c>GetByIdAsync</c> tracks, so use it for anything that writes and keep the
+    /// detail load for read-only work. See ef-tracked-graph-write-traps.
+    /// </remarks>
+    private async Task<Employee> GetTrackedEmployeeAsync(Guid employeeId)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId);
+        if (employee == null || employee.TenantId != GetTenantId())
+            throw ProbationWorkflowException.NotFound($"Employee '{employeeId}' was not found.");
+        return employee;
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationPolicyDto> GetPolicyForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
+        => BuildPolicy(await GetOwnedEmployeeAsync(employeeId), await _policySettings.GetAsync(cancellationToken));
+
+    private static ProbationPolicyDto BuildPolicy(Employee employee, CompanyHrPolicySettingsDto settings)
+    {
+        // The position master already encodes FR-HR-031's rule — measured on the reference tenant
+        // 2026-08-18: JNR 3 months (47 positions), SNR 6 (60), MGT 6 (16) — and it is maintained,
+        // 123 of 146 positions carrying a value. So the category rule is READ from data rather than
+        // hard-coded against level codes, which are tenant-specific and editable.
+        var positionMonths = employee.Position?.ProbationPeriodMonths;
+        var expected = positionMonths is > 0 ? positionMonths.Value : settings.DefaultProbationMonths;
+
+        return new ProbationPolicyDto
+        {
+            EmployeeId = employee.Id,
+            EmployeeName = employee.FullName,
+            EmployeeNumber = employee.EmployeeNumber,
+            StaffLevelId = employee.Position?.StaffLevelId,
+            StaffLevelName = employee.Position?.StaffLevel?.Name,
+            StaffLevelCode = employee.Position?.StaffLevel?.Code,
+            EmploymentType = employee.EmploymentType,
+            ExpectedDurationMonths = expected,
+            Source = positionMonths is > 0 ? "Position" : "PolicyDefault",
+            PositionProbationMonths = positionMonths,
+            PolicyDefaultMonths = settings.DefaultProbationMonths,
+            // Only permanent staff are bound. A contract or temporary appointment is governed by
+            // its own contract terms, which the FRD says explicitly, so a supplied length stands.
+            IsEnforced = employee.EmploymentType == EmploymentType.Permanent,
+            EndLeadDays = settings.ProbationEndLeadDays,
+        };
+    }
+
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<ProbationPeriodDto> CreateAsync(CreateProbationPeriodDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -185,10 +256,30 @@ public class ProbationService : IProbationService
             throw ProbationWorkflowException.Conflict(
                 "This employee already has an active probation period. Confirm, extend or terminate it before opening another.");
 
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var employee = await GetOwnedEmployeeAsync(createDto.EmployeeId);
+        var policy = BuildPolicy(employee, await _policySettings.GetAsync(cancellationToken));
+
+        // FR-HR-031. Omitting the length is the normal case: it belongs to the staff category, not
+        // to whoever is filling in the form. A supplied length that contradicts the category is
+        // refused for permanent staff, and the refusal names both numbers so it can be acted on.
+        var durationMonths = createDto.DurationMonths ?? policy.ExpectedDurationMonths;
+        if (createDto.DurationMonths.HasValue
+            && policy.IsEnforced
+            && createDto.DurationMonths.Value != policy.ExpectedDurationMonths)
+        {
+            var level = string.IsNullOrWhiteSpace(policy.StaffLevelName) ? "their staff category" : policy.StaffLevelName;
+            throw ProbationWorkflowException.Invalid(
+                $"Probation for {level} runs {policy.ExpectedDurationMonths} months, not {createDto.DurationMonths.Value}. "
+                + "Omit the duration to apply the category length, or correct the position's probation period.");
+        }
+
+        var entity = createDto.ToEntity(tenantId, createdByUserId, durationMonths);
         entity.Status = ProbationStatus.Active;
 
         await _probationRepository.AddAsync(entity);
+        // The employee is on probation from this moment, and the record has to say so. The hire
+        // path already stamps this; an HR-initiated probation did not.
+        MarkEmployeeOnProbation(await GetTrackedEmployeeAsync(createDto.EmployeeId));
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Probation record created for employee {EmployeeId}", createDto.EmployeeId);
@@ -210,6 +301,52 @@ public class ProbationService : IProbationService
         return true;
     }
 
+    // ── The employee record (slice 5) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Puts the employee on probation on the employee record itself.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The hire path already did this half</b> — <c>JobHireService</c> stamps
+    /// <c>StaffStatus.Probation</c> when the offer carries probation months. What was missing was
+    /// the same stamp on an <i>HR-initiated</i> probation, and, far more importantly, anything at
+    /// all that <b>cleared</b> it again. See <see cref="MarkEmployeeConfirmed"/>.</para>
+    ///
+    /// <para>Measured on the reference tenant 2026-08-18: all 2,351 live employees sat at
+    /// <c>StaffStatus.Active</c> and <b>zero</b> carried a <c>ConfirmationDate</c> — the field
+    /// whose own comment reads "Date probation was passed". Those numbers reflect a workforce
+    /// loaded by migration rather than hired through the pipeline, not a broken hire path.</para>
+    /// </remarks>
+    private static void MarkEmployeeOnProbation(Employee employee)
+    {
+        // Leave a leaver alone: only someone otherwise active moves onto probation.
+        if (employee.StaffStatus is StaffStatus.Active or StaffStatus.Probation)
+            employee.StaffStatus = StaffStatus.Probation;
+    }
+
+    /// <summary>Records on the employee that probation was passed (FR-HR-032).</summary>
+    /// <remarks>
+    /// ⚠ <b>This is the half that did not exist.</b> Hire sets <c>StaffStatus.Probation</c>;
+    /// nothing anywhere cleared it, and nothing ever wrote <c>ConfirmationDate</c> — <c>grep</c>
+    /// finds no other writer of that property in HR. So an employee who passed probation stayed
+    /// flagged as on probation permanently.
+    ///
+    /// <para>That is not cosmetic. <c>Employee.IsOnProbation</c> is computed from
+    /// <c>StaffStatus</c>, and <c>EmployeeBenefitEnrollmentService</c> refuses enrolment when
+    /// <c>!policy.AvailableDuringProbation &amp;&amp; employee.IsOnProbation</c> — with a policy
+    /// seeded at <c>AvailableDuringProbation = false</c>. A confirmed employee would have been
+    /// refused that benefit for the rest of their career.</para>
+    ///
+    /// <para>⚠ Clearing the flag makes a dormant rule live in both directions, so the harness
+    /// asserts the <b>benefit consequence</b> rather than the flag.</para>
+    /// </remarks>
+    private static void MarkEmployeeConfirmed(Employee employee, DateOnly confirmedOn)
+    {
+        if (employee.StaffStatus == StaffStatus.Probation)
+            employee.StaffStatus = StaffStatus.Active;
+        employee.ConfirmationDate = confirmedOn;
+    }
+
     // ── Workflow ──────────────────────────────────────────────────────────────
 
     /// <inheritdoc />
@@ -221,7 +358,8 @@ public class ProbationService : IProbationService
         return await RecordExtensionAsync(dto, GetTenantId(), actorEmployeeId, cancellationToken);
     }
 
-    public async Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, string? notes = null, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedProbationAsync(probationId);
 
@@ -230,11 +368,17 @@ public class ProbationService : IProbationService
                 $"This probation is already {entity.Status} and cannot be confirmed again.");
 
         entity.Status = ProbationStatus.Completed;
+        if (!string.IsNullOrWhiteSpace(notes)) entity.OutcomeNotes = notes;
+
+        var employee = await GetTrackedEmployeeAsync(entity.EmployeeId);
+        MarkEmployeeConfirmed(employee, DateOnly.FromDateTime(DateTime.UtcNow));
 
         await _probationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Probation {ProbationId} confirmed by {UserId}", probationId, confirmedByUserId);
+        _logger.LogInformation(
+            "Probation {ProbationId} confirmed by {UserId}; employee {EmployeeId} confirmed on {Date}",
+            probationId, confirmedByUserId, employee.Id, employee.ConfirmationDate);
         return true;
     }
 
@@ -248,6 +392,14 @@ public class ProbationService : IProbationService
 
         entity.Status = ProbationStatus.Terminated;
         entity.OutcomeNotes = dto.Notes;
+
+        // The probation is over, so the employee is no longer ON probation. What happens to their
+        // employment is the separation module's business, not this one's - area 15b records the
+        // decision and hands off (see the scope line in the build plan). Leaving the flag set would
+        // keep a benefit gate closed against someone this area has stopped tracking.
+        var employee = await GetTrackedEmployeeAsync(entity.EmployeeId);
+        if (employee.StaffStatus == StaffStatus.Probation)
+            employee.StaffStatus = StaffStatus.Active;
 
         await _probationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

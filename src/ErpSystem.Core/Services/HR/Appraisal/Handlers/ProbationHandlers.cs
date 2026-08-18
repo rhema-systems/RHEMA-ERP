@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -13,10 +14,20 @@ namespace ErpSystem.Core.Services.HR.Handlers;
 /// Theme 12 base. Resolves the appraised employee's active probation period so a probation
 /// appraisal's outcome (confirm / extend) updates the real onboarding record.
 /// </summary>
+/// <remarks>
+/// ⚠ <b>These handlers delegate to <see cref="IProbationService"/>; they do not mutate the
+/// probation themselves.</b> They used to, and that made area 5 a second, divergent writer of
+/// probation status: confirming from an appraisal recommendation flipped the status and nothing
+/// else, so the employee record was never updated, no extension audit row was written, and the
+/// outcome-notes field was overwritten by a path that had no business owning it. Area 15b slice 5
+/// converged them. Anything added to confirm/extend belongs in the service, once, where both
+/// callers reach it.
+/// </remarks>
 public abstract class ProbationHandlerBase : IOutcomeRecommendationHandler
 {
     protected readonly IGenericRepository<ProbationPeriod> ProbationRepository;
     protected readonly IGenericRepository<PerformanceAppraisal> AppraisalRepository;
+    protected readonly IProbationService ProbationService;
     protected readonly ICurrentUserProvider CurrentUserProvider;
     protected readonly IUnitOfWork UnitOfWork;
     protected readonly ILogger Logger;
@@ -24,12 +35,14 @@ public abstract class ProbationHandlerBase : IOutcomeRecommendationHandler
     protected ProbationHandlerBase(
         IGenericRepository<ProbationPeriod> probationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IProbationService probationService,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger logger)
     {
         ProbationRepository = probationRepository;
         AppraisalRepository = appraisalRepository;
+        ProbationService = probationService;
         CurrentUserProvider = currentUserProvider;
         UnitOfWork = unitOfWork;
         Logger = logger;
@@ -81,10 +94,11 @@ public class ConfirmProbationHandler : ProbationHandlerBase
     public ConfirmProbationHandler(
         IGenericRepository<ProbationPeriod> probationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IProbationService probationService,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ConfirmProbationHandler> logger)
-        : base(probationRepository, appraisalRepository, currentUserProvider, unitOfWork, logger) { }
+        : base(probationRepository, appraisalRepository, probationService, currentUserProvider, unitOfWork, logger) { }
 
     public override RecommendationType Type => RecommendationType.ConfirmProbation;
 
@@ -98,11 +112,12 @@ public class ConfirmProbationHandler : ProbationHandlerBase
             return null;
         }
 
-        probation.Status = ProbationStatus.Completed;
-        probation.OutcomeNotes = recommendation.Notes ?? "Confirmed via appraisal recommendation.";
-
-        await ProbationRepository.UpdateAsync(probation);
-        await UnitOfWork.SaveChangesAsync(cancellationToken);
+        // Through the service, so the employee record is confirmed too - see the class remarks.
+        await ProbationService.ConfirmAsync(
+            probation.Id,
+            CurrentUserProvider.UserId,
+            recommendation.Notes ?? "Confirmed via appraisal recommendation.",
+            cancellationToken);
 
         Logger.LogInformation("Probation {Id} confirmed (Completed) from appraisal recommendation", probation.Id);
         return ("ProbationPeriod", probation.Id);
@@ -117,10 +132,11 @@ public class ExtendProbationHandler : ProbationHandlerBase
     public ExtendProbationHandler(
         IGenericRepository<ProbationPeriod> probationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IProbationService probationService,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ExtendProbationHandler> logger)
-        : base(probationRepository, appraisalRepository, currentUserProvider, unitOfWork, logger) { }
+        : base(probationRepository, appraisalRepository, probationService, currentUserProvider, unitOfWork, logger) { }
 
     public override RecommendationType Type => RecommendationType.ExtendProbation;
 
@@ -142,13 +158,20 @@ public class ExtendProbationHandler : ProbationHandlerBase
             .FirstOrDefaultAsync(cancellationToken);
         var months = configuredMonths is > 0 ? configuredMonths.Value : DefaultExtensionMonths;
 
-        probation.CurrentEndDate = probation.CurrentEndDate.AddMonths(months);
-        probation.ExtensionCount += 1;
-        probation.OutcomeNotes = recommendation.Notes ?? $"Extended by {months} months via appraisal recommendation.";
-        // Stays Active.
-
-        await ProbationRepository.UpdateAsync(probation);
-        await UnitOfWork.SaveChangesAsync(cancellationToken);
+        // Through the service, so the extension is AUDITED - the direct write here left the
+        // ProbationExtension trail empty and clobbered OutcomeNotes. Stays Active either way.
+        await ProbationService.ExtendAsync(
+            probation.Id,
+            new CreateProbationExtensionDto
+            {
+                ProbationPeriodId = probation.Id,
+                NewEndDate = probation.CurrentEndDate.AddMonths(months),
+                ExtensionMonths = months,
+                Reason = recommendation.Notes ?? $"Extended by {months} months via appraisal recommendation.",
+                Comments = "Raised from an appraisal outcome recommendation.",
+            },
+            CurrentUserProvider.UserId,
+            cancellationToken);
 
         Logger.LogInformation("Probation {Id} extended by {Months}m from appraisal recommendation", probation.Id, months);
         return ("ProbationPeriod", probation.Id);

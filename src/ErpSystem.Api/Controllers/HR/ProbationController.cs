@@ -137,6 +137,19 @@ public class ProbationController : ControllerBase
         [FromQuery] int daysAhead = 30)
         => Ok(await _service.GetEndingWithinAsync(daysAhead));
 
+    /// <summary>
+    /// The probation length that applies to this employee, and where it came from (FR-HR-031).
+    /// </summary>
+    /// <remarks>
+    /// A create form should call this before it renders: the length is a property of the
+    /// employee's staff category — senior 6 months, junior 3 — not something a user should be
+    /// inventing. It also carries the expiry lead days FR-HR-140's alerts use.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.ProbationReadPolicy)]
+    [HttpGet("policy/{employeeId:guid}")]
+    public async Task<ActionResult<ProbationPolicyDto>> GetPolicyForEmployee(Guid employeeId)
+        => Ok(await _service.GetPolicyForEmployeeAsync(employeeId));
+
     // =========================================================================
     // PROBATION CRUD
     // =========================================================================

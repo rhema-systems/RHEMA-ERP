@@ -30,6 +30,15 @@ public interface IProbationService
     Task<IEnumerable<ProbationPeriodSummaryDto>> GetActiveProbationsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<ProbationPeriodSummaryDto>> GetEndingWithinAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The probation length that applies to this employee, and where it came from (FR-HR-031).
+    /// </summary>
+    /// <remarks>
+    /// This is what a create form should call before it renders: the length is a property of the
+    /// employee's staff category, not something a user should be inventing.
+    /// </remarks>
+    Task<ProbationPolicyDto> GetPolicyForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
     // CRUD
     Task<ProbationPeriodDto> CreateAsync(CreateProbationPeriodDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
@@ -46,7 +55,17 @@ public interface IProbationService
     /// could only ever be empty, and <c>ExtensionCount</c> disagreed with it by construction.
     /// </remarks>
     Task<ProbationExtensionDto> ExtendAsync(Guid probationId, CreateProbationExtensionDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default);
-    Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Confirms the probation and records the confirmation on the <b>employee</b> record.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every route that confirms a probation must come through here. Area 5's
+    /// <c>ConfirmProbationHandler</c> used to flip the status directly, so a probation confirmed
+    /// from an appraisal recommendation left the employee sitting at
+    /// <c>StaffStatus.Probation</c> with no <c>ConfirmationDate</c> — the same record, confirmed
+    /// two different ways, ending in two different states.
+    /// </remarks>
+    Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, string? notes = null, CancellationToken cancellationToken = default);
     Task<bool> TerminateAsync(TerminateProbationPeriodDto dto, Guid terminatedByUserId, CancellationToken cancellationToken = default);
 
     // Extension audit trail

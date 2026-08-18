@@ -191,10 +191,18 @@ time.** Hence decision D-2 below — this is the one thing in the area I will no
 
 - **All 2,351 live employees are `StaffStatus = Active`.** Not one is `Probation`.
 - **Zero employees have a `ConfirmationDate`.**
-- `grep` finds **no writer of `Employee.ConfirmationDate` anywhere in HR**, and no writer that
-  sets `StaffStatus = Probation` on hire or clears it on confirmation.
+- `grep` finds **no writer of `Employee.ConfirmationDate` anywhere in HR**, and nothing that
+  **clears** `StaffStatus = Probation` on confirmation.
 
-So the flag has no writer in **either** direction, and the consequence is live and measurable:
+⚠ **Corrected 2026-08-18 while building slice 5.** An earlier draft of this section said nothing
+set the flag in *either* direction. That was wrong: `JobHireService.cs:1463` already stamps
+`StaffStatus.Probation` when the offer carries probation months. The hire half works. What is
+missing is the **clearing** half and `ConfirmationDate` — which is the more damaging half anyway,
+because a flag that is set and never cleared is worse than one that is never set. The 2,351-Active
+measurement reflects a workforce loaded by migration rather than hired through the pipeline, not a
+broken hire path.
+
+So the flag is set and never released, and the consequence is live and measurable:
 `EmployeeBenefitEnrollmentService.cs:1090` refuses enrollment when
 `!policy.AvailableDuringProbation && employee.IsOnProbation`, and
 `BenefitEnterpriseDataSeeder.cs:144` seeds a policy with `AvailableDuringProbation = false`.
@@ -341,9 +349,10 @@ and it arrives in slice 2 rather than slice 0 so the gate lands as one piece.
 | F15 | FR-HR-031 category duration rule absent; policy settings unreferenced | 3.9 |
 | F16 | FR-HR-032 month-5 routing absent; no confirmation letter | 2, 3.12 |
 | F17 | FR-HR-140 expiry notification absent | 2 |
-| F18 | `Employee.StaffStatus`/`ConfirmationDate` have no writer either way; the seeded `AvailableDuringProbation = false` benefit rule has never fired | 3.11 |
+| F18 | Nothing clears `StaffStatus.Probation` on confirmation and nothing writes `ConfirmationDate`, so the seeded `AvailableDuringProbation = false` benefit rule would refuse a confirmed employee forever (hire sets the flag correctly — corrected 2026-08-18) | 3.11 |
 | F19 | Three uncoordinated writers of probation status | 3.4 |
 | F20 | FR-HR-030 oath of secrecy unimplemented | 3.16 |
+| ~~F22~~ | **WITHDRAWN 2026-08-18.** I recorded that the benefit-eligibility refusal was silenced like F21, reasoning from the bare `InvalidOperationException` in `EnsureEligibleAsync`. Measured: it arrives as a **409 carrying its own message**, because `EmployeeBenefitEnrollmentsController` catches it before the global handler sees it. Reading the throw site is not reading the contract. | — |
 | F21 | Not-found is a 400 with the message replaced by "Invalid argument provided."; the extension date rule is silenced the same way | 3.15 |
 
 ## 7. Cross-module seams
@@ -383,7 +392,7 @@ the JWT key ([[hr-harness-run-environment]]).
 ## 9. Slice log
 
 Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging** with the JWT
-key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 = 189**.
+key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 = 221**.
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -480,3 +489,50 @@ extension leaves nothing behind at all.
 ⚠ Harness debt this created: changing the `/extend` payload broke three earlier files that still
 sent the old shape, and slice 2's new rule broke slice 0's "HR completes a review". Both were
 caught by re-running every file, which is the point of doing so after each slice.
+
+### Slices 4 and 5 — the category rule, and confirmation reaching the employee (2026-08-18) — `run-slice4.mjs`, 32 assertions
+
+**Slice 4 — FR-HR-031.** Nothing applied a category rule: the length was whatever the caller sent,
+and `CompanyHrPolicySettings.DefaultProbationMonths` was unreferenced by any probation code.
+`DurationMonths` is now optional — omit it and the category length applies — and a value that
+contradicts the category is refused for permanent staff, naming both numbers. Contract and
+temporary staff are unbound, which the FRD says explicitly. `GET api/probations/policy/{employeeId}`
+exposes the resolved length, its source, the staff level and FR-HR-140's lead days; it is what a
+create form should read before rendering.
+
+The rule is **read from the position master, not hard-coded**, because that data already encodes it
+(JNR 3, SNR 6, MGT 6) and level codes are tenant-editable. The harness asserts that against the
+**live** position master — FR-HR-031 is a claim about TDC's data, so proving it on fixtures would
+prove nothing. If TDC wants the rule stated independently of positions, its home is a
+`ProbationMonths` column on `StaffLevel`.
+
+**Slice 5 — confirmation reaches the employee, and area 5 stops disagreeing.** Confirm now clears
+`StaffStatus.Probation` and stamps `ConfirmationDate`; terminate releases the flag without a date.
+Area 5's `ConfirmProbationHandler`/`ExtendProbationHandler` now delegate to `IProbationService`
+instead of mutating the row, so the same probation confirmed two ways no longer ends in two
+different states, and an appraisal-driven extension is audited like any other.
+
+⚠⚠ **The lesson of these slices: `AsNoTracking` is a silent write-loss, and its two symptoms look
+unrelated.** `EmployeeRepository.BaseQuery` is `AsNoTracking` by default, so
+`GetByIdWithDetailsAsync` returns a **detached** employee. Mutating it did nothing at all, and
+calling `UpdateAsync` on it threw *"another instance with the same key value is already being
+tracked"* — because the probation reads `.Include(p => p.Employee)` and had tracked the same row.
+One cause, two symptoms; and my first fix removed the `Update()` calls, which cured the 500 and
+left the silent no-op. **A change that makes a failure quieter is not a fix.** Writes now use the
+tracked generic `GetByIdAsync`; the detail load stays for read-only work.
+
+⚠ **Three harness defects, and one of them was the assertion the slice exists for.**
+`EmployeeDto` carries `staffStatus` but not `isOnProbation`/`confirmationDate` — those are on
+`EmployeeDetailDto` behind `/details`, so the first run read `undefined` for both.
+`availableDuringProbation` is nested on the `definition` block, not top level. And the reference
+tenant holds **zero** benefit policies (the enterprise seeder never ran here), so the benefit
+assertion was **skipping** — [[hr-succession-area-survey]]'s "a conditional assertion is a skipped
+assertion wearing a tick", live. The run now mints its own restricted policy and asserts both
+directions unconditionally: the same enrolment, same policy, same employee, **refused on probation
+and accepted after confirmation**. That pair is the proof the flag means something; asserting the
+flag alone would not have been.
+
+⚠ **F22 withdrawn.** I recorded that the benefit refusal was silenced like F21, reasoning from the
+bare `InvalidOperationException` at the throw site. Measured, it arrives as a 409 carrying its own
+message, because the controller catches it before the global handler sees it. **Reading the throw
+site is not reading the contract.**

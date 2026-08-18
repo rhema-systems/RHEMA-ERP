@@ -3762,18 +3762,22 @@ public static class RecruitmentMappingExtensions
         };
     }
 
-    public static ProbationPeriod ToEntity(this CreateProbationPeriodDto dto, Guid tenantId, Guid userId)
+    /// <summary>
+    /// Builds the probation row. <paramref name="durationMonths"/> is resolved by the service from
+    /// the employee's staff category (FR-HR-031), so it is passed in rather than read off the DTO,
+    /// which may legitimately omit it.
+    /// </summary>
+    public static ProbationPeriod ToEntity(this CreateProbationPeriodDto dto, Guid tenantId, Guid userId, int durationMonths)
     {
-        var endDate = DateOnly.FromDateTime(DateTime.UtcNow).AddMonths(dto.DurationMonths);
         return new ProbationPeriod
         {
             TenantId = tenantId,
             EmployeeId = dto.EmployeeId,
             ContractDetailId = dto.ContractDetailId,
             StartDate = dto.StartDate,
-            OriginalEndDate = dto.StartDate.AddMonths(dto.DurationMonths),
-            CurrentEndDate = dto.StartDate.AddMonths(dto.DurationMonths),
-            DurationMonths = dto.DurationMonths,
+            OriginalEndDate = dto.StartDate.AddMonths(durationMonths),
+            CurrentEndDate = dto.StartDate.AddMonths(durationMonths),
+            DurationMonths = durationMonths,
             Status = ProbationStatus.Active,
             OutcomeNotes = dto.OutcomeNotes,
             CreatedBy = userId.ToString(),

@@ -4051,11 +4051,66 @@ public class CreateProbationPeriodDto : CreateDtoBase
     [Required]
     public DateOnly StartDate { get; set; }
 
+    /// <summary>
+    /// How long the probation runs. <b>Omit it</b> and the length is resolved from the employee's
+    /// staff category, which is what FR-HR-031 asks for (senior 6 months, junior 3).
+    /// </summary>
+    /// <remarks>
+    /// Nullable since slice 4. A supplied value that contradicts the category is refused for
+    /// permanent staff — see <c>GET api/probations/policy/{employeeId}</c>, which returns the
+    /// resolved length and where it came from, and is what a create form should call.
+    /// </remarks>
     [Range(1, 24)]
-    public int DurationMonths { get; set; }
+    public int? DurationMonths { get; set; }
 
     [MaxLength(2000)]
     public string? OutcomeNotes { get; set; }
+}
+
+/// <summary>
+/// The probation length that applies to one employee, and where it was resolved from.
+/// </summary>
+/// <remarks>
+/// FR-HR-031: "The system shall apply probation periods by staff category (senior 6 months; junior
+/// 3 months)." Measured on the reference tenant 2026-08-18, the position master already encodes
+/// exactly that — JNR 3 months across 47 positions, SNR 6 across 60, MGT 6 across 16 — so the rule
+/// is <b>read from maintained data</b> rather than hard-coded against tenant-specific level codes.
+/// If TDC ever wants the rule stated independently of positions, its home is a
+/// <c>ProbationMonths</c> column on <c>StaffLevel</c>.
+/// </remarks>
+public class ProbationPolicyDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+
+    public Guid? StaffLevelId { get; set; }
+    public string? StaffLevelName { get; set; }
+    public string? StaffLevelCode { get; set; }
+
+    public EmploymentType EmploymentType { get; set; }
+    public string EmploymentTypeName => EmploymentType.ToString();
+
+    /// <summary>The length that will be applied when the caller does not supply one.</summary>
+    public int ExpectedDurationMonths { get; set; }
+
+    /// <summary>Where <see cref="ExpectedDurationMonths"/> came from: Position, PolicyDefault.</summary>
+    public string Source { get; set; } = string.Empty;
+
+    /// <summary>The position's own probation length, when it carries one.</summary>
+    public int? PositionProbationMonths { get; set; }
+
+    /// <summary>The tenant-wide fallback from CompanyHrPolicySettings.</summary>
+    public int PolicyDefaultMonths { get; set; }
+
+    /// <summary>
+    /// Whether the length is enforced. Only permanent staff are bound by FR-HR-031; a contract or
+    /// temporary appointment is governed by its own contract, so a supplied length is accepted.
+    /// </summary>
+    public bool IsEnforced { get; set; }
+
+    /// <summary>How many days before the end date the expiry alerts start (FR-HR-140).</summary>
+    public int EndLeadDays { get; set; }
 }
 
 public class ExtendProbationPeriodDto
