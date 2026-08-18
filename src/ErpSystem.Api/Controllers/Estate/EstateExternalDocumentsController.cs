@@ -1243,6 +1243,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["referenceNumber"] = reference,
             ["applicantName"] = request.ApplicantName,
             ["propertyNumber"] = request.PropertyReference,
+            ["housePlotShopNumber"] = request.PropertyReference,
             ["propertyUnit"] = request.PropertyReference,
             ["location"] = request.Location,
             ["locationDetail"] = request.Location,
@@ -1265,6 +1266,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["schedule"] = ResolveEstateSchedule(definition),
             ["procedureType"] = definition.Title
         };
+
+        if (string.Equals(definition.Code, "hosConversion", StringComparison.OrdinalIgnoreCase))
+        {
+            values["housingRequestType"] = "Conversion to HOS";
+        }
+
+        if (string.Equals(definition.Code, "tenancyRecognition", StringComparison.OrdinalIgnoreCase))
+        {
+            values["housingRequestType"] = "Recognition of tenancy";
+        }
 
         foreach (var item in request.AdditionalValues ?? new Dictionary<string, string?>())
         {

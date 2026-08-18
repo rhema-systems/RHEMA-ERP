@@ -1024,11 +1024,19 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             new("receivedDate", "Received date", "date", null),
             new("assignedOfficer", "Assigned Estate officer", "text", null),
             new("arrearsStatus", "Arrears status", "select", ["Not checked", "No arrears", "Arrears exist", "Waiver / exception approved"]),
+            new("sopSectionReference", "SOP section reference", "text", null),
+            new("approvedFeeScheduleReference", "Approved fee / appendix reference", "text", null),
+            new("approvedRateReference", "Approved rate reference", "text", null),
+            new("documentTemplateReference", "Approved form / template reference", "text", null),
             new("feeReference", "Fee / invoice / receipt reference", "text", null),
             new("legalReference", "Legal reference", "text", null),
             new("financeReference", "Finance reference", "text", null),
             new("planningReference", "Planning / site plan reference", "text", null),
-            new("dmsFolderReference", "DMS folder reference", "text", null)
+            new("dmsFolderReference", "DMS folder reference", "text", null),
+            new("financeHandoffStatus", "Finance handoff status", "select", ["Not required", "Pending invoice", "Invoice raised", "Receipt confirmed", "Returned for correction"]),
+            new("legalHandoffStatus", "Legal handoff status", "select", ["Not required", "Pending legal review", "Sent to Legal", "Legal completed", "Returned for correction"]),
+            new("recordsHandoffStatus", "Records handoff status", "select", ["Not required", "Pending Records update", "Sent to Records", "Records updated", "Returned for correction"]),
+            new("reportingReference", "Reporting / quarterly return reference", "text", null)
         };
 
         // Estate manual controls stay in Estate; linked teams receive source/reference fields without changing their modules.
@@ -1038,6 +1046,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("intakeType", "Intake type", "select", ["Incoming file", "Outgoing letter", "Form purchase", "Typing request", "Client pickup", "Internal dispatch"]),
                 new("registryBook", "Registry book", "select", ["General notebook", "Regularization notebook", "Kpone notebook", "Letters book", "Forms purchase book", "Movement register"]),
                 new("formType", "Form type", "select", ["Estate Transfer Form", "House Ownership Scheme Form", "Rental Unit Form", "Other"]),
+                new("formReceiptNumber", "Form purchase receipt number", "text", null),
+                new("formIssuedTo", "Form issued to", "text", null),
+                new("fileMovementReference", "File movement reference", "text", null),
                 new("receiptNumber", "Receipt number", "text", null),
                 new("fileComingFrom", "File coming from", "text", null),
                 new("referredOfficer", "Referred officer", "text", null),
@@ -1050,10 +1061,25 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (string.Equals(procedure.EntityType, "EstateRecordsManagement", StringComparison.OrdinalIgnoreCase))
         {
             fields.AddRange([
-                new("recordActionType", "Record action type", "select", ["Estate register update", "HOS ledger update", "Rent register update", "Transfer amendment", "Agency notification", "Building permit ownership verification", "Invitation / mediation letter"]),
+                new("recordActionType", "Record action type", "select", ["Estate register update", "HOS ledger update", "Rent register update", "Transfer amendment", "Assignment amendment", "Rental-to-HOS conversion", "Agency notification", "Building permit ownership verification", "Invitation / mediation letter"]),
+                new("sourceTransferCaseReference", "Source transfer / assignment case reference", "text", null),
+                new("housePlotShopNumber", "House / plot / shop number", "text", null),
                 new("registerReference", "Register / ledger reference", "text", null),
                 new("oldLesseeName", "Previous lessee / tenant name", "text", null),
                 new("newLesseeName", "New lessee / tenant name", "text", null),
+                new("newLesseeAddress", "New lessee address", "textarea", null),
+                new("transferEffectiveDate", "Transfer effective date", "date", null),
+                new("transferDeclarationReference", "Transfer Declaration form reference", "text", null),
+                new("voluntaryVacationReference", "Voluntary vacation of tenancy evidence reference", "text", null),
+                new("hosFormReference", "House Ownership Scheme form reference", "text", null),
+                new("tenantNamesChangingToHos", "Tenant names changing to HOS", "textarea", null),
+                new("houseType", "House type", "text", null),
+                new("purchaseAmount", "Purchase amount / amount bought", "currency", null),
+                new("purchaseDate", "Date property was purchased", "date", null),
+                new("estateRegisterUpdateStatus", "Estate register update status", "select", ["Not started", "Updated", "Returned for correction", "Not applicable"]),
+                new("ledgerUpdateStatus", "Ledger update status", "select", ["Not started", "Rent ledger updated", "HOS ledger updated", "Both ledgers updated", "Returned for correction", "Not applicable"]),
+                new("revenueRecordsUpdateStatus", "Revenue records update status", "select", ["Not started", "Revenue updated", "Estate Records updated", "Revenue and Estate Records updated", "Returned for correction"]),
+                new("recordsAmendmentConfirmation", "Records amendment confirmation", "textarea", null),
                 new("addressOnRecord", "Address on record", "text", null),
                 new("buildingPermitReference", "Building permit reference", "text", null),
                 new("ownershipVerificationStatus", "Ownership verification status", "select", ["Not checked", "Matches records", "Mismatch found", "Returned for correction"]),
@@ -1080,8 +1106,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             fields.AddRange([
                 new("searchPurpose", "Search purpose", "text", null),
                 new("searchPeriod", "Search period / scope", "text", null),
+                new("propertyFileReviewStatus", "Property-file review status", "select", ["Not started", "File reviewed", "File missing", "Returned for correction"]),
+                new("groundRentArrearsCheckStatus", "Ground-rent arrears check status", "select", ["Not checked", "No arrears", "Arrears exist", "Waiver / exception approved"]),
                 new("searchFeeReceipt", "Search fee receipt", "text", null),
-                new("searchReportReference", "Search report reference", "text", null)
+                new("searchReportReference", "Search report reference", "text", null),
+                new("searchCoverLetterReference", "Search cover letter reference", "text", null)
             ]);
         }
 
@@ -1123,10 +1152,23 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || string.Equals(procedure.EntityType, "EstateJointOwnership", StringComparison.OrdinalIgnoreCase))
         {
             fields.AddRange([
+                new("transferProcessType", "Transfer process type", "select", ["Transfer of interest", "Portion transfer", "Assignment", "Joint ownership addition", "Rental transfer", "Rental-to-HOS conversion"]),
+                new("housePlotShopNumber", "House / plot / shop number", "text", null),
                 new("transferorName", "Transferor / assignor / existing lessee", "text", null),
                 new("transfereeName", "Transferee / assignee / incoming party", "text", null),
+                new("newLesseeAddress", "New lessee / transferee address", "textarea", null),
+                new("transferEffectiveDate", "Transfer effective date", "date", null),
+                new("transferDeclarationReference", "Transfer Declaration form reference", "text", null),
+                new("transferorDeclarationStatus", "Transferor declaration status", "select", ["Not checked", "Completed and signed", "Missing signature", "Returned for correction"]),
+                new("transfereeDeclarationStatus", "Transferee declaration status", "select", ["Not checked", "Completed and signed", "Missing signature", "Returned for correction"]),
+                new("voluntaryVacationReference", "Voluntary vacation of tenancy evidence reference", "text", null),
+                new("hosFormReference", "HOS form reference when rental changes to HOS", "text", null),
+                new("houseType", "House type when HOS applies", "text", null),
+                new("purchaseAmount", "Purchase amount / amount bought", "currency", null),
                 new("considerationAmount", "Consideration amount", "currency", null),
                 new("transferFeePayable", "Transfer / assignment fee payable", "currency", null),
+                new("revenueRecordsReference", "Revenue records amendment reference", "text", null),
+                new("estateRecordsReference", "Estate Records amendment reference", "text", null),
                 new("executionStatus", "Execution status", "select", ["Not started", "Prepared", "Signed", "Registered", "Records updated"])
             ]);
         }
@@ -1145,24 +1187,38 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (string.Equals(procedure.EntityType, "EstateLeasePreparation", StringComparison.OrdinalIgnoreCase))
         {
             fields.AddRange([
+                new("landUse", "Land use", "select", ["Residential", "Commercial", "Institutional", "Industrial", "Agro Industrial", "Fuel Station", "Mixed Use", "Other"]),
+                new("leaseTermYears", "Lease term (years)", "number", null),
+                new("leaseCommencementDate", "Lease commencement / move-in date", "date", null),
+                new("groundRentPayable", "Ground Rent payable", "currency", null),
+                new("paymentFrequency", "Payment frequency", "select", ["Annual", "SemiAnnual", "Quarterly", "Monthly"]),
                 new("developmentStatus", "Development status", "select", ["Not checked", "Undeveloped", "Partially developed", "Substantially developed", "Completed"]),
                 new("buildingPermitReference", "Building permit reference", "text", null),
                 new("leasePreparationFee", "Lease preparation fee", "currency", null),
                 new("cadastralInvoiceReference", "Cadastral invoice reference", "text", null),
+                new("cadastralFeeReceiptReference", "Cadastral fee receipt reference", "text", null),
                 new("leaseRequestFormReference", "Lease request form reference", "text", null),
-                new("registeredLeaseReference", "Registered lease reference", "text", null)
+                new("legalLeasePreparationStatus", "Legal lease preparation status", "select", ["Not sent", "Sent to Legal", "Legal drafting", "Registered lease returned", "Detached to Records"]),
+                new("registeredLeaseReference", "Registered lease reference", "text", null),
+                new("detachmentReference", "Legal detachment / Records update reference", "text", null)
             ]);
         }
 
         if (string.Equals(procedure.EntityType, "EstateLeaseRenewal", StringComparison.OrdinalIgnoreCase))
         {
             fields.AddRange([
+                new("originalLeaseReference", "Original lease reference", "text", null),
+                new("variationReason", "Variation / renewal reason", "textarea", null),
                 new("existingLeaseExpiryDate", "Existing lease expiry date", "date", null),
                 new("yearsToExpiry", "Years to expiry", "number", null),
+                new("unexpiredTermBand", "Unexpired term band", "select", ["Not assessed", "10 years or less", "More than 10 years"]),
+                new("surrenderOptionStatus", "Surrender option status", "select", ["Not required", "Surrender requested", "Surrender accepted", "Surrender rejected"]),
                 new("developmentStatus", "Development proposal / status", "text", null),
                 new("renewalPremium", "Renewal premium", "currency", null),
                 new("improvedGroundRent", "Improved Ground Rent", "currency", null),
-                new("committeeDecision", "LRTC decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+                new("lrtcReference", "LRTC reference", "text", null),
+                new("committeeDecision", "LRTC decision", "select", ["Pending", "Approved", "Returned", "Rejected"]),
+                new("deedOfVariationReference", "Deed of Variation reference", "text", null)
             ]);
         }
 
@@ -1172,8 +1228,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("adjoiningPlotNumber", "Adjoining plot number", "text", null),
                 new("additionalLandSizeAcres", "Additional land size (acres)", "number", null),
                 new("availabilityStatus", "Availability status", "select", ["Not checked", "Available", "Unavailable", "Disputed", "Requires layout revision"]),
+                new("feeRecommendationReference", "Fee recommendation reference", "text", null),
                 new("recommendation", "Estate recommendation", "textarea", null),
-                new("approvalDecision", "Approval decision", "select", ["Pending", "Approved", "Returned", "Rejected"])
+                new("approvalDecision", "Approval decision", "select", ["Pending", "Approved", "Returned", "Rejected"]),
+                new("offerOrRefusalReference", "Offer / refusal letter reference", "text", null)
             ]);
         }
 
@@ -1184,7 +1242,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("proposedLayoutReference", "Proposed layout reference", "text", null),
                 new("revisionReason", "Revision reason", "textarea", null),
                 new("planningComment", "Planning comment", "textarea", null),
-                new("mdApprovalReference", "MD approval reference", "text", null)
+                new("mdApprovalReference", "MD approval reference", "text", null),
+                new("layoutRevisionDispatchReference", "Dispatch / Records update reference", "text", null)
             ]);
         }
 
@@ -1212,6 +1271,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("originalProposalReference", "Original proposal reference", "text", null),
                 new("outstandingAmount", "Outstanding amount", "currency", null),
                 new("revisedAmountPayable", "Revised amount payable", "currency", null),
+                new("rateRevisionBasis", "Rate revision basis", "textarea", null),
+                new("mdSignatureReference", "MD / HOE signature reference", "text", null),
                 new("noticeDate", "Notice date", "date", null),
                 new("dispatchReference", "Dispatch reference", "text", null)
             ]);
@@ -1231,8 +1292,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             fields.AddRange([
                 new("regularisationApproach", "Regularisation approach", "select", ["Direct approach", "Indirect approach"]),
                 new("planLayoutStatus", "Planning layout status", "select", ["Not checked", "Satisfies approved layout", "Requires planning review", "Rejected"]),
+                new("communityRegularised", "Community / area being regularised", "text", null),
+                new("applicationFormReference", "Completed application form reference", "text", null),
+                new("revenueRecordsConfirmation", "Revenue and Estate Records confirmation", "text", null),
                 new("invitationLetterReference", "Invitation letter reference", "text", null),
-                new("interviewDate", "Interview date", "date", null)
+                new("interviewDate", "Interview date", "date", null),
+                new("committeeVettingReference", "Committee vetting reference", "text", null)
             ]);
         }
 
@@ -1248,7 +1313,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("paymentBookReference", "Payment book reference", "text", null),
                 new("offerLetterReference", "Offer Letter reference", "text", null),
                 new("acceptanceDate", "Acceptance date", "date", null),
-                new("rightOfEntryIssuedDate", "Right of Entry issued date", "date", null)
+                new("rightOfEntryReference", "Right of Entry reference", "text", null),
+                new("rightOfEntryIssuedDate", "Right of Entry issued date", "date", null),
+                new("quarterlyReportReference", "Quarterly report reference", "text", null)
             ]);
         }
 
@@ -1259,11 +1326,17 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("houseType", "House type", "text", null),
                 new("unitNumber", "Unit / house number", "text", null),
                 new("declarationReference", "Statutory declaration reference", "text", null),
+                new("hosFormReference", "House Ownership Scheme form reference", "text", null),
+                new("tenantNamesChangingToHos", "Tenant names changing to HOS", "textarea", null),
                 new("rentCardNumber", "Rent card number", "text", null),
                 new("rentRegisterReference", "Rent register reference", "text", null),
                 new("sellingPrice", "Selling price", "currency", null),
+                new("purchaseAmount", "Purchase amount / amount bought", "currency", null),
+                new("purchaseDate", "Date property was purchased", "date", null),
                 new("paymentCompletionStatus", "Payment completion status", "select", ["Not checked", "Deposit paid", "Arrears cleared", "Full selling price paid", "Payment incomplete"]),
-                new("dateOfTenancy", "Date of tenancy", "date", null)
+                new("dateOfTenancy", "Date of tenancy", "date", null),
+                new("ledgerUpdateStatus", "HOS / rent ledger update status", "select", ["Not started", "Rent ledger updated", "HOS ledger updated", "Both ledgers updated", "Returned for correction"]),
+                new("recordsUpdateReference", "Revenue and Estate Records update reference", "text", null)
             ]);
         }
 
@@ -1274,6 +1347,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("allocationLetterReference", "Traditional allocation letter reference", "text", null),
                 new("sitePlanReference", "Traditional site plan reference", "text", null),
                 new("priorAllocationStatus", "Prior allocation status", "select", ["Not checked", "No prior allocation", "Prior allocation found", "Disputed", "Undefined signatories"]),
+                new("proposalLetterReference", "Proposal letter reference", "text", null),
+                new("offerLetterReference", "Offer Letter reference", "text", null),
+                new("rightOfEntryReference", "Right of Entry reference", "text", null),
+                new("quarterlyReportReference", "Quarterly report reference", "text", null),
                 new("rejectionReason", "Rejection reason", "textarea", null)
             ]);
         }
@@ -1283,11 +1360,17 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             fields.AddRange([
                 new("reportType", "Report type", "select", ["Quarterly productivity", "Rent roll", "Debtor list", "Allocation report", "Transfer and assignment report", "Lease and mortgage report", "Control exception register", "Board summary"]),
                 new("reportingPeriod", "Reporting period", "text", null),
+                new("sourceSchedule", "Source schedule", "select", ["Records", "Serviced Plots", "Lands / Partially Serviced", "Housing", "Traditional Lands", "Regularisation", "Facilities", "Property Management", "All Estate"]),
                 new("applicationsReceived", "Applications received", "number", null),
                 new("applicationsProcessed", "Applications processed", "number", null),
                 new("expectedRevenue", "Expected revenue", "currency", null),
                 new("paymentsReceived", "Payments received", "currency", null),
                 new("debtorCount", "Debtor count", "number", null),
+                new("transfersCompleted", "Transfers / assignments completed", "number", null),
+                new("leasesOrMortgagesProcessed", "Leases / mortgages processed", "number", null),
+                new("appendixFeeVersion", "Appendix fee version used", "text", null),
+                new("boardSubmissionReference", "Board submission reference", "text", null),
+                new("auditTrailReference", "Audit trail reference", "text", null),
                 new("exceptionSummary", "Exception summary", "textarea", null),
                 new("reportRecipient", "Report recipient", "text", null)
             ]);
@@ -1303,6 +1386,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             new("Application letter / request form", "Applicant / Registry", true),
             new("Property file extract", "Estate Registry / Records", true),
             new("Ownership, tenancy, lease, or allocation evidence", "Applicant / Estate Records", true),
+            new("Approved SOP form or template reference", "Estate / Central DMS", false),
+            new("Approved fee schedule or appendix extract", "Estate / Finance", false),
             new("Revenue / arrears / payment confirmation", "Finance / Revenue", false),
             new("Site plan, cadastral plan, layout, or inspection evidence", "Planning / Development / Estate", false),
             new("Approval, recommendation, or routing note", "HOE / EM / EO", true),
@@ -1316,12 +1401,18 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "EstateRegistrySecretariat" => [
                 new("Incoming notebook / registry entry", "Estate Registry", true),
                 new("Forms purchase receipt", "Estate Registry / Revenue", false),
+                new("Issued Estate Transfer / HOS / Rental form register", "Estate Registry", false),
                 new("Letters book or dispatch entry", "Estate Registry", true),
                 new("File movement trace", "Estate Registry", true),
                 new("Typed letter or notice", "Estate Registry", false)
             ],
             "EstateRecordsManagement" => [
                 new("Estate register or ledger extract", "Estate Records", true),
+                new("Transfer Declaration form completed by transferor and transferee", "Transferor / Transferee", false),
+                new("Voluntary vacation of tenancy evidence", "Applicant / Estate Records", false),
+                new("House Ownership Scheme form for rental-to-HOS conversion", "Housing / Applicant", false),
+                new("House type and purchase amount ledger schedule", "Housing / Estate Records", false),
+                new("Revenue and Estate Records amendment confirmation", "Revenue / Estate Records", true),
                 new("Revenue and Development consistency check", "Estate Records / Revenue / Development", true),
                 new("Building permit ownership verification form", "Development / Estate Records", false),
                 new("Agency notification letter", "Estate Records", false),
@@ -1336,6 +1427,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "EstateSearchApplication" => [
                 new("Search application form", "Applicant / Registry", true),
                 new("Search fee receipt", "Revenue", false),
+                new("Ground rent arrears confirmation", "Finance / Revenue", true),
+                new("Property file review extract", "Estate Records", true),
                 new("Search report", "Estate Records", true)
             ],
             "EstateCertifiedTrueCopy" => [
@@ -1347,7 +1440,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "EstateLeasePreparation" => [
                 new("Building permit confirmation", "Building Inspectorate / Development", true),
                 new("Substantial development site report", "Estate / Development", true),
+                new("Lease preparation fee receipt", "Finance / Revenue", true),
+                new("Cadastral plan invoice and receipt", "Estate / Planning / Revenue", false),
                 new("Lease request form to Legal", "Estate / Legal", true),
+                new("Legal lease preparation tracking note", "Legal / Estate", false),
                 new("Registered lease copy for detachment", "Legal / Lands Commission", false)
             ],
             "EstateMortgageConsent" => [
@@ -1356,10 +1452,28 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("Development and arrears verification", "Estate / Finance Revenue", true),
                 new("Mortgage consent response", "Estate Department", true)
             ],
+            "EstateTransfer" => [
+                new("Transfer Declaration form completed by transferor and transferee", "Transferor / Transferee", true),
+                new("Voluntary vacation of tenancy evidence", "Transferor / Estate Records", true),
+                new("Transfer effective-date evidence", "Applicant / Legal / Estate Records", true),
+                new("New lessee address evidence", "Transferee", true),
+                new("Transfer fee payment confirmation", "Finance / Revenue", false),
+                new("Revenue and Estate Records amendment confirmation", "Revenue / Estate Records", true),
+                new("Registered transfer instrument or Legal completion note", "Legal / Lands Commission", false)
+            ],
+            "EstateAssignment" => [
+                new("Assignment application / consent request", "Applicant", true),
+                new("Draft deed or assignment document", "Applicant / Legal", true),
+                new("Transfer Declaration or assignment party declaration", "Assignor / Assignee", true),
+                new("New lessee or assignee address evidence", "Assignee", true),
+                new("Revenue and Estate Records amendment confirmation", "Revenue / Estate Records", true),
+                new("Registered assignment instrument or Legal completion note", "Legal / Lands Commission", false)
+            ],
             "EstateAdditionalLand" => [
                 new("Additional land application", "Applicant", true),
                 new("Adjoining plot verification", "Estate Records", true),
                 new("Inspection and availability report", "Estate / Planning", true),
+                new("Fee recommendation and approved rate extract", "Estate / Finance", false),
                 new("Approval recommendation", "HOE / MD", true),
                 new("Offer or refusal letter", "Estate Department", true)
             ],
@@ -1367,11 +1481,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("Layout revision request", "Applicant / Estate", true),
                 new("Existing and proposed layout plans", "Planning / Development", true),
                 new("Layout revision letter", "Estate Department", true),
-                new("MD signed approval", "MD / HOE", true)
+                new("MD signed approval", "MD / HOE", true),
+                new("Dispatch and Records update evidence", "Registry / Estate Records", true)
             ],
             "EstateChangeOfUse" => [
                 new("Change-of-use application", "Applicant", true),
                 new("Site inspection report", "Estate / Planning", true),
+                new("Existing and proposed land-use fee calculation worksheet", "Estate / Finance", true),
                 new("Change-of-use fee calculation", "Estate Department", true),
                 new("Approval or refusal letter", "HOE / MD", true),
                 new("Payment confirmation", "Finance / Revenue", false)
@@ -1379,14 +1495,18 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "EstateReminderRateRevision" => [
                 new("Unpaid proposal / arrears schedule", "Estate / Revenue", true),
                 new("Reminder or rate revision notice", "Estate Department", true),
+                new("Approved revised-rate calculation", "Estate / Finance", true),
                 new("Signed notice approval", "HOE / MD", true),
                 new("Dispatch evidence", "Registry", true)
             ],
             "EstateLeaseRenewal" => [
                 new("Lease renewal application", "Applicant", true),
+                new("Unexpired-term assessment", "Estate", true),
                 new("Lease Renewal Technical Committee approval", "LRTC", true),
                 new("Renewal invoice / demand letter", "Estate / Finance Revenue", true),
-                new("Deed of Variation draft", "Estate / Legal", true)
+                new("Surrender and renewal option evidence", "Estate / Legal", false),
+                new("Deed of Variation draft", "Estate / Legal", true),
+                new("Registered Deed of Variation / Records update evidence", "Legal / Estate Records", false)
             ],
             "EstateServicedPlotAllocation" => [
                 new("Completed application form", "Applicant / Marketing", true),
@@ -1397,28 +1517,39 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("Payment book update evidence", "Revenue / Estate Records", true)
             ],
             "EstateLandsPartiallyServiced" => [
+                new("Application form or application letter", "Applicant / Registry", true),
                 new("Proposal Letter with LMF and Ground Rent", "Estate Lands / Partially Serviced", true),
+                new("LMF and Ground Rent calculation worksheet", "Estate Lands / Finance", true),
                 new("Offer Letter", "Estate Lands / Partially Serviced", true),
-                new("Right of Entry", "Estate Lands / Partially Serviced", true)
+                new("Right of Entry", "Estate Lands / Partially Serviced", true),
+                new("Quarterly lands schedule report extract", "Estate Lands / Partially Serviced", false)
             ],
             "EstateHousingHomeOwnership" => [
                 new("Recognition or HOS application", "Applicant / Housing", true),
                 new("Rental Transfer Form", "Housing Section", false),
                 new("Rent Card", "Housing / MD", false),
+                new("House Ownership Scheme form for rental-to-HOS conversion", "Housing / Applicant", true),
+                new("Tenant names changing to HOS schedule", "Housing Section", true),
+                new("House type and selling price / purchase amount schedule", "Housing / Estate Records", true),
                 new("HOS Offer Letter", "Housing Section", true),
                 new("Payment completion evidence", "Revenue / Housing", false),
+                new("HOS ledger and Estate Records update evidence", "Revenue / Estate Records", true),
                 new("Lease request for purchased house", "Housing / Legal", false)
             ],
             "EstateTraditionalLands" => [
                 new("Traditional Council allocation letter", "Traditional Council", true),
                 new("Traditional Council site plan", "Traditional Council / Planning", true),
                 new("Proposal Letter with LMF and Ground Rent", "Estate Traditional Lands", true),
+                new("LMF and Ground Rent calculation worksheet", "Estate Traditional Lands / Finance", true),
                 new("Offer Letter", "Estate Traditional Lands", true),
-                new("Right of Entry", "Estate Traditional Lands", true)
+                new("Right of Entry", "Estate Traditional Lands", true),
+                new("Quarterly traditional lands report extract", "Estate Traditional Lands", false)
             ],
             "EstateTenancyRegularisation" => [
                 new("Invitation letter", "Estate Regularisation", true),
                 new("Regularisation requirements pack", "Applicant", true),
+                new("Completed regularisation application form", "Applicant", true),
+                new("Revenue and Estate Records confirmation", "Revenue / Estate Records", true),
                 new("Planning plot-number confirmation", "Planning Section", true),
                 new("Committee vetting approval", "Estate Regularisation Committee", true),
                 new("Proposal Letter with LMF and Ground Rent", "Estate Regularisation", true),
@@ -1430,8 +1561,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 new("Rent roll", "Housing / Estate Records", false),
                 new("Debtor list", "Revenue / Estate", false),
                 new("Allocation and expected revenue report", "Estate Schedules", true),
+                new("Transfer and assignment report", "Estate Records", false),
+                new("Lease and mortgage report", "Estate / Legal", false),
+                new("Approved appendix fee schedule control sheet", "Estate / Finance", true),
                 new("Control exception register", "Estate Management", true),
-                new("Approved report pack", "HOE / Estate Managers", true)
+                new("Board summary / approved report pack", "HOE / Estate Managers", true)
             ],
             _ => []
         });

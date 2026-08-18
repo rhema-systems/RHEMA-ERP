@@ -50,6 +50,8 @@ const LAND_FEE_ENTITY_TYPES = new Set([
 
 const CHANGE_OF_USE_ENTITY_TYPES = new Set(['EstateChangeOfUse']);
 
+const GENERATED_DOCUMENT_MODULES = new Set(['Estate', 'Legal']);
+
 const CALCULATED_PROCEDURE_FIELD_KEYS = new Set([
   'plotSizeHectares',
   'landManagementFeePayable',
@@ -178,6 +180,13 @@ export function ProcedureCaseWorkspace({
     description: prefilledCase.description,
   });
   const appliedPrefillSignatureRef = React.useRef('');
+  const supportsGeneratedDocuments = GENERATED_DOCUMENT_MODULES.has(module);
+  const generatedDocumentSourceLabel =
+    module === 'Legal'
+      ? 'Source: Legal Department -> Central DMS'
+      : 'Source: Estate / Facility -> Central DMS';
+  const generatedDocumentPreparedBy =
+    selectedCase?.sourceDepartment || (module === 'Legal' ? 'Legal Department' : 'Estate Section');
 
   const currentStageItems = React.useMemo(
     () => selectedCase?.checklistItems.filter((item) => item.stageIndex === selectedCase.currentStageIndex) ?? [],
@@ -242,14 +251,14 @@ export function ProcedureCaseWorkspace({
   ]);
 
   React.useEffect(() => {
-    if (module !== 'Estate') {
+    if (!supportsGeneratedDocuments) {
       return;
     }
 
     let mounted = true;
     const loadTemplates = async () => {
       try {
-        const templates = await documentManagementService.getGenerationTemplates('Estate');
+        const templates = await documentManagementService.getGenerationTemplates(module);
         if (!mounted) {
           return;
         }
@@ -258,7 +267,7 @@ export function ProcedureCaseWorkspace({
         setSelectedGenerationTemplate((current) => current || templates[0]?.templateCode || '');
       } catch (err) {
         if (mounted) {
-          setError(err instanceof Error ? err.message : 'Unable to load Estate document templates.');
+          setError(err instanceof Error ? err.message : `Unable to load ${module} document templates.`);
         }
       }
     };
@@ -268,7 +277,7 @@ export function ProcedureCaseWorkspace({
     return () => {
       mounted = false;
     };
-  }, [module]);
+  }, [module, supportsGeneratedDocuments]);
 
   React.useEffect(() => {
     if (!selectedCase || (!LAND_FEE_ENTITY_TYPES.has(entityType) && !CHANGE_OF_USE_ENTITY_TYPES.has(entityType))) {
@@ -499,7 +508,7 @@ export function ProcedureCaseWorkspace({
     setDocumentFiles((current) => ({ ...current, [documentId]: file }));
   };
 
-  const generateEstateDocument = async () => {
+  const generateProcedureDocument = async () => {
     if (!selectedCase || !selectedGenerationTemplate) {
       return;
     }
@@ -522,27 +531,84 @@ export function ProcedureCaseWorkspace({
     };
 
     setMergeAlias('ApplicantName', 'applicantName');
-    setMergeAlias('PropertyNumber', 'propertyNumber');
+    setMergeAlias('PropertyNumber', 'propertyNumber', 'housePlotShopNumber', 'unitNumber');
+    setMergeAlias('HousePlotShopNumber', 'housePlotShopNumber', 'propertyNumber', 'unitNumber');
+    setMergeAlias('TransferorName', 'transferorName', 'oldLesseeName');
+    setMergeAlias('TransfereeName', 'transfereeName', 'newLesseeName');
+    setMergeAlias('NewLesseeAddress', 'newLesseeAddress', 'addressOnRecord');
+    setMergeAlias('TransferEffectiveDate', 'transferEffectiveDate');
+    setMergeAlias('TransferDeclarationReference', 'transferDeclarationReference');
+    setMergeAlias('VoluntaryVacationReference', 'voluntaryVacationReference');
+    setMergeAlias('HosFormReference', 'hosFormReference');
+    setMergeAlias('HouseType', 'houseType');
+    setMergeAlias('PurchaseAmount', 'purchaseAmount', 'sellingPrice', 'considerationAmount');
+    setMergeAlias('PurchaseDate', 'purchaseDate');
+    setMergeAlias('SopSectionReference', 'sopSectionReference');
+    setMergeAlias('ApprovedFeeScheduleReference', 'approvedFeeScheduleReference', 'approvedRateReference');
+    setMergeAlias('DocumentTemplateReference', 'documentTemplateReference');
+    setMergeAlias('FinanceReference', 'financeReference', 'feeReference');
+    setMergeAlias('LegalReference', 'legalReference');
+    setMergeAlias('RecordsReference', 'estateRecordsReference', 'recordsUpdateReference', 'registerReference');
+    setMergeAlias('ReportReference', 'reportingReference', 'quarterlyReportReference', 'boardSubmissionReference');
+    setMergeAlias('OfferLetterReference', 'offerLetterReference');
+    setMergeAlias('RightOfEntryReference', 'rightOfEntryReference');
+    setMergeAlias('LeaseRequestFormReference', 'leaseRequestFormReference');
+    setMergeAlias('RegisteredLeaseReference', 'registeredLeaseReference');
     setMergeAlias('LandUse', 'landUse');
     setMergeAlias('Premium', 'landManagementFeePayable', 'renewalPremium', 'transferFeePayable');
     setMergeAlias('GroundRent', 'groundRentPayable', 'improvedGroundRent');
+    setMergeAlias('PaymentFrequency', 'paymentFrequency');
+    setMergeAlias('LeaseTerm', 'leaseTerm', 'leaseTermYears');
+    setMergeAlias('MoveInDate', 'moveInDate', 'dateOfTenancy', 'leaseCommencementDate');
+    setMergeAlias('OriginalLeaseReference', 'originalLeaseReference', 'registeredLeaseReference');
+    setMergeAlias('VariationReason', 'variationReason', 'leaseVariationReason');
+    setMergeAlias('VendorName', 'vendorName', 'ownerName');
+    setMergeAlias('AgreedAmount', 'agreedAmount', 'considerationAmount', 'purchaseAmount');
+    setMergeAlias('PaymentBasis', 'paymentBasis', 'vendorPaymentMethod');
+    setMergeAlias('ApprovalReference', 'approvalReference', 'mdApprovalReference');
     setMergeAlias('OfferExpiryDate', 'offerExpiryDate', 'paymentDeadline');
     setMergeAlias('CaseReference', 'referenceNumber', 'fileReference');
+    setMergeAlias('InstrumentType', 'instrumentType', 'transferProcessType', 'mortgageType', 'housingRequestType');
+    setMergeAlias('ScheduleReference', 'scheduleReference');
+    setMergeAlias('ClientExecutionDate', 'clientExecutionDate');
+    setMergeAlias('MortgageeName', 'mortgageeName');
+    setMergeAlias('PaymentReceiptReference', 'paymentReceiptReference', 'transferFeeReceipt', 'feeReference');
+    setMergeAlias('MortgageLetterReference', 'mortgageLetterReference');
+    setMergeAlias('MdApprovalReference', 'mdApprovalReference', 'approvalReference');
+    setMergeAlias('TransferFeeReceipt', 'transferFeeReceipt', 'paymentReceiptReference');
+    setMergeAlias('TerminationReason', 'terminationReason');
+    setMergeAlias('SiteReportReference', 'siteReportReference');
+    setMergeAlias('NoticePostingStartDate', 'noticePostingStartDate');
+    setMergeAlias('NoticePostingEndDate', 'noticePostingEndDate');
+    setMergeAlias('RecognitionApplicantName', 'recognitionApplicantName', 'applicantName');
+    setMergeAlias('RecognitionPaymentStatus', 'recognitionPaymentStatus', 'paymentStatus');
+    setMergeAlias('RecognitionDocumentReference', 'recognitionDocumentReference');
+    setMergeAlias('SignatureStatus', 'signatureStatus');
+    setMergeAlias('AssignorName', 'assignorName', 'transferorName');
+    setMergeAlias('AssigneeName', 'assigneeName', 'transfereeName');
+    setMergeAlias('VestingInstrumentReference', 'vestingInstrumentReference');
+    setMergeAlias('ConsentDecision', 'consentDecision');
+    setMergeAlias('CourtName', 'courtName');
+    setMergeAlias('CaseNumber', 'caseNumber');
+    setMergeAlias('CourtProcessType', 'courtProcessType');
+    setMergeAlias('ServiceDate', 'serviceDate');
+    setMergeAlias('ResponseDeadline', 'responseDeadline');
+    setMergeAlias('FilingReference', 'filingReference');
 
     setIsGeneratingDocument(true);
     setError(null);
     try {
       const result = await documentManagementService.generateDocumentFromTemplate({
         templateCode: selectedGenerationTemplate,
-        sourceModule: 'Estate',
-        sourceLabel: 'Source: Estate / Facility -> Central DMS',
+        sourceModule: module,
+        sourceLabel: generatedDocumentSourceLabel,
         sourceEntityType: entityType,
         sourceRecordReference: selectedCase.referenceNumber || selectedCase.title,
         sourceRecordId: selectedCase.id,
         caseTitle: selectedCase.title,
         caseReference: selectedCase.referenceNumber || selectedCase.title,
         applicantName: selectedCase.applicantName || undefined,
-        preparedBy: selectedCase.sourceDepartment || 'Estate Section',
+        preparedBy: generatedDocumentPreparedBy,
         purpose: selectedCase.currentStageName,
         mergeValues,
       });
@@ -554,7 +620,7 @@ export function ProcedureCaseWorkspace({
       }));
       setIsGeneratedViewerOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to generate Estate document.');
+      setError(err instanceof Error ? err.message : `Unable to generate ${module} document.`);
     } finally {
       setIsGeneratingDocument(false);
     }
@@ -791,7 +857,7 @@ export function ProcedureCaseWorkspace({
                 />
               </div>
 
-              {module === 'Estate' ? (
+              {supportsGeneratedDocuments ? (
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <h2 className="text-sm font-semibold">Generated Documents</h2>
@@ -813,7 +879,7 @@ export function ProcedureCaseWorkspace({
                       </Select>
                       <Button
                         className="gap-2"
-                        onClick={() => void generateEstateDocument()}
+                        onClick={() => void generateProcedureDocument()}
                         disabled={!selectedGenerationTemplate || isGeneratingDocument}
                       >
                         {isGeneratingDocument ? (

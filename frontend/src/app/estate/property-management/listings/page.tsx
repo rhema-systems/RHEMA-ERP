@@ -655,25 +655,49 @@ export default function EstatePropertyListingsPage() {
                             selected.groundRentPayable,
                             form.externalListingCurrency || selected.currency
                           )}. This can be shown on the portal, but billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
-                        : 'Assess and approve annual ground rent before publishing this land rental listing.'}
+                        : 'Assess and approve annual ground rent through the applicable Estate SOP before publishing this land rental listing. Billing account setup happens later after customer acceptance, signed agreement, and move-in / agreement start date.'}
                     </p>
                     {selected.groundRentPayable == null ||
                     selected.groundRentPayable <= 0 ? (
-                      <Button
-                        asChild
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="mt-3 bg-white"
-                      >
-                        <Link
-                          href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(
-                            selected.id
-                          )}`}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          asChild
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="bg-white"
                         >
-                          Set up ground rent
-                        </Link>
-                      </Button>
+                          <Link href="/estate/EstateLandsPartiallyServiced">
+                            Partially serviced land SOP
+                          </Link>
+                        </Button>
+                        <Button
+                          asChild
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="bg-white"
+                        >
+                          <Link href="/estate/EstateTenancyRegularisation">
+                            Regularisation SOP
+                          </Link>
+                        </Button>
+                        <Button
+                          asChild
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="bg-white"
+                        >
+                          <Link
+                            href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(
+                              selected.id
+                            )}`}
+                          >
+                            Set up ground rent
+                          </Link>
+                        </Button>
+                      </div>
                     ) : null}
                   </div>
                 ) : null}

@@ -19,6 +19,7 @@ import {
   type LegalProcedureWorkspace,
   type LegalWorkspaceField,
 } from '@/services/legal-procedure.service';
+import { ProcedureCaseWorkspace } from '@/components/procedures/ProcedureCaseWorkspace';
 
 function fieldDisplayValue(field: LegalWorkspaceField) {
   if (field.type === 'select' && field.options && field.options.length > 0) {
@@ -431,6 +432,13 @@ export default function LegalProcedureWorkspacePage() {
       </div>
 
       <LegalMatterOperations workspace={workspace} />
+
+      <ProcedureCaseWorkspace
+        module="Legal"
+        entityType={procedure.entityType}
+        defaultTitle={procedure.title}
+        workspaceType="Legal Matter"
+      />
 
       <LegalWorkflowOverview workspace={workspace} />
     </div>

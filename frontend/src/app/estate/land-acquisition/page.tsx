@@ -96,7 +96,7 @@ const ProcedurePdfViewer = dynamic(
   { ssr: false }
 );
 
-const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 10, 12]);
+const ACQUISITION_APPROVAL_STAGE_IDS = new Set([1, 3, 5, 7, 11, 13]);
 
 type FieldType =
   | 'text'
@@ -152,6 +152,7 @@ const stageIcons: Record<
   'ownership-verification': FileCheck2,
   'agreement-negotiation': WalletCards,
   'agreement-approval': BadgeCheck,
+  'vendor-payment': WalletCards,
   execution: FileSignature,
   'statutory-consent': Landmark,
   'statutory-consent-approval': CheckCircle2,
@@ -510,6 +511,25 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       undefined,
       2
     ),
+  ],
+  'vendor-payment': [
+    field('vendorName', 'Vendor / Seller', 'text', undefined, 1, true),
+    field('paymentPurpose', 'Payment Purpose', 'text', undefined, 1, true),
+    field('agreedAmount', 'Agreed Amount', 'text', undefined, 1, true),
+    field('vendorPaymentDueDate', 'Payment Due Date', 'date', undefined, 1, true),
+    field('vendorPaymentMethod', 'Agreement Payment Method', 'text', undefined, 1, true),
+    field('boardApprovalReference', 'Approval Reference', 'text', undefined, 1, true),
+    field('accountsPayableInvoiceNumber', 'AP Invoice', 'text', undefined, 1, true),
+    field('accountsPayableInvoiceStatus', 'Invoice Status', 'text', undefined, 1, true),
+    field('accountsPayablePaymentNumber', 'AP Payment', 'text', undefined, 1, true),
+    field('accountsPayablePaymentStatus', 'Payment Status', 'text', undefined, 1, true),
+    field('receiptNumber', 'Receipt Number', 'text', undefined, 1, true),
+    field('paymentReference', 'Payment Reference', 'text', undefined, 1, true),
+    field('paymentDate', 'Payment Date', 'date', undefined, 1, true),
+    field('amountPaid', 'Amount Paid', 'text', undefined, 1, true),
+    field('paymentMethod', 'Processed Payment Method', 'text', undefined, 1, true),
+    field('isPaid', 'Paid', 'check', undefined, 1, true),
+    field('paymentNotes', 'Payment Notes', 'textarea', undefined, 2, true),
   ],
   execution: [
     field('instrumentType', 'Instrument Type', 'select', [
@@ -919,6 +939,46 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
   ],
+  'vendor-payment': [
+    {
+      title: 'Approved vendor consideration',
+      description:
+        'Review the seller, approved amount, due date, payment method, and approval reference from the negotiated agreement.',
+      keys: [
+        'vendorName',
+        'paymentPurpose',
+        'agreedAmount',
+        'vendorPaymentDueDate',
+        'vendorPaymentMethod',
+        'boardApprovalReference',
+      ],
+    },
+    {
+      title: 'Accounts Payable status',
+      description:
+        'Create the AP request and process the vendor payment before moving to instrument execution.',
+      keys: [
+        'accountsPayableInvoiceNumber',
+        'accountsPayableInvoiceStatus',
+        'accountsPayablePaymentNumber',
+        'accountsPayablePaymentStatus',
+      ],
+    },
+    {
+      title: 'Processed vendor payment',
+      description:
+        'Payment evidence is synchronized from Accounts Payable after the vendor payment is completed.',
+      keys: [
+        'receiptNumber',
+        'paymentReference',
+        'paymentDate',
+        'amountPaid',
+        'paymentMethod',
+        'isPaid',
+        'paymentNotes',
+      ],
+    },
+  ],
   execution: [
     {
       title: 'Instrument execution',
@@ -1124,11 +1184,13 @@ function defaultsFor(
 }
 
 function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: WorkspaceValues) {
-  if (kind === 'stamp-duty-payment') {
+  if (kind === 'vendor-payment' || kind === 'stamp-duty-payment') {
     const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
+    const paymentId = `${values.accountsPayablePaymentId ?? ''}`.trim();
     const paid = values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
     if (!invoiceId) return [field('accountsPayableRequest', 'Accounts Payable Request')];
-    return paid ? [] : [field('accountsPayablePayment', 'Accounts Payable Payment')];
+    if (!paymentId) return [field('accountsPayablePayment', 'Accounts Payable Payment')];
+    return paid ? [] : [field('accountsPayablePaymentProcessing', 'Finance Processing')];
   }
 
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
@@ -1316,6 +1378,7 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
   labels.set('vendorId', 'Linked Vendor / Owner');
   labels.set('stageDocuments', 'Stage Documents');
   labels.set('witnessOath', 'Witness Oath');
+  labels.set('accountsPayablePaymentProcessing', 'Finance Processing');
   return keys.map((key) => labels.get(key) || key);
 }
 
@@ -1975,6 +2038,35 @@ export default function LandAcquisitionPage() {
         />
       </div>
 
+      {stages.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Workflow not configured</CardTitle>
+            <CardDescription>
+              Configure and publish the Land Acquisition workflow in
+              Administration &gt; Workflow Setup. The acquisition board will
+              show the stages, documents, checklist items, roles, and
+              assignments returned by that workflow.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  '/administration/workflow?entityType=LandAcquisition'
+                )
+              }
+            >
+              <FolderOpen className="mr-2 h-4 w-4" />
+              Open Workflow Setup
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {stages.length > 0 ? (
+        <>
       <div className="rounded-lg border bg-card p-2 text-card-foreground shadow-sm">
         <ScrollArea className="w-full whitespace-nowrap">
           <div className="flex gap-2 pb-2">
@@ -2045,6 +2137,7 @@ export default function LandAcquisitionPage() {
             <AcquisitionDetail
               item={selectedItem}
               stage={selectedItemStage}
+              stages={stages}
               onOpenWorkspace={() => openWorkspace(selectedItem)}
               onPrimary={(comments) =>
                 runAction(selectedItem, selectedItemStage, 'primary', comments)
@@ -2075,6 +2168,8 @@ export default function LandAcquisitionPage() {
           )}
         </section>
       </div>
+        </>
+      ) : null}
 
       {(draftItem || selectedItem) && workspaceStage && (
         <WorkspaceDialog
@@ -2228,6 +2323,7 @@ function AcquisitionCard({
 function AcquisitionDetail({
   item,
   stage,
+  stages,
   onOpenWorkspace,
   onPrimary,
   onReject,
@@ -2239,6 +2335,7 @@ function AcquisitionDetail({
 }: {
   item: LandAcquisitionItem;
   stage: LandAcquisitionStage;
+  stages: LandAcquisitionStage[];
   onOpenWorkspace: () => void;
   onPrimary: (comments?: string) => Promise<void>;
   onReject: (comments?: string) => Promise<void>;
@@ -2257,6 +2354,9 @@ function AcquisitionDetail({
     null
   );
   const [summaryLoading, setSummaryLoading] = React.useState(false);
+  const [summaryLocations, setSummaryLocations] = React.useState<
+    HrLocationLookup[]
+  >([]);
   const [stageDocuments, setStageDocuments] = React.useState<
     LandAcquisitionDocument[]
   >([]);
@@ -2292,12 +2392,18 @@ function AcquisitionDetail({
     stage.order > 0 &&
     !ACQUISITION_APPROVAL_STAGE_IDS.has(stage.id) &&
     ['Pending Approval', 'Submitted', 'Rejected'].includes(item.status);
+  const timelineStages = stages.length > 0 ? stages : [stage];
 
   const openSummary = async () => {
     setSummaryOpen(true);
     setSummaryLoading(true);
     try {
-      setSummary(await estateAcquisitionService.getSummary(item.id));
+      const [nextSummary, locations] = await Promise.all([
+        estateAcquisitionService.getSummary(item.id),
+        estateAcquisitionService.getActiveHrLocations().catch(() => []),
+      ]);
+      setSummary(nextSummary);
+      setSummaryLocations(locations);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -2527,7 +2633,7 @@ function AcquisitionDetail({
               Procedure Timeline
             </h3>
             <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              {ACQUISITION_STAGES.map((candidate) => {
+              {timelineStages.map((candidate) => {
                 const done =
                   candidate.order < stage.order ||
                   (hasPublishedLandAsset && candidate.order <= stage.order);
@@ -2683,20 +2789,29 @@ function AcquisitionDetail({
           ) : summary?.stages.length ? (
             <div className="space-y-4">
               {summary.stages.map((savedStage) => {
-                const definition = ACQUISITION_STAGES.find(
-                  (candidate) => candidate.id === savedStage.procedureId
+                const definition = timelineStages.find(
+                  (candidate) =>
+                    candidate.id === savedStage.procedureId ||
+                    candidate.order === savedStage.procedureId
                 );
                 const labels = new Map(
-                  (definition
-                    ? WORKSPACE_FIELDS[definition.workspaceKind]
-                    : []
+                  (
+                    definition
+                      ? WORKSPACE_FIELDS[definition.workspaceKind]
+                      : []
                   ).map((workspaceField) => [
                     workspaceField.key,
                     workspaceField.label,
                   ])
                 );
-                const entries = Object.entries(savedStage.values).filter(
-                  ([, value]) => value !== null && value !== ''
+                const fields = definition
+                  ? WORKSPACE_FIELDS[definition.workspaceKind]
+                  : [];
+                const entries = summaryEntries(
+                  savedStage.values,
+                  fields,
+                  labels,
+                  summaryLocations
                 );
                 return (
                   <section
@@ -2713,14 +2828,11 @@ function AcquisitionDetail({
                     </div>
                     {entries.length ? (
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {entries.map(([key, value]) => (
+                        {entries.map((entry) => (
                           <Field
-                            key={key}
-                            label={
-                              labels.get(key) ||
-                              key.replace(/([a-z])([A-Z])/g, '$1 $2')
-                            }
-                            value={formatSummaryValue(value)}
+                            key={entry.key}
+                            label={entry.label}
+                            value={entry.value}
                           />
                         ))}
                       </div>
@@ -2750,6 +2862,95 @@ function AcquisitionDetail({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+type SummaryValue = string | boolean | number | null;
+
+type SummaryEntry = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+function summaryEntries(
+  values: Record<string, SummaryValue>,
+  fields: WorkspaceField[],
+  labels: Map<string, string>,
+  locations: HrLocationLookup[]
+): SummaryEntry[] {
+  const fieldByKey = new Map(
+    fields.map((fieldConfig) => [fieldConfig.key, fieldConfig])
+  );
+
+  return Object.entries(values).flatMap(([key, value]) => {
+    if (value === null || value === '') return [];
+
+    if (key === 'pastOwnersJson') {
+      return pastOwnerSummaryEntries(value);
+    }
+
+    const config = fieldByKey.get(key);
+    return [
+      {
+        key,
+        label: labels.get(key) || key.replace(/([a-z])([A-Z])/g, '$1 $2'),
+        value: formatSummaryValue(
+          resolveSummaryValue(key, value, config, locations)
+        ),
+      },
+    ];
+  });
+}
+
+function pastOwnerSummaryEntries(value: SummaryValue): SummaryEntry[] {
+  const owners = parsePastOwners(typeof value === 'string' ? value : undefined)
+    .filter((owner) =>
+      Object.values(owner).some((entry) => `${entry || ''}`.trim())
+    );
+
+  return owners.map((owner, index) => ({
+    key: `pastOwnersJson-${index}`,
+    label: `Past Owner ${index + 1}`,
+    value: [
+      owner.ownerName,
+      owner.contactNumber ? `Contact: ${owner.contactNumber}` : '',
+      owner.address ? `Address: ${owner.address}` : '',
+      owner.identificationNumber
+        ? `ID: ${owner.identificationType || 'Identification'} ${owner.identificationNumber}`
+        : '',
+      owner.ownershipStartDate || owner.ownershipEndDate
+        ? `Ownership: ${owner.ownershipStartDate || 'Not recorded'} to ${owner.ownershipEndDate || 'Not recorded'}`
+        : '',
+      owner.dateGapReason ? `Gap reason: ${owner.dateGapReason}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | '),
+  }));
+}
+
+function resolveSummaryValue(
+  key: string,
+  value: SummaryValue,
+  config: WorkspaceField | undefined,
+  locations: HrLocationLookup[]
+): SummaryValue {
+  if (typeof value !== 'string') return value;
+
+  const isLocationField =
+    config?.type === 'region' ||
+    config?.type === 'district' ||
+    /(region|district|country|town)id$/i.test(key);
+  if (!isLocationField) return value;
+
+  return (
+    locations.find(
+      (location) =>
+        location.id === value ||
+        location.name.localeCompare(value, undefined, {
+          sensitivity: 'accent',
+        }) === 0
+    )?.name || value
   );
 }
 
@@ -3158,6 +3359,11 @@ function WorkspaceDialog({
   const accountsPayablePaid =
     Boolean(accountsPayableInvoiceId) &&
     (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+  const isAccountsPayableWorkspace =
+    stage.workspaceKind === 'vendor-payment' ||
+    stage.workspaceKind === 'stamp-duty-payment';
+  const accountsPayableSubject =
+    stage.workspaceKind === 'vendor-payment' ? 'vendor payment' : 'stamp duty payment';
   const isPublishedAssetWorkspace =
     stage.workspaceKind === 'asset-creation' && item.status === 'Approved';
   const workspaceCanEdit = canEdit && !isPublishedAssetWorkspace;
@@ -3222,7 +3428,9 @@ function WorkspaceDialog({
       invoiceId: accountsPayableInvoiceId,
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
-      description: `Stamp duty payment for ${item.projectReference}`,
+      description: `${accountsPayableSubject} for ${item.projectReference}`,
+      source: 'land-acquisition',
+      locked: 'true',
     });
     router.push(`/finance/ap/payments/create?${params.toString()}`);
   };
@@ -3560,7 +3768,7 @@ function WorkspaceDialog({
                 }
               />
             )}
-            {stage.workspaceKind === 'stamp-duty-payment' && (
+            {isAccountsPayableWorkspace && (
               <section className="rounded-lg border bg-card p-4">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
@@ -3579,7 +3787,9 @@ function WorkspaceDialog({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {accountsPayableInvoiceId
                         ? `Invoice ${values.accountsPayableInvoiceNumber || accountsPayableInvoiceId} is the payment source for this acquisition.`
-                        : 'Create the payable from the approved stamp duty assessment before processing payment.'}
+                        : stage.workspaceKind === 'vendor-payment'
+                          ? 'Create the payable from the approved agreement amount before processing vendor payment.'
+                          : 'Create the payable from the approved stamp duty assessment before processing payment.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">

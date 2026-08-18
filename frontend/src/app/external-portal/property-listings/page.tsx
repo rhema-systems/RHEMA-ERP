@@ -347,8 +347,12 @@ export default function ExternalPropertyListingsPage() {
       setCreatedRequest(created);
       setMessage('');
       await loadListings();
-    } catch {
-      setError('Could not submit request for this listing.');
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Could not submit request for this listing.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -707,7 +711,10 @@ export default function ExternalPropertyListingsPage() {
                       placeholder="Preferred viewing time, financing, lease period, or other notes."
                     />
                   </div>
-                  <Button className="w-full" disabled={isSubmitting}>
+                  <Button
+                    className="w-full"
+                    disabled={isSubmitting || requestOptions.length === 0}
+                  >
                     {isSubmitting ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (

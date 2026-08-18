@@ -28,14 +28,15 @@ public enum AcquisitionProcedure
     OwnershipVerification = 5,
     AgreementNegotiation = 6,
     AgreementApproval = 7,
-    LandInstrumentExecution = 8,
-    StatutoryConsent = 9,
-    StatutoryConsentApproval = 10,
-    StampDutyAssessment = 11,
-    StampDutyAssessmentApproval = 12,
-    StampDutyPayment = 13,
-    LandsCommissionRegistration = 14,
-    LandAssetCreation = 15
+    VendorPayment = 8,
+    LandInstrumentExecution = 9,
+    StatutoryConsent = 10,
+    StatutoryConsentApproval = 11,
+    StampDutyAssessment = 12,
+    StampDutyAssessmentApproval = 13,
+    StampDutyPayment = 14,
+    LandsCommissionRegistration = 15,
+    LandAssetCreation = 16
 }
 
 public enum LandOwnershipType

@@ -1838,6 +1838,11 @@ export const navigationItems: NavItem[] = [
             icon: Award,
           },
           {
+            title: 'Reporting Controls',
+            href: '/estate/EstateReportingControls',
+            icon: BarChart3,
+          },
+          {
             title: 'Reports',
             href: '/reports?module=estate',
             icon: BarChart3,
