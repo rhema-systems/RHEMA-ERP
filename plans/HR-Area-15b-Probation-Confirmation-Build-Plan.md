@@ -23,10 +23,10 @@ skeleton with three writers and no readers.
 |---|---|
 | Backend surface | `ProbationController`, 18 endpoints, `api/probations` |
 | Service | `ProbationService` (357 lines), 3 repositories, 3 entities |
-| Frontend | **none** — zero references to `api/probations` anywhere in `frontend/src` |
-| Gate | bare `[Authorize]` — any authenticated user |
-| Harness | none |
-| Data | **0 probation rows**, 0 reviews, 0 extensions |
+| Frontend | **none at survey time** — zero references to `api/probations` anywhere in `frontend/src`. Seven screens as of slice 11. |
+| Gate | bare `[Authorize]` at survey time — `HR.Probation.*` as of slice 0 |
+| Harness | none at survey time — **557 assertions** across 13 files as of slice 12 |
+| Data | **0 probation rows**, 0 reviews, 0 extensions at survey time |
 | FRD backing | **18 mentions**, 3 requirements, all priority **M**: FR-HR-031, FR-HR-032, FR-HR-140 |
 | Also owed from §A1.4 | FR-HR-030 (oath of secrecy) — zero implementation anywhere |
 
@@ -395,8 +395,8 @@ Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging
 key passed in ([[hr-harness-run-environment]]). Slice 9 additionally needs `node clamd-stub.mjs`
 running alongside — the controlled upload gate makes a clean scan mandatory for every hr-*
 category, so without it the code after the gate never executes. Running totals:
-**38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 / 55 / 29 / 31 = 473**
-(the last two are the UI-payload probes, which are not optional — see slices 10 and 11).
+**38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 / 55 / 29 / 31 / 84 = 557**
+(the last three are the two UI-payload probes and the content audit, none of them optional).
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -770,3 +770,52 @@ forms with **no confirming authority**, and the authority screen warns when no t
 exists. Both surface the unconfigured case rather than rendering a quiet empty table — the same
 principle as the backend refusing to fall back to HR. An unconfigured tenant should look
 unconfigured, not look fine.
+
+### Slice 12 — the content audit (2026-08-18) — `audit-content.mjs`, 84 assertions
+
+**All 26 GET endpoints in the area, each required to return a known fixture row with its fields
+populated. 84/84 on the first run, and again on a second run from a different DB state.**
+
+That result deserves a caveat rather than a victory lap: area 11's audit failed **20 of 37**
+endpoints after eight green slices, so passing first time is only meaningful because of *how* the
+audit is written. One fixture set carries marker values (`AUDIT-STRENGTHS-…`,
+`AUDIT-EXTENSION-REASON-…`), every read must return that specific row, and **nothing is guarded by
+`if`** — the rule from [[hr-succession-area-survey]] that a conditional assertion is a skipped
+assertion wearing a tick.
+
+One detail worth copying: the fixture's dates are computed **backwards from today**, so probation A
+genuinely falls inside the expiry window. Dating it arbitrarily and then asserting it appears in
+`ending-within` would have tested the audit's own arithmetic rather than the endpoint — and would
+have passed either way.
+
+⚠ The one failure was a fixture collision, not a defect: `mintProbationAdminActor` already uses
+suffix `'C'`, and the audit's third subject reused it, so the employee number clashed. Harness
+suffixes are now documented in the README, because the failure surfaces as a 400 from an unrelated
+endpoint and reads like a product bug.
+
+---
+
+## 10. Area status
+
+**AREA 15b IS COMPLETE.** 12 slices, **557 assertions**, content audit clean at 26/26 endpoints.
+
+Requirements delivered: **FR-HR-030** (oath of secrecy, both paths, scan through the controlled gate
+and central DMS), **FR-HR-031** (category durations, enforced for permanent staff), **FR-HR-032**
+(month-5 routing to a named confirming authority, confirmation on the workflow engine, and the
+confirmation letter), **FR-HR-140** (expiry notice at the tenant's lead time, plus the outcome set:
+confirm, extend, terminate).
+
+Owed elsewhere, deliberately:
+
+- **Separation/exit** still owns what happens after a *terminated* probation — entitlement
+  computation, clearance gating, the non-disciplinary exit routes. This area records the decision and
+  hands off ([[hr-deferred-modules]]).
+- **Payroll**: a confirmation may change pay. Registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`
+  rather than invented here ([[hr-finance-integration-split]]).
+- **The email templates are not seeded.** `ProbationEmailTemplateSeeder` sits in
+  `HrSeedOrchestrator.DeferredSteps` beside the recruitment one — *"Templates are not TDC-branded
+  yet"*. Until they run, the confirmation letter renders from its built-in catalog default and is
+  **not editable in the template designer**. Enable both together.
+- **`CompanyProfile` is unconfigured**, so letters render "Default Tenant" as the employer and print
+  no signatory name. Both are documented fallbacks, and both are fixed by that controller — one of
+  the unbuilt stragglers.
