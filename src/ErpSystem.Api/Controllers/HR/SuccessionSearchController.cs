@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/succession")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class SuccessionSearchController : ControllerBase
 {
     private readonly ISuccessionCandidateSearchService _searchService;

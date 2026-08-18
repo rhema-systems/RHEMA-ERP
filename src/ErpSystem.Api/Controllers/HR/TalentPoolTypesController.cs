@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/talent-pool-types")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class TalentPoolTypesController : ControllerBase
 {
     private readonly ITalentPoolTypeDefinitionService _service;
@@ -45,6 +46,7 @@ public class TalentPoolTypesController : ControllerBase
         }
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPost]
     public async Task<ActionResult<TalentPoolTypeDefinitionDto>> Create([FromBody] CreateTalentPoolTypeDefinitionDto dto)
     {
@@ -66,6 +68,7 @@ public class TalentPoolTypesController : ControllerBase
         }
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<TalentPoolTypeDefinitionDto>> Update(Guid id, [FromBody] UpdateTalentPoolTypeDefinitionDto dto)
     {
@@ -89,6 +92,7 @@ public class TalentPoolTypesController : ControllerBase
         }
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {

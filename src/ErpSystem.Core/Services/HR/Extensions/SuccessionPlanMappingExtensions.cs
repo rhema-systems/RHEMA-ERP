@@ -78,6 +78,7 @@ public static class SuccessionPlanMappingExtensions
             PlanYear = entity.PlanYear,
             VersionNumber = entity.VersionNumber,
             IsActiveVersion = entity.IsActiveVersion,
+            PositionId = entity.PositionId,
             PositionTitle = entity.Position?.Title ?? string.Empty,
             CurrentIncumbentName = entity.CurrentIncumbent?.FullName,
             Status = entity.Status,

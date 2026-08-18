@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/succession-plans")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class SuccessionPlanController : ControllerBase
 {
     private readonly ISuccessionPlanService _service;
@@ -100,6 +101,7 @@ public class SuccessionPlanController : ControllerBase
     // CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<SuccessionPlanDto>> Create([FromBody] CreateSuccessionPlanDto dto)
     {
@@ -117,6 +119,7 @@ public class SuccessionPlanController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<SuccessionPlanDto>> Update(Guid id, [FromBody] UpdateSuccessionPlanDto dto)
     {
@@ -130,6 +133,7 @@ public class SuccessionPlanController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -141,6 +145,7 @@ public class SuccessionPlanController : ControllerBase
     // WORKFLOW
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/submit")]
     public async Task<IActionResult> SubmitForReview(Guid id)
     {
@@ -152,21 +157,36 @@ public class SuccessionPlanController : ControllerBase
         return Ok(new { message = "Succession plan submitted for review." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPost("{id:guid}/review")]
     public async Task<IActionResult> Review(Guid id, [FromBody] ReviewSuccessionPlanDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        // The reviewer is whoever is signed in. It used to arrive on the body.
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.PlanId = id;
-        await _service.ReviewAsync(dto);
+        await _service.ReviewAsync(dto, employeeId.Value);
         return Ok(new { message = "Review recorded." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveSuccessionPlanDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        // The approver is whoever is signed in. It used to arrive on the body, so any caller could
+        // approve a succession plan under a colleague's name.
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.PlanId = id;
-        await _service.ApproveAsync(dto);
+        await _service.ApproveAsync(dto, employeeId.Value);
         return Ok(new { message = "Succession plan approved." });
     }
 
@@ -182,6 +202,7 @@ public class SuccessionPlanController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionCompetencyRequirementDto>>> GetCompetencyRequirements(Guid id)
         => Ok(await _service.GetCompetencyRequirementsAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/competency-requirements")]
     public async Task<ActionResult<SuccessionCompetencyRequirementDto>> AddCompetencyRequirement(
         Guid id, [FromBody] CreateSuccessionCompetencyRequirementDto dto)
@@ -199,6 +220,7 @@ public class SuccessionPlanController : ControllerBase
         return CreatedAtAction(nameof(GetCompetencyRequirements), new { id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("competency-requirements/{requirementId:guid}")]
     public async Task<ActionResult<SuccessionCompetencyRequirementDto>> UpdateCompetencyRequirement(
         Guid requirementId, [FromBody] UpdateSuccessionCompetencyRequirementDto dto)
@@ -212,6 +234,7 @@ public class SuccessionPlanController : ControllerBase
         return Ok(await _service.UpdateCompetencyRequirementAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("competency-requirements/{requirementId:guid}")]
     public async Task<IActionResult> DeleteCompetencyRequirement(Guid requirementId)
     {
@@ -227,6 +250,7 @@ public class SuccessionPlanController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionActionSummaryDto>>> GetActions(Guid id)
         => Ok(await _service.GetActionsForPlanAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/actions")]
     public async Task<ActionResult<SuccessionActionDto>> AddAction(
         Guid id, [FromBody] CreateSuccessionActionDto dto)
@@ -251,6 +275,7 @@ public class SuccessionPlanController : ControllerBase
         }
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("actions/{actionId:guid}")]
     public async Task<ActionResult<SuccessionActionDto>> UpdateAction(
         Guid actionId, [FromBody] UpdateSuccessionActionDto dto)
@@ -271,6 +296,7 @@ public class SuccessionPlanController : ControllerBase
         }
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("actions/{actionId:guid}")]
     public async Task<IActionResult> DeleteAction(Guid actionId)
     {
@@ -298,10 +324,12 @@ public class SuccessionPlanController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDocumentDto>>> GetDocuments(Guid id)
         => Ok(await _service.GetDocumentsForPlanAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpGet("{id:guid}/documents/confidential")]
     public async Task<ActionResult<IEnumerable<SuccessionDocumentDto>>> GetConfidentialDocuments(Guid id)
         => Ok(await _service.GetConfidentialDocumentsAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/documents")]
     public async Task<ActionResult<SuccessionDocumentDto>> AddDocument(
         Guid id, [FromBody] CreateSuccessionDocumentDto dto)
@@ -319,6 +347,7 @@ public class SuccessionPlanController : ControllerBase
         return CreatedAtAction(nameof(GetDocuments), new { id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("documents/{documentId:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {

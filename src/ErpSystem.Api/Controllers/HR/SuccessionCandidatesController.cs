@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/succession-candidates")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class SuccessionCandidatesController : ControllerBase
 {
     private readonly ISuccessionCandidateService _service;
@@ -61,6 +62,7 @@ public class SuccessionCandidatesController : ControllerBase
     // CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<SuccessionCandidateDto>> Create([FromBody] CreateSuccessionCandidateDto dto)
     {
@@ -76,6 +78,7 @@ public class SuccessionCandidatesController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<SuccessionCandidateDto>> Update(Guid id, [FromBody] UpdateSuccessionCandidateDto dto)
     {
@@ -88,6 +91,7 @@ public class SuccessionCandidatesController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -99,6 +103,7 @@ public class SuccessionCandidatesController : ControllerBase
     // WORKFLOW
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/assess")]
     public async Task<IActionResult> Assess(Guid id, [FromBody] AssessCandidateDto dto)
     {
@@ -108,6 +113,7 @@ public class SuccessionCandidatesController : ControllerBase
         return Ok(new { message = "Candidate assessment recorded." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/select")]
     public async Task<IActionResult> Select(Guid id)
     {
@@ -118,6 +124,7 @@ public class SuccessionCandidatesController : ControllerBase
         return Ok(new { message = "Candidate selected." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPatch("bulk-rank")]
     public async Task<IActionResult> BulkUpdateRanks([FromBody] IEnumerable<CandidateRankUpdateDto> updates)
     {
@@ -149,6 +156,7 @@ public class SuccessionCandidatesController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionCandidateGapDto>>> GetUnaddressedGaps(Guid id)
         => Ok(await _service.GetUnaddressedGapsAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/gaps")]
     public async Task<ActionResult<SuccessionCandidateGapDto>> AddGap(
         Guid id, [FromBody] CreateSuccessionCandidateGapDto dto)
@@ -166,6 +174,7 @@ public class SuccessionCandidatesController : ControllerBase
         return CreatedAtAction(nameof(GetGaps), new { id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("gaps/{gapId:guid}")]
     public async Task<ActionResult<SuccessionCandidateGapDto>> UpdateGap(
         Guid gapId, [FromBody] UpdateSuccessionCandidateGapDto dto)
@@ -179,6 +188,7 @@ public class SuccessionCandidatesController : ControllerBase
         return Ok(await _service.UpdateCompetencyGapAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("gaps/{gapId:guid}")]
     public async Task<IActionResult> DeleteGap(Guid gapId)
     {
@@ -187,6 +197,7 @@ public class SuccessionCandidatesController : ControllerBase
     }
 
     /// <summary>Auto-generate gaps from the target position's competency requirements vs the employee's own levels.</summary>
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/gaps/generate-from-position")]
     public async Task<ActionResult<IEnumerable<SuccessionCandidateGapDto>>> GenerateGapsFromPosition(Guid id)
     {
@@ -218,6 +229,7 @@ public class SuccessionCandidatesController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionCandidateFeedbackDto>>> GetFeedback(Guid id)
         => Ok(await _service.GetFeedbackAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/feedback")]
     public async Task<ActionResult<SuccessionCandidateFeedbackDto>> AddFeedback(
         Guid id, [FromBody] CreateSuccessionCandidateFeedbackDto dto)
@@ -240,6 +252,7 @@ public class SuccessionCandidatesController : ControllerBase
         }
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("feedback/{feedbackId:guid}")]
     public async Task<IActionResult> DeleteFeedback(Guid feedbackId)
     {
@@ -255,6 +268,7 @@ public class SuccessionCandidatesController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDevelopmentActivitySummaryDto>>> GetDevelopmentActivities(Guid id)
         => Ok(await _service.GetDevelopmentActivitiesAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/development-activities")]
     public async Task<ActionResult<SuccessionDevelopmentActivityDto>> AddDevelopmentActivity(
         Guid id, [FromBody] CreateSuccessionDevelopmentActivityDto dto)
@@ -272,6 +286,7 @@ public class SuccessionCandidatesController : ControllerBase
         return CreatedAtAction(nameof(GetDevelopmentActivities), new { id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("development-activities/{activityId:guid}")]
     public async Task<ActionResult<SuccessionDevelopmentActivityDto>> UpdateDevelopmentActivity(
         Guid activityId, [FromBody] UpdateSuccessionDevelopmentActivityDto dto)
@@ -285,6 +300,7 @@ public class SuccessionCandidatesController : ControllerBase
         return Ok(await _service.UpdateDevelopmentActivityAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("development-activities/{activityId:guid}")]
     public async Task<IActionResult> DeleteDevelopmentActivity(Guid activityId)
     {
@@ -300,6 +316,7 @@ public class SuccessionCandidatesController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDocumentDto>>> GetDocuments(Guid id)
         => Ok(await _service.GetDocumentsAsync(id));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/documents")]
     public async Task<ActionResult<SuccessionDocumentDto>> AddDocument(
         Guid id, [FromBody] CreateSuccessionDocumentDto dto)
@@ -317,6 +334,7 @@ public class SuccessionCandidatesController : ControllerBase
         return CreatedAtAction(nameof(GetDocuments), new { id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("documents/{documentId:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {

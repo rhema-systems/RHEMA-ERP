@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/talent-pools")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class TalentPoolsController : ControllerBase
 {
     private readonly ITalentPoolService _service;
@@ -60,6 +61,7 @@ public class TalentPoolsController : ControllerBase
     // POOL CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<TalentPoolDto>> Create([FromBody] CreateTalentPoolDto dto)
     {
@@ -75,6 +77,7 @@ public class TalentPoolsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<TalentPoolDto>> Update(Guid id, [FromBody] UpdateTalentPoolDto dto)
     {
@@ -87,6 +90,7 @@ public class TalentPoolsController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -118,6 +122,7 @@ public class TalentPoolsController : ControllerBase
     // MEMBER CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/members")]
     public async Task<ActionResult<TalentPoolMemberDto>> AddMember(Guid id, [FromBody] CreateTalentPoolMemberDto dto)
     {
@@ -134,6 +139,7 @@ public class TalentPoolsController : ControllerBase
         return CreatedAtAction(nameof(GetMemberById), new { memberId = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("members/{memberId:guid}")]
     public async Task<ActionResult<TalentPoolMemberDto>> UpdateMember(Guid memberId, [FromBody] UpdateTalentPoolMemberDto dto)
     {
@@ -146,6 +152,7 @@ public class TalentPoolsController : ControllerBase
         return Ok(await _service.UpdateMemberAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("members/{memberId:guid}/remove")]
     public async Task<IActionResult> RemoveMember(Guid memberId, [FromBody] RemoveTalentPoolMemberDto dto)
     {
@@ -166,6 +173,7 @@ public class TalentPoolsController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDevelopmentActivitySummaryDto>>> GetDevelopmentActivities(Guid memberId)
         => Ok(await _service.GetDevelopmentActivitiesForMemberAsync(memberId));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("members/{memberId:guid}/development-activities")]
     public async Task<ActionResult<SuccessionDevelopmentActivityDto>> AddDevelopmentActivity(
         Guid memberId, [FromBody] CreateSuccessionDevelopmentActivityDto dto)
@@ -191,6 +199,7 @@ public class TalentPoolsController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDocumentDto>>> GetDocuments(Guid memberId)
         => Ok(await _service.GetDocumentsForMemberAsync(memberId));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("members/{memberId:guid}/documents")]
     public async Task<ActionResult<SuccessionDocumentDto>> AddDocument(
         Guid memberId, [FromBody] CreateSuccessionDocumentDto dto)
@@ -208,6 +217,7 @@ public class TalentPoolsController : ControllerBase
         return CreatedAtAction(nameof(GetDocuments), new { memberId }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("documents/{documentId:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {

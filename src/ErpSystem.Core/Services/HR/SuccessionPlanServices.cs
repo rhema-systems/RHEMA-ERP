@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
@@ -152,17 +153,38 @@ public class SuccessionPlanService : ISuccessionPlanService
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// The navigations <c>ToSummaryDto</c> reads.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every <i>filtered</i> list query on the repository (by status, year, criticality, risk,
+    /// due-for-review, no-successors …) already includes these. The two <i>default</i> views did
+    /// not: <c>GetAllAsync</c> went through the generic repository and the paged read used a bare
+    /// <c>GetQueryable()</c>. Both mapped through the same summary mapper, whose
+    /// <c>entity.Position?.Title ?? string.Empty</c> silently produced a blank — so the register,
+    /// the first screen anyone opens, showed an empty Position column on every row while every
+    /// filtered view beside it showed the title. The position is the subject of a succession plan;
+    /// a register without it is unreadable.
+    /// </remarks>
+    private IQueryable<SuccessionPlan> SummaryQuery(Guid tenantId)
+        => _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
+            .Include(p => p.Position)
+            .Include(p => p.CurrentIncumbent);
+
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _planRepository.GetAllAsync()).Where(p => p.TenantId == tenantId);
+        var entities = await SummaryQuery(GetTenantId())
+            .OrderByDescending(p => p.PlanYear)
+            .ThenByDescending(p => p.VersionNumber)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<SuccessionPlanSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var query = _planRepository.GetQueryable().Where(p => p.TenantId == tenantId);
+        var query = SummaryQuery(tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -279,10 +301,33 @@ public class SuccessionPlanService : ISuccessionPlanService
     public async Task<SuccessionPlanDto> CreateAsync(CreateSuccessionPlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // A position may carry only one plan that is still being worked on. Checked here so the
+        // rule can name the plan that blocks it; left to the database alone it surfaced as a bare
+        // 500 from UX_SuccessionPlan_ActiveVersion.
+        var openPlan = await _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId
+                        && p.PositionId == createDto.PositionId
+                        && (p.Status == SuccessionPlanStatus.Draft || p.Status == SuccessionPlanStatus.UnderReview))
+            .Select(p => new { p.PlanNumber, p.PlanYear, p.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openPlan != null)
+            throw new SuccessionConflictException(
+                $"This position already has a succession plan in progress ({openPlan.PlanNumber}, {openPlan.PlanYear}, " +
+                $"{openPlan.Status}). Finish or delete that plan before starting another.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.PlanNumber = await GeneratePlanNumberAsync(tenantId, cancellationToken);
         entity.VersionNumber = await GetNextVersionNumberForPositionAsync(tenantId, createDto.PositionId, cancellationToken);
-        entity.IsActiveVersion = true;
+
+        // ⚠ A draft does NOT hold the position's active-version slot. It used to be set true here,
+        // which meant a position with an approved plan could never receive a successor version:
+        // the create tripped UX_SuccessionPlan_ActiveVersion and 500'd, so the supersede branch in
+        // ApproveAsync — which archives the previous version and sets SupersededByPlanId — could
+        // never be reached and versioning had never once worked. The flag is now raised on
+        // approval, which is what "active version" means.
+        entity.IsActiveVersion = false;
         entity.Status = SuccessionPlanStatus.Draft;
 
         await _planRepository.AddAsync(entity);
@@ -290,7 +335,11 @@ public class SuccessionPlanService : ISuccessionPlanService
 
         _logger.LogInformation("Succession plan created: {PlanNumber}", entity.PlanNumber);
 
-        return entity.ToDto();
+        // Re-read through the detail loader rather than mapping the tracked entity: its Position
+        // and incumbent navigations were never loaded, so ToDto() returned PositionTitle = "" and
+        // CurrentIncumbentName = null while the detail read of the very same row returned both.
+        // A create form that renders the response would show a blank position until refresh.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SuccessionPlanDto> UpdateAsync(UpdateSuccessionPlanDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -316,6 +365,12 @@ public class SuccessionPlanService : ISuccessionPlanService
 
         if (entity.Status == SuccessionPlanStatus.Approved)
             throw new InvalidOperationException("An approved succession plan cannot be deleted.");
+
+        // ⚠ DeleteAsync is a soft delete, but UX_SuccessionPlan_ActiveVersion is filtered on
+        // IsActiveVersion alone and knows nothing about IsDeleted — so a deleted plan would keep
+        // holding its position's only active-version slot, and the position could never be
+        // planned for again. Stand the flag down as part of the delete.
+        entity.IsActiveVersion = false;
 
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -343,19 +398,19 @@ public class SuccessionPlanService : ISuccessionPlanService
         return true;
     }
 
-    public async Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, Guid reviewedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(reviewDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
             throw new InvalidOperationException("Only plans under review can be reviewed.");
 
-        entity.ReviewedById = reviewDto.ReviewedById;
-        entity.ReviewDate = reviewDto.ReviewDate;
+        entity.ReviewedById = reviewedByEmployeeId;
+        entity.ReviewDate = DateTime.UtcNow;
         entity.Status = reviewDto.NewStatus;
 
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, reviewDto.ReviewedById, $"Reviewed — status set to {reviewDto.NewStatus}", reviewDto.ReviewNotes, cancellationToken);
+        await CreateSnapshotAsync(entity, reviewedByEmployeeId, $"Reviewed — status set to {reviewDto.NewStatus}", reviewDto.ReviewNotes, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Succession plan reviewed: {PlanNumber}, NewStatus: {Status}", entity.PlanNumber, entity.Status);
@@ -363,37 +418,64 @@ public class SuccessionPlanService : ISuccessionPlanService
         return true;
     }
 
-    public async Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, Guid approvedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(approveDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
             throw new InvalidOperationException("Only plans under review can be approved.");
 
-        entity.ApprovedById = approveDto.ApprovedById;
-        entity.ApprovalDate = approveDto.ApprovalDate;
+        // Supersede any previously approved active version for the same position (same tenant).
+        //
+        // ⚠ This must be saved BEFORE the new version raises its own flag.
+        // UX_SuccessionPlan_ActiveVersion is a unique filtered index on (PositionId,
+        // IsActiveVersion) — two rows may not both be active, not even mid-transaction. Clearing
+        // the old flag and setting the new one in a single SaveChanges leaves the order to EF, and
+        // when it wrote the new row first the index rejected it: approving a successor version
+        // 500'd. Nobody had met this because a draft used to be unable to exist alongside an
+        // approved plan at all, so the supersede branch was unreachable code.
+        //
+        // The two saves are not atomic: if the second fails, the position is briefly left with no
+        // active version. That state is self-healing — re-approving finds nothing to supersede and
+        // raises the flag — and is strictly better than the permanent 500 it replaces.
+        // ⚠ Deleted rows are included on purpose. The index filters on IsActiveVersion alone, so a
+        // soft-deleted plan that still carries the flag occupies the slot just as firmly as a live
+        // one — and the delete path only started standing the flag down today, so rows deleted
+        // before that are still holding positions hostage. Whatever holds the flag must be cleared,
+        // alive or not; a deleted plan is archived silently rather than being marked superseded,
+        // because it was never anyone's predecessor.
+        var holdingTheSlot = await _planRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == entity.TenantId &&
+                                               p.PositionId == entity.PositionId &&
+                                               p.Id != entity.Id &&
+                                               p.IsActiveVersion)
+            .ToListAsync(cancellationToken);
+
+        if (holdingTheSlot.Count > 0)
+        {
+            foreach (var previous in holdingTheSlot)
+            {
+                previous.IsActiveVersion = false;
+
+                if (!previous.IsDeleted)
+                {
+                    previous.SupersededByPlanId = entity.Id;
+                    previous.Status = SuccessionPlanStatus.Archived;
+                }
+
+                await _planRepository.UpdateAsync(previous);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        entity.ApprovedById = approvedByEmployeeId;
+        entity.ApprovalDate = DateTime.UtcNow;
         entity.Status = SuccessionPlanStatus.Approved;
         entity.IsActiveVersion = true;
 
-        // Supersede any previously approved active version for the same position (same tenant)
-        var previousVersions = await _planRepository.GetQueryable()
-            .Where(p => p.TenantId == entity.TenantId &&
-                        p.PositionId == entity.PositionId &&
-                        p.Id != entity.Id &&
-                        p.IsActiveVersion &&
-                        !p.IsDeleted)
-            .ToListAsync(cancellationToken);
-
-        foreach (var previous in previousVersions)
-        {
-            previous.IsActiveVersion = false;
-            previous.SupersededByPlanId = entity.Id;
-            previous.Status = SuccessionPlanStatus.Archived;
-            await _planRepository.UpdateAsync(previous);
-        }
-
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, approveDto.ApprovedById, "Approved", approveDto.ApprovalNotes, cancellationToken);
+        await CreateSnapshotAsync(entity, approvedByEmployeeId, "Approved", approveDto.ApprovalNotes, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Succession plan approved: {PlanNumber}", entity.PlanNumber);
@@ -916,6 +998,22 @@ public class SuccessionPlanService : ISuccessionPlanService
         return maxVersion + 1;
     }
 
+    /// <summary>
+    /// Next plan number for the tenant, derived from the highest sequence already issued this year.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This deliberately counts <b>deleted rows too</b>. It used to be
+    /// <c>GetQueryable().CountAsync(...) + 1</c>, and <c>GetQueryable()</c> excludes soft-deleted
+    /// rows — but <c>IX_SuccessionPlan_Tenant_PlanNumber</c> is a plain unique index that does not,
+    /// so a deleted plan keeps its number reserved forever. The result was that deleting any plan
+    /// made the counter fall back onto a number the index still held, and <b>every subsequent
+    /// create failed</b> with a duplicate-key 500 — permanently, from one ordinary use of the
+    /// delete button. Measured 2026-08-18.
+    ///
+    /// Taking the maximum issued sequence rather than a live count also survives the other way a
+    /// count drifts: numbers are never reused, so two plans can never collide even if rows are
+    /// later purged.
+    /// </remarks>
     private async Task<string> GeneratePlanNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var settings = await _hrPolicyProvider.GetAsync(cancellationToken);
@@ -923,8 +1021,19 @@ public class SuccessionPlanService : ISuccessionPlanService
             ? "SP"
             : settings.SuccessionPlanNumberPrefix.Trim();
 
-        var count = await _planRepository.GetQueryable().CountAsync(p => p.TenantId == tenantId, cancellationToken);
-        return $"{prefix}-{DateTime.UtcNow.Year}-{(count + 1):D4}";
+        var yearPrefix = $"{prefix}-{DateTime.UtcNow.Year}-";
+
+        var issued = await _planRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.PlanNumber.StartsWith(yearPrefix))
+            .Select(p => p.PlanNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[yearPrefix.Length..], out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{yearPrefix}{(highest + 1):D4}";
     }
 
     private async Task CreateSnapshotAsync(SuccessionPlan plan, Guid createdById, string changeReason, string? notes, CancellationToken cancellationToken)

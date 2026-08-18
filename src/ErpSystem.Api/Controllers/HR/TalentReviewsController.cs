@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/talent-reviews")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class TalentReviewsController : ControllerBase
 {
     private readonly ITalentReviewSessionService _service;
@@ -64,6 +65,7 @@ public class TalentReviewsController : ControllerBase
     // SESSION CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<TalentReviewSessionDto>> Create([FromBody] CreateTalentReviewSessionDto dto)
     {
@@ -79,6 +81,7 @@ public class TalentReviewsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<TalentReviewSessionDto>> Update(Guid id, [FromBody] UpdateTalentReviewSessionDto dto)
     {
@@ -91,6 +94,7 @@ public class TalentReviewsController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPost("{id:guid}/finalize")]
     public async Task<IActionResult> Finalize(Guid id, [FromBody] FinalizeTalentReviewSessionDto dto)
     {
@@ -100,6 +104,7 @@ public class TalentReviewsController : ControllerBase
         return Ok(new { message = "Talent review session finalized." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -146,6 +151,7 @@ public class TalentReviewsController : ControllerBase
     // RATING CRUD & WORKFLOW
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/ratings")]
     public async Task<ActionResult<TalentReviewRatingDto>> AddRating(Guid id, [FromBody] CreateTalentReviewRatingDto dto)
     {
@@ -162,6 +168,7 @@ public class TalentReviewsController : ControllerBase
         return CreatedAtAction(nameof(GetRatings), new { id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("ratings/{ratingId:guid}")]
     public async Task<ActionResult<TalentReviewRatingDto>> UpdateRating(Guid ratingId, [FromBody] UpdateTalentReviewRatingDto dto)
     {
@@ -174,6 +181,7 @@ public class TalentReviewsController : ControllerBase
         return Ok(await _service.UpdateRatingAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpPost("ratings/{ratingId:guid}/confirm-calibration")]
     public async Task<IActionResult> ConfirmCalibration(Guid ratingId, [FromBody] ConfirmCalibrationDto dto)
     {
@@ -183,6 +191,7 @@ public class TalentReviewsController : ControllerBase
         return Ok(new { message = "Calibration confirmed." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("ratings/{ratingId:guid}")]
     public async Task<IActionResult> DeleteRating(Guid ratingId)
     {

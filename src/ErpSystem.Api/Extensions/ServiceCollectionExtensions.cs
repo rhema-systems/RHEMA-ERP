@@ -1310,6 +1310,25 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerTravel)));
 
+            // HR succession & talent policies. Measured 2026-08-18: all nine controllers carried a
+            // bare [Authorize] with no method-level policy anywhere, so a plain Employee account
+            // listed every succession plan in the tenant, read candidate readiness and
+            // retention-risk flags, and both created and deleted a plan. Same ladder again —
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.SuccessionReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewSuccession,
+                        HrPermissions.MaintainSuccession,
+                        HrPermissions.AdministerSuccession)))
+                .AddPolicy(HrPermissions.SuccessionWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainSuccession,
+                        HrPermissions.AdministerSuccession)))
+                .AddPolicy(HrPermissions.SuccessionAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerSuccession)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

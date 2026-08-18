@@ -35,6 +35,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
             .Include(p => p.Candidates).ThenInclude(c => c.Employee)
             .Include(p => p.Actions).ThenInclude(a => a.ResponsiblePerson)
             .Include(p => p.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.PositionId == positionId && p.IsActiveVersion && !p.IsDeleted);
     }
 
@@ -161,6 +162,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
             .Include(p => p.Actions).ThenInclude(a => a.AssignedBy)
             .Include(p => p.History).ThenInclude(h => h.SnapshotCreatedBy)
             .Include(p => p.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
 
@@ -236,6 +238,7 @@ public class SuccessionCandidateRepository : GenericRepository<SuccessionCandida
             .Include(c => c.TalentPoolMember).ThenInclude(m => m!.TalentPool)
             .Where(c => c.SuccessionPlanId == planId && !c.IsDeleted)
             .OrderBy(c => c.Rank)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -299,6 +302,7 @@ public class SuccessionCandidateRepository : GenericRepository<SuccessionCandida
             .Include(c => c.DevelopmentActivities).ThenInclude(a => a.Milestones)
             .Include(c => c.DevelopmentActivities).ThenInclude(a => a.Supervisor)
             .Include(c => c.Feedback).ThenInclude(f => f.Reviewer)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 
@@ -352,6 +356,7 @@ public class SuccessionCandidateGapRepository : GenericRepository<SuccessionCand
             .Include(g => g.Competency)
             .Where(g => g.CompetencyId == competencyId && !g.IsDeleted)
             .OrderByDescending(g => g.RequiredLevel - g.CurrentLevel)
+            .AsSplitQuery()
             .ToListAsync();
     }
 }
@@ -396,6 +401,7 @@ public class SuccessionDevelopmentActivityRepository : GenericRepository<Success
             .Include(a => a.TalentPoolMember).ThenInclude(m => m!.Employee)
             .Where(a => a.Status == status && !a.IsDeleted)
             .OrderBy(a => a.PlannedStartDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -423,6 +429,7 @@ public class SuccessionDevelopmentActivityRepository : GenericRepository<Success
             .Include(a => a.Supervisor)
             .Include(a => a.Milestones)
             .Include(a => a.AddressedGaps).ThenInclude(g => g.Competency)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
     }
 }
@@ -455,6 +462,7 @@ public class SuccessionDevelopmentMilestoneRepository : GenericRepository<Succes
             .Include(m => m.Activity).ThenInclude(a => a.TalentPoolMember).ThenInclude(t => t!.Employee)
             .Where(m => !m.IsDeleted && !m.IsCompleted && m.TargetDate < today)
             .OrderBy(m => m.TargetDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 }
@@ -480,6 +488,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Where(a => a.SuccessionPlanId == planId && !a.IsDeleted)
             .OrderBy(a => a.Priority)
             .ThenBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -501,6 +510,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Include(a => a.SuccessionPlan).ThenInclude(p => p.Position)
             .Where(a => a.Status == status && !a.IsDeleted)
             .OrderBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -511,6 +521,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Include(a => a.SuccessionPlan).ThenInclude(p => p.Position)
             .Where(a => a.Priority == priority && !a.IsDeleted)
             .OrderBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -537,6 +548,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Where(a => a.ResponsiblePersonId == employeeId && !a.IsDeleted)
             .OrderBy(a => a.Priority)
             .ThenBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 }
@@ -684,6 +696,7 @@ public class TalentPoolRepository : GenericRepository<TalentPool>, ITalentPoolRe
             .Include(p => p.TargetPosition)
             .Include(p => p.Members.Where(m => m.IsActive && !m.IsDeleted))
                 .ThenInclude(m => m.Employee)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
 }
@@ -752,6 +765,7 @@ public class TalentPoolMemberRepository : GenericRepository<TalentPoolMember>, I
             .Include(m => m.DevelopmentActivities).ThenInclude(a => a.Milestones)
             .Include(m => m.DevelopmentActivities).ThenInclude(a => a.Supervisor)
             .Include(m => m.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
     }
 
@@ -806,6 +820,7 @@ public class TalentReviewSessionRepository : GenericRepository<TalentReviewSessi
             .Include(s => s.FinalizedBy)
             .Where(s => s.IsFinalized && !s.IsDeleted)
             .OrderByDescending(s => s.SessionDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -830,6 +845,7 @@ public class TalentReviewSessionRepository : GenericRepository<TalentReviewSessi
             .Include(s => s.Ratings).ThenInclude(r => r.RatedBy)
             .Include(s => s.Ratings).ThenInclude(r => r.CalibrationConfirmedBy)
             .Include(s => s.Ratings).ThenInclude(r => r.TalentPoolMember).ThenInclude(m => m!.TalentPool)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
     }
 }
@@ -855,6 +871,7 @@ public class TalentReviewRatingRepository : GenericRepository<TalentReviewRating
             .Where(r => r.SessionId == sessionId && !r.IsDeleted)
             .OrderBy(r => r.Employee.LastName)
             .ThenBy(r => r.Employee.FirstName)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -930,6 +947,7 @@ public class TalentReviewRatingRepository : GenericRepository<TalentReviewRating
             .Include(r => r.CalibrationConfirmedBy)
             .Include(r => r.TalentPoolMember).ThenInclude(m => m!.TalentPool)
             .Include(r => r.PreviousRatingSession)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(r => r.SessionId == sessionId
                                     && r.EmployeeId == employeeId
                                     && !r.IsDeleted);

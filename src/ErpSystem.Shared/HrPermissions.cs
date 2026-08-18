@@ -24,6 +24,7 @@ public static class HrPermissions
 {
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
+    public const string CategorySuccession = "HR - Succession & Talent";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -43,6 +44,14 @@ public static class HrPermissions
     public const string TravelReadPolicy = "HR.Policy.TravelRead";
     public const string TravelWritePolicy = "HR.Policy.TravelWrite";
     public const string TravelAdminPolicy = "HR.Policy.TravelAdmin";
+
+    public const string ViewSuccession = "HR.Succession.Read";
+    public const string MaintainSuccession = "HR.Succession.Write";
+    public const string AdministerSuccession = "HR.Succession.Admin";
+
+    public const string SuccessionReadPolicy = "HR.Policy.SuccessionRead";
+    public const string SuccessionWritePolicy = "HR.Policy.SuccessionWrite";
+    public const string SuccessionAdminPolicy = "HR.Policy.SuccessionAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
@@ -64,7 +73,17 @@ public static class HrPermissions
             CategoryTravel),
         new(AdministerTravel, "Administer Staff Travel",
             "Delete travel records and administer travel policies, per-diem rates, vendors and approval templates.",
-            CategoryTravel)
+            CategoryTravel),
+
+        new(ViewSuccession, "View Succession & Talent",
+            "View succession plans, candidate readiness and retention risk, talent pools, talent reviews and nine-box placements.",
+            CategorySuccession),
+        new(MaintainSuccession, "Maintain Succession & Talent",
+            "Author succession plans, nominate and assess candidates, record development activities, and run talent reviews.",
+            CategorySuccession),
+        new(AdministerSuccession, "Administer Succession & Talent",
+            "Approve succession plans, finalize calibration, read confidential succession documents, delete records, and administer talent pool types.",
+            CategorySuccession)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -74,16 +93,31 @@ public static class HrPermissions
     /// medical record or a paid travel claim stays with tenant administrators.
     /// </summary>
     /// <remarks>
-    /// Travel follows medical deliberately. HR raises travel on behalf of staff and processes
+    /// <para>Travel follows medical deliberately. HR raises travel on behalf of staff and processes
     /// advances and claims (Write), but deleting travel records and setting the policies,
     /// per-diem rates and approval templates that govern their own spending authority is
     /// administration (Admin) — the same separation that stopped an HR-role user deleting a paid
-    /// medical claim.
+    /// medical claim.</para>
+    ///
+    /// <para>Succession follows the same ladder for a different reason. HR runs succession
+    /// planning — authoring plans, nominating candidates, recording development, facilitating
+    /// talent reviews — so Read and Write are theirs. But <b>approving</b> a plan names a person as
+    /// the intended successor to a post, and finalizing calibration fixes a nine-box placement that
+    /// then feeds promotion and movement decisions. Those are management acts, not record-keeping,
+    /// so they sit with Admin alongside deletion and the confidential document tier.</para>
+    ///
+    /// <para>⚠ Note what is <b>absent</b>: no grant reaches the <c>Employee</c> role. Succession
+    /// deliberately inverts the self-service rule the rest of HR follows. A candidate's readiness
+    /// level, retention-risk flag and nine-box placement are assessments made about them, not
+    /// records belonging to them, so there is no self tier here at all — see decision D-2 in
+    /// <c>plans/HR-Area-13-Succession-Build-Plan.md</c>. Any future "my development plan" screen
+    /// must be fed by a separate, deliberately narrowed projection, never by relaxing this map.</para>
     /// </remarks>
     private static readonly string[] HrStaffGrants =
     {
         ViewMedicalRecords, MaintainMedicalRecords,
-        ViewTravel, MaintainTravel
+        ViewTravel, MaintainTravel,
+        ViewSuccession, MaintainSuccession
     };
 
     /// <summary>

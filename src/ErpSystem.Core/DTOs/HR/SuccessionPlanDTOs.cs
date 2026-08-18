@@ -93,6 +93,10 @@ public class SuccessionPlanSummaryDto
     public int PlanYear { get; set; }
     public int VersionNumber { get; set; }
     public bool IsActiveVersion { get; set; }
+
+    /// <summary>The position the plan is for. Present so a register row can link to it.</summary>
+    public Guid PositionId { get; set; }
+
     public string PositionTitle { get; set; } = string.Empty;
     public string? CurrentIncumbentName { get; set; }
     public SuccessionPlanStatus Status { get; set; }
@@ -202,15 +206,17 @@ public class UpdateSuccessionPlanDto : UpdateDtoBase
     public DateTime? NextReviewDate { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>ReviewedById</c> and <c>ReviewDate</c> were removed deliberately. Both were caller-declared:
+/// the reviewer's identity came from the request body, so any caller could record a review under a
+/// colleague's name, and the date could be backdated at will. Who reviewed a succession plan and
+/// when are facts the server knows and the client cannot — the actor comes from the token and the
+/// date from the clock. See <c>plans/HR-Area-13-Succession-Build-Plan.md</c> §3.5.
+/// </remarks>
 public class ReviewSuccessionPlanDto
 {
     [Required]
     public Guid PlanId { get; set; }
-
-    [Required]
-    public Guid ReviewedById { get; set; }
-
-    public DateTime ReviewDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(2000)]
     public string? ReviewNotes { get; set; }
@@ -219,15 +225,15 @@ public class ReviewSuccessionPlanDto
     public SuccessionPlanStatus NewStatus { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>ApprovedById</c> and <c>ApprovalDate</c> were removed for the reason given on
+/// <see cref="ReviewSuccessionPlanDto"/>. Approval names a person as the intended successor to a
+/// post; an approver the caller chose for themselves is not an approval.
+/// </remarks>
 public class ApproveSuccessionPlanDto
 {
     [Required]
     public Guid PlanId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(2000)]
     public string? ApprovalNotes { get; set; }

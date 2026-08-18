@@ -102,6 +102,16 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)medicalStatus;
                 break;
 
+            // Succession raises this when a request collides with an existing record — a position
+            // that already has an active plan, or a plan number already taken. Both were enforced
+            // only by unique indexes before, so they arrived as unhandled DbUpdateExceptions.
+            case SuccessionConflictException successionEx:
+                response.Title = "Conflict";
+                response.Status = (int)HttpStatusCode.Conflict;
+                response.Detail = successionEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Status = (int)HttpStatusCode.Conflict;
@@ -363,6 +373,7 @@ public class GlobalExceptionHandlingMiddleware
             case ConflictException:
             case ArgumentException:
             case MedicalWorkflowException:
+            case SuccessionConflictException:
                 // These are expected exceptions - log as warnings
                 _logger.LogWarning(exception,
                     "Client error occurred for {RequestMethod} {RequestPath}. Context: {@LogContext}",
