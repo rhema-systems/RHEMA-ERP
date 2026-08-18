@@ -4192,15 +4192,20 @@ public class AcknowledgeProbationReviewDto
     public string? EmployeeResponse { get; set; }
 }
 
+/// <summary>
+/// HR sign-off on a completed probation review.
+/// </summary>
+/// <remarks>
+/// ⚠ This DTO used to carry <c>HrApprovedById</c> and <c>HrApprovalDate</c>, both supplied by the
+/// caller — so a request could name someone else as the approver and back-date the approval. The
+/// approver is now taken from the authenticated token and the date is stamped server-side; there
+/// is deliberately nothing left here to spoof. See the actor rule in
+/// <c>plans/HR-Area-15b-Probation-Confirmation-Build-Plan.md</c> §5 D-5.
+/// </remarks>
 public class ApproveProbationReviewDto
 {
-    [Required]
-    public Guid ReviewId { get; set; }
-
-    [Required]
-    public Guid HrApprovedById { get; set; }
-
-    public DateTime HrApprovalDate { get; set; } = DateTime.UtcNow;
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 public class TerminateProbationPeriodDto

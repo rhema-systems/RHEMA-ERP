@@ -1329,6 +1329,26 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerSuccession)));
 
+            // HR probation & confirmation policies. Measured 2026-08-18: ProbationController
+            // carried a bare [Authorize], so any authenticated employee could list who in the
+            // tenant is on probation, read their performance/conduct/attitude ratings and the
+            // reviewer's comments, extend a probation period, and confirm or terminate it — the
+            // last of those decides whether a colleague's employment becomes permanent. Same
+            // ladder again — Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.ProbationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewProbation,
+                        HrPermissions.MaintainProbation,
+                        HrPermissions.AdministerProbation)))
+                .AddPolicy(HrPermissions.ProbationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainProbation,
+                        HrPermissions.AdministerProbation)))
+                .AddPolicy(HrPermissions.ProbationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerProbation)));
+
             foreach (var permission in HrPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>

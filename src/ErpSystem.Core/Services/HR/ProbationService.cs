@@ -1,9 +1,12 @@
 using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -44,6 +47,18 @@ public class ProbationService : IProbationService
         return tenantId;
     }
 
+    // ⚠ Entitlement for reviewer-scoped actions cannot come from a permission gate. A probation
+    // review is conducted by the employee line manager (FRD FR-HR-032 routes the month-5 form to
+    // the head), and a line manager holds no HR permission at all. Gating submit/complete on
+    // HR.Probation.Write made them reachable only by HR - who the rule below then refuses - so the
+    // action was reachable by nobody. Entitlement comes from the RECORD: are you the reviewer on
+    // it? See slice 2 in plans/HR-Area-15b-Probation-Confirmation-Build-Plan.md.
+    private bool IsHrActor()
+        => _currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
+           || _currentUserProvider.HasRole(Constants.Roles.TenantAdmin)
+           || _currentUserProvider.HasRole(Constants.Roles.Hr)
+           || _currentUserProvider.HasRole(Constants.Roles.LegacyHrUser);
+
     private Guid RequireCurrentTenant(Guid tenantId)
     {
         var current = GetTenantId();
@@ -54,11 +69,27 @@ public class ProbationService : IProbationService
 
     // A probation period owned by another tenant is reported as missing rather than forbidden, so the
     // endpoints do not confirm that the id exists elsewhere.
+    //
+    // The exception type matters as much as the check. These threw ArgumentException, which
+    // GlobalExceptionHandlingMiddleware maps to 400 AND replaces with "Invalid argument provided."
+    // - so a missing record and a malformed payload were the same answer, and neither said
+    // anything. ProbationWorkflowException carries its reason and its message through.
     private async Task<ProbationPeriod> GetOwnedProbationAsync(Guid id)
     {
         var entity = await _probationRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Probation record with ID '{id}' not found.");
+            throw ProbationWorkflowException.NotFound($"Probation record '{id}' was not found.");
+        return entity;
+    }
+
+    // As above, but with the navigations the DTO reads. Used by every path that RETURNS a
+    // probation: the generic GetByIdAsync has no includes, so those responses came back with a
+    // blank employee name and a review count of zero while the lists beside them were correct.
+    private async Task<ProbationPeriod> GetOwnedProbationWithDetailsAsync(Guid id)
+    {
+        var entity = await _probationRepository.GetByIdWithDetailsAsync(id);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw ProbationWorkflowException.NotFound($"Probation record '{id}' was not found.");
         return entity;
     }
 
@@ -68,7 +99,7 @@ public class ProbationService : IProbationService
     {
         var entity = await _reviewRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Probation review with ID '{id}' not found.");
+            throw ProbationWorkflowException.NotFound($"Probation review '{id}' was not found.");
         return entity;
     }
 
@@ -76,18 +107,41 @@ public class ProbationService : IProbationService
 
     public async Task<ProbationPeriodDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedProbationAsync(id);
+        var entity = await GetOwnedProbationWithDetailsAsync(id);
         return entity.ToDto();
     }
 
-    public async Task<ProbationPeriodDto?> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async Task<IEnumerable<ProbationPeriodSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _probationRepository.GetByEmployeeIdAsync(employeeId);
-        var scoped = entities.Where(p => p.TenantId == tenantId).ToList();
-        var active = scoped.FirstOrDefault(p => p.Status == ProbationStatus.Active)
-            ?? scoped.OrderByDescending(p => p.StartDate).FirstOrDefault();
-        return active?.ToDto();
+        // The repository already orders newest first; the active one, if any, belongs at the top.
+        return entities
+            .Where(p => p.TenantId == tenantId)
+            .OrderBy(p => p.Status == ProbationStatus.Active ? 0 : 1)
+            .ThenByDescending(p => p.StartDate)
+            .ToSummaryDtoList();
+    }
+
+    public async Task<PagedResult<ProbationPeriodSummaryDto>> GetPagedAsync(
+        int page = 1, int pageSize = 25, ProbationStatus? status = null, Guid? employeeId = null,
+        string? search = null, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 200) pageSize = 25;
+
+        var (items, total) = await _probationRepository.GetPagedAsync(
+            tenantId, page, pageSize, status, employeeId, search);
+
+        return new PagedResult<ProbationPeriodSummaryDto>
+        {
+            Items = items.ToSummaryDtoList(),
+            TotalCount = total,
+            Page = page,
+            PageSize = pageSize,
+        };
     }
 
     public async Task<ProbationPeriodDetailDto> GetWithReviewsAsync(Guid id, CancellationToken cancellationToken = default)
@@ -95,7 +149,7 @@ public class ProbationService : IProbationService
         var tenantId = GetTenantId();
         var entity = await _probationRepository.GetWithReviewsAsync(id);
         if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException($"Probation record with ID '{id}' not found.");
+            throw ProbationWorkflowException.NotFound($"Probation record '{id}' was not found.");
         return entity.ToDetailDto();
     }
 
@@ -128,7 +182,8 @@ public class ProbationService : IProbationService
 
         var existing = await _probationRepository.GetByEmployeeIdAsync(createDto.EmployeeId);
         if (existing.Any(p => p.TenantId == tenantId && p.Status == ProbationStatus.Active))
-            throw new InvalidOperationException("This employee already has an active probation period.");
+            throw ProbationWorkflowException.Conflict(
+                "This employee already has an active probation period. Confirm, extend or terminate it before opening another.");
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.Status = ProbationStatus.Active;
@@ -137,7 +192,9 @@ public class ProbationService : IProbationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Probation record created for employee {EmployeeId}", createDto.EmployeeId);
-        return entity.ToDto();
+        // Re-read so the response carries the employee name the caller just addressed, rather than
+        // the just-saved row with its navigations unloaded.
+        return (await GetOwnedProbationWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -145,7 +202,8 @@ public class ProbationService : IProbationService
         var entity = await GetOwnedProbationAsync(id);
 
         if (entity.Status != ProbationStatus.Active)
-            throw new InvalidOperationException("Only active probation records can be deleted.");
+            throw ProbationWorkflowException.InvalidState(
+                $"This probation is {entity.Status}, so it is part of the employment record and cannot be deleted. Only an active probation can be removed.");
 
         await _probationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -154,25 +212,13 @@ public class ProbationService : IProbationService
 
     // ── Workflow ──────────────────────────────────────────────────────────────
 
-    public async Task<bool> ExtendAsync(Guid probationId, DateTime newEndDate, string reason, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public async Task<ProbationExtensionDto> ExtendAsync(
+        Guid probationId, CreateProbationExtensionDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedProbationAsync(probationId);
-
-        if (entity.Status != ProbationStatus.Active)
-            throw new InvalidOperationException("Only active probations can be extended.");
-
-        if (DateOnly.FromDateTime(newEndDate) <= entity.CurrentEndDate)
-            throw new ArgumentException("New end date must be later than the current end date.");
-
-        entity.CurrentEndDate = DateOnly.FromDateTime(newEndDate);
-        entity.OutcomeNotes = reason;
-        entity.ExtensionCount++;
-
-        await _probationRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Probation {ProbationId} extended to {NewEndDate}", probationId, newEndDate);
-        return true;
+        // One path, one audit row. The old implementation lived here and wrote none.
+        dto.ProbationPeriodId = probationId;
+        return await RecordExtensionAsync(dto, GetTenantId(), actorEmployeeId, cancellationToken);
     }
 
     public async Task<bool> ConfirmAsync(Guid probationId, Guid confirmedByUserId, CancellationToken cancellationToken = default)
@@ -180,7 +226,8 @@ public class ProbationService : IProbationService
         var entity = await GetOwnedProbationAsync(probationId);
 
         if (entity.Status != ProbationStatus.Active)
-            throw new InvalidOperationException("Only active probations can be confirmed.");
+            throw ProbationWorkflowException.InvalidState(
+                $"This probation is already {entity.Status} and cannot be confirmed again.");
 
         entity.Status = ProbationStatus.Completed;
 
@@ -196,7 +243,8 @@ public class ProbationService : IProbationService
         var entity = await GetOwnedProbationAsync(dto.ProbationId);
 
         if (entity.Status != ProbationStatus.Active)
-            throw new InvalidOperationException("Only active probations can be terminated.");
+            throw ProbationWorkflowException.InvalidState(
+                $"This probation is already {entity.Status} and cannot be terminated.");
 
         entity.Status = ProbationStatus.Terminated;
         entity.OutcomeNotes = dto.Notes;
@@ -233,6 +281,13 @@ public class ProbationService : IProbationService
     {
         var entity = await GetOwnedReviewAsync(updateDto.Id);
 
+        // Rescheduling only. The assessment itself goes through SubmitReviewAsync, which is why
+        // UpdateProbationReviewDto deliberately carries nothing else - it used to be handed the
+        // full review payload and silently drop all of it behind a 200.
+        if (entity.Status == ProbationReviewStatus.Completed)
+            throw ProbationWorkflowException.InvalidState(
+                "This review is completed and can no longer be rescheduled.");
+
         if (updateDto.ScheduledDate.HasValue) entity.ScheduledDate = updateDto.ScheduledDate.Value;
         if (updateDto.SecondReviewerId.HasValue) entity.SecondReviewerId = updateDto.SecondReviewerId;
         await _reviewRepository.UpdateAsync(entity);
@@ -240,15 +295,166 @@ public class ProbationService : IProbationService
         return entity.ToDto();
     }
 
+    /// <inheritdoc />
+    public async Task<ProbationReviewDto> SubmitReviewAsync(
+        Guid reviewId, SubmitProbationReviewDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedReviewAsync(reviewId);
+        var probation = await GetOwnedProbationAsync(entity.ProbationPeriodId);
+
+        if (probation.Status != ProbationStatus.Active)
+            throw ProbationWorkflowException.InvalidState(
+                $"This probation is {probation.Status}; its reviews can no longer be changed.");
+
+        if (entity.Status == ProbationReviewStatus.Completed)
+            throw ProbationWorkflowException.InvalidState(
+                "This review has already been completed. Reopen it before recording a different assessment.");
+
+        // The reviewer is the person the review was assigned to - the named reviewer or the second
+        // reviewer. HR schedules reviews; it does not conduct them and does not sign them.
+        if (entity.ReviewedById != actorEmployeeId && entity.SecondReviewerId != actorEmployeeId)
+            throw new UnauthorizedAccessException(
+                "Only the reviewer named on this review, or its second reviewer, may record its assessment.");
+
+        // A recommendation is what the rest of the area acts on, so it is the one required field.
+        if (dto.Recommendation is null)
+            throw ProbationWorkflowException.Invalid(
+                "A review must carry a recommendation: Confirm, Extend, Terminate or ContinueMonitoring.");
+
+        if (dto.Recommendation == ProbationReviewRecommendation.Extend && dto.ProposedExtensionMonths is not > 0)
+            throw ProbationWorkflowException.Invalid(
+                "A recommendation to extend must say how many months are proposed.");
+
+        entity.ActualDate = dto.ActualDate;
+        entity.PerformanceRating = dto.PerformanceRating;
+        entity.ConductRating = dto.ConductRating;
+        entity.AttitudeRating = dto.AttitudeRating;
+        entity.StrengthsObserved = dto.StrengthsObserved;
+        entity.AreasForImprovement = dto.AreasForImprovement;
+        entity.ReviewerComments = dto.ReviewerComments;
+        entity.Recommendation = dto.Recommendation;
+        entity.ProposedExtensionMonths = dto.Recommendation == ProbationReviewRecommendation.Extend
+            ? dto.ProposedExtensionMonths
+            : null;
+        entity.SignedDocumentPath = dto.SignedDocumentPath;
+
+        await _reviewRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Probation review {ReviewId} submitted by {ActorId} recommending {Recommendation}",
+            reviewId, actorEmployeeId, dto.Recommendation);
+
+        return (await GetOwnedReviewAsync(reviewId)).ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationReviewDto> AcknowledgeReviewAsync(
+        Guid reviewId, AcknowledgeProbationReviewDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedReviewAsync(reviewId);
+        var probation = await GetOwnedProbationAsync(entity.ProbationPeriodId);
+
+        // ⚠ The subject, and nobody else. Not HR, not the reviewer. Signing "I have seen this" in
+        // someone else's name is the defect area 9 found in its own acknowledgement path.
+        if (probation.EmployeeId != actorEmployeeId)
+            throw new UnauthorizedAccessException(
+                "Only the employee this probation review is about may acknowledge it.");
+
+        if (entity.Recommendation is null)
+            throw ProbationWorkflowException.InvalidState(
+                "This review has not been conducted yet, so there is nothing to acknowledge.");
+
+        if (entity.EmployeeAcknowledged)
+            throw ProbationWorkflowException.InvalidState("You have already acknowledged this review.");
+
+        entity.EmployeeAcknowledged = true;
+        entity.EmployeeAcknowledgementDate = DateTime.UtcNow;   // server-stamped, never from the payload
+        entity.EmployeeResponse = dto.EmployeeResponse;
+
+        await _reviewRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Probation review {ReviewId} acknowledged by its subject {ActorId}", reviewId, actorEmployeeId);
+        return (await GetOwnedReviewAsync(reviewId)).ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationReviewDto> HrApproveReviewAsync(
+        Guid reviewId, ApproveProbationReviewDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedReviewAsync(reviewId);
+
+        if (entity.Status != ProbationReviewStatus.Completed)
+            throw ProbationWorkflowException.InvalidState(
+                "Only a completed review can be signed off. Record the assessment and complete it first.");
+
+        if (entity.HrApproved)
+            throw ProbationWorkflowException.InvalidState("This review has already been signed off.");
+
+        entity.HrApproved = true;
+        entity.HrApprovedById = actorEmployeeId;                // from the token, never the payload
+        entity.HrApprovalDate = DateTime.UtcNow;                // server-stamped
+        if (!string.IsNullOrWhiteSpace(dto.Comments))
+            entity.ReviewerComments = string.IsNullOrWhiteSpace(entity.ReviewerComments)
+                ? dto.Comments
+                : $"{entity.ReviewerComments}\n\nHR: {dto.Comments}";
+
+        await _reviewRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Probation review {ReviewId} signed off by {ActorId}", reviewId, actorEmployeeId);
+        return (await GetOwnedReviewAsync(reviewId)).ToDto();
+    }
+
+    /// <inheritdoc />
     public async Task<bool> CompleteReviewAsync(Guid reviewId, Guid completedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedReviewAsync(reviewId);
 
+        // The reviewer closes their own review; HR may close it on their behalf (a reviewer who
+        // has left, a review conducted on paper). Everyone else is refused.
+        if (!IsHrActor()
+            && entity.ReviewedById != completedByUserId
+            && entity.SecondReviewerId != completedByUserId)
+            throw new UnauthorizedAccessException(
+                "Only the reviewer named on this review, its second reviewer, or HR may complete it.");
+
+        // ⚠ A review with no assessment is not a conducted review. Before slice 2 this method set
+        // the status and nothing else, so an empty review completed happily and then read as
+        // conducted forever - and the reminder queues stopped chasing it.
+        if (entity.Recommendation is null)
+            throw ProbationWorkflowException.InvalidState(
+                "This review has not been conducted yet. Record the reviewer's assessment before completing it.");
+
+        if (entity.Status == ProbationReviewStatus.Completed)
+            throw ProbationWorkflowException.InvalidState("This review is already completed.");
+
         entity.Status = ProbationReviewStatus.Completed;
+        entity.ActualDate ??= DateOnly.FromDateTime(DateTime.UtcNow);
 
         await _reviewRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<ProbationReviewDto>> GetMyReviewsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var probations = (await _probationRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(p => p.TenantId == tenantId)
+            .Select(p => p.Id)
+            .ToHashSet();
+        if (probations.Count == 0) return Array.Empty<ProbationReviewDto>();
+
+        var reviews = new List<ProbationReviewDto>();
+        foreach (var probationId in probations)
+        {
+            var rows = await _reviewRepository.GetByProbationPeriodIdAsync(probationId);
+            reviews.AddRange(rows.Where(r => r.TenantId == tenantId).Select(r => r.ToDto()));
+        }
+        return reviews.OrderByDescending(r => r.ScheduledDate).ToList();
     }
 
     public async Task<IEnumerable<ProbationReviewDto>> GetReviewsByStatusAsync(ProbationReviewStatus status, CancellationToken cancellationToken = default)
@@ -278,17 +484,20 @@ public class ProbationService : IProbationService
         var probation = await GetOwnedProbationAsync(createDto.ProbationPeriodId);
 
         if (probation.Status != ProbationStatus.Active)
-            throw new InvalidOperationException("Only active probation periods can be extended.");
+            throw ProbationWorkflowException.InvalidState(
+                $"This probation is {probation.Status} and can no longer be extended.");
 
         var newEndDate = createDto.NewEndDate;
         if (newEndDate <= probation.CurrentEndDate)
-            throw new ArgumentException($"New end date ({newEndDate:d}) must be later than the current end date ({probation.CurrentEndDate:d}).");
+            throw ProbationWorkflowException.Invalid(
+                $"The new end date ({newEndDate:yyyy-MM-dd}) must be later than the current end date ({probation.CurrentEndDate:yyyy-MM-dd}).");
 
         // Verify extension months is consistent with the stated new date
         var computedMonths = ((newEndDate.Year - probation.CurrentEndDate.Year) * 12)
                            + newEndDate.Month - probation.CurrentEndDate.Month;
         if (computedMonths < 1)
-            throw new ArgumentException("Extension must be at least one full calendar month.");
+            throw ProbationWorkflowException.Invalid(
+                "An extension must run at least one full calendar month past the current end date.");
 
         var extension = new ProbationExtension
         {
@@ -350,6 +559,7 @@ public class ProbationService : IProbationService
             ExtensionMonths = e.ExtensionMonths,
             Reason = e.Reason,
             ExtendedById = e.ExtendedById,
+            ExtendedByName = e.ExtendedBy?.FullName,
             ExtendedDate = e.ExtendedDate,
             Comments = e.Comments,
         }).ToList();

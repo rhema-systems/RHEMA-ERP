@@ -25,6 +25,7 @@ public static class HrPermissions
     public const string CategoryMedical = "HR - Occupational Health";
     public const string CategoryTravel = "HR - Staff Travel";
     public const string CategorySuccession = "HR - Succession & Talent";
+    public const string CategoryProbation = "HR - Probation & Confirmation";
 
     /// <summary>Prefix identifying HR permissions, used by the role-fallback handler.</summary>
     public const string Prefix = "HR.";
@@ -52,6 +53,14 @@ public static class HrPermissions
     public const string SuccessionReadPolicy = "HR.Policy.SuccessionRead";
     public const string SuccessionWritePolicy = "HR.Policy.SuccessionWrite";
     public const string SuccessionAdminPolicy = "HR.Policy.SuccessionAdmin";
+
+    public const string ViewProbation = "HR.Probation.Read";
+    public const string MaintainProbation = "HR.Probation.Write";
+    public const string AdministerProbation = "HR.Probation.Admin";
+
+    public const string ProbationReadPolicy = "HR.Policy.ProbationRead";
+    public const string ProbationWritePolicy = "HR.Policy.ProbationWrite";
+    public const string ProbationAdminPolicy = "HR.Policy.ProbationAdmin";
 
     public static readonly HrPermissionDefinition[] All =
     {
@@ -83,7 +92,17 @@ public static class HrPermissions
             CategorySuccession),
         new(AdministerSuccession, "Administer Succession & Talent",
             "Approve succession plans, finalize calibration, read confidential succession documents, delete records, and administer talent pool types.",
-            CategorySuccession)
+            CategorySuccession),
+
+        new(ViewProbation, "View Probation & Confirmation",
+            "View probation periods, review schedules and ratings, extension history and confirmation outcomes.",
+            CategoryProbation),
+        new(MaintainProbation, "Maintain Probation & Confirmation",
+            "Open probation periods, schedule and record probation reviews, and issue confirmation letters.",
+            CategoryProbation),
+        new(AdministerProbation, "Administer Probation & Confirmation",
+            "Decide the probation outcome — confirm, extend or terminate — and delete probation records.",
+            CategoryProbation)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -106,18 +125,39 @@ public static class HrPermissions
     /// then feeds promotion and movement decisions. Those are management acts, not record-keeping,
     /// so they sit with Admin alongside deletion and the confidential document tier.</para>
     ///
+    /// <para>Probation splits on the same line, and here the requirement draws it for us. FRD
+    /// FR-HR-032 and the notification matrix state the chain as <i>system (month 5) → head
+    /// confirms → HR issues the confirmation letter</i>. So opening a probation period, scheduling
+    /// reviews, recording their ratings and issuing the letter are HR record-keeping (Write),
+    /// while the three <b>outcomes</b> — confirm, extend, terminate — decide whether someone's
+    /// employment becomes permanent and are management acts (Admin), alongside deletion.</para>
+    ///
+    /// <para>⚠ Admin is the <i>interim</i> home for those three. Slice 8 of
+    /// <c>plans/HR-Area-15b-Probation-Confirmation-Build-Plan.md</c> moves the real check onto the
+    /// workflow engine, where the approver is the confirming authority named for the employee's
+    /// organisation unit (decision D-2, taken 2026-08-18 because 0 of 41 units carry a
+    /// <c>HeadEmployeeId</c> and only 7% of employees a <c>ManagerId</c>). When that lands, these
+    /// three may relax to Write with the instance-level authority check doing the real work — do
+    /// not relax them before it, or the outcome becomes reachable by anyone HR-shaped.</para>
+    ///
     /// <para>⚠ Note what is <b>absent</b>: no grant reaches the <c>Employee</c> role. Succession
     /// deliberately inverts the self-service rule the rest of HR follows. A candidate's readiness
     /// level, retention-risk flag and nine-box placement are assessments made about them, not
     /// records belonging to them, so there is no self tier here at all — see decision D-2 in
     /// <c>plans/HR-Area-13-Succession-Build-Plan.md</c>. Any future "my development plan" screen
     /// must be fed by a separate, deliberately narrowed projection, never by relaxing this map.</para>
+    ///
+    /// <para>Probation does not contradict that. It needs one employee-facing action — signing
+    /// "I have seen this review" (<c>ProbationReview.EmployeeAcknowledged</c>) — and that arrives
+    /// as a self-or-HR check on the ownership helper, the way discipline's acknowledgement does,
+    /// <b>not</b> as a grant here. The rule holds: this map never reaches <c>Employee</c>.</para>
     /// </remarks>
     private static readonly string[] HrStaffGrants =
     {
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
-        ViewSuccession, MaintainSuccession
+        ViewSuccession, MaintainSuccession,
+        ViewProbation, MaintainProbation
     };
 
     /// <summary>

@@ -121,6 +121,28 @@ public class GlobalExceptionHandlingMiddleware
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 break;
 
+            // Probation & confirmation. One exception, four outcomes — the medical shape, for the
+            // same reason: without this case every rule in the area was flattened to one of two
+            // fixed strings and said nothing. See ProbationWorkflowException.
+            case ProbationWorkflowException probationEx:
+                var probationStatus = probationEx.Reason switch
+                {
+                    ProbationFailureReason.NotFound => HttpStatusCode.NotFound,
+                    ProbationFailureReason.InvalidState => HttpStatusCode.Conflict,
+                    ProbationFailureReason.Conflict => HttpStatusCode.Conflict,
+                    _ => HttpStatusCode.BadRequest
+                };
+                response.Title = probationStatus switch
+                {
+                    HttpStatusCode.NotFound => "Not Found",
+                    HttpStatusCode.Conflict => "Conflict",
+                    _ => "Bad Request"
+                };
+                response.Status = (int)probationStatus;
+                response.Detail = probationEx.Message;   // safe to display by design
+                context.Response.StatusCode = (int)probationStatus;
+                break;
+
             case ConflictException conflictEx:
                 response.Title = "Conflict";
                 response.Status = (int)HttpStatusCode.Conflict;
@@ -212,7 +234,7 @@ public class GlobalExceptionHandlingMiddleware
 
             var level = exception switch
             {
-                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException => "Warning",
+                ValidationException or UnauthorizedException or ForbiddenException or UnauthorizedAccessException or NotFoundException or ConflictException or ArgumentException or MedicalWorkflowException or ProbationWorkflowException => "Warning",
                 InvalidOperationException => "Error",
                 _ => "Critical"
             };
