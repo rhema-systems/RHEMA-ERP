@@ -682,6 +682,21 @@ export default function EstatePropertyListingsPage() {
                             Regularisation SOP
                           </Link>
                         </Button>
+                        <Button
+                          asChild
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="bg-white"
+                        >
+                          <Link
+                            href={`/estate/property-management/EstatePropertyManagementGroundRent?assetId=${encodeURIComponent(
+                              selected.id
+                            )}`}
+                          >
+                            Set up ground rent
+                          </Link>
+                        </Button>
                       </div>
                     ) : null}
                   </div>

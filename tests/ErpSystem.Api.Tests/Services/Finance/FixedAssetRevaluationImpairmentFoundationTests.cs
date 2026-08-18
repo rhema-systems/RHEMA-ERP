@@ -436,17 +436,93 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetRevaluationImpairment")]
     [Trait("Category", "FixedAssets")]
-    public async Task ImpairmentReversalIsRejectedUntilSupported()
+    public async Task ImpairmentReversalPostsAgainstItsSource_WithinBothIas36Ceilings()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedValuationFoundationAsync(db, tenantId);
         var services = CreateServices(db, tenantId);
 
-        var act = () => services.Valuations.CreateValuationAsync(CreateValuationDto(fixture.Asset.Id, ValuationType.ImpairmentReversal, 1100m), Guid.NewGuid());
+        var impairment = await services.Valuations.CreateValuationAsync(
+            CreateValuationDto(fixture.Asset.Id, ValuationType.Impairment, 700m), Guid.NewGuid());
+        await services.Valuations.PostValuationToGLAsync(impairment.Id);
+
+        var request = CreateValuationDto(fixture.Asset.Id, ValuationType.ImpairmentReversal, 850m);
+        request.SourceImpairmentValuationId = impairment.Id;
+        request.UnimpairedCarryingAmountCap = 900m;
+        var reversal = await services.Valuations.CreateValuationAsync(request, Guid.NewGuid());
+        await services.Valuations.PostValuationToGLAsync(reversal.Id);
+
+        reversal.ImpairmentReversal.Should().Be(150m);
+        reversal.OutstandingImpairmentBefore.Should().Be(300m);
+        reversal.SourceImpairmentValuationId.Should().Be(impairment.Id);
+        var journal = await LoadValuationJournalAsync(db, reversal.Id);
+        journal.Transactions.Single(t => t.AccountId == fixture.AccumulatedImpairmentAccount.Id)
+            .DebitAmount.Should().Be(150m);
+        journal.Transactions.Single(t => t.AccountId == fixture.Category.ImpairmentReversalAccountId)
+            .CreditAmount.Should().Be(150m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetRevaluationImpairment")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ImpairmentReversalCannotExceedNoImpairmentCarryingAmount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedValuationFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var impairment = await services.Valuations.CreateValuationAsync(
+            CreateValuationDto(fixture.Asset.Id, ValuationType.Impairment, 700m), Guid.NewGuid());
+        await services.Valuations.PostValuationToGLAsync(impairment.Id);
+
+        var request = CreateValuationDto(fixture.Asset.Id, ValuationType.ImpairmentReversal, 950m);
+        request.SourceImpairmentValuationId = impairment.Id;
+        request.UnimpairedCarryingAmountCap = 900m;
+        var act = () => services.Valuations.CreateValuationAsync(request, Guid.NewGuid());
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Impairment reversal is not supported*");
+            .WithMessage("*above 900.00*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetRevaluationImpairment")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ApprovedValuationCorrectionPostsLinkedCompensatingJournal_AndRestoresBookSnapshot()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedValuationFoundationAsync(db, tenantId);
+        var maker = CreateServices(db, tenantId, userId: Guid.NewGuid());
+        var valuation = await maker.Valuations.CreateValuationAsync(
+            CreateValuationDto(fixture.Asset.Id, ValuationType.Revaluation, 1500m), Guid.NewGuid());
+        await maker.Valuations.PostValuationToGLAsync(valuation.Id);
+
+        var request = await maker.Valuations.RequestCorrectionAsync(valuation.Id, new()
+        {
+            Reason = "The valuer report was assigned to the wrong fixed asset record.",
+            ImpactAssessment = "Restore the pre-valuation NBV before posting the corrected valuation report."
+        });
+
+        // A separate resolved identity is essential evidence: the maker cannot approve the same
+        // correction request even when both users operate through the same Finance workspace.
+        var checker = CreateServices(db, tenantId, userId: Guid.NewGuid());
+        var approved = await checker.Valuations.ReviewCorrectionAsync(valuation.Id, request.Id, new()
+        {
+            Approved = true,
+            ReviewComment = "Source report and asset register were independently checked and agree."
+        });
+        var posted = await checker.Valuations.PostCorrectionAsync(valuation.Id, approved.Id);
+
+        posted.Status.Should().Be(AssetValuationCorrectionStatuses.Posted);
+        posted.ReversalJournalEntryId.Should().NotBeNull();
+        var storedValuation = await db.AssetValuations.SingleAsync(v => v.Id == valuation.Id);
+        storedValuation.IsCorrected.Should().BeTrue();
+        storedValuation.CorrectionId.Should().Be(request.Id);
+        var book = await db.FixedAssetBookValues.SingleAsync(b => b.FixedAssetId == fixture.Asset.Id);
+        book.NetBookValue.Should().Be(1000m);
+        (await db.AssetTransactions.SingleAsync(t => t.TransactionType == "ValuationCorrection"))
+            .ResultingBookValue.Should().Be(1000m);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -459,9 +535,13 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
         return new ApplicationDbContext(options);
     }
 
-    private static ServiceFixture CreateServices(ApplicationDbContext db, Guid tenantId, IWorkflowService? workflowService = null)
+    private static ServiceFixture CreateServices(
+        ApplicationDbContext db,
+        Guid tenantId,
+        IWorkflowService? workflowService = null,
+        Guid? userId = null)
     {
-        var currentUser = CreateCurrentUser(tenantId);
+        var currentUser = CreateCurrentUser(tenantId, userId);
         var auditService = new FinanceAuditService(
             db,
             currentUser.Object,
@@ -481,7 +561,8 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
             accountingBookService: null,
             financePostingEngine: postingEngine,
             financeAuditService: auditService,
-            workflowService: workflowService);
+            workflowService: workflowService,
+            financeReversalPolicyService: new FinanceReversalPolicyService(db, currentUser.Object));
         var depreciationService = new FixedAssetDepreciationService(
             db,
             currentUser.Object,
@@ -493,12 +574,12 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
         return new ServiceFixture(valuationService, depreciationService);
     }
 
-    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
+    private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId, Guid? userId = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
-        currentUser.SetupGet(x => x.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(x => x.UserId).Returns((userId ?? Guid.NewGuid()).ToString());
         currentUser.SetupGet(x => x.UserName).Returns("fa.valuation");
         currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(x => x.UserAgent).Returns("fixed-asset-valuation-tests");

@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
@@ -52,7 +53,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "StockAdjustment",
             SourceDocumentId = adjustment.Id,
             SourceDocumentTenantId = adjustment.TenantId,
@@ -82,7 +83,7 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory",
-            OriginModuleCode = "Inventory",
+            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
             SourceDocumentType = "StockAdjustment",
             SourceDocumentId = adjustment.Id,
             SourceDocumentTenantId = adjustment.TenantId,

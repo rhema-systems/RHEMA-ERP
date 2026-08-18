@@ -127,11 +127,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FixedAssetCategory> FixedAssetCategories { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<FixedAssetBookValue> FixedAssetBookValues { get; set; }
+    public DbSet<ProcurementFixedAssetCapitalization> ProcurementFixedAssetCapitalizations { get; set; }
     public DbSet<FixedAssetCapitalizationReversal> FixedAssetCapitalizationReversals { get; set; }
+    public DbSet<FixedAssetDepreciationReversal> FixedAssetDepreciationReversals { get; set; }
     public DbSet<AssetDisposal> AssetDisposals { get; set; }
     public DbSet<AssetTransfer> AssetTransfers { get; set; }
     public DbSet<AssetTransaction> AssetTransactions { get; set; }
     public DbSet<AssetValuation> AssetValuations { get; set; }
+    public DbSet<AssetValuationCorrection> AssetValuationCorrections { get; set; }
     public DbSet<AssetDepreciationSchedule> AssetDepreciationSchedules { get; set; }
     public DbSet<FixedAssetDepreciationRun> FixedAssetDepreciationRuns { get; set; }
     public DbSet<AssetVerificationSession> AssetVerificationSessions { get; set; }
@@ -171,6 +174,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
+    public DbSet<BudgetRevision> BudgetRevisions { get; set; }
+    public DbSet<BudgetRevisionLine> BudgetRevisionLines { get; set; }
     public DbSet<BankAccount> BankAccounts { get; set; }
     public DbSet<LiquidityAccount> LiquidityAccounts { get; set; }
     public DbSet<LiquidityAccountEntry> LiquidityAccountEntries { get; set; }
@@ -309,6 +314,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<UserReportFavorite> UserReportFavorites { get; set; }
     public DbSet<ReportExport> ReportExports { get; set; }
     public DbSet<ReportRoleAssignment> ReportRoleAssignments { get; set; }
+    public DbSet<FinanceAdHocReportDefinition> FinanceAdHocReportDefinitions { get; set; }
 
     // Report data source entities
     public DbSet<DataSource> ReportDataSources { get; set; }
@@ -585,6 +591,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<InventoryLocation> InventoryLocations { get; set; }
     public DbSet<WarehouseQuantity> WarehouseQuantities { get; set; }
     public DbSet<InventoryAllocation> InventoryAllocations { get; set; }
+    public DbSet<InventoryWorkOrderReservationAction> InventoryWorkOrderReservationActions { get; set; }
 
     // Enhanced Inventory entities
     public DbSet<UnitOfMeasure> UnitsOfMeasure { get; set; }
@@ -633,6 +640,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<InventoryIssueVoucher> InventoryIssueVouchers { get; set; }
     public DbSet<InventoryIssueVoucherLine> InventoryIssueVoucherLines { get; set; }
     public DbSet<InventoryIssueVoucherAction> InventoryIssueVoucherActions { get; set; }
+    public DbSet<InventoryIssueAccountingRule> InventoryIssueAccountingRules { get; set; }
+    public DbSet<InventoryIssueFinanceLineage> InventoryIssueFinanceLineages { get; set; }
+    public DbSet<InventoryIssueReturnAllocation> InventoryIssueReturnAllocations { get; set; }
     public DbSet<InventoryReturnVoucher> InventoryReturnVouchers { get; set; }
     public DbSet<InventoryReturnVoucherLine> InventoryReturnVoucherLines { get; set; }
     public DbSet<InventoryReturnVoucherEvidence> InventoryReturnVoucherEvidence { get; set; }
@@ -665,6 +675,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<PurchaseOrderItem> PurchaseOrderItems { get; set; }
     public DbSet<PurchaseOrderReceipt> PurchaseOrderReceipts { get; set; }
     public DbSet<PurchaseOrderReceiptItem> PurchaseOrderReceiptItems { get; set; }
+    public DbSet<ProcurementReceiptSourceEvidence> ProcurementReceiptSourceEvidence { get; set; }
     public DbSet<PurchaseOrderLandedCostPlan> PurchaseOrderLandedCostPlans { get; set; }
     public DbSet<PurchaseOrderLandedCostPlanItem> PurchaseOrderLandedCostPlanItems { get; set; }
     public DbSet<ProcurementPurchaseOrderAmendment> ProcurementPurchaseOrderAmendments { get; set; }
@@ -1050,6 +1061,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<ProjectPaymentCertificate> ProjectPaymentCertificates { get; set; }
     public DbSet<ProjectExtensionOfTime> ProjectExtensionOfTimeRequests { get; set; }
     public DbSet<ProjectFinalAccount> ProjectFinalAccounts { get; set; }
+    public DbSet<ProjectFinalAccountRevision> ProjectFinalAccountRevisions { get; set; }
     public DbSet<ProjectBuilding> ProjectBuildings { get; set; }
     public DbSet<ProjectFloor> ProjectFloors { get; set; }
     public DbSet<ProjectUnitReleaseBatch> ProjectUnitReleaseBatches { get; set; }
@@ -1123,6 +1135,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryNegativeStockOverrideConfiguration());
         builder.ApplyConfiguration(new InventoryNegativeStockWarehouseQuantityConfiguration());
         builder.ApplyConfiguration(new InventoryNegativeStockItemConfiguration());
+        builder.ApplyConfiguration(new InventoryLocationNegativeStockTriggerConfiguration());
+        builder.ApplyConfiguration(new InventoryWorkOrderAllocationConfiguration());
+        builder.ApplyConfiguration(new InventoryWorkOrderReservationActionConfiguration());
         builder.ApplyConfiguration(new InventoryProjectReservationConfiguration());
         builder.ApplyConfiguration(new InventoryProjectReservationActionConfiguration());
         builder.ApplyConfiguration(new InventoryReplenishmentRecommendationConfiguration());
@@ -1139,6 +1154,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryIssueVoucherConfiguration());
         builder.ApplyConfiguration(new InventoryIssueVoucherLineConfiguration());
         builder.ApplyConfiguration(new InventoryIssueVoucherActionConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueAccountingRuleConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueFinanceLineageConfiguration());
+        builder.ApplyConfiguration(new InventoryIssueReturnAllocationConfiguration());
         builder.ApplyConfiguration(new InventoryReturnVoucherConfiguration());
         builder.ApplyConfiguration(new InventoryReturnVoucherLineConfiguration());
         builder.ApplyConfiguration(new InventoryReturnVoucherEvidenceConfiguration());
@@ -1173,6 +1191,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<WorkflowDelegation>().HasIndex(item => item.WorkflowDefinitionId);
         builder.Entity<WorkflowDelegation>().HasIndex(item => item.WorkflowStepId);
         ConfigureProcurementConfiguration(builder);
+        ConfigureQuantitySurveyConfiguration(builder);
         ConfigureProcurementPolicy(builder);
         ConfigureProcurementRequisitionAuthorityRoutes(builder);
         ConfigureProcurementRequisitionSourcingReleases(builder);
@@ -1520,6 +1539,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
+            // Specialised cutover facts are intentionally linked to their controlled opening batch.
+            // This index keeps evidence validation and settlement-read-model rebuilds tenant-local.
+            entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
+                .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
             entity.HasIndex(e => new { e.TenantId, e.LiquidityAccountId, e.PaymentDate });
             entity.HasIndex(e => e.ReversalJournalEntryId);
             entity.HasIndex(e => e.ReversalPostingEventId);
@@ -1928,6 +1951,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<CollectionActivity>(entity =>
         {
             entity.ToTable("CollectionActivities");
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            // A posted invoice may have many calls/reminders, but Finance must have
+            // only one durable primary work item for that exposure. The filtered
+            // SQL Server index makes bulk generation idempotent under concurrency.
+            entity.HasIndex(e => new { e.TenantId, e.InvoiceId, e.CollectionContext })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsPrimaryTask] = 1 AND [InvoiceId] IS NOT NULL");
+            entity.HasIndex(e => new { e.TenantId, e.CollectionContext, e.CollectionStatus, e.FollowUpDate });
             entity.HasOne(e => e.Customer)
                 .WithMany()
                 .HasForeignKey(e => e.CustomerId)
@@ -1939,6 +1970,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.AssignedTo)
                 .WithMany()
                 .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CompletedBy)
+                .WithMany()
+                .HasForeignKey(e => e.CompletedById)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ParentActivity)
+                .WithMany(e => e.History)
+                .HasForeignKey(e => e.ParentActivityId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
@@ -1985,12 +2024,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("VendorInvoice", table =>
             {
                 table.HasTrigger("TR_VendorInvoice_TDC0504MandatoryMatch");
+                table.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_TDC0504MatchingTolerances",
                     "[MatchingPriceTolerancePercent] BETWEEN 0 AND 100 AND [MatchingQuantityTolerancePercent] BETWEEN 0 AND 100");
                 table.HasCheckConstraint(
                     "CK_VendorInvoice_TDC0504SnapshotHash",
                     "[MatchingSnapshotHash] IS NULL OR LEN([MatchingSnapshotHash]) = 64");
+                table.HasCheckConstraint(
+                    "CK_VendorInvoice_AcceptedSupplyCoherent",
+                    "([AcceptedSupplyKind] IS NULL AND [AcceptedSupplySourceId] IS NULL AND [AcceptedSupplySourceReference] IS NULL AND [AcceptedSupplySnapshotHash] IS NULL AND [AcceptedSupplyValidatedAtUtc] IS NULL) OR ([AcceptedSupplyKind] BETWEEN 1 AND 3 AND [AcceptedSupplySourceId] IS NOT NULL AND LEN([AcceptedSupplySourceReference]) BETWEEN 1 AND 100 AND LEN([AcceptedSupplySnapshotHash]) = 64 AND [AcceptedSupplyValidatedAtUtc] IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_VendorInvoice_AcceptedSupplyPurchaseOrder",
+                    "[AcceptedSupplyKind] IS NULL OR [AcceptedSupplyKind] = 3 OR [PurchaseOrderId] IS NOT NULL");
             });
             entity.HasOne(e => e.Supplier)
                 .WithMany()
@@ -2034,6 +2080,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.MatchingControlEventId });
             entity.HasIndex(e => new { e.TenantId, e.MatchExceptionControlEventId });
+            entity.HasIndex(e => new
+                {
+                    e.TenantId,
+                    e.AcceptedSupplyKind,
+                    e.AcceptedSupplySourceId
+                },
+                "UX_VendorInvoice_AcceptedCertificate")
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
         });
 
         builder.Entity<VendorInvoiceLineItem>(entity =>
@@ -2362,6 +2417,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.InvoicePaymentSodControlEventId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => new { e.TenantId, e.PaymentMethodId });
+            // See the equivalent AR index: opening batches are the posting source while the
+            // payment remains the canonical AP advance/WHT fact used after go-live.
+            entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
+                .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
             entity.HasIndex(e => e.WorkflowInstanceId);
             entity.HasIndex(e => e.AppliedApprovalPolicySetId);
             entity.HasIndex(e => e.ReversalJournalEntryId);
@@ -2708,6 +2767,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.TransactionDebitAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.TransactionCreditAmount).HasColumnType("decimal(18,2)");
+            // Trial balance, ledger inquiry and reconciliation all begin with tenant/book/date
+            // scoping before narrowing to accounts. This composite index was added from the
+            // NFR-PER workload review so high-volume tenants do not scan the full shared ledger.
+            // AccountId is last because both all-account reports and single-account drill-downs
+            // can then use the same index prefix.
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.BookClassification,
+                e.TransactionDate,
+                e.AccountId
+            });
             entity.HasIndex(e => e.ExchangeRateId);
             entity.HasIndex(e => new { e.TenantId, e.TransactionCurrency, e.ExchangeRateId });
             entity.HasOne(e => e.Account)
@@ -3172,6 +3243,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.ToSegmentLookupValueId });
+            entity.HasIndex(e => new { e.TenantId, e.ToFixedAssetCategoryId });
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId });
             entity.Property(e => e.FromLocation).HasMaxLength(500);
             entity.Property(e => e.ToLocation).HasMaxLength(500);
             entity.Property(e => e.FromSegmentString).HasMaxLength(500);
@@ -3181,6 +3254,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Reason).HasMaxLength(1000);
             entity.Property(e => e.Comments).HasMaxLength(2000);
             entity.Property(e => e.FailureReason).HasMaxLength(1000);
+            entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ReclassificationAssetCarryingAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ReclassificationAccumulatedDepreciation).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ReclassificationAccumulatedImpairment).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ReclassificationRevaluationSurplus).HasColumnType("decimal(18,2)");
             entity.HasOne(e => e.FixedAsset)
                 .WithMany()
                 .HasForeignKey(e => e.FixedAssetId)
@@ -3197,6 +3275,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.ToSegmentLookupValueId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FromFixedAssetCategory)
+                .WithMany()
+                .HasForeignKey(e => e.FromFixedAssetCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ToFixedAssetCategory)
+                .WithMany()
+                .HasForeignKey(e => e.ToFixedAssetCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => e.AccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Account mappings are retained as immutable evidence on the transfer. Explicit
+            // restricted foreign keys prevent deleting an account that explains a posted move.
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromAssetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToAssetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromAccumulatedDepreciationAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToAccumulatedDepreciationAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromAccumulatedImpairmentAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToAccumulatedImpairmentAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.FromRevaluationSurplusAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(e => e.ToRevaluationSurplusAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
                 .HasForeignKey(e => e.JournalEntryId)
@@ -3209,7 +3309,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<AssetDisposal>(entity =>
         {
-            entity.ToTable("AssetDisposals");
+            entity.ToTable("AssetDisposals", table =>
+            {
+                // These constraints mirror the service invariants at the persistence boundary so
+                // future import jobs or direct SQL cannot create ambiguous receipt destinations or
+                // claim that a disposal was invoiced without retaining its canonical AR document.
+                table.HasCheckConstraint(
+                    "CK_AssetDisposals_SettlementDestination",
+                    "[SettlementBankAccountId] IS NULL OR [SettlementLiquidityAccountId] IS NULL");
+                table.HasCheckConstraint(
+                    "CK_AssetDisposals_SettlementDocumentState",
+                    "([SettlementStatus] IN (0,1,4)) OR ([SettlementStatus] IN (2,3) AND [CustomerInvoiceId] IS NOT NULL)");
+            });
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.BookClassification });
             entity.HasIndex(e => new { e.TenantId, e.IdempotencyKey })
                 .IsUnique()
@@ -3219,20 +3330,59 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FiscalPeriodId });
             entity.HasIndex(e => new { e.TenantId, e.AccountingBookId });
             entity.HasIndex(e => new { e.TenantId, e.ProceedsAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.ProceedsExchangeRateId });
+            entity.HasIndex(e => new { e.TenantId, e.RevaluationSurplusAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.RetainedEarningsAccountId });
+            entity.HasIndex(e => new { e.TenantId, e.BuyerBusinessPartnerId });
+            entity.HasIndex(e => new { e.TenantId, e.CustomerInvoiceId })
+                .IsUnique()
+                .HasFilter("[CustomerInvoiceId] IS NOT NULL");
+            entity.HasIndex(e => new { e.TenantId, e.CustomerPaymentId })
+                .IsUnique()
+                .HasFilter("[CustomerPaymentId] IS NOT NULL");
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.ProceedsCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.ProceedsFunctionalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ProceedsExchangeRateValue).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.ProceedsExchangeRateSource).HasMaxLength(100).IsRequired();
             entity.Property(e => e.IdempotencyKey).HasMaxLength(150);
             entity.Property(e => e.ReferenceNumber).HasMaxLength(100);
             entity.Property(e => e.Reason).HasMaxLength(1000);
             entity.Property(e => e.Comments).HasMaxLength(1000);
             entity.Property(e => e.FailureReason).HasMaxLength(1000);
+            entity.Property(e => e.DisposedPortionPercent).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ComponentReference).HasMaxLength(100);
+            entity.Property(e => e.ComponentDescription).HasMaxLength(500);
+            entity.Property(e => e.AllocationEvidenceReference).HasMaxLength(200);
+            entity.Property(e => e.AllocationEvidenceNotes).HasMaxLength(1000);
             entity.Property(e => e.CostAtDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.AcquisitionCostAllocated).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RevaluationAdjustmentAllocated).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ResidualValueAllocated).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ProductionCapacityAllocated).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.AccumulatedProductionUnitsAllocated).HasColumnType("decimal(18,4)");
             entity.Property(e => e.AccumulatedDepreciationAtDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.FinalDepreciationAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.FinalDepreciationProrationBasis).HasMaxLength(30);
+            entity.Property(e => e.FinalDepreciationProductionUnits).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationDiminishingRatePercent).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationLifetimeProductionCapacity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationCumulativeProductionUnitsBefore).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationCumulativeProductionUnitsAfter).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.FinalDepreciationEvidenceReference).HasMaxLength(200);
+            entity.Property(e => e.FinalDepreciationEvidenceNotes).HasMaxLength(1000);
             entity.Property(e => e.AccumulatedImpairmentAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusAtDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RevaluationSurplusTransferAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainingAcquisitionCostAfterDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainingAccumulatedDepreciationAfterDisposal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainingNetBookValueAfterDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetProceeds).HasColumnType("decimal(18,2)");
             entity.Property(e => e.NetBookValueAtDisposal).HasColumnType("decimal(18,2)");
             entity.Property(e => e.GainOrLoss).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SettlementReference).HasMaxLength(100);
+            entity.Property(e => e.SettlementInvoiceAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SettlementTaxAmount).HasColumnType("decimal(18,2)");
             entity.HasOne(e => e.FixedAsset)
                 .WithMany()
                 .HasForeignKey(e => e.FixedAssetId)
@@ -3249,6 +3399,53 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.ProceedsAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            // The referenced rate is durable accounting evidence. Restrict deletion so a posted
+            // disposal can always explain how native proceeds became functional-currency GL value.
+            entity.HasOne(e => e.ProceedsExchangeRate)
+                .WithMany()
+                .HasForeignKey(e => e.ProceedsExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Disposal evidence retains both equity accounts even if configuration changes later.
+            entity.HasOne(e => e.RevaluationSurplusAccount)
+                .WithMany()
+                .HasForeignKey(e => e.RevaluationSurplusAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.RetainedEarningsAccount)
+                .WithMany()
+                .HasForeignKey(e => e.RetainedEarningsAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.BuyerBusinessPartner)
+                .WithMany()
+                .HasForeignKey(e => e.BuyerBusinessPartnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SaleTaxGroup)
+                .WithMany()
+                .HasForeignKey(e => e.SaleTaxGroupId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementPaymentTerm)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementPaymentTermId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementPaymentMethod)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementPaymentMethodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementBankAccount)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementBankAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SettlementLiquidityAccount)
+                .WithMany()
+                .HasForeignKey(e => e.SettlementLiquidityAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CustomerInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerInvoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CustomerPayment)
+                .WithMany()
+                .HasForeignKey(e => e.CustomerPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
                 .HasForeignKey(e => e.JournalEntryId)
@@ -3256,6 +3453,58 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.PostingEvent)
                 .WithMany()
                 .HasForeignKey(e => e.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProcurementFixedAssetCapitalization>(entity =>
+        {
+            entity.ToTable("ProcurementFixedAssetCapitalizations", table =>
+            {
+                table.HasCheckConstraint("CK_ProcurementFixedAssetCapitalizations_Quantity", "[CapitalizedQuantity] > 0");
+                table.HasCheckConstraint("CK_ProcurementFixedAssetCapitalizations_Amounts", "[SourceTransactionAmount] >= 0 AND [FunctionalAmount] > 0");
+            });
+            entity.HasIndex(value => new { value.TenantId, value.IdempotencyKey }).IsUnique();
+            entity.HasIndex(value => new { value.TenantId, value.PurchaseOrderItemId, value.Status });
+            entity.HasIndex(value => new { value.TenantId, value.FixedAssetId, value.Status });
+            entity.HasIndex(value => new { value.TenantId, value.PostingEventId });
+            entity.HasIndex(value => new { value.TenantId, value.JournalEntryId });
+            entity.Property(value => value.AcceptedSupplyReference).HasMaxLength(100).IsRequired();
+            entity.Property(value => value.SourceCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(value => value.FunctionalCurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(value => value.SourceIntegrityHash).HasMaxLength(64).IsRequired();
+            entity.Property(value => value.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(value => value.FailureReason).HasMaxLength(2000);
+            entity.HasOne(value => value.FixedAsset)
+                .WithMany()
+                .HasForeignKey(value => value.FixedAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.PurchaseOrder)
+                .WithMany()
+                .HasForeignKey(value => value.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.PurchaseOrderItem)
+                .WithMany()
+                .HasForeignKey(value => value.PurchaseOrderItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(value => value.InventoryItem)
+                .WithMany()
+                .HasForeignKey(value => value.InventoryItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(value => value.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(value => value.JournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(value => value.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(value => value.ReversalJournalEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3296,6 +3545,43 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<FixedAssetDepreciationReversal>(entity =>
+        {
+            entity.ToTable("FixedAssetDepreciationReversals");
+            entity.HasIndex(e => new { e.TenantId, e.OriginalDepreciationRunId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.OriginalPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId })
+                .IsUnique()
+                .HasFilter("[ReversalPostingEventId] IS NOT NULL");
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.RequestedByUserName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ReviewedByUserName).HasMaxLength(200);
+            entity.Property(e => e.ReviewComment).HasMaxLength(2000);
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.HasOne(e => e.OriginalDepreciationRun)
+                .WithMany(run => run.Reversals)
+                .HasForeignKey(e => e.OriginalDepreciationRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<FixedAssetBookValue>(entity =>
         {
             entity.ToTable("FixedAssetBookValues");
@@ -3308,6 +3594,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.BookClassification).HasMaxLength(20).IsRequired();
             entity.Property(e => e.OpeningSource).HasMaxLength(50);
             entity.Property(e => e.SourceDocumentType).HasMaxLength(50);
+            entity.Property(e => e.DiminishingBalanceRatePercent).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.LifetimeProductionCapacity).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.AccumulatedProductionUnits).HasColumnType("decimal(18,4)");
             entity.HasOne(e => e.FixedAsset)
                 .WithMany(asset => asset.BookValues)
                 .HasForeignKey(e => e.FixedAssetId)
@@ -3360,6 +3649,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.RevaluationDeficit).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ImpairmentLoss).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ImpairmentReversal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.OutstandingImpairmentBefore).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnimpairedCarryingAmountCap).HasColumnType("decimal(18,2)");
             entity.Property(e => e.AdjustmentAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationSurplusApplied).HasColumnType("decimal(18,2)");
             entity.Property(e => e.RevaluationLossRecognized).HasColumnType("decimal(18,2)");
@@ -3378,6 +3669,40 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.PostingEvent)
                 .WithMany()
                 .HasForeignKey(e => e.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.SourceImpairmentValuation)
+                .WithMany()
+                .HasForeignKey(e => e.SourceImpairmentValuationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AssetValuationCorrection>(entity =>
+        {
+            entity.ToTable("AssetValuationCorrections");
+            entity.HasIndex(e => new { e.TenantId, e.OriginalValuationId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.HasOne(e => e.OriginalValuation)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalValuationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.OriginalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalPostingEvent)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReversalJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3401,13 +3726,29 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.NetBookValue).HasColumnType("decimal(18,2)");
             entity.Property(e => e.DepreciableAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ResidualValueSnapshot).HasColumnType("decimal(18,2)");
-            entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification }).IsUnique();
+            entity.Property(e => e.DiminishingBalanceRatePercentSnapshot).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.LifetimeProductionCapacitySnapshot).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.PeriodProductionUnits).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CumulativeProductionUnitsBefore).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.CumulativeProductionUnitsAfter).HasColumnType("decimal(18,4)");
+            entity.Property(e => e.ProductionEvidenceReference).HasMaxLength(200);
+            entity.Property(e => e.ProductionEvidenceNotes).HasMaxLength(1000);
+            entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification, e.CorrectionSequence }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetDepreciationRunId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });
             entity.HasIndex(e => new { e.TenantId, e.JournalEntryId });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
+            entity.HasIndex(e => new { e.TenantId, e.DepreciationReversalId });
+            entity.HasIndex(e => new { e.TenantId, e.AssetDisposalId })
+                .IsUnique()
+                .HasFilter("[AssetDisposalId] IS NOT NULL");
             entity.HasOne(e => e.DepreciationRun)
                 .WithMany(e => e.Lines)
                 .HasForeignKey(e => e.FixedAssetDepreciationRunId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AssetDisposal)
+                .WithMany()
+                .HasForeignKey(e => e.AssetDisposalId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.AccountingBook)
                 .WithMany()
@@ -3416,6 +3757,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.PostingEvent)
                 .WithMany()
                 .HasForeignKey(e => e.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.DepreciationReversal)
+                .WithMany()
+                .HasForeignKey(e => e.DepreciationReversalId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3452,6 +3805,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure FixedAssetCategory → Account relationships (prevent cascade cycles with multiple FKs)
         builder.Entity<FixedAssetCategory>(entity =>
         {
+            entity.Property(c => c.DefaultDiminishingBalanceRatePercent).HasColumnType("decimal(18,4)");
+            entity.Property(c => c.DefaultLifetimeProductionCapacity).HasColumnType("decimal(18,4)");
             entity.HasOne(c => c.AssetAccount)
                 .WithMany()
                 .HasForeignKey(c => c.AssetAccountId)
@@ -4013,6 +4368,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProcurementReceiptDocumentConfiguration());
         builder.ApplyConfiguration(new ProcurementReceiptDocumentSignatureConfiguration());
         builder.ApplyConfiguration(new ProcurementReceiptDocumentActionConfiguration());
+        builder.ApplyConfiguration(new ProcurementReceiptSourceEvidenceConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceMatchExceptionConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceMatchExceptionVarianceConfiguration());
         builder.ApplyConfiguration(new VendorInvoiceMatchExceptionEvidenceConfiguration());
@@ -4044,6 +4400,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new ProjectPaymentCertificateConfiguration());
         builder.ApplyConfiguration(new ProjectExtensionOfTimeConfiguration());
         builder.ApplyConfiguration(new ProjectFinalAccountConfiguration());
+        builder.ApplyConfiguration(new ProjectFinalAccountRevisionConfiguration());
         builder.ApplyConfiguration(new ProjectBuildingConfiguration());
         builder.ApplyConfiguration(new ProjectFloorConfiguration());
         builder.ApplyConfiguration(new ProjectUnitReleaseBatchConfiguration());
@@ -4507,11 +4864,19 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("ReportSchedules");
             entity.HasOne(s => s.Report).WithMany(r => r.Schedules).HasForeignKey(s => s.ReportId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(s => s.ReportTemplate).WithMany().HasForeignKey(s => s.ReportTemplateId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(s => s.RunAsUser).WithMany().HasForeignKey(s => s.RunAsUserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(s => s.PausedBy).WithMany().HasForeignKey(s => s.PausedById).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(s => s.Tenant).WithMany().HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(s => s.RowVersion).IsRowVersion();
             entity.HasIndex(s => s.ReportId);
+            entity.HasIndex(s => s.ReportTemplateId);
             entity.HasIndex(s => s.IsActive);
             entity.HasIndex(s => s.NextExecutionDate);
             entity.HasIndex(s => s.Frequency);
+            // The production worker scans by tenant/state/due date; this composite
+            // index avoids a table scan as schedules accumulate across tenants.
+            entity.HasIndex(s => new { s.IsActive, s.Status, s.NextExecutionDate });
         });
 
         // Configure ReportTemplate entity
@@ -4536,11 +4901,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("ReportExecutions");
             entity.HasOne(e => e.Report).WithMany(r => r.Executions).HasForeignKey(e => e.ReportId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportSchedule).WithMany().HasForeignKey(e => e.ReportScheduleId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportTemplate).WithMany().HasForeignKey(e => e.ReportTemplateId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ReportExport).WithMany().HasForeignKey(e => e.ReportExportId).OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.NoAction);
+            entity.Property(e => e.RowVersion).IsRowVersion();
             entity.HasIndex(e => e.ReportId);
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExecutedAt);
             entity.HasIndex(e => e.Status);
+            // This filtered key is the final idempotency gate when multiple API
+            // instances observe the same due schedule at the same time.
+            entity.HasIndex(e => new { e.TenantId, e.ReportScheduleId, e.ScheduledFor })
+                .IsUnique()
+                .HasFilter("[ReportScheduleId] IS NOT NULL AND [ScheduledFor] IS NOT NULL AND [IsDeleted] = 0");
         });
 
         // Configure UserReportFavorite entity
@@ -4566,6 +4940,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExportedAt);
             entity.HasIndex(e => e.Format);
+            entity.HasIndex(e => new { e.TenantId, e.Status, e.ExportedAt });
         });
 
         // Configure ReportRoleAssignment entity
@@ -4579,6 +4954,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(rra => rra.ReportId);
             entity.HasIndex(rra => rra.RoleId);
             entity.HasIndex(rra => rra.AssignedAt);
+        });
+
+        builder.Entity<FinanceAdHocReportDefinition>(entity =>
+        {
+            entity.ToTable("FinanceAdHocReportDefinitions");
+            entity.HasOne(item => item.Report).WithMany().HasForeignKey(item => item.ReportId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.OwnerUser).WithMany().HasForeignKey(item => item.OwnerUserId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.Property(item => item.RowVersion).IsRowVersion();
+            // One shared Report row has exactly one governed Finance builder definition.
+            entity.HasIndex(item => item.ReportId).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.OwnerUserId, item.Visibility });
+            entity.HasIndex(item => new { item.TenantId, item.DatasetCode });
         });
 
         // Configure DataSource entity
@@ -4618,6 +5009,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // Configure decimal precision globally
         ConfigureDecimalPrecision(builder);
+        ConfigureQuantitySurveyRateDecimalPrecision(builder);
 
         // The legacy global precision pass above intentionally normalizes most decimals to four
         // places, but Finance FX evidence requires the approved six-place quote and an eight-place
@@ -5580,15 +5972,24 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure WorkOrderPart entity
         builder.Entity<WorkOrderPart>(entity =>
         {
+            entity.ToTable("WorkOrderParts", table =>
+                table.HasTrigger("TR_WorkOrderParts_ReservationLineageGuard"));
             entity.HasIndex(wop => wop.WorkOrderId);
             entity.HasIndex(wop => wop.ItemCode);
             entity.HasIndex(wop => wop.Status);
             entity.HasIndex(wop => wop.InventoryItemId);
+            entity.HasIndex(wop => new { wop.TenantId, wop.AllocationId }).IsUnique()
+                .HasFilter("[AllocationId] IS NOT NULL AND [IsDeleted] = 0");
 
             entity.HasOne(wop => wop.WorkOrder)
                 .WithMany(wo => wo.Parts)
                 .HasForeignKey(wop => wop.WorkOrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(wop => wop.Allocation)
+                .WithMany()
+                .HasForeignKey(wop => wop.AllocationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Configure WorkOrderLabor entity
@@ -7013,6 +7414,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(scenario => scenario.SupersededByUserId)
                 .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(scenario => scenario.ParentScenario)
+                .WithMany()
+                .HasForeignKey(scenario => scenario.ParentScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<BudgetReturn>(entity =>
@@ -7048,6 +7453,43 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
+        });
+
+        builder.Entity<BudgetRevision>(entity =>
+        {
+            entity.Property(revision => revision.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasIndex(revision => new { revision.TenantId, revision.RevisionNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(revision => new { revision.TenantId, revision.SourceScenarioId, revision.Status });
+            entity.HasOne(revision => revision.SourceScenario)
+                .WithMany()
+                .HasForeignKey(revision => revision.SourceScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(revision => revision.ResultScenario)
+                .WithMany()
+                .HasForeignKey(revision => revision.ResultScenarioId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<BudgetRevisionLine>(entity =>
+        {
+            // One signed adjustment per budget cell avoids ambiguous duplicate
+            // changes and makes the net-zero virement rule deterministic.
+            entity.HasIndex(line => new
+                {
+                    line.TenantId,
+                    line.BudgetRevisionId,
+                    line.SegmentValueId,
+                    line.AccountId,
+                    line.FiscalPeriodId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(line => line.BudgetRevision)
+                .WithMany(revision => revision.Lines)
+                .HasForeignKey(line => line.BudgetRevisionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 
@@ -8479,13 +8921,50 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         UpdateAuditableEntities();
+        NormalizeProcurementAwardReadinessAuditEnvelopes();
+        NormalizeProcurementBidderCommunicationAuditEnvelopes();
         return await base.SaveChangesAsync(cancellationToken);
     }
 
     public override int SaveChanges()
     {
         UpdateAuditableEntities();
+        NormalizeProcurementAwardReadinessAuditEnvelopes();
+        NormalizeProcurementBidderCommunicationAuditEnvelopes();
         return base.SaveChanges();
+    }
+
+    private void NormalizeProcurementAwardReadinessAuditEnvelopes()
+    {
+        foreach (var entry in ChangeTracker
+                     .Entries<ProcurementAwardReadinessDecision>()
+                     .Where(item => item.State == EntityState.Added))
+        {
+            // SQL treats the evaluation time as the immutable creation time.
+            // Apply this after the generic audit pass so no convention or
+            // interceptor can leave the two persisted values out of sync.
+            entry.Entity.CreatedAt = entry.Entity.EvaluatedAtUtc;
+            entry.Entity.UpdatedAt = null;
+            entry.Entity.UpdatedBy = null;
+            entry.Entity.LastModifiedById = null;
+        }
+    }
+
+    private void NormalizeProcurementBidderCommunicationAuditEnvelopes()
+    {
+        foreach (var entry in ChangeTracker
+                     .Entries<ProcurementBidderCommunicationRegister>()
+                     .Where(item => item.State == EntityState.Added))
+        {
+            // The append-only register trigger binds creation to the service's
+            // immutable initialization timestamp. Apply this after the generic
+            // audit convention so the persisted envelope cannot drift by a few
+            // milliseconds during SaveChanges.
+            entry.Entity.CreatedAt = entry.Entity.InitializedAtUtc;
+            entry.Entity.UpdatedAt = null;
+            entry.Entity.UpdatedBy = null;
+            entry.Entity.LastModifiedById = null;
+        }
     }
 
     private void UpdateAuditableEntities()
@@ -8499,8 +8978,23 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             switch (entry.State)
             {
                 case EntityState.Added:
-                    entry.Entity.CreatedAt = DateTime.UtcNow;
-                    entry.Entity.UpdatedAt = DateTime.UtcNow;
+                    if (entry.Entity is ProcurementAwardReadinessDecision readinessDecision)
+                    {
+                        // The append-only SQL envelope requires the service's
+                        // single evaluation timestamp and forbids update metadata.
+                        // Preserve that exact timestamp instead of applying the
+                        // generic mutable-entity audit defaults.
+                        if (readinessDecision.CreatedAt == default)
+                            readinessDecision.CreatedAt = readinessDecision.EvaluatedAtUtc;
+                        readinessDecision.UpdatedAt = null;
+                        readinessDecision.UpdatedBy = null;
+                        readinessDecision.LastModifiedById = null;
+                    }
+                    else
+                    {
+                        entry.Entity.CreatedAt = DateTime.UtcNow;
+                        entry.Entity.UpdatedAt = DateTime.UtcNow;
+                    }
                     
                     // Set TenantId for TenantEntity objects if not already set
                     if (entry.Entity is TenantEntity tenantEntity && tenantEntity.TenantId == Guid.Empty)
@@ -8794,10 +9288,54 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // EmergencyProcurementPlan entity
         builder.Entity<EmergencyProcurementPlan>(entity =>
         {
-            entity.HasIndex(e => e.PlanCode).IsUnique();
             entity.HasIndex(e => e.EmergencyType);
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => e.CriticalityLevel);
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.ToTable("EmergencyProcurementPlans", table =>
+            {
+                table.HasTrigger("TR_EmergencyProcurementPlans_Governance");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_GovernedStatus",
+                    "[Status] IN ('Draft','Prepared','PendingAudit','AuditVouched','PendingApproval','Approved','Rejected','Triggered','Filed')");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_PreparedLineage",
+                    "([Status] = 'Draft' AND [PurchaseRequisitionId] IS NULL AND [ExceptionRuleId] IS NULL AND [WorkflowDefinitionId] IS NULL AND [PreparedById] IS NULL AND [PreparedAtUtc] IS NULL) OR " +
+                    "([Status] <> 'Draft' AND [PurchaseRequisitionId] IS NOT NULL AND [ExceptionRuleId] IS NOT NULL AND [WorkflowDefinitionId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL AND [FileUploadRecordId] IS NOT NULL AND LEN([EvidenceReference]) > 0 AND LEN([ExceptionJustification]) >= 20 AND [PreparedById] IS NOT NULL AND [PreparedAtUtc] IS NOT NULL AND [ApprovalAuthority] IN ('ManagingDirector','Board') AND LEN([IntegrityHash]) = 64)");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_AuditLineage",
+                    "([Status] IN ('Draft','Prepared','PendingAudit') AND [InternalAuditVouchedById] IS NULL AND [InternalAuditVouchedAtUtc] IS NULL) OR " +
+                    "([Status] IN ('AuditVouched','PendingApproval','Approved','Rejected','Triggered','Filed') AND [InternalAuditVouchedById] IS NOT NULL AND [InternalAuditVouchedAtUtc] IS NOT NULL AND LEN([InternalAuditVouchNote]) >= 10)");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_ApprovalLineage",
+                    "([Status] IN ('Draft','Prepared','PendingAudit','AuditVouched') AND [WorkflowInstanceId] IS NULL AND [ApprovedById] IS NULL AND [ApprovedDate] IS NULL) OR " +
+                    "([Status] IN ('PendingApproval','Rejected') AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NULL AND [ApprovedDate] IS NULL AND [ApprovalReference] IS NULL) OR " +
+                    "([Status] IN ('Approved','Triggered','Filed') AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NOT NULL AND [ApprovedDate] IS NOT NULL AND [ApprovalReference] IS NOT NULL)");
+                table.HasCheckConstraint("CK_EmergencyProcurementPlans_FilingLineage",
+                    "([Status] <> 'Filed' AND [ExceptionalSourcingTenderId] IS NULL AND [PostAwardJustification] IS NULL AND [PostAwardCentralDocumentVersionId] IS NULL AND [PostAwardFileUploadRecordId] IS NULL AND [PostAwardEvidenceReference] IS NULL AND [FiledAtUtc] IS NULL AND [FiledById] IS NULL) OR " +
+                    "([Status] = 'Filed' AND [ExceptionalSourcingTenderId] IS NOT NULL AND [PostAwardJustification] IS NOT NULL AND [PostAwardCentralDocumentVersionId] IS NOT NULL AND [PostAwardFileUploadRecordId] IS NOT NULL AND [PostAwardEvidenceReference] IS NOT NULL AND [FiledAtUtc] IS NOT NULL AND [FiledById] IS NOT NULL)");
+            });
+
+            entity.HasOne(e => e.PurchaseRequisition).WithMany()
+                .HasForeignKey(e => e.PurchaseRequisitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ExceptionRule).WithMany()
+                .HasForeignKey(e => e.ExceptionRuleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.WorkflowDefinition).WithMany()
+                .HasForeignKey(e => e.WorkflowDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.WorkflowInstance).WithMany()
+                .HasForeignKey(e => e.WorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CentralDocumentVersion).WithMany()
+                .HasForeignKey(e => e.CentralDocumentVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.PostAwardCentralDocumentVersion).WithMany()
+                .HasForeignKey(e => e.PostAwardCentralDocumentVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FileUploadRecord>().WithMany()
+                .HasForeignKey(e => e.FileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FileUploadRecord>().WithMany()
+                .HasForeignKey(e => e.PostAwardFileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Tender>().WithMany()
+                .HasForeignKey(e => e.ExceptionalSourcingTenderId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany()
+                .HasForeignKey(e => e.PreparedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany()
+                .HasForeignKey(e => e.InternalAuditVouchedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany()
+                .HasForeignKey(e => e.FiledById).OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(e => e.CriticalItems)
                 .WithOne(i => i.EmergencyProcurementPlan)
@@ -8808,6 +9346,25 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(s => s.EmergencyProcurementPlan)
                 .HasForeignKey(s => s.EmergencyProcurementPlanId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Keep the tenant-leading control indexes alongside EF's conventional
+            // single-column FK indexes, but retire the legacy tenant-only index.
+            entity.HasIndex(e => new { e.TenantId, e.PlanCode }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PurchaseRequisitionId })
+                .IsUnique().HasFilter("[PurchaseRequisitionId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.ExceptionRuleId });
+            entity.HasIndex(e => new { e.TenantId, e.WorkflowInstanceId });
+            entity.HasIndex(e => new { e.TenantId, e.ExceptionalSourcingTenderId });
+
+            var legacyTenantIndex = entity.Metadata.GetIndexes()
+                .SingleOrDefault(index =>
+                    index.Properties.Count == 1 &&
+                    index.Properties[0].Name == nameof(EmergencyProcurementPlan.TenantId));
+
+            if (legacyTenantIndex != null)
+            {
+                entity.Metadata.RemoveIndex(legacyTenantIndex);
+            }
         });
 
         // EmergencyProcurementItem entity
@@ -9325,6 +9882,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 table.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
                 table.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
+                table.HasCheckConstraint(
+                    "CK_PurchaseOrders_ProcurementCategory",
+                    "[ProcurementCategory] IS NULL OR [ProcurementCategory] BETWEEN 0 AND 4");
+                table.HasCheckConstraint(
+                    "CK_PurchaseOrders_GovernedCategoryRequired",
+                    "[ProcurementSourceType] IS NULL OR [ProcurementSourceType] = 5 OR [ProcurementCategory] IS NOT NULL");
                 table.HasCheckConstraint(
                     "CK_PurchaseOrders_ApprovedSourceLineage",
                     "[ProcurementSourceType] BETWEEN 0 AND 5 AND [ProcurementSourceId] IS NOT NULL AND LEN([ProcurementSourceReference]) BETWEEN 1 AND 100 AND ISJSON([SourceSnapshotJson]) = 1 AND LEN([SourceIntegrityHash]) = 64 AND [SourceValidatedAtUtc] IS NOT NULL AND ([ProcurementSourceType] = 5 OR ([SourceRequisitionId] IS NOT NULL AND [SourcingReleaseId] IS NOT NULL AND [SourcingCaseId] IS NOT NULL AND [AwardReadinessDecisionId] IS NOT NULL))");
@@ -10228,6 +10791,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // InventoryBalance entity - Performance cache (denormalized view)
         builder.Entity<InventoryBalance>(entity =>
         {
+            entity.ToTable("InventoryBalances", table =>
+                table.HasTrigger("TR_InventoryBalances_ExactBinNegativeStockGuard"));
+
             // Unique composite key on Item + Warehouse + Location per tenant
             entity.HasIndex(ib => new { ib.TenantId, ib.InventoryItemId, ib.WarehouseId, ib.LocationId })
                 .IsUnique()

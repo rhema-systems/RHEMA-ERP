@@ -1,11 +1,11 @@
 using System.Text.Json;
 using ErpSystem.Core.Entities;
-using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared.Interfaces;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Security.Claims;
 
 namespace ErpSystem.Data.Interceptors;
 
@@ -14,13 +14,17 @@ namespace ErpSystem.Data.Interceptors;
 /// </summary>
 public class AuditInterceptor : SaveChangesInterceptor
 {
-    private readonly IServiceProvider _serviceProvider;
+    private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<AuditInterceptor> _logger;
     private readonly AuditConfiguration _auditConfiguration;
 
-    public AuditInterceptor(IServiceProvider serviceProvider, ILogger<AuditInterceptor> logger, AuditConfiguration auditConfiguration)
+    public AuditInterceptor(
+        IHttpContextAccessor httpContextAccessor,
+        ILogger<AuditInterceptor> logger,
+        AuditConfiguration auditConfiguration)
     {
-        _serviceProvider = serviceProvider;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
         _auditConfiguration = auditConfiguration;
     }
@@ -94,12 +98,18 @@ public class AuditInterceptor : SaveChangesInterceptor
     private List<AuditLog> GetAuditEntries(ApplicationDbContext context)
     {
         var auditEntries = new List<AuditLog>();
+        var userContext = GetUserContext();
+        if (!userContext.HasValue)
+        {
+            _logger.LogDebug("Skipping audit entry creation - no authenticated request context is available");
+            return auditEntries;
+        }
 
         foreach (var entry in context.ChangeTracker.Entries())
         {
             if (ShouldAuditEntity(entry.Entity))
             {
-                var auditEntry = CreateAuditEntry(entry);
+                var auditEntry = CreateAuditEntry(entry, userContext.Value);
                 if (auditEntry != null)
                 {
                     auditEntries.Add(auditEntry);
@@ -113,12 +123,18 @@ public class AuditInterceptor : SaveChangesInterceptor
     private async Task<List<AuditLog>> GetAuditEntriesAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
     {
         var auditEntries = new List<AuditLog>();
+        var userContext = GetUserContext();
+        if (!userContext.HasValue)
+        {
+            _logger.LogDebug("Skipping audit entry creation - no authenticated request context is available");
+            return auditEntries;
+        }
 
         foreach (var entry in context.ChangeTracker.Entries())
         {
             if (ShouldAuditEntity(entry.Entity))
             {
-                var auditEntry = await CreateAuditEntryAsync(entry, cancellationToken);
+                var auditEntry = await CreateAuditEntryAsync(entry, userContext.Value, cancellationToken);
                 if (auditEntry != null)
                 {
                     auditEntries.Add(auditEntry);
@@ -154,17 +170,11 @@ public class AuditInterceptor : SaveChangesInterceptor
         return true;
     }
 
-    private AuditLog? CreateAuditEntry(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
+    private AuditLog? CreateAuditEntry(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        (Guid userId, string username, Guid tenantId, string ipAddress, string userAgent) userContext)
     {
-        var userContext = GetUserContext();
-
-        if (!userContext.HasValue)
-        {
-            _logger.LogDebug("Skipping audit entry creation - no user context available");
-            return null;
-        }
-
-        var (userId, username, tenantId, ipAddress, userAgent) = userContext.Value;
+        var (userId, username, tenantId, ipAddress, userAgent) = userContext;
 
         var entityName = entry.Entity.GetType().Name;
         var action = GetAuditAction(entry.State);
@@ -203,11 +213,14 @@ public class AuditInterceptor : SaveChangesInterceptor
         return auditEntry;
     }
 
-    private Task<AuditLog?> CreateAuditEntryAsync(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, CancellationToken cancellationToken = default)
+    private Task<AuditLog?> CreateAuditEntryAsync(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        (Guid userId, string username, Guid tenantId, string ipAddress, string userAgent) userContext,
+        CancellationToken cancellationToken = default)
     {
         // For now, the async version is the same as sync since we don't have async user context retrieval
         // This can be extended if needed for async user context operations
-        var auditEntry = CreateAuditEntry(entry);
+        var auditEntry = CreateAuditEntry(entry, userContext);
         return Task.FromResult(auditEntry);
     }
 
@@ -215,27 +228,34 @@ public class AuditInterceptor : SaveChangesInterceptor
     {
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var currentUserService = scope.ServiceProvider.GetService<ICurrentUserService>();
-
-            if (currentUserService == null)
-            {
+            // Audit logging executes inside DbContext.SaveChanges. Resolving ICurrentUserService here
+            // creates UserManager/ApplicationDbContext again and recursively re-enters this interceptor.
+            // Claims are already the authoritative request context, so read them without opening a DI
+            // scope or resolving any service that can depend on the audited DbContext.
+            var httpContext = _httpContextAccessor.HttpContext;
+            var principal = httpContext?.User;
+            if (principal?.Identity?.IsAuthenticated != true)
                 return null;
-            }
 
-            var userId = Guid.TryParse(currentUserService.UserId, out var parsedUserId) ? parsedUserId : (Guid?)null;
-            var username = currentUserService.UserName;
-            var tenantId = currentUserService.TenantId;
-            var ipAddress = currentUserService.IpAddress;
-            var userAgent = currentUserService.UserAgent;
+            var userId = Guid.TryParse(
+                principal.FindFirstValue(ClaimTypes.NameIdentifier),
+                out var parsedUserId)
+                ? parsedUserId
+                : (Guid?)null;
+            var username = principal.FindFirstValue(ClaimTypes.Name);
+            var tenantId = Guid.TryParse(principal.FindFirstValue("tenant_id"), out var parsedTenantId)
+                ? parsedTenantId
+                : DefaultTenantId;
+            var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
+            var userAgent = httpContext?.Request.Headers.UserAgent.FirstOrDefault();
 
             // All required fields must be available
-            if (!userId.HasValue || string.IsNullOrEmpty(username) || !tenantId.HasValue)
+            if (!userId.HasValue || string.IsNullOrEmpty(username))
             {
                 return null;
             }
 
-            return (userId.Value, username, tenantId.Value, ipAddress ?? "Unknown", userAgent ?? "Unknown");
+            return (userId.Value, username, tenantId, ipAddress ?? "Unknown", userAgent ?? "Unknown");
         }
         catch (Exception ex)
         {

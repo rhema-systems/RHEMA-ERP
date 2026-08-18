@@ -37,7 +37,15 @@ export interface ProcurementTenderSubmissionReceipt {
   receivedAtUtc: string;
   disposition: ProcurementTenderSubmissionDisposition;
   openedAtUtc?: string;
+  bidAmount: number;
+  currency: string;
   integrityHash: string;
+}
+
+export interface ProcurementTenderTechnicalResult {
+  bidId: string;
+  score: number;
+  qualified: boolean;
 }
 
 export interface ProcurementTenderMilestone {
@@ -68,6 +76,9 @@ export interface ProcurementTenderControl {
   openedAtUtc?: string;
   technicalEvaluatedAtUtc?: string;
   financialEvaluatedAtUtc?: string;
+  minimumTechnicalScore: number;
+  technicalWeight: number;
+  financialWeight: number;
   recommendedBidId?: string;
   workflowInstanceId?: string;
   authorityApprovalReference?: string;
@@ -80,6 +91,7 @@ export interface ProcurementTenderControl {
   rowVersion: string;
   documentIssues: ProcurementTenderDocumentIssue[];
   submissionReceipts: ProcurementTenderSubmissionReceipt[];
+  technicalResults: ProcurementTenderTechnicalResult[];
   milestones: ProcurementTenderMilestone[];
 }
 

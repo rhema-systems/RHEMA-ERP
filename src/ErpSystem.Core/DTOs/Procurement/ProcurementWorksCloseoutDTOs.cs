@@ -20,6 +20,8 @@ public sealed class SubmitProcurementWorksCloseoutActionRequest
     public Guid? ProjectFinalAccountId { get; set; }
     public Guid? ProjectPaymentCertificateId { get; set; }
     public Guid? PerformanceBondRequestId { get; set; }
+    public ProcurementRetentionReleaseStage? RetentionReleaseStage { get; set; }
+    public bool UsesRetentionBond { get; set; }
     public DateTime? EffectiveAtUtc { get; set; }
     [Range(typeof(decimal), "0", "9999999999999999")] public decimal? Amount { get; set; }
     [StringLength(3), RegularExpression("^[A-Za-z]{3}$")] public string? Currency { get; set; }
@@ -81,6 +83,16 @@ public sealed class ProcurementWorksCloseoutActionDto
     public Guid? ProjectFinalAccountId { get; init; }
     public Guid? ProjectPaymentCertificateId { get; init; }
     public Guid? PerformanceBondRequestId { get; init; }
+    public ProcurementRetentionReleaseStage? RetentionReleaseStage { get; init; }
+    public Guid? QuantitySurveyConfigurationProfileId { get; init; }
+    public int? QuantitySurveyConfigurationProfileVersion { get; init; }
+    public Guid? QuantitySurveyRetentionDecisionId { get; init; }
+    public string? QuantitySurveyRetentionPolicyHash { get; init; }
+    public decimal? RetentionHeldSnapshot { get; init; }
+    public decimal? RetentionReleasedBefore { get; init; }
+    public decimal? RetentionStageLimitAmount { get; init; }
+    public decimal? RetentionReleasedAfter { get; init; }
+    public bool UsesRetentionBond { get; init; }
     public DateTime? EffectiveAtUtc { get; init; }
     public DateTime? DefectsLiabilityEndsAtUtc { get; init; }
     public decimal? Amount { get; init; }
@@ -123,6 +135,7 @@ public sealed class ProcurementWorksCloseoutProjectSummaryDto
 public sealed class ProcurementWorksHandoverSourceDto
 {
     public Guid Id { get; init; }
+    public Guid? ProjectUnitId { get; init; }
     public string HandoverType { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
@@ -179,8 +192,42 @@ public sealed class ProcurementWorksCloseoutOverviewDto
     public IReadOnlyList<ProcurementWorksCertificateSourceDto> PaymentCertificates { get; init; } =
         Array.Empty<ProcurementWorksCertificateSourceDto>();
     public ProcurementWorksSecuritySourceDto? PerformanceSecurity { get; init; }
+    public ProcurementRetentionPolicyDto? RetentionPolicy { get; init; }
+    public IReadOnlyList<ProcurementRetentionLedgerEntryDto> RetentionLedger { get; init; } =
+        Array.Empty<ProcurementRetentionLedgerEntryDto>();
     public IReadOnlyList<ProcurementWorksCloseoutCheckDto> Checks { get; init; } =
         Array.Empty<ProcurementWorksCloseoutCheckDto>();
     public IReadOnlyList<ProcurementWorksCloseoutActionDto> History { get; init; } =
         Array.Empty<ProcurementWorksCloseoutActionDto>();
+}
+
+public sealed class ProcurementRetentionPolicyDto
+{
+    public Guid ProfileId { get; init; }
+    public int ProfileVersion { get; init; }
+    public Guid DecisionId { get; init; }
+    public decimal MaximumRetentionPercent { get; init; }
+    public decimal PracticalCompletionReleasePercent { get; init; }
+    public decimal SectionalTakeoverReleasePercent { get; init; }
+    public decimal DefectsReleasePercent { get; init; }
+    public int DefectsLiabilityDays { get; init; }
+    public Guid ApprovalWorkflowDefinitionId { get; init; }
+    public bool AllowRetentionBond { get; init; }
+    public string PolicyHash { get; init; } = string.Empty;
+}
+
+public sealed class ProcurementRetentionLedgerEntryDto
+{
+    public string SourceType { get; init; } = string.Empty;
+    public Guid SourceId { get; init; }
+    public string SourceReference { get; init; } = string.Empty;
+    public DateTime EffectiveAtUtc { get; init; }
+    public ProcurementRetentionReleaseStage? ReleaseStage { get; init; }
+    public decimal HeldAmount { get; init; }
+    public decimal ReleasedAmount { get; init; }
+    public decimal RunningHeldAmount { get; init; }
+    public decimal RunningReleasedAmount { get; init; }
+    public decimal OutstandingAmount { get; init; }
+    public string Currency { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
 }

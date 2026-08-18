@@ -1,7 +1,9 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Workflow;
 
 namespace ErpSystem.Core.Entities.Procurement;
 
@@ -895,9 +897,70 @@ public class EmergencyProcurementPlan : TenantEntity
     [MaxLength(2000)]
     public string? Notes { get; set; }
 
+    // Governed emergency-purchase exception lifecycle. The plan remains the
+    // aggregate root; requisition, policy, workflow and DMS remain the owners
+    // of their respective records.
+    public Guid? PurchaseRequisitionId { get; set; }
+    public Guid? ExceptionRuleId { get; set; }
+    public Guid? WorkflowDefinitionId { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
+    public Guid? CentralDocumentVersionId { get; set; }
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? ExceptionalSourcingTenderId { get; set; }
+
+    [MaxLength(2000)]
+    public string? ExceptionJustification { get; set; }
+
+    [MaxLength(500)]
+    public string? EvidenceReference { get; set; }
+
+    public Guid? PreparedById { get; set; }
+    public DateTime? PreparedAtUtc { get; set; }
+    public DateTime? SubmittedForAuditAtUtc { get; set; }
+    public Guid? InternalAuditVouchedById { get; set; }
+    public DateTime? InternalAuditVouchedAtUtc { get; set; }
+
+    [MaxLength(1000)]
+    public string? InternalAuditVouchNote { get; set; }
+
+    public DateTime? SubmittedForApprovalAtUtc { get; set; }
+
+    [MaxLength(30)]
+    public string? ApprovalAuthority { get; set; }
+
+    [MaxLength(200)]
+    public string? ApprovalReference { get; set; }
+
+    [MaxLength(2000)]
+    public string? PostAwardJustification { get; set; }
+
+    public Guid? PostAwardCentralDocumentVersionId { get; set; }
+    public Guid? PostAwardFileUploadRecordId { get; set; }
+
+    [MaxLength(500)]
+    public string? PostAwardEvidenceReference { get; set; }
+
+    public Guid? FiledById { get; set; }
+    public DateTime? FiledAtUtc { get; set; }
+
+    [Column(TypeName = "nvarchar(max)")]
+    public string LifecycleSnapshotJson { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string IntegrityHash { get; set; } = string.Empty;
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     // Navigation Properties
     public virtual Department? Department { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
+    public virtual PurchaseRequisition? PurchaseRequisition { get; set; }
+    public virtual ProcurementPolicyExceptionRule? ExceptionRule { get; set; }
+    public virtual WorkflowDefinition? WorkflowDefinition { get; set; }
+    public virtual WorkflowInstance? WorkflowInstance { get; set; }
+    public virtual CentralDocumentVersion? CentralDocumentVersion { get; set; }
+    public virtual CentralDocumentVersion? PostAwardCentralDocumentVersion { get; set; }
     public virtual ICollection<EmergencyProcurementItem> CriticalItems { get; set; } = new List<EmergencyProcurementItem>();
     public virtual ICollection<EmergencySupplier> EmergencySuppliers { get; set; } = new List<EmergencySupplier>();
 }

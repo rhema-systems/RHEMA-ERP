@@ -25,7 +25,7 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
             .Where(method => method.DeclaringType == type)
             .Select(method => method.Name)
             .Should().Contain([
-                "Summary", "Search", "Get", "GetForRegistration",
+                "Summary", "IssueOptions", "Search", "Get", "GetForRegistration",
                 "PaymentMethods", "Issue", "Reissue", "RecordPayment",
                 "Reconcile", "RequestExemption", "DecideExemption"
             ]);

@@ -4,6 +4,13 @@ This guide is for backend, frontend, and integration developers who need to call
 
 This PR is an integration foundation, not production go-live approval. Production migration and accountant sign-off remain outside this PR.
 
+The maintained integration artifacts are:
+
+- [Finance Integration Contract Catalogue](Finance/finance-integration-contract-catalogue.md) — stable contract IDs, owners, versions and delivery status.
+- [Finance Integration Adapter Checklist](Finance/finance-integration-adapter-checklist.md) — joint producer/Finance design and review checklist.
+- [Finance Integration Consumer-Test Template](Finance/finance-integration-consumer-test-template.md) — reusable request-capture assertions and CI expectations.
+- [FIN-INT-006 Fixed Asset Disposal Reference Contract](Finance/fixed-asset-disposal-ar-tax-cash-contract.md) — first complete orchestration example.
+
 ## Quick Integration Overview
 
 Use this section when briefing developers who need to connect invoicing, procurement, sales, maintenance, projects, or any other operational module into Finance.
@@ -25,8 +32,10 @@ Good codebase examples:
 Every posting-capable integration should build a `FinancePostingRequestDto` with:
 
 - `SourceModule`
+- `OriginModuleCode`
 - `SourceDocumentType`
 - `SourceDocumentId`
+- `SourceDocumentTenantId`
 - `SourceDocumentReference`
 - `PostingAction`
 - `PostingDate`
@@ -113,6 +122,7 @@ Before merging a feature that touches Finance:
 - Confirm returned `JournalEntryId` and posting references are saved as repairable back-references.
 - Confirm AP/AR transactions update or feed the settlement/reporting read models expected by aging and statements.
 - Add regression tests proving the integration uses `IFinancePostingEngine`.
+- Use `ShouldSatisfyPostingContract(...)` from the shared consumer-test assertions.
 - Add negative tests for cross-tenant account/source references and duplicate posting.
 
 ### One-Sentence Rule
@@ -123,8 +133,9 @@ Create the operational document in its owning module, then post it through the F
 
 - Ready for dev/UAT integration.
 - Not approved as production migration evidence.
+- Contract availability is tracked by `FIN-INT-###` in the Finance Integration Contract Catalogue; a planned entry is not a callable promise.
 - `FIN-LIM-0017` remains open until representative tenant dry-run and accountant-reviewed evidence exist.
-- `FIN-LIM-0048` remains globally open unless real cutover data proves source-level AP/AR/fixed-asset openings are not required or those openings are loaded through proper source-document/import paths.
+- `FIN-LIM-0048` is implementation-resolved following merged PR #66; representative advance/WHT/fixed-asset cutover rehearsal and accountant sign-off remain release gates.
 
 ## Core Rule
 

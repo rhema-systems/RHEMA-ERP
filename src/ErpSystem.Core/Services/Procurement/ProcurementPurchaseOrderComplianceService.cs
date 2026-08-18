@@ -1,6 +1,5 @@
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
-using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -158,8 +157,8 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 exception.Message));
         }
 
-        var categoryIds = await ResolveCategoryIdsAsync(
-            purchaseOrder.Id, cancellationToken);
+        var categoryIds = await ResolveSupplierCategoryIdsAsync(
+            purchaseOrder, cancellationToken);
         try
         {
             var supplier = await _supplierValidation.EvaluateEligibilityAsync(
@@ -662,32 +661,45 @@ public sealed class ProcurementPurchaseOrderComplianceService :
         }
     }
 
-    private async Task<List<Guid>> ResolveCategoryIdsAsync(
-        Guid purchaseOrderId,
+    private async Task<List<Guid>> ResolveSupplierCategoryIdsAsync(
+        PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken)
     {
-        var inventoryItemIds = await _unitOfWork.Repository<PurchaseOrderItem>()
-            .GetQueryable(item =>
-                item.TenantId == _currentUser.TenantId &&
-                item.PurchaseOrderId == purchaseOrderId &&
-                item.InventoryItemId.HasValue &&
-                !item.IsDeleted)
-            .AsNoTracking()
-            .Select(item => item.InventoryItemId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-        if (inventoryItemIds.Count == 0)
+        if (!purchaseOrder.ProcurementCategory.HasValue)
             return [];
-        return await _unitOfWork.Repository<InventoryItem>()
+
+        var categoryCode = SupplierCategoryCode(
+            purchaseOrder.ProcurementCategory.Value);
+        var categoryIds = await _unitOfWork.Repository<PartnerCategory>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
-                inventoryItemIds.Contains(item.Id) &&
+                item.IsActive &&
+                item.CategoryCode == categoryCode &&
                 !item.IsDeleted)
             .AsNoTracking()
-            .Select(item => item.CategoryId)
+            .Select(item => item.Id)
             .Distinct()
             .ToListAsync(cancellationToken);
+        if (categoryIds.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"No active supplier category is configured for procurement class {purchaseOrder.ProcurementCategory.Value}. Configure partner category {categoryCode} before submitting the purchase order.");
+        }
+
+        return categoryIds;
     }
+
+    internal static string SupplierCategoryCode(
+        ProcurementCategoryClass category) => category switch
+        {
+            ProcurementCategoryClass.Goods => "GOODS",
+            ProcurementCategoryClass.Works => "WORKS",
+            ProcurementCategoryClass.TechnicalServices => "TECHNICAL_SERVICES",
+            ProcurementCategoryClass.ConsultancyServices => "CONSULTANCY_SERVICES",
+            ProcurementCategoryClass.GeneralServices => "GENERAL_SERVICES",
+            _ => throw new ArgumentOutOfRangeException(nameof(category), category,
+                "The procurement category is not supported.")
+        };
 
     private async Task EnsureCapabilityAsync(
         string permission,
@@ -767,21 +779,35 @@ public sealed class ProcurementPurchaseOrderComplianceService :
             CorrelationId = correlationId,
             CausationId = correlationId,
             OccurredAtUtc = readiness.EvaluatedAtUtc,
-            Evidence = readiness.Checks
-                .Where(item => item.ReferenceId.HasValue ||
-                               !string.IsNullOrWhiteSpace(item.Reference))
-                .Select(item => new ProcurementControlEventEvidenceReference
-                {
-                    ReferenceKind =
-                        ProcurementControlEvidenceReferenceKind.ExternalReference,
-                    ReferenceId = item.ReferenceId,
-                    Reference = item.Reference ??
-                                item.ReferenceId?.ToString(),
-                    Label = item.Label,
-                    RequirementKey = item.Key
-                })
-                .ToList()
+            Evidence = BuildEvidence(readiness.Checks)
         }, cancellationToken);
+    }
+
+    internal static List<ProcurementControlEventEvidenceReference> BuildEvidence(
+        IEnumerable<ProcurementPurchaseOrderComplianceCheckDto> checks)
+    {
+        return checks
+            .Where(item => item.ReferenceId.HasValue ||
+                           !string.IsNullOrWhiteSpace(item.Reference))
+            .Select(item => new ProcurementControlEventEvidenceReference
+            {
+                ReferenceKind =
+                    ProcurementControlEvidenceReferenceKind.ExternalReference,
+                ReferenceId = item.ReferenceId,
+                Reference = string.IsNullOrWhiteSpace(item.Reference)
+                    ? item.ReferenceId?.ToString("D")
+                    : item.Reference.Trim(),
+                Label = item.Label,
+                RequirementKey = item.Key
+            })
+            .GroupBy(
+                item => new
+                {
+                    item.ReferenceKind,
+                    Reference = item.Reference!.ToUpperInvariant()
+                })
+            .Select(group => group.First())
+            .ToList();
     }
 
     private async Task PublishAsync(

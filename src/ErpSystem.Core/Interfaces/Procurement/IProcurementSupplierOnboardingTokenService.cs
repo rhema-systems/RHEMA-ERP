@@ -5,6 +5,7 @@ namespace ErpSystem.Core.Interfaces.Procurement;
 public interface IProcurementSupplierOnboardingTokenService
 {
     Task<ProcurementSupplierOnboardingTokenSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProcurementSupplierOnboardingRegistrationOptionDto>> GetIssueOptionsAsync(string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierOnboardingTokenPageDto> SearchAsync(ProcurementSupplierOnboardingTokenSearchRequest request, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierOnboardingTokenDto> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<ProcurementSupplierOnboardingTokenDto?> GetForRegistrationAsync(Guid registrationId, CancellationToken cancellationToken = default);

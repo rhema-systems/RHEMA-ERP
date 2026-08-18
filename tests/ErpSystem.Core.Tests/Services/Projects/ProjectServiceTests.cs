@@ -12,6 +12,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.QuantitySurvey;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -23,6 +24,7 @@ using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Projects;
+using ErpSystem.Core.Services.QuantitySurvey;
 using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -4292,6 +4294,480 @@ public class ProjectServiceTests
         result.AtRiskProjects.Should().ContainSingle(x => x.Id == accessibleProject.Id);
     }
 
+    [Fact]
+    public async Task AddProjectBoqItemAsync_ShouldSnapshotEffectiveTenantClassifications()
+    {
+        var tenantId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-001",
+            Title = "Controlled BoQ"
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Code = "WP-001",
+            Name = "Substructure",
+            Currency = "GHS"
+        };
+        var section = CreateCatalogEntry(tenantId, ProjectCatalogDefaults.QuantitySurveySections, "A", "Preliminaries");
+        var trade = CreateCatalogEntry(tenantId, ProjectCatalogDefaults.QuantitySurveyTrades, "CONC", "Concrete work");
+        var costCode = CreateCatalogEntry(tenantId, ProjectCatalogDefaults.QuantitySurveyCostCodes, "CC-100", "Structural works");
+        var measurementCode = CreateCatalogEntry(tenantId, ProjectCatalogDefaults.QuantitySurveyMeasurementCodes, "E20", "In-situ concrete");
+        measurementCode.StandardCode = nameof(QuantitySurveyBoqStandard.Cesmm4);
+        measurementCode.MeasurementRule = "Measure net volume in cubic metres.";
+        measurementCode.DefaultUnitOfMeasure = "m3";
+
+        var fixture = new ProjectServiceFixture(tenantId, Guid.NewGuid());
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.ProjectCatalogEntries.AddRange([section, trade, costCode, measurementCode]);
+
+        var result = await fixture.CreateService().AddProjectBoqItemAsync(project.Id, new CreateProjectBoqItemDto
+        {
+            ProjectPackageId = package.Id,
+            SectionCatalogEntryId = section.Id,
+            TradeCatalogEntryId = trade.Id,
+            CostCodeCatalogEntryId = costCode.Id,
+            MeasurementCodeCatalogEntryId = measurementCode.Id,
+            Description = "25 MPa concrete",
+            Quantity = 12.5m,
+            UnitRate = 900m
+        });
+
+        result.SectionCode.Should().Be("A");
+        result.TradeCode.Should().Be("CONC");
+        result.CostCode.Should().Be("CC-100");
+        result.MeasurementStandard.Should().Be(nameof(QuantitySurveyBoqStandard.Cesmm4));
+        result.MeasurementCode.Should().Be("E20");
+        result.MeasurementRule.Should().Be("Measure net volume in cubic metres.");
+        result.UnitOfMeasure.Should().Be("m3");
+        result.ItemCode.Should().Be("E20");
+        result.BudgetAmount.Should().Be(11250m);
+    }
+
+    [Fact]
+    public async Task AddProjectBoqItemAsync_ShouldRejectClassificationOwnedByAnotherTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-002",
+            Title = "Tenant boundary"
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Works",
+            Currency = "GHS"
+        };
+        var foreignTrade = CreateCatalogEntry(Guid.NewGuid(), ProjectCatalogDefaults.QuantitySurveyTrades, "ELEC", "Electrical");
+        var fixture = new ProjectServiceFixture(tenantId, Guid.NewGuid());
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.ProjectCatalogEntries.Add(foreignTrade);
+
+        var action = () => fixture.CreateService().AddProjectBoqItemAsync(project.Id, new CreateProjectBoqItemDto
+        {
+            ProjectPackageId = package.Id,
+            TradeCatalogEntryId = foreignTrade.Id,
+            Description = "Cable installation",
+            Quantity = 1m
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*could not be found for this tenant*");
+        fixture.ProjectBoqItems.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AddProjectBoqItemAsync_ShouldEnforceEffectiveBoqStandardsDecision()
+    {
+        var tenantId = Guid.NewGuid();
+        var projectTypeId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectTypeId = projectTypeId,
+            ProjectCode = "PRJ-QS-003",
+            Title = "Policy enforcement"
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Works",
+            Currency = "GHS"
+        };
+        var profile = new QuantitySurveyConfigurationProfile
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProfileCode = "QS-POLICY",
+            Name = "QS Policy",
+            LifecycleStatus = QuantitySurveyConfigurationProfileStatus.Published,
+            EffectiveFrom = DateTime.UtcNow.AddDays(-1),
+            IsDefault = true
+        };
+        var decision = new QuantitySurveyConfigurationDecision
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProfileId = profile.Id,
+            DecisionKey = "QS-DEC-002",
+            OwnerGroup = "Quantity Survey",
+            Status = QuantitySurveyConfigurationDecisionStatus.Approved,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Approved,
+            ValueJson = $$"""
+            {
+              "allowedStandards": ["Cesmm4"],
+              "projectTypeIds": ["{{projectTypeId}}"],
+              "requireTrade": true,
+              "requireCostCode": true
+            }
+            """,
+            DecisionDate = DateTime.UtcNow
+        };
+        var fixture = new ProjectServiceFixture(tenantId, Guid.NewGuid());
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.QuantitySurveyProfiles.Add(profile);
+        fixture.QuantitySurveyDecisions.Add(decision);
+
+        var action = () => fixture.CreateService().AddProjectBoqItemAsync(project.Id, new CreateProjectBoqItemDto
+        {
+            ProjectPackageId = package.Id,
+            Description = "Unclassified work",
+            Quantity = 1m
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires a controlled trade*");
+        fixture.ProjectBoqItems.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task BoqVersioning_ShouldPreserveLineageAndCompareQuantityChanges()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-VERSION",
+            Title = "BoQ version comparison",
+            CreatedById = userId
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Code = "WP-001",
+            Name = "Substructure",
+            Currency = "GHS"
+        };
+        var lineKey = Guid.NewGuid();
+        var line = new ProjectBoqItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            ProjectPackageId = package.Id,
+            VersionLineKey = lineKey,
+            LineNumber = "1.1",
+            ItemType = ProjectBoqItemTypes.Item,
+            Description = "Excavate foundation trenches",
+            Quantity = 10m,
+            UnitOfMeasure = "m3",
+            UnitRate = 25m,
+            Currency = "GHS"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.ProjectBoqItems.Add(line);
+        var service = fixture.CreateService();
+
+        var initialWorkspace = await service.GetProjectBoqVersionWorkspaceAsync(project.Id);
+        var original = await service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Original,
+            ExpectedWorkingSetHash = initialWorkspace.WorkingSetHash,
+            ChangeSummary = "Original measured quantities"
+        }, "qs-version-test-original");
+        var publishedOriginal = fixture.ProjectBoqVersions.Single(item => item.Id == original.Id);
+        publishedOriginal.VersionType = QuantitySurveyBoqVersionType.Approved;
+        publishedOriginal.Status = ProjectBoqVersionStatuses.Approved;
+        publishedOriginal.ApprovalStatus = ProjectBoqVersionStatuses.Approved;
+        publishedOriginal.PublishedAt = DateTime.UtcNow;
+        publishedOriginal.PublishedById = userId;
+
+        line.Quantity = 14m;
+        var revisedWorkspace = await service.GetProjectBoqVersionWorkspaceAsync(project.Id);
+        var revised = await service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Revised,
+            SourceVersionId = original.Id,
+            ExpectedWorkingSetHash = revisedWorkspace.WorkingSetHash,
+            ChangeSummary = "Revised measured foundation quantity"
+        }, "qs-version-test-revised");
+        var comparison = await service.CompareProjectBoqVersionsAsync(project.Id, original.Id, revised.Id);
+
+        fixture.ProjectBoqVersions.Should().HaveCount(2);
+        fixture.ProjectBoqVersionLines.Should().HaveCount(2);
+        fixture.ProjectBoqVersionLines.Should().OnlyContain(item => item.LineKey == lineKey);
+        revised.SourceVersionId.Should().Be(original.Id);
+        comparison.ChangedLineCount.Should().Be(1);
+        comparison.AddedLineCount.Should().Be(0);
+        comparison.RemovedLineCount.Should().Be(0);
+        comparison.Lines.Should().ContainSingle(item =>
+            item.LineKey == lineKey
+            && item.QuantityDelta == 4m
+            && item.AmountDelta == 100m
+            && item.ChangedFields.Contains("Quantity"));
+    }
+
+    [Fact]
+    public async Task SubmitBoqVersionAsync_ShouldUseConfiguredWorkflowAndCreateImmutableApprovedPublication()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var workflowDefinitionId = Guid.NewGuid();
+        var workflowInstanceId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectCode = "PRJ-QS-APPROVAL",
+            Title = "BoQ approval", CreatedById = userId
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = project.Id,
+            Code = "WP-APP", Name = "Approved works", Currency = "GHS"
+        };
+        var line = new ProjectBoqItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = project.Id,
+            ProjectPackageId = package.Id, VersionLineKey = Guid.NewGuid(),
+            LineNumber = "1", ItemType = ProjectBoqItemTypes.Item,
+            Description = "Controlled approved work", Quantity = 2m,
+            UnitOfMeasure = "item", UnitRate = 50m, Currency = "GHS"
+        };
+        var profile = new QuantitySurveyConfigurationProfile
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProfileCode = "QS-APPROVAL",
+            LifecycleStatus = QuantitySurveyConfigurationProfileStatus.Published,
+            EffectiveFrom = DateTime.UtcNow.AddDays(-1), IsDefault = true
+        };
+        var decision = new QuantitySurveyConfigurationDecision
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProfileId = profile.Id,
+            DecisionKey = "QS-DEC-003",
+            Status = QuantitySurveyConfigurationDecisionStatus.Approved,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Approved,
+            DecisionDate = DateTime.UtcNow,
+            ValueJson = $$"""
+            {
+              "effectiveFrom": "2026-08-01T00:00:00Z",
+              "effectiveTo": null,
+              "requiredVersionTypes": ["original", "approved", "revised"],
+              "boqWorkflowDefinitionId": "{{workflowDefinitionId}}",
+              "estimateWorkflowDefinitionId": "{{Guid.NewGuid()}}",
+              "approvedVersionsImmutable": true,
+              "requireWorkflowBeforeUse": true,
+              "requireLineLevelComparison": true
+            }
+            """
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.ProjectBoqItems.Add(line);
+        fixture.QuantitySurveyProfiles.Add(profile);
+        fixture.QuantitySurveyDecisions.Add(decision);
+        fixture.WorkflowIntegrationService
+            .Setup(service => service.SubmitAsync(
+                QuantitySurveyWorkflowBindingRegistry.Boq,
+                It.IsAny<Guid>(),
+                workflowDefinitionId))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult
+                {
+                    Success = true,
+                    Status = WorkflowInstanceStatus.Completed,
+                    WorkflowInstanceId = workflowInstanceId
+                },
+                WorkflowOutcome.Approved));
+        var service = fixture.CreateService();
+        var workspace = await service.GetProjectBoqVersionWorkspaceAsync(project.Id);
+        var candidate = await service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Original,
+            ExpectedWorkingSetHash = workspace.WorkingSetHash,
+            ChangeSummary = "Original BoQ for governed approval"
+        }, "qs-approval-create");
+
+        var submitted = await service.SubmitProjectBoqVersionAsync(
+            project.Id, candidate.Id, userId, "qs-approval-submit");
+
+        submitted.Status.Should().Be(ProjectBoqVersionStatuses.Approved);
+        fixture.ProjectBoqVersions.Should().HaveCount(2);
+        var publication = fixture.ProjectBoqVersions.Single(item => item.VersionType == QuantitySurveyBoqVersionType.Approved);
+        publication.SourceVersionId.Should().Be(candidate.Id);
+        publication.Status.Should().Be(ProjectBoqVersionStatuses.Approved);
+        publication.PublishedAt.Should().NotBeNull();
+        publication.PublishedById.Should().Be(userId);
+        publication.WorkflowDefinitionId.Should().Be(workflowDefinitionId);
+        publication.WorkflowInstanceId.Should().Be(workflowInstanceId);
+        fixture.ProjectBoqVersionLines.Should().HaveCount(2);
+        fixture.ProjectBoqVersionLines.Where(item => item.ProjectBoqVersionId == publication.Id)
+            .Should().ContainSingle().Which.LineKey.Should().Be(line.VersionLineKey);
+    }
+
+    [Fact]
+    public async Task CreateBoqVersionAsync_ShouldRejectStaleWorkingSetAndDirectApprovedSnapshot()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-GUARD",
+            Title = "BoQ version guards",
+            CreatedById = userId
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Name = "Works",
+            Currency = "GHS"
+        };
+        var line = new ProjectBoqItem
+        {
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            ProjectPackageId = package.Id,
+            Description = "Controlled work",
+            Quantity = 1m,
+            UnitRate = 10m,
+            Currency = "GHS"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.ProjectBoqItems.Add(line);
+        var service = fixture.CreateService();
+        var workspace = await service.GetProjectBoqVersionWorkspaceAsync(project.Id);
+
+        var approvedAttempt = () => service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Approved,
+            ExpectedWorkingSetHash = workspace.WorkingSetHash,
+            ChangeSummary = "Attempted direct approval"
+        }, "qs-version-approved-guard");
+        await approvedAttempt.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*only be created by the configured BoQ approval workflow*");
+
+        line.Quantity = 2m;
+        var staleAttempt = () => service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Original,
+            ExpectedWorkingSetHash = workspace.WorkingSetHash,
+            ChangeSummary = "Stale snapshot attempt"
+        }, "qs-version-stale-guard");
+        await staleAttempt.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*working BoQ changed*");
+        fixture.ProjectBoqVersions.Should().BeEmpty();
+    }
+
+    private static ProjectCatalogEntry CreateCatalogEntry(Guid tenantId, string catalogType, string code, string name)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CatalogType = catalogType,
+            Code = code,
+            Name = name,
+            IsActive = true,
+            EffectiveFrom = DateTime.UtcNow.AddDays(-1)
+        };
+
+    [Fact]
+    public async Task AddMemberAsync_ShouldRequireAnActiveUserInTheCurrentTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-MEMBER-001",
+            Title = "Member validation"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.Projects.Add(project);
+        var foreignUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            UserName = "foreign.user",
+            IsActive = true
+        };
+        fixture.Users.Add(foreignUser);
+
+        var action = () => fixture.CreateService().AddMemberAsync(project.Id,
+            new AddProjectMemberDto { UserId = foreignUser.Id, Role = "QuantitySurveyor" });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not an active member of the current tenant*");
+        fixture.Members.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AddMemberAsync_ShouldPersistAControlledCurrentTenantUser()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-MEMBER-002",
+            Title = "Member validation"
+        };
+        var selectedUser = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserName = "qs.user",
+            IsActive = true
+        };
+        var fixture = new ProjectServiceFixture(tenantId, actorId);
+        fixture.Projects.Add(project);
+        fixture.Users.Add(selectedUser);
+
+        var result = await fixture.CreateService().AddMemberAsync(project.Id,
+            new AddProjectMemberDto { UserId = selectedUser.Id, Role = "QuantitySurveyor" });
+
+        result.UserId.Should().Be(selectedUser.Id);
+        fixture.Members.Should().ContainSingle(item => item.ProjectId == project.Id &&
+            item.UserId == selectedUser.Id && item.TenantId == tenantId);
+    }
+
     private sealed class ProjectServiceFixture
     {
         public List<Project> Projects { get; } = new();
@@ -4360,6 +4836,13 @@ public class ProjectServiceTests
         public List<SalesAgreement> SalesAgreements { get; } = new();
         public List<SalesOrder> SalesOrders { get; } = new();
         public List<ApplicationUser> Users { get; } = new();
+        public List<ProjectPackage> ProjectPackages { get; } = new();
+        public List<ProjectBoqItem> ProjectBoqItems { get; } = new();
+        public List<ProjectCatalogEntry> ProjectCatalogEntries { get; } = new();
+        public List<QuantitySurveyConfigurationProfile> QuantitySurveyProfiles { get; } = new();
+        public List<QuantitySurveyConfigurationDecision> QuantitySurveyDecisions { get; } = new();
+        public List<ProjectBoqVersion> ProjectBoqVersions { get; } = new();
+        public List<ProjectBoqVersionLine> ProjectBoqVersionLines { get; } = new();
 
         public Mock<IProjectRepository> ProjectRepository { get; } = new();
         public Mock<IProjectManagementSettingsRepository> SettingsRepository { get; } = new();
@@ -4450,6 +4933,13 @@ public class ProjectServiceTests
         private readonly Mock<IGenericRepository<BusinessPartner>> _businessPartnerRepository;
         private readonly Mock<IGenericRepository<SalesAgreement>> _salesAgreementRepository;
         private readonly Mock<IGenericRepository<SalesOrder>> _salesOrderRepository;
+        private readonly Mock<IGenericRepository<ProjectPackage>> _projectPackageRepository;
+        private readonly Mock<IGenericRepository<ProjectBoqItem>> _projectBoqItemRepository;
+        private readonly Mock<IGenericRepository<ProjectCatalogEntry>> _projectCatalogEntryRepository;
+        private readonly Mock<IGenericRepository<QuantitySurveyConfigurationProfile>> _quantitySurveyProfileRepository;
+        private readonly Mock<IGenericRepository<QuantitySurveyConfigurationDecision>> _quantitySurveyDecisionRepository;
+        private readonly Mock<IGenericRepository<ProjectBoqVersion>> _projectBoqVersionRepository;
+        private readonly Mock<IGenericRepository<ProjectBoqVersionLine>> _projectBoqVersionLineRepository;
 
         public ProjectServiceFixture(Guid tenantId, Guid userId)
         {
@@ -4516,6 +5006,13 @@ public class ProjectServiceTests
             _businessPartnerRepository = CreateRepository(BusinessPartners);
             _salesAgreementRepository = CreateRepository(SalesAgreements);
             _salesOrderRepository = CreateRepository(SalesOrders);
+            _projectPackageRepository = CreateRepository(ProjectPackages);
+            _projectBoqItemRepository = CreateRepository(ProjectBoqItems);
+            _projectCatalogEntryRepository = CreateRepository(ProjectCatalogEntries);
+            _quantitySurveyProfileRepository = CreateRepository(QuantitySurveyProfiles);
+            _quantitySurveyDecisionRepository = CreateRepository(QuantitySurveyDecisions);
+            _projectBoqVersionRepository = CreateRepository(ProjectBoqVersions);
+            _projectBoqVersionLineRepository = CreateRepository(ProjectBoqVersionLines);
 
             ProjectRepository
                 .Setup(x => x.LookupAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int>()))
@@ -4598,6 +5095,9 @@ public class ProjectServiceTests
             WorkflowStatusAdapterRegistry
                 .Setup(x => x.GetAdapter("ProjectDeliverable"))
                 .Returns(new ProjectDeliverableWorkflowStatusAdapter());
+            WorkflowStatusAdapterRegistry
+                .Setup(x => x.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Boq))
+                .Returns(new QuantitySurveyWorkflowStatusAdapter());
             WorkflowIntegrationService
                 .Setup(x => x.SubmitAsync("ProjectDeliverable", It.IsAny<Guid>()))
                 .ReturnsAsync(new WorkflowIntegrationResult(
@@ -4687,7 +5187,25 @@ public class ProjectServiceTests
             UnitOfWork.Setup(x => x.Repository<BusinessPartner>()).Returns(_businessPartnerRepository.Object);
             UnitOfWork.Setup(x => x.Repository<SalesAgreement>()).Returns(_salesAgreementRepository.Object);
             UnitOfWork.Setup(x => x.Repository<SalesOrder>()).Returns(_salesOrderRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectPackage>()).Returns(_projectPackageRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectBoqItem>()).Returns(_projectBoqItemRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectCatalogEntry>()).Returns(_projectCatalogEntryRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<QuantitySurveyConfigurationProfile>()).Returns(_quantitySurveyProfileRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<QuantitySurveyConfigurationDecision>()).Returns(_quantitySurveyDecisionRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectBoqVersion>()).Returns(_projectBoqVersionRepository.Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectBoqVersionLine>()).Returns(_projectBoqVersionLineRepository.Object);
             UnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+            UnitOfWork.SetupGet(x => x.HasActiveTransaction).Returns(true);
+            UnitOfWork.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Data.IsolationLevel>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            UnitOfWork.Setup(x => x.AcquireTransactionLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            UnitOfWork.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            UnitOfWork.Setup(x => x.RollbackAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            UnitOfWork
+                .Setup(x => x.ExecuteInStrategyAsync(It.IsAny<Func<Task<Guid>>>(), It.IsAny<CancellationToken>()))
+                .Returns((Func<Task<Guid>> operation, CancellationToken _) => operation());
+            UnitOfWork
+                .Setup(x => x.ExecuteInStrategyAsync(It.IsAny<Func<Task<bool>>>(), It.IsAny<CancellationToken>()))
+                .Returns((Func<Task<bool>> operation, CancellationToken _) => operation());
             AppEventBus
                 .Setup(x => x.PublishAsync(It.IsAny<EntityActivityEvent>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
@@ -4697,6 +5215,7 @@ public class ProjectServiceTests
             CurrentUserProvider.SetupGet(x => x.Username).Returns("tester@example.com");
             CurrentUserProvider.SetupGet(x => x.IsAuthenticated).Returns(true);
             CurrentUserProvider.SetupGet(x => x.IsExternalUser).Returns(false);
+            CurrentUserProvider.SetupGet(x => x.Roles).Returns(() => _roles.ToArray());
             CurrentUserProvider.Setup(x => x.HasRole(It.IsAny<string>())).Returns((string role) => _roles.Contains(role));
         }
 

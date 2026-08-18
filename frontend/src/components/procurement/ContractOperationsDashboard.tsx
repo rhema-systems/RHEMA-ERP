@@ -49,6 +49,10 @@ interface ContractOperationsDashboardProps {
   contractId?: string;
 }
 
+export function formatContractKpiPercentage(value?: number | null): string {
+  return value == null ? '—' : `${value.toFixed(2)}%`;
+}
+
 const money = (amount: number, currency: string) =>
   `${currency} ${amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -312,14 +316,14 @@ function ContractOperationsDetailView({
                   </Badge>
                 </div>
                 <p className="mt-2 text-xl font-semibold">
-                  {kpi.score === undefined ? '—' : `${kpi.score.toFixed(2)}%`}
+                  {formatContractKpiPercentage(kpi.score)}
                 </p>
-                {kpi.target !== undefined && (
+                {kpi.target != null && (
                   <Progress className="mt-2" value={Math.max(0, Math.min(100, kpi.score ?? 0))} />
                 )}
                 <p className="mt-2 truncate text-xs text-muted-foreground">
                   {kpi.sourceReference}
-                  {kpi.target !== undefined ? ` · target ${kpi.target.toFixed(2)}%` : ''}
+                  {kpi.target != null ? ` · target ${formatContractKpiPercentage(kpi.target)}` : ''}
                 </p>
               </div>
             ))}

@@ -12,6 +12,27 @@ function getAuthHeaders(): HeadersInit {
   };
 }
 
+async function readError(response: Response): Promise<string> {
+  const body = await response.text();
+  if (!body) return `HTTP error! status: ${response.status}`;
+
+  try {
+    const problem = JSON.parse(body) as {
+      detail?: string;
+      title?: string;
+      message?: string;
+    };
+    return (
+      problem.detail ||
+      problem.message ||
+      problem.title ||
+      `HTTP error! status: ${response.status}`
+    );
+  } catch {
+    return body;
+  }
+}
+
 export interface RegistrationReviewDto {
   id: string;
   applicationNumber: string;
@@ -169,8 +190,7 @@ export const registrationReviewService = {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || `HTTP error! status: ${response.status}`);
+      throw new Error(await readError(response));
     }
   },
 

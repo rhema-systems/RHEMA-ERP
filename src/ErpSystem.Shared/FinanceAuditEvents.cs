@@ -30,6 +30,14 @@ public static class FinanceAuditEvents
     public const string RecurringJournalOccurrencePosted = "Finance.RecurringJournal.OccurrencePosted";
     public const string RecurringJournalGenerationFailed = "Finance.RecurringJournal.GenerationFailed";
 
+    public const string ReportScheduleCreated = "Finance.ReportSchedule.Created";
+    public const string ReportScheduleUpdated = "Finance.ReportSchedule.Updated";
+    public const string ReportSchedulePaused = "Finance.ReportSchedule.Paused";
+    public const string ReportScheduleResumed = "Finance.ReportSchedule.Resumed";
+    public const string ReportScheduleExecuted = "Finance.ReportSchedule.Executed";
+    public const string ReportScheduleExecutionFailed = "Finance.ReportSchedule.ExecutionFailed";
+    public const string ReportScheduleArtifactDownloaded = "Finance.ReportSchedule.ArtifactDownloaded";
+
     public const string PostingEventCreated = "Finance.PostingEvent.Created";
     public const string DuplicatePostingAttempt = "Finance.PostingEvent.DuplicateAttempt";
     public const string PostingFailed = "Finance.PostingEvent.Failed";
@@ -64,6 +72,12 @@ public static class FinanceAuditEvents
     public const string BudgetReturnApproved = "Finance.BudgetReturn.Approved";
     public const string BudgetReturnRejected = "Finance.BudgetReturn.Rejected";
     public const string BudgetWorksheetSaved = "Finance.BudgetWorksheet.Saved";
+    public const string BudgetRevisionCreated = "Finance.BudgetRevision.Created";
+    public const string BudgetRevisionUpdated = "Finance.BudgetRevision.Updated";
+    public const string BudgetRevisionSubmitted = "Finance.BudgetRevision.SubmittedForApproval";
+    public const string BudgetRevisionApproved = "Finance.BudgetRevision.Approved";
+    public const string BudgetRevisionRejected = "Finance.BudgetRevision.Rejected";
+    public const string BudgetRevisionApplied = "Finance.BudgetRevision.AppliedToOfficialBudget";
 
     public const string SourceDocumentApproved = "Finance.SourceDocument.Approved";
     public const string SourceDocumentPosted = "Finance.SourceDocument.Posted";
@@ -123,6 +137,12 @@ public static class FinanceAuditEvents
     public const string ApProcurementReconciliationGenerated = "Finance.AP.ProcurementReconciliation.Generated";
     public const string ApProcurementReconciliationExported = "Finance.AP.ProcurementReconciliation.Exported";
     public const string ArUnappliedSettlementsGenerated = "Finance.AR.UnappliedSettlements.Generated";
+    public const string ArCollectionTasksGenerated = "Finance.AR.Collections.TasksGenerated";
+    public const string ArCollectionTaskCreated = "Finance.AR.Collections.TaskCreated";
+    public const string ArCollectionTaskUpdated = "Finance.AR.Collections.TaskUpdated";
+    public const string ArCollectionTaskAutoResolved = "Finance.AR.Collections.TaskAutoResolved";
+    public const string ArCollectionTaskReactivated = "Finance.AR.Collections.TaskReactivated";
+    public const string ArCollectionReminderRecorded = "Finance.AR.Collections.ReminderRecorded";
     public const string CashBankTransactionCaptured = "Finance.CashBankTransaction.Captured";
     public const string CashBankTransactionSubmitted = "Finance.CashBankTransaction.Submitted";
     public const string CashBankTransactionApproved = "Finance.CashBankTransaction.Approved";
@@ -224,6 +244,9 @@ public static class FinanceAuditEvents
     public const string FinancialStatementLayoutVersionPublished = "Finance.Reporting.LayoutVersionPublished";
     public const string FinancialStatementLayoutImported = "Finance.Reporting.LayoutImported";
     public const string FinancialStatementLegacyLayoutMigrated = "Finance.Reporting.LegacyLayoutMigrated";
+    public const string AdHocReportCreated = "Finance.Reporting.AdHocReportCreated";
+    public const string AdHocReportUpdated = "Finance.Reporting.AdHocReportUpdated";
+    public const string AdHocReportDeleted = "Finance.Reporting.AdHocReportDeleted";
 
     public const string TaxRuleCreated = "Finance.Tax.RuleCreated";
     public const string TaxRuleUpdated = "Finance.Tax.RuleUpdated";
@@ -313,6 +336,11 @@ public static class FinanceAuditEvents
     public const string FixedAssetDepreciationPosted = "Finance.FixedAsset.DepreciationPosted";
     public const string FixedAssetDepreciationPostingFailed = "Finance.FixedAsset.DepreciationPostingFailed";
     public const string FixedAssetDepreciationRunReversed = "Finance.FixedAsset.DepreciationRunReversed";
+    public const string FixedAssetDepreciationReversalRequested = "Finance.FixedAsset.DepreciationReversalRequested";
+    public const string FixedAssetDepreciationReversalApproved = "Finance.FixedAsset.DepreciationReversalApproved";
+    public const string FixedAssetDepreciationReversalRejected = "Finance.FixedAsset.DepreciationReversalRejected";
+    public const string FixedAssetDepreciationReversalBlocked = "Finance.FixedAsset.DepreciationReversalBlocked";
+    public const string FixedAssetDepreciationReversalFailed = "Finance.FixedAsset.DepreciationReversalFailed";
     public const string FixedAssetDepreciationConfigurationChanged = "Finance.FixedAsset.DepreciationConfigurationChanged";
     public const string FixedAssetDepreciationBlockedClosedPeriod = "Finance.FixedAsset.DepreciationBlockedClosedPeriod";
     public const string FixedAssetDepreciationAccountMappingInvalid = "Finance.FixedAsset.DepreciationAccountMappingInvalid";
@@ -324,6 +352,15 @@ public static class FinanceAuditEvents
     public const string FixedAssetImpairmentPosted = "Finance.FixedAsset.ImpairmentPosted";
     public const string FixedAssetImpairmentPostingFailed = "Finance.FixedAsset.ImpairmentPostingFailed";
     public const string FixedAssetImpairmentReversed = "Finance.FixedAsset.ImpairmentReversed";
+    public const string FixedAssetImpairmentReversalCalculated = "Finance.FixedAsset.ImpairmentReversalCalculated";
+    public const string FixedAssetImpairmentReversalPosted = "Finance.FixedAsset.ImpairmentReversalPosted";
+    public const string FixedAssetImpairmentReversalPostingFailed = "Finance.FixedAsset.ImpairmentReversalPostingFailed";
+    public const string FixedAssetValuationCorrectionRequested = "Finance.FixedAsset.ValuationCorrectionRequested";
+    public const string FixedAssetValuationCorrectionApproved = "Finance.FixedAsset.ValuationCorrectionApproved";
+    public const string FixedAssetValuationCorrectionRejected = "Finance.FixedAsset.ValuationCorrectionRejected";
+    public const string FixedAssetValuationCorrected = "Finance.FixedAsset.ValuationCorrected";
+    public const string FixedAssetValuationCorrectionBlocked = "Finance.FixedAsset.ValuationCorrectionBlocked";
+    public const string FixedAssetValuationCorrectionFailed = "Finance.FixedAsset.ValuationCorrectionFailed";
     public const string FixedAssetValuationConfigurationUsed = "Finance.FixedAsset.ValuationConfigurationUsed";
     public const string FixedAssetValuationAccountMappingChanged = "Finance.FixedAsset.ValuationAccountMappingChanged";
     public const string FixedAssetValuationBlockedClosedPeriod = "Finance.FixedAsset.ValuationBlockedClosedPeriod";
@@ -347,10 +384,15 @@ public static class FinanceAuditEvents
     public const string FixedAssetDisposalPostingFailed = "Finance.FixedAsset.DisposalPostingFailed";
     public const string FixedAssetWrittenOff = "Finance.FixedAsset.WrittenOff";
     public const string FixedAssetDisposalSaleProceedsRecorded = "Finance.FixedAsset.DisposalSaleProceedsRecorded";
+    public const string FixedAssetDisposalRevaluationSurplusTransferred = "Finance.FixedAsset.DisposalRevaluationSurplusTransferred";
     public const string FixedAssetDisposalBlockedClosedPeriod = "Finance.FixedAsset.DisposalBlockedClosedPeriod";
     public const string FixedAssetDisposalBlockedMissingDepreciation = "Finance.FixedAsset.DisposalBlockedMissingDepreciation";
     public const string FixedAssetDisposalBlockedInvalidTenantAccountProceeds = "Finance.FixedAsset.DisposalBlockedInvalidTenantAccountProceeds";
     public const string FixedAssetDisposalConfigurationUsed = "Finance.FixedAsset.DisposalConfigurationUsed";
+    public const string FixedAssetDisposalFinalDepreciationCalculated = "Finance.FixedAsset.DisposalFinalDepreciationCalculated";
+    public const string FixedAssetDisposalFinalDepreciationPosted = "Finance.FixedAsset.DisposalFinalDepreciationPosted";
+    public const string FixedAssetPartialDisposalAllocationCalculated = "Finance.FixedAsset.PartialDisposalAllocationCalculated";
+    public const string FixedAssetPartialDisposalAllocationPosted = "Finance.FixedAsset.PartialDisposalAllocationPosted";
     public const string FixedAssetDisposalPostedEditRejected = "Finance.FixedAsset.DisposalPostedEditRejected";
     public const string FixedAssetRegisterReportGenerated = "Finance.FixedAsset.Report.RegisterGenerated";
     public const string FixedAssetRollForwardReportGenerated = "Finance.FixedAsset.Report.RollForwardGenerated";

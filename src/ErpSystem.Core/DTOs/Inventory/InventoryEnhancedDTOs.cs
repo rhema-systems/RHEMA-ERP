@@ -1516,6 +1516,10 @@ public class IssueRequisitionDto
     public Guid? ReceiverUserId { get; set; }
 
     [Required]
+    [MaxLength(50)]
+    public string MovementReasonCode { get; set; } = string.Empty;
+
+    [Required]
     public List<IssueRequisitionItemDto> Items { get; set; } = new();
 
     [MaxLength(2000)]
@@ -1592,6 +1596,9 @@ public sealed class InventoryIssueVoucherDto
     public DateTime? AcknowledgedAtUtc { get; set; }
     public string? Notes { get; set; }
     public string? ReceiverComment { get; set; }
+    public string MovementReasonCode { get; set; } = string.Empty;
+    public Guid? FinancePostingEventId { get; set; }
+    public Guid? FinanceJournalEntryId { get; set; }
     public string RowVersion { get; set; } = string.Empty;
     public IReadOnlyList<InventoryIssueVoucherLineDto> Lines { get; set; } = Array.Empty<InventoryIssueVoucherLineDto>();
     public IReadOnlyList<InventoryIssueVoucherActionDto> Actions { get; set; } = Array.Empty<InventoryIssueVoucherActionDto>();

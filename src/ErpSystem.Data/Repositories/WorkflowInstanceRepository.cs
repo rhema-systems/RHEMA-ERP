@@ -62,6 +62,11 @@ public class WorkflowInstanceRepository : GenericRepository<WorkflowInstance>, I
     public async Task<WorkflowInstance?> GetWithDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var instance = await _dbSet
+            // The workflow graph contains several sibling collections. A single
+            // joined query multiplies steps, instances, assignees and activity
+            // rows and can time out on established workflows. Split queries keep
+            // the same tracked graph without the cartesian explosion.
+            .AsSplitQuery()
             .Include(wi => wi.WorkflowDefinition)
             .ThenInclude(wd => wd.Steps)
             .Include(wi => wi.EntityType)

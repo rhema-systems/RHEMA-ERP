@@ -47,7 +47,8 @@ type OpeningLine = {
     notes: string;
 };
 
-type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | null;
+type BusyAction = 'create' | 'update' | 'validate' | 'submit' | 'post' | 'load' | 'fixed-assets' | 'specialized' | null;
+type SpecializedOpeningKind = 'supplierAdvance' | 'customerAdvance' | 'apWithholding' | 'arWithholding';
 
 const BASE_CURRENCY = 'GHS';
 
@@ -136,7 +137,17 @@ export default function OpeningBalancesPage() {
     const [currentBatch, setCurrentBatch] = useState<OpeningBalanceBatch | null>(null);
     const [isDirty, setIsDirty] = useState(false);
     const [validation, setValidation] = useState<OpeningBalanceValidationResult | null>(null);
+    // Keep the exact book-value evidence key, not only the asset key. A single asset can have
+    // parallel IFRS/Tax books, and a stale selection must never switch accounting books merely
+    // because the operator changes the batch header after selecting a row.
+    const [selectedFixedAssetBookValueIds, setSelectedFixedAssetBookValueIds] = useState<string[]>([]);
     const [comment, setComment] = useState('');
+    const [specialized, setSpecialized] = useState({
+        kind: 'supplierAdvance' as SpecializedOpeningKind,
+        partyId: '', taxId: '', sourceReference: '', currencyCode: BASE_CURRENCY,
+        amount: '', exchangeRateId: '', exchangeRate: '1', taxableBase: '', netPaidAmount: '',
+        certificateNumber: '', certificateDate: '',
+    });
     const [header, setHeader] = useState({
         batchNumber: '',
         sourceReference: '',
@@ -175,6 +186,16 @@ export default function OpeningBalancesPage() {
     const batchesQuery = useQuery({
         queryKey: ['opening-balance-batches'],
         queryFn: () => financeDataService.getOpeningBalanceBatches(),
+    });
+
+    const subledgerReadinessQuery = useQuery({
+        queryKey: ['opening-balance-subledger-readiness'],
+        queryFn: () => financeDataService.getSubledgerOpeningBalanceReadiness(),
+    });
+
+    const specializedOptionsQuery = useQuery({
+        queryKey: ['opening-balance-specialized-options'],
+        queryFn: () => financeDataService.getSpecializedOpeningBalanceOptions(),
     });
 
     const accountingBooks = useMemo<AccountingBook[]>(() => {
@@ -358,6 +379,114 @@ export default function OpeningBalancesPage() {
         }
     };
 
+    const handleCreateFixedAssetBatch = async () => {
+        if (!header.openingDate || !header.fiscalPeriodId) {
+            toast({ title: 'Opening period required', description: 'Select the opening date and fiscal period on the GL Batch tab first.', variant: 'destructive' });
+            return;
+        }
+        if (selectedFixedAssetBookValueIds.length === 0) {
+            toast({ title: 'Select assets', description: 'Select at least one unposted fixed-asset opening row.', variant: 'destructive' });
+            return;
+        }
+
+        try {
+            setBusyAction('fixed-assets');
+            // The backend derives every GL account and amount from the imported register. The UI
+            // sends only the explicit asset selection and cutover header so operators cannot make
+            // the asset register and opening journal disagree by editing generated lines.
+            const created = await financeDataService.createFixedAssetOpeningBalanceBatch({
+                sourceReference: header.sourceReference.trim() || undefined,
+                description: `Fixed-asset ${header.bookClassification} opening balances`,
+                openingDate: header.openingDate,
+                fiscalPeriodId: header.fiscalPeriodId,
+                bookClassification: header.bookClassification,
+                fixedAssetBookValueIds: selectedFixedAssetBookValueIds,
+            });
+            applyBatchToForm(created);
+            setSelectedFixedAssetBookValueIds([]);
+            setActiveTab('gl');
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            toast({ title: 'Fixed-asset opening batch prepared', description: 'Validate and submit the generated batch for approval.' });
+        } catch (error: any) {
+            toast({ title: 'Preparation failed', description: error?.message || 'Unable to prepare the fixed-asset opening batch.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleCreateSpecializedBatch = async () => {
+        if (!header.openingDate || !header.fiscalPeriodId || !specialized.partyId || Number(specialized.amount) <= 0) {
+            toast({ title: 'Cutover evidence required', description: 'Select the period, party and a positive amount.', variant: 'destructive' });
+            return;
+        }
+        const isWithholding = specialized.kind === 'apWithholding' || specialized.kind === 'arWithholding';
+        const tax = specializedOptionsQuery.data?.withholdingTaxes.find(item => item.id === specialized.taxId);
+        if (isWithholding && !tax) {
+            toast({ title: 'WHT configuration required', description: 'Select an active withholding tax.', variant: 'destructive' });
+            return;
+        }
+        if (specialized.kind === 'apWithholding' && !tax?.payableAccountId) {
+            toast({ title: 'WHT payable account required', description: 'The selected tax has no payable account mapping.', variant: 'destructive' });
+            return;
+        }
+        if (specialized.kind === 'arWithholding' && !tax?.receivableAccountId) {
+            toast({ title: 'WHT receivable account required', description: 'The selected tax has no receivable account mapping.', variant: 'destructive' });
+            return;
+        }
+
+        const common = {
+            sourceReference: specialized.sourceReference.trim() || undefined,
+            openingDate: header.openingDate,
+            fiscalPeriodId: header.fiscalPeriodId,
+            bookClassification: header.bookClassification,
+            currencyCode: isWithholding
+                ? (specializedOptionsQuery.data?.functionalCurrencyCode || BASE_CURRENCY)
+                : specialized.currencyCode.trim().toUpperCase(),
+            amount: Number(specialized.amount),
+            exchangeRateId: specialized.exchangeRateId.trim() || undefined,
+            exchangeRate: Number(specialized.exchangeRate) || 1,
+        };
+
+        try {
+            setBusyAction('specialized');
+            // The server creates both the canonical AP/AR record and its frozen opening batch.
+            // The UI never exposes generated GL lines for editing, preserving source-to-ledger truth.
+            let created: OpeningBalanceBatch;
+            if (specialized.kind === 'supplierAdvance') {
+                created = await financeDataService.createSupplierAdvanceOpeningBalance({ ...common, supplierId: specialized.partyId });
+            } else if (specialized.kind === 'customerAdvance') {
+                created = await financeDataService.createCustomerAdvanceOpeningBalance({ ...common, customerId: specialized.partyId });
+            } else if (specialized.kind === 'apWithholding' && tax?.payableAccountId) {
+                created = await financeDataService.createApWithholdingOpeningBalance({
+                    ...common, supplierId: specialized.partyId, taxId: tax.id,
+                    withholdingTaxAccountId: tax.payableAccountId,
+                    taxableBase: Number(specialized.taxableBase), netPaidAmount: Number(specialized.netPaidAmount),
+                });
+            } else if (specialized.kind === 'arWithholding' && tax?.receivableAccountId) {
+                created = await financeDataService.createArWithholdingOpeningBalance({
+                    ...common, customerId: specialized.partyId, taxId: tax.id,
+                    withholdingTaxAccountId: tax.receivableAccountId,
+                    certificateNumber: specialized.certificateNumber.trim() || undefined,
+                    certificateDate: specialized.certificateDate || undefined,
+                });
+            } else {
+                // Defensive guard for stale lookup data changed between the initial validation
+                // and submission. The backend repeats the authoritative tax-account check.
+                throw new Error('The selected WHT tax account mapping is no longer available.');
+            }
+            applyBatchToForm(created);
+            setActiveTab('gl');
+            router.replace(`/finance/opening-balances?batchId=${created.id}`, { scroll: false });
+            await Promise.all([batchesQuery.refetch(), diagnosticsQuery.refetch(), subledgerReadinessQuery.refetch()]);
+            toast({ title: 'Specialised opening batch prepared', description: 'Validate and submit the generated evidence for approval.' });
+        } catch (error: any) {
+            toast({ title: 'Preparation failed', description: error?.message || 'Unable to prepare specialised cutover evidence.', variant: 'destructive' });
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
     const handleUpdateBatch = async () => {
         if (!currentBatch || clientErrors.length > 0) {
             if (clientErrors.length > 0) {
@@ -422,7 +551,7 @@ export default function OpeningBalancesPage() {
             setBusyAction('post');
             const posted = await financeDataService.postOpeningBalanceBatch(currentBatch.id, comment || undefined);
             applyBatchToForm(posted);
-            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch()]);
+            await Promise.all([diagnosticsQuery.refetch(), batchesQuery.refetch(), subledgerReadinessQuery.refetch()]);
             toast({ title: 'Opening batch posted', description: posted.batchNumber });
         } catch (error: any) {
             toast({ title: 'Post failed', description: error?.message || 'Unable to post opening balance batch.', variant: 'destructive' });
@@ -546,6 +675,7 @@ export default function OpeningBalancesPage() {
                 <TabsList>
                     <TabsTrigger value="gl">GL Batch</TabsTrigger>
                     <TabsTrigger value="subledger">Subledger</TabsTrigger>
+                    <TabsTrigger value="specialized">Advances &amp; WHT</TabsTrigger>
                     <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
                 </TabsList>
 
@@ -676,6 +806,10 @@ export default function OpeningBalancesPage() {
                                             <Select
                                                 value={header.bookClassification}
                                                 onValueChange={(value) => {
+                                                    // A book change changes the register population being approved.
+                                                    // Clear the visible selection as an immediate UX safeguard; the API
+                                                    // separately validates exact book-value IDs as the trust boundary.
+                                                    setSelectedFixedAssetBookValueIds([]);
                                                     setIsDirty(true);
                                                     setHeader(current => ({ ...current, bookClassification: value }));
                                                     setLines(current => current.map(line => {
@@ -1026,8 +1160,11 @@ export default function OpeningBalancesPage() {
                 <TabsContent value="subledger" className="space-y-6">
                     <div className="grid gap-6 md:grid-cols-2">
                         <Card>
-                            <CardHeader>
+                            <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>AR Opening Invoices</CardTitle>
+                                <Badge variant="outline">
+                                    {subledgerReadinessQuery.data?.postedArOpeningInvoiceCount ?? 0}/{subledgerReadinessQuery.data?.arOpeningInvoiceCount ?? 0} posted
+                                </Badge>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="text-sm text-muted-foreground">
@@ -1051,8 +1188,11 @@ export default function OpeningBalancesPage() {
                         </Card>
 
                         <Card>
-                            <CardHeader>
+                            <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>AP Opening Bills</CardTitle>
+                                <Badge variant="outline">
+                                    {subledgerReadinessQuery.data?.postedApOpeningInvoiceCount ?? 0}/{subledgerReadinessQuery.data?.apOpeningInvoiceCount ?? 0} posted
+                                </Badge>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="text-sm text-muted-foreground">
@@ -1075,6 +1215,201 @@ export default function OpeningBalancesPage() {
                             </CardContent>
                         </Card>
                     </div>
+
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between gap-4">
+                            <div>
+                                <CardTitle>Fixed-Asset Opening Register</CardTitle>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Prepare an approved GL batch from imported cost and accumulated-depreciation evidence. Accounts and amounts are derived by Finance and cannot be edited manually.
+                                </p>
+                            </div>
+                            <Badge variant="outline">
+                                {subledgerReadinessQuery.data?.postedFixedAssetOpeningBookValueCount ?? 0}/{subledgerReadinessQuery.data?.fixedAssetOpeningBookValueCount ?? 0} posted
+                            </Badge>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {(subledgerReadinessQuery.data?.warnings ?? []).map(warning => (
+                                <Alert key={warning}>
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertDescription>{warning}</AlertDescription>
+                                </Alert>
+                            ))}
+
+                            <div className="grid gap-3 sm:grid-cols-3">
+                                <div className="rounded-md border p-3">
+                                    <div className="text-xs text-muted-foreground">Opening cost</div>
+                                    <div className="font-semibold">{formatAmount(subledgerReadinessQuery.data?.fixedAssetOpeningCost ?? 0)}</div>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <div className="text-xs text-muted-foreground">Accumulated depreciation</div>
+                                    <div className="font-semibold">{formatAmount(subledgerReadinessQuery.data?.fixedAssetOpeningAccumulatedDepreciation ?? 0)}</div>
+                                </div>
+                                <div className="rounded-md border p-3">
+                                    <div className="text-xs text-muted-foreground">Net book value</div>
+                                    <div className="font-semibold">{formatAmount(subledgerReadinessQuery.data?.fixedAssetOpeningNetBookValue ?? 0)}</div>
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-md border">
+                                <table className="w-full min-w-[900px]">
+                                    <thead>
+                                        <tr className="border-b bg-muted/50">
+                                            <th className="w-12 p-3"></th>
+                                            <th className="p-3 text-left font-medium">Asset</th>
+                                            <th className="p-3 text-left font-medium">Book / As Of</th>
+                                            <th className="p-3 text-right font-medium">Cost</th>
+                                            <th className="p-3 text-right font-medium">Accum. Dep.</th>
+                                            <th className="p-3 text-right font-medium">NBV</th>
+                                            <th className="p-3 text-left font-medium">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {(subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
+                                            .filter(candidate => candidate.bookClassification === header.bookClassification)
+                                            .map(candidate => {
+                                                const selectable = !candidate.openingPostedToGl;
+                                                return (
+                                                    <tr key={candidate.fixedAssetBookValueId} className="border-b last:border-0">
+                                                        <td className="p-3 text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                aria-label={`Select ${candidate.assetCode}`}
+                                                                checked={selectedFixedAssetBookValueIds.includes(candidate.fixedAssetBookValueId)}
+                                                                disabled={!selectable || busyAction !== null}
+                                                                onChange={(event) => setSelectedFixedAssetBookValueIds(current => event.target.checked
+                                                                    ? [...new Set([...current, candidate.fixedAssetBookValueId])]
+                                                                    : current.filter(id => id !== candidate.fixedAssetBookValueId))}
+                                                            />
+                                                        </td>
+                                                        <td className="p-3">
+                                                            <div className="font-medium">{candidate.assetCode} - {candidate.assetName}</div>
+                                                            <div className="text-xs text-muted-foreground">{candidate.categoryCode}</div>
+                                                        </td>
+                                                        <td className="p-3">{candidate.bookClassification} / {normalizeDate(candidate.openingAsOfDate)}</td>
+                                                        <td className="p-3 text-right">{formatAmount(candidate.acquisitionCost)}</td>
+                                                        <td className="p-3 text-right">{formatAmount(candidate.accumulatedDepreciation)}</td>
+                                                        <td className="p-3 text-right font-medium">{formatAmount(candidate.netBookValue)}</td>
+                                                        <td className="p-3"><Badge variant={candidate.openingPostedToGl ? 'default' : 'secondary'}>{candidate.openingPostedToGl ? 'Posted' : 'Ready'}</Badge></td>
+                                                    </tr>
+                                                );
+                                            })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-sm text-muted-foreground">
+                                    Uses {header.bookClassification}, opening date {header.openingDate || '-'}, and the selected fiscal period from the GL Batch tab.
+                                </p>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => setSelectedFixedAssetBookValueIds((subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
+                                            .filter(candidate => candidate.bookClassification === header.bookClassification && !candidate.openingPostedToGl)
+                                            .map(candidate => candidate.fixedAssetBookValueId))}
+                                        disabled={busyAction !== null}
+                                    >
+                                        Select Ready
+                                    </Button>
+                                    <Button onClick={handleCreateFixedAssetBatch} disabled={busyAction !== null || selectedFixedAssetBookValueIds.length === 0}>
+                                        {busyAction === 'fixed-assets' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
+                                        Prepare GL Batch
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="specialized" className="space-y-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Specialised cutover evidence</CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                                Prepare TDC&apos;s unapplied advances, unremitted supplier WHT and outstanding customer WHT certificates as canonical Finance records. The server derives and freezes the balancing GL batch.
+                            </p>
+                        </CardHeader>
+                        <CardContent className="space-y-5">
+                            <Alert>
+                                <ClipboardCheck className="h-4 w-4" />
+                                <AlertTitle>No cash is posted again</AlertTitle>
+                                <AlertDescription>
+                                    These balances arose before go-live, so migration clearing offsets the source account. Maker-checker approval and central posting still apply.
+                                </AlertDescription>
+                            </Alert>
+                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                <div className="space-y-2">
+                                    <Label>Opening type</Label>
+                                    <Select value={specialized.kind} onValueChange={value => setSpecialized(current => ({ ...current, kind: value as SpecializedOpeningKind, partyId: '', taxId: '' }))}>
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="supplierAdvance">Unapplied supplier advance</SelectItem>
+                                            <SelectItem value="customerAdvance">Unapplied customer advance</SelectItem>
+                                            <SelectItem value="apWithholding">Unremitted supplier WHT</SelectItem>
+                                            <SelectItem value="arWithholding">Outstanding customer WHT certificate</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>{specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding' ? 'Supplier' : 'Customer'}</Label>
+                                    <Select value={specialized.partyId} onValueChange={value => setSpecialized(current => ({ ...current, partyId: value }))}>
+                                        <SelectTrigger><SelectValue placeholder="Select party" /></SelectTrigger>
+                                        <SelectContent>
+                                            {(specialized.kind === 'supplierAdvance' || specialized.kind === 'apWithholding'
+                                                ? specializedOptionsQuery.data?.suppliers
+                                                : specializedOptionsQuery.data?.customers)?.map(item => (
+                                                <SelectItem key={item.id} value={item.id}>{item.code} · {item.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Source reference</Label>
+                                    <Input value={specialized.sourceReference} onChange={event => setSpecialized(current => ({ ...current, sourceReference: event.target.value }))} placeholder="Legacy register/certificate reference" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Amount</Label>
+                                    <Input type="number" min="0.01" step="0.01" value={specialized.amount} onChange={event => setSpecialized(current => ({ ...current, amount: event.target.value }))} />
+                                </div>
+                                {(specialized.kind === 'supplierAdvance' || specialized.kind === 'customerAdvance') && <>
+                                    <div className="space-y-2">
+                                        <Label>Currency</Label>
+                                        <Input maxLength={3} value={specialized.currencyCode} onChange={event => setSpecialized(current => ({ ...current, currencyCode: event.target.value.toUpperCase() }))} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Approved exchange-rate ID</Label>
+                                        <Input value={specialized.exchangeRateId} onChange={event => setSpecialized(current => ({ ...current, exchangeRateId: event.target.value }))} placeholder="Required only for foreign currency" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Exchange rate</Label>
+                                        <Input type="number" min="0.000001" step="0.000001" value={specialized.exchangeRate} onChange={event => setSpecialized(current => ({ ...current, exchangeRate: event.target.value }))} />
+                                    </div>
+                                </>}
+                                {(specialized.kind === 'apWithholding' || specialized.kind === 'arWithholding') && <div className="space-y-2">
+                                    <Label>Withholding tax</Label>
+                                    <Select value={specialized.taxId} onValueChange={value => setSpecialized(current => ({ ...current, taxId: value }))}>
+                                        <SelectTrigger><SelectValue placeholder="Select configured WHT" /></SelectTrigger>
+                                        <SelectContent>{specializedOptionsQuery.data?.withholdingTaxes.map(item => (
+                                            <SelectItem key={item.id} value={item.id}>{item.code} · {item.name} ({item.rate}%)</SelectItem>
+                                        ))}</SelectContent>
+                                    </Select>
+                                </div>}
+                                {specialized.kind === 'apWithholding' && <>
+                                    <div className="space-y-2"><Label>Taxable base</Label><Input type="number" min="0.01" step="0.01" value={specialized.taxableBase} onChange={event => setSpecialized(current => ({ ...current, taxableBase: event.target.value }))} /></div>
+                                    <div className="space-y-2"><Label>Net amount paid before cutover</Label><Input type="number" min="0" step="0.01" value={specialized.netPaidAmount} onChange={event => setSpecialized(current => ({ ...current, netPaidAmount: event.target.value }))} /></div>
+                                </>}
+                                {specialized.kind === 'arWithholding' && <>
+                                    <div className="space-y-2"><Label>Certificate number</Label><Input value={specialized.certificateNumber} onChange={event => setSpecialized(current => ({ ...current, certificateNumber: event.target.value }))} /></div>
+                                    <div className="space-y-2"><Label>Certificate date</Label><Input type="date" value={specialized.certificateDate} onChange={event => setSpecialized(current => ({ ...current, certificateDate: event.target.value }))} /></div>
+                                </>}
+                            </div>
+                            <Button onClick={handleCreateSpecializedBatch} disabled={busyAction !== null || specializedOptionsQuery.isLoading}>
+                                {busyAction === 'specialized' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
+                                Prepare controlled batch
+                            </Button>
+                        </CardContent>
+                    </Card>
                 </TabsContent>
 
                 <TabsContent value="diagnostics" className="space-y-6">

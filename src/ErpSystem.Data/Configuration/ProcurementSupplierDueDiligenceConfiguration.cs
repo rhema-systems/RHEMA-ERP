@@ -31,7 +31,8 @@ public sealed class ProcurementSupplierDueDiligenceReviewConfiguration :
                 "AND (([Status] = 3 AND [RejectedById] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL) " +
                 "OR [Status] <> 3) " +
                 "AND (([Status] = 4 AND [ExpiredAtUtc] IS NOT NULL) OR [Status] <> 4) " +
-                "AND (([Status] = 5 AND [SupersededByReviewId] IS NOT NULL) OR [Status] <> 5)");
+                "AND (([Status] = 5 AND ([SupersededByReviewId] IS NOT NULL " +
+                "OR [LastOperation] = N'PolicySuperseded')) OR [Status] <> 5)");
         });
 
         builder.Property(item => item.RowVersion).IsRowVersion();

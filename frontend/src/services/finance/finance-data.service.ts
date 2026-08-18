@@ -29,6 +29,12 @@ import type {
     CreateExchangeRateDto,
     CreateJournalEntryDto,
     CreateOpeningBalanceBatchDto,
+    CreateFixedAssetOpeningBalanceBatchDto,
+    CreateSupplierAdvanceOpeningBalanceDto,
+    CreateCustomerAdvanceOpeningBalanceDto,
+    CreateApWithholdingOpeningBalanceDto,
+    CreateArWithholdingOpeningBalanceDto,
+    SpecializedOpeningBalanceOptions,
     UpdateOpeningBalanceBatchDto,
     CreateSubledgerAdjustmentJournalDto,
     UpdateFinanceSettingsDto,
@@ -38,6 +44,7 @@ import type {
     OpeningBalanceBatch,
     OpeningBalanceDiagnostic,
     OpeningBalanceValidationResult,
+    SubledgerOpeningBalanceReadiness,
     ReverseSubledgerAdjustmentJournalDto,
     CreateFiscalYearDto,
     BalanceSheetReportDto,
@@ -523,6 +530,37 @@ class FinanceDataService {
 
     async createOpeningBalanceBatch(dto: CreateOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
         return apiService.post<OpeningBalanceBatch>('/finance/opening-balances', dto);
+    }
+
+    async createFixedAssetOpeningBalanceBatch(dto: CreateFixedAssetOpeningBalanceBatchDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/fixed-assets', dto);
+    }
+
+    // These specialised cutover endpoints create canonical AP/AR facts and a controlled
+    // opening batch together. Callers must never recreate them as freehand GL lines because
+    // later allocation, certificate and remittance workflows depend on the source linkage.
+    async createSupplierAdvanceOpeningBalance(dto: CreateSupplierAdvanceOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/supplier-advances', dto);
+    }
+
+    async createCustomerAdvanceOpeningBalance(dto: CreateCustomerAdvanceOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/customer-advances', dto);
+    }
+
+    async createApWithholdingOpeningBalance(dto: CreateApWithholdingOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/ap-withholding', dto);
+    }
+
+    async createArWithholdingOpeningBalance(dto: CreateArWithholdingOpeningBalanceDto): Promise<OpeningBalanceBatch> {
+        return apiService.post<OpeningBalanceBatch>('/finance/opening-balances/ar-withholding', dto);
+    }
+
+    async getSpecializedOpeningBalanceOptions(): Promise<SpecializedOpeningBalanceOptions> {
+        return apiService.get<SpecializedOpeningBalanceOptions>('/finance/opening-balances/specialized-options');
+    }
+
+    async getSubledgerOpeningBalanceReadiness(): Promise<SubledgerOpeningBalanceReadiness> {
+        return apiService.get<SubledgerOpeningBalanceReadiness>('/finance/opening-balances/subledger-readiness');
     }
 
     async getOpeningBalanceBatches(): Promise<OpeningBalanceBatch[]> {

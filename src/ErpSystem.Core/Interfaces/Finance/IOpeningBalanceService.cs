@@ -8,6 +8,19 @@ public interface IOpeningBalanceService
         CreateOpeningBalanceBatchDto dto,
         CancellationToken cancellationToken = default);
 
+    Task<OpeningBalanceBatchDto> CreateFixedAssetBatchAsync(
+        CreateFixedAssetOpeningBalanceBatchDto dto,
+        CancellationToken cancellationToken = default);
+
+    Task<OpeningBalanceBatchDto> CreateSupplierAdvanceBatchAsync(CreateSupplierAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchDto> CreateCustomerAdvanceBatchAsync(CreateCustomerAdvanceOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchDto> CreateApWithholdingBatchAsync(CreateApWithholdingOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchDto> CreateArWithholdingBatchAsync(CreateArWithholdingOpeningBalanceDto dto, CancellationToken cancellationToken = default);
+    Task<SpecializedOpeningBalanceOptionsDto> GetSpecializedOptionsAsync(CancellationToken cancellationToken = default);
+
+    Task<SubledgerOpeningBalanceReadinessDto> GetSubledgerReadinessAsync(
+        CancellationToken cancellationToken = default);
+
     Task<OpeningBalanceBatchDto?> GetBatchAsync(
         Guid batchId,
         CancellationToken cancellationToken = default);

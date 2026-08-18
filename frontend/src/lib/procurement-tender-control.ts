@@ -43,11 +43,40 @@ export function getTenderControlReadiness(control: ProcurementTenderControl) {
 export function buildTechnicalScores(control: ProcurementTenderControl) {
   return control.submissionReceipts
     .filter((item) => item.disposition === Disposition.OnTimeAccepted)
-    .map((item) => ({ bidId: item.tenderBidId, score: 0, qualified: true, reason: '' }));
+    .map((item) => ({
+      bidId: item.tenderBidId,
+      score: 0,
+      qualified: true,
+      reason: '',
+    }));
 }
 
 export function buildFinancialScores(control: ProcurementTenderControl) {
-  return control.submissionReceipts
-    .filter((item) => item.disposition === Disposition.OnTimeAccepted)
-    .map((item) => ({ bidId: item.tenderBidId, score: 0, evaluatedAmount: 0, reason: '' }));
+  const qualified = new Set(
+    control.technicalResults
+      .filter((item) => item.qualified)
+      .map((item) => item.bidId)
+  );
+  let receipts = control.submissionReceipts.filter(
+    (item) =>
+      item.disposition === Disposition.OnTimeAccepted &&
+      qualified.has(item.tenderBidId)
+  );
+  if (control.method === 7) {
+    const ranking = [...control.technicalResults]
+      .filter((item) => item.qualified)
+      .sort(
+        (left, right) =>
+          right.score - left.score || left.bidId.localeCompare(right.bidId)
+      );
+    receipts = receipts.filter(
+      (item) => item.tenderBidId === ranking[0]?.bidId
+    );
+  }
+  return receipts.map((item) => ({
+    bidId: item.tenderBidId,
+    score: 0,
+    evaluatedAmount: item.bidAmount,
+    reason: '',
+  }));
 }

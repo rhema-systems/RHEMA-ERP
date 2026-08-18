@@ -1,5 +1,6 @@
 import { apiService } from '@/services/api.service';
 import type {
+  SupplierOnboardingRegistrationOption,
   RecordSupplierOnboardingPayment,
   SupplierOnboardingExemptionDecision,
   SupplierOnboardingExemptionRequest,
@@ -14,7 +15,12 @@ import type {
 const root = '/procurement/supplier-onboarding-tokens';
 
 export const procurementSupplierOnboardingTokenService = {
-  summary: () => apiService.get<SupplierOnboardingTokenSummary>(`${root}/summary`),
+  summary: () =>
+    apiService.get<SupplierOnboardingTokenSummary>(`${root}/summary`),
+  issueOptions: () =>
+    apiService.get<SupplierOnboardingRegistrationOption[]>(
+      `${root}/issue-options`
+    ),
   search: (request: SupplierOnboardingTokenSearch) =>
     apiService.get<SupplierOnboardingTokenPage>(
       root,
@@ -26,12 +32,17 @@ export const procurementSupplierOnboardingTokenService = {
       `${root}/registrations/${registrationId}`
     ),
   issue: (registrationId: string) =>
-    apiService.post<SupplierOnboardingTokenIssueResult>(root, { registrationId }),
-  reissue: (id: string, reason: string, rowVersion: string) =>
-    apiService.post<SupplierOnboardingTokenIssueResult>(`${root}/${id}/reissue`, {
-      reason,
-      rowVersion,
+    apiService.post<SupplierOnboardingTokenIssueResult>(root, {
+      registrationId,
     }),
+  reissue: (id: string, reason: string, rowVersion: string) =>
+    apiService.post<SupplierOnboardingTokenIssueResult>(
+      `${root}/${id}/reissue`,
+      {
+        reason,
+        rowVersion,
+      }
+    ),
   paymentMethods: (id: string) =>
     apiService.get<SupplierOnboardingPaymentMethodOption[]>(
       `${root}/${id}/payment-methods`
@@ -52,10 +63,7 @@ export const procurementSupplierOnboardingTokenService = {
       `${root}/${tokenId}/payments/${paymentId}/reconcile`,
       { reconciliationReference, ...(notes ? { notes } : {}), rowVersion }
     ),
-  requestExemption: (
-    id: string,
-    request: SupplierOnboardingExemptionRequest
-  ) =>
+  requestExemption: (id: string, request: SupplierOnboardingExemptionRequest) =>
     apiService.post<SupplierOnboardingToken>(
       `${root}/${id}/exemptions`,
       request

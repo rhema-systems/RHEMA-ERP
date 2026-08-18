@@ -38,7 +38,18 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         // External users can only see their own business partner
         if (_currentUserProvider.IsExternalUser)
         {
-            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+            var tenantId = _currentUserProvider.TenantId;
+            var userId = _currentUserProvider.UserId;
+            query = query.Where(bp =>
+                bp.TenantId == tenantId &&
+                (bp.UserId == userId || _context.BusinessPartnerUsers
+                    .IgnoreQueryFilters()
+                    .Any(link =>
+                        link.TenantId == tenantId &&
+                        link.BusinessPartnerId == bp.Id &&
+                        link.UserId == userId &&
+                        link.IsActive &&
+                        !link.IsDeleted)));
         }
 
         return await query.FirstOrDefaultAsync();
@@ -53,12 +64,32 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
     public async Task<BusinessPartner?> GetByUserIdAsync(Guid userId)
     {
-        // Use IgnoreQueryFilters to bypass tenant filtering for external users
-        // External users need to access their business partner regardless of tenant context
+        if (userId == Guid.Empty || _currentUserProvider.TenantId == Guid.Empty)
+        {
+            return null;
+        }
+
+        // External access supports both the legacy primary-user link and the governed
+        // multi-user relationship. IgnoreQueryFilters is retained because external
+        // identities are resolved before some normal tenant-scoped repository calls,
+        // but the tenant boundary is restored explicitly on both sides of the join.
+        var tenantId = _currentUserProvider.TenantId;
         return await _dbSet
             .IgnoreQueryFilters()
             .Include(bp => bp.User)
-            .Where(bp => bp.UserId == userId && !bp.IsDeleted)
+            .Where(bp =>
+                bp.TenantId == tenantId &&
+                !bp.IsDeleted &&
+                (bp.UserId == userId || _context.BusinessPartnerUsers
+                    .IgnoreQueryFilters()
+                    .Any(link =>
+                        link.TenantId == tenantId &&
+                        link.BusinessPartnerId == bp.Id &&
+                        link.UserId == userId &&
+                        link.IsActive &&
+                        !link.IsDeleted)))
+            .OrderByDescending(bp => bp.UserId == userId)
+            .ThenBy(bp => bp.Id)
             .FirstOrDefaultAsync();
     }
 

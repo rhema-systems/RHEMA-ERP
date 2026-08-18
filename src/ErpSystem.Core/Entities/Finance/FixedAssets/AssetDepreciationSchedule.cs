@@ -18,6 +18,20 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? FixedAssetDepreciationRunId { get; set; }
         public virtual FixedAssetDepreciationRun? DepreciationRun { get; set; }
 
+        /// <summary>
+        /// Identifies a final partial-period charge posted atomically by a disposal. Normal
+        /// scheduled runs leave this null; the link lets depreciation reports and auditors trace
+        /// the charge without inventing a second depreciation-run approval.
+        /// </summary>
+        public Guid? AssetDisposalId { get; set; }
+        public virtual AssetDisposal? AssetDisposal { get; set; }
+
+        /// <summary>
+        /// Matches the owning run revision. Including this value in the uniqueness key allows a
+        /// corrected run for the same asset/book/period while retaining every earlier revision.
+        /// </summary>
+        public int CorrectionSequence { get; set; }
+
         public Guid? AccountingBookId { get; set; }
         public virtual AccountingBook? AccountingBook { get; set; }
 
@@ -63,6 +77,29 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public ErpSystem.Core.Enums.DepreciationMethod DepreciationMethodSnapshot { get; set; }
 
+        // Method-specific assumptions are copied to every schedule so later category/asset policy
+        // changes cannot rewrite how a historical charge was calculated.
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal DiminishingBalanceRatePercentSnapshot { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal LifetimeProductionCapacitySnapshot { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal PeriodProductionUnits { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal CumulativeProductionUnitsBefore { get; set; }
+
+        [Column(TypeName = "decimal(18,4)")]
+        public decimal CumulativeProductionUnitsAfter { get; set; }
+
+        [MaxLength(200)]
+        public string? ProductionEvidenceReference { get; set; }
+
+        [MaxLength(1000)]
+        public string? ProductionEvidenceNotes { get; set; }
+
         public DateTime? PlacedInServiceDateSnapshot { get; set; }
 
         // --- Status ---
@@ -97,6 +134,15 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public Guid? PostingEventId { get; set; }
         public virtual FinancePostingEvent? PostingEvent { get; set; }
+
+        // Reversal evidence is additive. IsPosted remains true because the original journal did
+        // post; IsReversed tells current-balance reports not to treat it as an outstanding charge.
+        public bool IsReversed { get; set; }
+        public DateTime? ReversedAt { get; set; }
+        public Guid? ReversalJournalEntryId { get; set; }
+        public Guid? ReversalPostingEventId { get; set; }
+        public Guid? DepreciationReversalId { get; set; }
+        public virtual FixedAssetDepreciationReversal? DepreciationReversal { get; set; }
 
         public bool IsProjected { get; set; } = false; // True if this is a future forecast
     }

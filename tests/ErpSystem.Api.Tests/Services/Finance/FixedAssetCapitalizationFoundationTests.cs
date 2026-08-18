@@ -203,6 +203,111 @@ public sealed class FixedAssetCapitalizationFoundationTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetCapitalization")]
+    [Trait("Contract", "FIN-INT-007")]
+    public async Task ApprovedProcurementHandoff_ShouldReclassInventoryWithoutDuplicatingAssetCost()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var inventoryControl = SeedAccount(
+            db,
+            tenantId,
+            "1300",
+            AccountType.Asset,
+            isControlAccount: true,
+            allowDirectPosting: false);
+        var settings = await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId);
+        settings.ControlAccountInventoryId = inventoryControl.Id;
+        fixture.Asset.Status = FixedAssetStatus.Acquired;
+        var handoff = new ProcurementFixedAssetCapitalization
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FixedAssetId = fixture.Asset.Id,
+            AcceptedSupplyKind = ProcurementAcceptedSupplyKind.GoodsReceiptInspection,
+            AcceptedSupplySourceId = Guid.NewGuid(),
+            AcceptedSupplyReference = "PO-ASSET-001",
+            PurchaseOrderId = Guid.NewGuid(),
+            PurchaseOrderItemId = Guid.NewGuid(),
+            InventoryItemId = Guid.NewGuid(),
+            CapitalizedQuantity = 1m,
+            SourceCurrencyCode = "GHS",
+            SourceTransactionAmount = 100m,
+            FunctionalCurrencyCode = "GHS",
+            FunctionalAmount = 100m,
+            SourceIntegrityHash = new string('a', 64),
+            SourceSnapshotJson = "{}",
+            ReceiptPostingEvidenceJson = "{}",
+            IdempotencyKey = "fa-procurement-test-001",
+            CapitalizationDate = new DateTime(2026, 7, 5)
+        };
+        db.ProcurementFixedAssetCapitalizations.Add(handoff);
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId);
+
+        var result = await services.FixedAssets.CapitalizeFromProcurementAsync(
+            fixture.Asset.Id,
+            new ProcurementFixedAssetPostingInstructionDto
+            {
+                CapitalizationId = handoff.Id,
+                PurchaseOrderItemId = handoff.PurchaseOrderItemId,
+                CapitalizationDate = new DateTime(2026, 7, 5),
+                InventoryControlAccountId = inventoryControl.Id,
+                FunctionalAmount = 100m,
+                FunctionalCurrencyCode = "GHS",
+                SourceReference = handoff.AcceptedSupplyReference,
+                Reason = "Accepted procured laptop approved for capitalization."
+            });
+
+        result.SourceDocumentType.Should().Be("ProcurementFixedAssetCapitalization");
+        result.SourceDocumentId.Should().Be(handoff.Id);
+        result.SourceDocumentLineId.Should().Be(handoff.PurchaseOrderItemId);
+        var journal = await db.JournalEntries.Include(value => value.Transactions)
+            .SingleAsync(value => value.Id == result.JournalEntryId);
+        journal.Transactions.Should().ContainSingle(value =>
+            value.AccountId == fixture.AssetCostAccount.Id && value.DebitAmount == 100m);
+        journal.Transactions.Should().ContainSingle(value =>
+            value.AccountId == inventoryControl.Id && value.CreditAmount == 100m);
+        journal.Transactions.Sum(value => value.DebitAmount).Should().Be(100m);
+        journal.Transactions.Sum(value => value.CreditAmount).Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetCapitalization")]
+    [Trait("Contract", "FIN-INT-007")]
+    public async Task ProcurementAcceptedSupplyInvoice_ShouldClearGrvAndNotCapitalizeAssetAgain()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var grvControl = SeedAccount(
+            db,
+            tenantId,
+            "2100",
+            AccountType.Liability,
+            isControlAccount: true,
+            allowDirectPosting: false);
+        var purchaseOrderId = Guid.NewGuid();
+        fixture.Invoice.PurchaseOrderId = purchaseOrderId;
+        fixture.Invoice.AcceptedSupplyKind = ProcurementAcceptedSupplyKind.GoodsReceiptInspection;
+        fixture.Invoice.AcceptedSupplySourceId = purchaseOrderId;
+        (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).ControlAccountGRVAccrualId = grvControl.Id;
+        await db.SaveChangesAsync();
+        var services = CreateServices(db, tenantId, fixedAssetServiceRequired: true);
+
+        var posted = await services.VendorInvoices.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(value => value.Transactions)
+            .SingleAsync(value => value.Id == posted.JournalEntryId);
+        journal.Transactions.Should().ContainSingle(value => value.AccountId == grvControl.Id && value.DebitAmount == 100m);
+        journal.Transactions.Should().NotContain(value => value.AccountId == fixture.AssetCostAccount.Id && value.DebitAmount > 0m);
+        (await db.FixedAssets.AsNoTracking().SingleAsync(value => value.Id == fixture.Asset.Id)).Status
+            .Should().Be(FixedAssetStatus.Draft,
+                "the accepted-receipt adapter, not the supplier invoice, owns Procurement asset capitalization");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetCapitalization")]
     [Trait("Category", "FixedAssets")]
     public async Task RecoverableTaxOnApAssetLine_ShouldNotBeCapitalized()
     {

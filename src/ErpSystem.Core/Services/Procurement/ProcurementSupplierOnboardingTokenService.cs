@@ -123,6 +123,38 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         };
     }
 
+    public async Task<IReadOnlyList<ProcurementSupplierOnboardingRegistrationOptionDto>>
+        GetIssueOptionsAsync(
+            string correlationId,
+            CancellationToken cancellationToken = default)
+    {
+        await EnsureCapabilityAsync(
+            ManagePermission,
+            "supplier-onboarding-token:issue-options",
+            NormalizeCorrelation(correlationId),
+            cancellationToken);
+
+        var registrationsWithTokens = TokenQuery().Select(item => item.RegistrationId);
+        return await Registrations.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted &&
+                item.PartnerType == "Supplier" &&
+                (item.Status == "Draft" || item.Status == "MoreInfoRequired") &&
+                !registrationsWithTokens.Contains(item.Id))
+            .AsNoTracking()
+            .OrderBy(item => item.RegistrationNumber)
+            .Select(item => new ProcurementSupplierOnboardingRegistrationOptionDto
+            {
+                RegistrationId = item.Id,
+                RegistrationNumber = item.RegistrationNumber,
+                ApplicantName = item.ApplicantName,
+                RegistrationCategory = item.RegistrationCategory,
+                Status = item.Status
+            })
+            .Take(200)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<ProcurementSupplierOnboardingTokenPageDto> SearchAsync(
         ProcurementSupplierOnboardingTokenSearchRequest request,
         CancellationToken cancellationToken = default)

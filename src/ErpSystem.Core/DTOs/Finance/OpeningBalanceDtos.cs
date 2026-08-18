@@ -17,6 +17,8 @@ public sealed class CreateOpeningBalanceLineDto
     public Guid AccountId { get; set; }
     public decimal DebitAmount { get; set; }
     public decimal CreditAmount { get; set; }
+    public decimal? TransactionDebitAmount { get; set; }
+    public decimal? TransactionCreditAmount { get; set; }
     public string? TransactionCurrencyCode { get; set; }
     public string? FunctionalCurrencyCode { get; set; }
     public Guid? ExchangeRateId { get; set; }
@@ -47,6 +49,143 @@ public sealed class SubmitOpeningBalanceBatchDto
 public sealed class PostOpeningBalanceBatchDto
 {
     public string? Comment { get; set; }
+}
+
+/// <summary>
+/// Creates a controlled GL opening-balance batch from fixed-asset book values already loaded by
+/// the existing asset import. The request deliberately identifies assets, not user-entered GL
+/// accounts: Finance derives the cost and accumulated-depreciation accounts from the approved
+/// category configuration so the register and ledger cannot be mapped differently at cutover.
+/// </summary>
+public sealed class CreateFixedAssetOpeningBalanceBatchDto
+{
+    public string? BatchNumber { get; set; }
+    public string? SourceReference { get; set; }
+    public string? Description { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public string? IdempotencyKey { get; set; }
+    /// <summary>
+    /// Identifies the exact imported book-value rows selected by the operator. Asset IDs are not
+    /// sufficiently precise because one asset can carry IFRS, Tax, or other parallel books; using
+    /// the book-value key prevents a later header-book change from silently selecting different
+    /// accounting evidence for the same asset.
+    /// </summary>
+    public IReadOnlyList<Guid> FixedAssetBookValueIds { get; set; } = Array.Empty<Guid>();
+}
+
+public abstract class CreateSpecializedOpeningBalanceDto
+{
+    public string? BatchNumber { get; set; }
+    public string? SourceReference { get; set; }
+    public string? Description { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public Guid FiscalPeriodId { get; set; }
+    public string BookClassification { get; set; } = "IFRS";
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal Amount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRate { get; set; } = 1m;
+}
+
+public sealed class CreateSupplierAdvanceOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
+{
+    public Guid SupplierId { get; set; }
+}
+
+public sealed class CreateCustomerAdvanceOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
+{
+    public Guid CustomerId { get; set; }
+}
+
+public sealed class CreateApWithholdingOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
+{
+    public Guid SupplierId { get; set; }
+    public Guid TaxId { get; set; }
+    public Guid WithholdingTaxAccountId { get; set; }
+    public decimal TaxableBase { get; set; }
+    public decimal NetPaidAmount { get; set; }
+}
+
+public sealed class CreateArWithholdingOpeningBalanceDto : CreateSpecializedOpeningBalanceDto
+{
+    public Guid CustomerId { get; set; }
+    public Guid TaxId { get; set; }
+    public Guid WithholdingTaxAccountId { get; set; }
+    public string? CertificateNumber { get; set; }
+    public DateTime? CertificateDate { get; set; }
+}
+
+public sealed class SpecializedOpeningBalanceOptionsDto
+{
+    public string FunctionalCurrencyCode { get; set; } = "GHS";
+    public IReadOnlyList<OpeningBalancePartyOptionDto> Suppliers { get; set; } = Array.Empty<OpeningBalancePartyOptionDto>();
+    public IReadOnlyList<OpeningBalancePartyOptionDto> Customers { get; set; } = Array.Empty<OpeningBalancePartyOptionDto>();
+    public IReadOnlyList<OpeningBalanceWhtOptionDto> WithholdingTaxes { get; set; } = Array.Empty<OpeningBalanceWhtOptionDto>();
+}
+
+public sealed class OpeningBalancePartyOptionDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
+public sealed class OpeningBalanceWhtOptionDto
+{
+    public Guid Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public decimal Rate { get; set; }
+    public Guid? PayableAccountId { get; set; }
+    public Guid? ReceivableAccountId { get; set; }
+}
+
+public sealed class SubledgerOpeningBalanceReadinessDto
+{
+    public int ApOpeningInvoiceCount { get; set; }
+    public int PostedApOpeningInvoiceCount { get; set; }
+    public decimal ApOpeningInvoiceFunctionalAmount { get; set; }
+    public int ArOpeningInvoiceCount { get; set; }
+    public int PostedArOpeningInvoiceCount { get; set; }
+    public decimal ArOpeningInvoiceFunctionalAmount { get; set; }
+    public int SupplierAdvanceOpeningCount { get; set; }
+    public int PostedSupplierAdvanceOpeningCount { get; set; }
+    public decimal SupplierAdvanceOpeningFunctionalAmount { get; set; }
+    public int CustomerAdvanceOpeningCount { get; set; }
+    public int PostedCustomerAdvanceOpeningCount { get; set; }
+    public decimal CustomerAdvanceOpeningFunctionalAmount { get; set; }
+    public int ApWithholdingOpeningCount { get; set; }
+    public int PostedApWithholdingOpeningCount { get; set; }
+    public decimal ApWithholdingOpeningAmount { get; set; }
+    public int ArWithholdingOpeningCount { get; set; }
+    public int PostedArWithholdingOpeningCount { get; set; }
+    public decimal ArWithholdingOpeningAmount { get; set; }
+    public int FixedAssetOpeningBookValueCount { get; set; }
+    public int PostedFixedAssetOpeningBookValueCount { get; set; }
+    public decimal FixedAssetOpeningCost { get; set; }
+    public decimal FixedAssetOpeningAccumulatedDepreciation { get; set; }
+    public decimal FixedAssetOpeningNetBookValue { get; set; }
+    public IReadOnlyList<FixedAssetOpeningBalanceCandidateDto> FixedAssetCandidates { get; set; }
+        = Array.Empty<FixedAssetOpeningBalanceCandidateDto>();
+    public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
+}
+
+public sealed class FixedAssetOpeningBalanceCandidateDto
+{
+    public Guid FixedAssetId { get; set; }
+    public Guid FixedAssetBookValueId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public string AssetName { get; set; } = string.Empty;
+    public string CategoryCode { get; set; } = string.Empty;
+    public string BookClassification { get; set; } = string.Empty;
+    public DateTime? OpeningAsOfDate { get; set; }
+    public decimal AcquisitionCost { get; set; }
+    public decimal AccumulatedDepreciation { get; set; }
+    public decimal NetBookValue { get; set; }
+    public bool OpeningPostedToGl { get; set; }
+    public Guid? OpeningJournalEntryId { get; set; }
 }
 
 public sealed class OpeningBalanceBatchDto
@@ -87,6 +226,8 @@ public sealed class OpeningBalanceLineDto
     public string AccountName { get; set; } = string.Empty;
     public decimal DebitAmount { get; set; }
     public decimal CreditAmount { get; set; }
+    public decimal? TransactionDebitAmount { get; set; }
+    public decimal? TransactionCreditAmount { get; set; }
     public string TransactionCurrencyCode { get; set; } = string.Empty;
     public string FunctionalCurrencyCode { get; set; } = string.Empty;
     public Guid? ExchangeRateId { get; set; }

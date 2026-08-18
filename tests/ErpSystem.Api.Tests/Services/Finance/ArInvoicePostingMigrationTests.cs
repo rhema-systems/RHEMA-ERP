@@ -4,6 +4,7 @@ using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -138,6 +139,82 @@ public sealed class ArInvoicePostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(100m);
         journal.Transactions.Single(t => t.AccountId == clearingAccount.Id).CreditAmount.Should().Be(100m);
         journal.Transactions.Should().NotContain(t => t.AccountId == fixture.RevenueAccount.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task FixedAssetDisposalDeduction_ShouldDebitClearingOnlyForMatchingCompletedDisposal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        const string disposalReference = "DSP-2026-0001";
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Reference = $"FA-DISPOSAL:{disposalReference}";
+            invoice.SubTotal = 80m;
+            invoice.TotalAmount = 80m;
+            invoice.BaseCurrencyAmount = 80m;
+            invoice.LineItems.Add(new InvoiceLineItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InvoiceId = invoice.Id,
+                LineItemType = LineItemType.FixedAssetDisposalAdjustment,
+                GLAccountId = invoice.LineItems.Single().GLAccountId,
+                Description = "Auctioneer deduction", Quantity = 1m, UnitPrice = -20m,
+                TaxTreatment = TaxTreatment.OutOfScope, DiscountPercentage = 0m, DiscountAmount = 0m,
+                TaxAmount = 0m, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+            });
+        });
+        db.AssetDisposals.Add(new AssetDisposal
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FixedAssetId = Guid.NewGuid(),
+            DisposalDate = fixture.Invoice.InvoiceDate, DisposalType = DisposalType.Sale,
+            Status = AssetDisposalStatus.Completed, SaleProceeds = 100m, DisposalCost = 20m,
+            BuyerBusinessPartnerId = fixture.Customer.Id, ReferenceNumber = disposalReference,
+            Reason = "Approved sale", CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Single(line => line.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(80m);
+        journal.Transactions.Where(line => line.AccountId == fixture.RevenueAccount.Id)
+            .Sum(line => line.CreditAmount - line.DebitAmount).Should().Be(80m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetDisposals")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task FixedAssetDisposalDeduction_ShouldRejectSpoofedPublicInvoiceReference()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Reference = "FA-DISPOSAL:NOT-APPROVED";
+            invoice.SubTotal = 80m;
+            invoice.TotalAmount = 80m;
+            invoice.BaseCurrencyAmount = 80m;
+            invoice.LineItems.Add(new InvoiceLineItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, InvoiceId = invoice.Id,
+                LineItemType = LineItemType.FixedAssetDisposalAdjustment,
+                GLAccountId = invoice.LineItems.Single().GLAccountId,
+                Description = "Spoofed deduction", Quantity = 1m, UnitPrice = -20m,
+                TaxTreatment = TaxTreatment.OutOfScope, DiscountPercentage = 0m, DiscountAmount = 0m,
+                TaxAmount = 0m, CreatedAt = DateTime.UtcNow, CreatedBy = "seed"
+            });
+        });
+        var (service, _) = CreateService(db, tenantId);
+
+        var act = () => service.PostAsync(fixture.Invoice.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*restricted to non-taxable fixed-asset disposal adjustments*");
+        (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
     [Fact]

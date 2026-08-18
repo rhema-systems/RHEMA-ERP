@@ -192,6 +192,37 @@ public sealed class AuditGovernanceService : IAuditGovernanceService
     {
         EnsureTenant();
         Validate(request);
+
+        // SQL Server's retrying execution strategy must own any transaction it
+        // may need to replay. When a caller already owns a transaction, join it
+        // and leave commit/rollback responsibility with that caller.
+        if (!_unitOfWork.HasActiveTransaction)
+        {
+            return await _unitOfWork.ExecuteInStrategyAsync(
+                () => AppendWithinTransactionAsync(
+                    storeKey,
+                    recordId,
+                    action,
+                    request,
+                    cancellationToken),
+                cancellationToken);
+        }
+
+        return await AppendWithinTransactionAsync(
+            storeKey,
+            recordId,
+            action,
+            request,
+            cancellationToken);
+    }
+
+    private async Task<AuditRecordGovernanceDto> AppendWithinTransactionAsync(
+        string storeKey,
+        Guid recordId,
+        AuditLifecycleActionType action,
+        AuditLifecycleCommandDto request,
+        CancellationToken cancellationToken)
+    {
         var ownsTransaction = !_unitOfWork.HasActiveTransaction;
         if (ownsTransaction)
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);

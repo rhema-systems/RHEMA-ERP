@@ -337,15 +337,27 @@ public class FixedAssetReportsService : IFixedAssetReportsService
                 Name = d.FixedAsset?.Name ?? "Unknown",
                 DisposalDate = d.DisposalDate,
                 DisposalType = d.DisposalType,
+                DisposalScope = d.DisposalScope,
+                DisposedPortionPercent = d.DisposedPortionPercent,
+                ComponentReference = d.ComponentReference,
+                AllocationEvidenceReference = d.AllocationEvidenceReference,
                 SaleProceeds = d.SaleProceeds,
                 DisposalCost = d.DisposalCost,
                 NetProceeds = d.NetProceeds,
+                ProceedsCurrencyCode = d.ProceedsCurrencyCode,
+                ProceedsFunctionalAmount = d.ProceedsFunctionalAmount,
+                ProceedsExchangeRateId = d.ProceedsExchangeRateId,
+                ProceedsExchangeRateValue = d.ProceedsExchangeRateValue,
+                ProceedsExchangeRateSource = d.ProceedsExchangeRateSource,
+                ProceedsExchangeRateDate = d.ProceedsExchangeRateDate,
                 CostAtDisposal = d.CostAtDisposal,
                 AccumulatedDepreciationAtDisposal = d.AccumulatedDepreciationAtDisposal,
                 AccumulatedImpairmentAtDisposal = d.AccumulatedImpairmentAtDisposal,
                 RevaluationSurplusAtDisposal = d.RevaluationSurplusAtDisposal,
+                RevaluationSurplusTransferAmount = d.RevaluationSurplusTransferAmount,
                 NetBookValue = d.NetBookValueAtDisposal,
                 GainLoss = d.GainOrLoss,
+                RemainingNetBookValue = d.RemainingNetBookValueAfterDisposal,
                 BuyerName = d.BuyerName,
                 JournalEntryId = d.JournalEntryId,
                 PostingEventId = d.PostingEventId,
@@ -556,7 +568,11 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             if (category.RevaluationSurplusAccountId.HasValue)
             {
                 AddReconciliationRow(rows, diagnostics, "Revaluation Surplus", category.RevaluationSurplusAccountId.Value, accounts, glLines,
-                    RoundMoney(valuations.Where(v => assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied)),
+                    // Completed disposal transfers reduce the asset-specific reserve directly in
+                    // equity. Subtract the retained transfer evidence so subledger reconciliation
+                    // follows the same balance as the posted revaluation-surplus account.
+                    RoundMoney(valuations.Where(v => assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(v => v.RevaluationSurplus - v.RevaluationSurplusApplied)
+                        - disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.RevaluationSurplusTransferAmount)),
                     valuations.Count(v => v.ValuationType == ValuationType.Revaluation && assets.Any(a => a.Id == v.FixedAssetId && a.FixedAssetCategoryId == category.Id)),
                     0,
                     0,
@@ -586,8 +602,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
             if (category.DisposalProceedsClearingAccountId.HasValue)
             {
                 AddReconciliationRow(rows, diagnostics, "Disposal Proceeds Clearing", category.DisposalProceedsClearingAccountId.Value, accounts, glLines,
-                    RoundMoney(disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.NetProceeds)),
-                    disposals.Count(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id) && d.NetProceeds > 0m),
+                    // GL reconciliation must aggregate functional values; adding USD and GHS native
+                    // amounts would produce a plausible-looking but meaningless control total.
+                    RoundMoney(disposals.Where(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id)).Sum(d => d.ProceedsFunctionalAmount)),
+                    disposals.Count(d => assets.Any(a => a.Id == d.FixedAssetId && a.FixedAssetCategoryId == category.Id) && d.ProceedsFunctionalAmount > 0m),
                     0,
                     0,
                     BalanceConvention.DebitMinusCredit);
@@ -842,7 +860,9 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     private IQueryable<AssetDepreciationSchedule> BuildDepreciationQuery(FixedAssetReportQueryDto query)
     {
         var dbQuery = _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == TenantId);
+            // Reversed schedules remain immutable source evidence, but current depreciation and
+            // reconciliation reports must follow the net accounting position after correction.
+            .Where(s => s.TenantId == TenantId && !s.IsDeleted && !s.IsReversed);
 
         if (query.AssetId.HasValue)
             dbQuery = dbQuery.Where(s => s.FixedAssetId == query.AssetId.Value);
@@ -1020,8 +1040,10 @@ public class FixedAssetReportsService : IFixedAssetReportsService
     }
 
     private static bool IsDepreciationLineRelated(AccountTransaction transaction, AssetDepreciationSchedule schedule)
-        => transaction.SourceDocumentType == SourceDocumentTypeDepreciationRun &&
+        => (transaction.SourceDocumentType == SourceDocumentTypeDepreciationRun ||
+            transaction.SourceDocumentType == SourceDocumentTypeDisposal) &&
            (transaction.SourceDocumentId == schedule.FixedAssetDepreciationRunId ||
+            transaction.SourceDocumentId == schedule.AssetDisposalId ||
             NotesContainId(transaction.Notes, "ScheduleId", schedule.Id) ||
             NotesContainId(transaction.Notes, "FixedAssetId", schedule.FixedAssetId));
 

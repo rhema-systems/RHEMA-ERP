@@ -78,6 +78,89 @@ public sealed class ProcurementAccessControlServiceTests
     }
 
     [Fact]
+    public async Task CommitteeCapabilityAllowsSeparatePrivilegeAndMembershipAssignmentsForTheSameActor()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_PROCUREMENT_OFFICER");
+        await fixture.GrantSecurityRoleAsync("TDC_EVALUATOR");
+        var administrator = await fixture.Service.SaveAssignmentAsync(null,
+            new SaveProcurementResponsibilityAssignmentRequest
+            {
+                UserId = fixture.UserId,
+                RoleName = "TDC_PROCUREMENT_OFFICER",
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                IsActive = true,
+                Reason = "Committee administration duty"
+            }, "trace-committee-administrator");
+        var evaluator = await fixture.Service.SaveAssignmentAsync(null,
+            new SaveProcurementResponsibilityAssignmentRequest
+            {
+                UserId = fixture.UserId,
+                RoleName = "TDC_EVALUATOR",
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                IsActive = true,
+                Reason = "Evaluation committee membership duty"
+            }, "trace-committee-evaluator");
+        var committee = (await fixture.Service.GetCommitteesAsync())
+            .Single(item => item.Code == "TDC_EVALUATION");
+        await fixture.Service.AddCommitteeMemberAsync(committee.Id,
+            new SaveProcurementCommitteeMemberRequest
+            {
+                AssignmentId = evaluator.Id,
+                MemberKind = ProcurementCommitteeMemberKind.Chair,
+                IsVoting = true,
+                EffectiveFrom = DateTime.UtcNow.AddMinutes(-1),
+                Reason = "Constitute evaluation committee"
+            }, "trace-committee-member");
+        var committeeEntity = await fixture.Context.ProcurementCommittees
+            .SingleAsync(item => item.Id == committee.Id);
+        committeeEntity.RequiredQuorum = 1;
+        committeeEntity.Status = ProcurementCommitteeStatus.Active;
+        committeeEntity.EffectiveFrom = DateTime.UtcNow.AddMinutes(-1);
+        await fixture.Context.SaveChangesAsync();
+
+        var decision = await fixture.Service.CheckCapabilityAsync(
+            new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = "procurement.tender.administer",
+                CommitteeCode = "TDC_EVALUATION",
+                SourceType = "RequestForQuotation",
+                SourceReference = "RFQ-001"
+            }, "trace-committee-capability");
+
+        decision.Allowed.Should().BeTrue();
+        decision.MatchedAssignmentIds.Should().Equal(administrator.Id);
+        decision.MatchedAssignmentIds.Should().NotContain(evaluator.Id);
+    }
+
+    [Fact]
+    public async Task RepeatedCapabilityEnforcementAppendsDistinctAuditEventsForTheSameCorrelation()
+    {
+        await using var fixture = new Fixture();
+        await fixture.Seeder.SeedTenantAsync(fixture.TenantId, fixture.UserId);
+        await fixture.GrantSecurityRoleAsync("TDC_PROCUREMENT_OFFICER");
+        var request = new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = ProcurementAccessControlRegistry.SupplierPaymentVerifyPermission,
+            SourceType = "SupplierDocument",
+            SourceReference = "DOC-001"
+        };
+
+        var first = await fixture.Service.EnforceCapabilityAsync(request, "trace-repeated-decision");
+        var second = await fixture.Service.EnforceCapabilityAsync(request, "trace-repeated-decision");
+
+        first.Allowed.Should().BeTrue();
+        second.Allowed.Should().BeTrue();
+        var events = await fixture.Context.ProcurementControlEvents
+            .Where(item => item.EventType == "AccessDecision" &&
+                           item.CorrelationId == "trace-repeated-decision")
+            .ToListAsync();
+        events.Should().HaveCount(2);
+        events.Select(item => item.EventKey).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task ActiveContextScopeCannotBeCreatedBeforeTheSecurityRoleIsGranted()
     {
         await using var fixture = new Fixture();

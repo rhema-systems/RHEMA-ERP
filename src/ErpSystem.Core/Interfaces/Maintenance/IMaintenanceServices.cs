@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Inventory;
 
 namespace ErpSystem.Core.Interfaces.Maintenance;
 
@@ -368,18 +369,20 @@ public interface IWorkOrderTaskService
 public interface IWorkOrderPartService
 {
     // Single operations
-    Task<WorkOrderPartDto> AddPartAsync(CreateWorkOrderPartDto createDto);
-    Task<WorkOrderPartDto> UpdatePartAsync(Guid id, UpdateWorkOrderPartDto updateDto);
-    Task DeletePartAsync(Guid id);
+    Task<WorkOrderPartDto> AddPartAsync(CreateWorkOrderPartDto createDto, string? idempotencyKey = null, string? correlationId = null);
+    Task<WorkOrderPartDto> UpdatePartAsync(Guid id, UpdateWorkOrderPartDto updateDto, string? idempotencyKey = null, string? correlationId = null);
+    Task DeletePartAsync(Guid id, string? idempotencyKey = null, string? correlationId = null);
     Task<IEnumerable<WorkOrderPartDto>> GetPartsByWorkOrderAsync(Guid workOrderId);
     Task<WorkOrderPartDto> UpdatePartStatusAsync(Guid id, string status, int? quantityUsed = null);
-    Task<WorkOrderPartDto> ReturnUnusedPartsAsync(Guid partId);
+    Task<WorkOrderPartDto> ReturnUnusedPartsAsync(Guid partId, string? idempotencyKey = null, string? correlationId = null);
+    Task<WorkOrderPartDto> RetryReservationAsync(Guid partId, string? idempotencyKey = null, string? correlationId = null);
+    Task<IReadOnlyList<InventoryWorkOrderReservationActionDto>> GetReservationActionsAsync(Guid partId);
     Task<decimal> GetTotalPartsCostAsync(Guid workOrderId);
     Task<IEnumerable<WorkOrderPartDto>> GetPartsRequiringOrderAsync();
 
     // Bulk operations
-    Task<IEnumerable<WorkOrderPartDto>> AddPartsBulkAsync(IEnumerable<CreateWorkOrderPartDto> createDtos);
-    Task DeletePartsBulkAsync(IEnumerable<Guid> ids);
+    Task<IEnumerable<WorkOrderPartDto>> AddPartsBulkAsync(IEnumerable<CreateWorkOrderPartDto> createDtos, string? idempotencyKey = null, string? correlationId = null);
+    Task DeletePartsBulkAsync(IEnumerable<Guid> ids, string? idempotencyKey = null, string? correlationId = null);
 }
 
 public interface IWorkOrderToolService

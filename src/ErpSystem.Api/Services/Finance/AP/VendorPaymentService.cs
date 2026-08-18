@@ -293,6 +293,47 @@ namespace ErpSystem.Api.Services.Finance.AP
             };
         }
 
+        public async Task<List<PostedSupplierAdvanceDto>> GetPostedSupplierAdvancesAsync(
+            Guid supplierOrBusinessPartnerId,
+            CancellationToken cancellationToken = default)
+        {
+            if (supplierOrBusinessPartnerId == Guid.Empty)
+                return new List<PostedSupplierAdvanceDto>();
+
+            var supplierId = await ResolveSupplierIdForQueryAsync(supplierOrBusinessPartnerId, cancellationToken);
+            if (!supplierId.HasValue)
+                return new List<PostedSupplierAdvanceDto>();
+
+            return await _unitOfWork.Repository<VendorPayment>()
+                .GetQueryable(payment =>
+                    payment.TenantId == TenantId &&
+                    !payment.IsDeleted &&
+                    payment.SupplierId == supplierId.Value &&
+                    payment.IsSupplierAdvance &&
+                    payment.JournalEntryId.HasValue &&
+                    payment.TotalAmount > payment.AllocatedAmount &&
+                    payment.Status != VendorPaymentStatus.Voided &&
+                    payment.Status != VendorPaymentStatus.Failed &&
+                    payment.Status != VendorPaymentStatus.Reversed)
+                .AsNoTracking()
+                .OrderByDescending(payment => payment.PaymentDate)
+                .Select(payment => new PostedSupplierAdvanceDto
+                {
+                    Id = payment.Id,
+                    PaymentNumber = payment.PaymentNumber,
+                    SupplierId = payment.SupplierId,
+                    SupplierName = payment.Supplier.Name,
+                    PaymentDate = payment.PaymentDate,
+                    TotalAmount = payment.TotalAmount,
+                    AllocatedAmount = payment.AllocatedAmount,
+                    AvailableAmount = payment.TotalAmount - payment.AllocatedAmount,
+                    CurrencyCode = payment.CurrencyCode,
+                    Status = payment.Status,
+                    JournalEntryId = payment.JournalEntryId!.Value
+                })
+                .ToListAsync(cancellationToken);
+        }
+
         // ═════════════════════════════════════════════════════════════════
         //  CREATE PAYMENT
         // ═════════════════════════════════════════════════════════════════
@@ -1119,14 +1160,33 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
         }
 
-        public async Task<VendorPaymentDto> ReversePaymentAsync(
+        public Task<VendorPaymentDto> ReversePaymentAsync(
             Guid id,
             ReverseVendorPaymentDto dto,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) =>
+            ReversePaymentAsync(id, dto, cancellationToken, executionStrategyScope: false);
+
+        private async Task<VendorPaymentDto> ReversePaymentAsync(
+            Guid id,
+            ReverseVendorPaymentDto dto,
+            CancellationToken cancellationToken,
+            bool executionStrategyScope)
         {
             ArgumentNullException.ThrowIfNull(dto);
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AP payment reversal.");
+
+            // SQL Server's retrying execution strategy must own the complete serializable
+            // transaction. Starting a user transaction before entering the strategy causes every
+            // production reversal to fail before the first write. The recursive scope mirrors the
+            // existing AP create/allocation/authorization transaction boundary and remains safe
+            // when a caller already owns a wider transaction.
+            if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
+            {
+                return await _unitOfWork.ExecuteInStrategyAsync(
+                    () => ReversePaymentAsync(id, dto, cancellationToken, executionStrategyScope: true),
+                    cancellationToken);
+            }
 
             var initialPayment = await LoadPaymentForPostingAsync(id, cancellationToken);
             await _financeAccessScopeService.EnsureBankAccountAccessAsync(

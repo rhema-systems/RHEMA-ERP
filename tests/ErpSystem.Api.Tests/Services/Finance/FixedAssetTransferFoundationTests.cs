@@ -121,6 +121,32 @@ public sealed class FixedAssetTransferFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
     [Trait("Category", "FixedAssets")]
+    public async Task CrossTenantReclassificationCategoryRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedTransferFoundationAsync(db, tenantId);
+        var other = await SeedTransferFoundationAsync(db, otherTenantId, codePrefix: "OTH");
+        var services = CreateServices(db, tenantId);
+
+        var dto = RequestDto(fixture.Asset.Id);
+        dto.TransferType = AssetTransferType.GlReclassification;
+        dto.ToLocation = string.Empty;
+        dto.ToFixedAssetCategoryId = other.TargetCategory.Id;
+        dto.AccountingDate = new DateTime(2026, 7, 10);
+        dto.Reason = "Move the asset to the reviewed accounting classification.";
+
+        var act = () => services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*category belongs to another tenant*");
+        (await db.AssetTransfers.CountAsync(t => t.TenantId == tenantId)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
+    [Trait("Category", "FixedAssets")]
     public async Task CustodyLocationOnlyTransferCreatesHistoryButNoGlJournal()
     {
         var tenantId = Guid.NewGuid();
@@ -146,21 +172,189 @@ public sealed class FixedAssetTransferFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
     [Trait("Category", "FixedAssets")]
-    public async Task GlReclassificationTransferFailsClearlyInsteadOfMisposting()
+    public async Task GlReclassificationMovesCurrentBalancesAndPreservesMeasurementHistory()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedTransferFoundationAsync(db, tenantId, accumulatedDepreciation: 200m, netBookValue: 1000m);
+        var services = CreateServices(db, tenantId);
+
+        var dto = RequestDto(fixture.Asset.Id);
+        dto.TransferType = AssetTransferType.GlReclassification;
+        dto.ToFixedAssetCategoryId = fixture.TargetCategory.Id;
+        dto.ToSegmentLookupValueId = fixture.TargetSegment.Id;
+        dto.AccountingDate = new DateTime(2026, 7, 10);
+        dto.ToLocation = string.Empty;
+        dto.Reason = "Reclassify the asset to its approved operational category.";
+
+        var requested = await services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+        var completed = await services.Transfers.ApproveTransferAsync(
+            requested.Id,
+            fixture.Approver.Id,
+            new ApproveAssetTransferDto { Comments = "Independent accounting review completed." });
+
+        completed.Status.Should().Be(AssetTransferStatus.Completed);
+        completed.JournalEntryId.Should().NotBeNull();
+        completed.PostingEventId.Should().NotBeNull();
+        completed.ReclassificationAssetCarryingAmount.Should().Be(1200m);
+        completed.ReclassificationAccumulatedDepreciation.Should().Be(200m);
+
+        var asset = await db.FixedAssets.Include(a => a.BookValues).SingleAsync(a => a.Id == fixture.Asset.Id);
+        asset.FixedAssetCategoryId.Should().Be(fixture.TargetCategory.Id);
+        asset.CurrentSegmentLookupValueId.Should().Be(fixture.TargetSegment.Id);
+        asset.AcquisitionCost.Should().Be(1200m);
+        asset.NetBookValue.Should().Be(1000m);
+        asset.BookValues.Single().AccumulatedDepreciation.Should().Be(200m);
+
+        var journal = await db.JournalEntries.Include(j => j.Transactions).SingleAsync(j => j.Id == completed.JournalEntryId);
+        journal.Transactions.Should().ContainSingle(t =>
+            t.AccountId == fixture.TargetCategory.AssetAccountId && t.DebitAmount == 1200m && t.SegmentString == fixture.TargetSegment.SegmentValue);
+        journal.Transactions.Should().ContainSingle(t =>
+            t.AccountId == fixture.Category.AssetAccountId && t.CreditAmount == 1200m && t.SegmentString == fixture.SourceSegment.SegmentValue);
+        journal.Transactions.Should().ContainSingle(t =>
+            t.AccountId == fixture.Category.AccumulatedDepreciationAccountId && t.DebitAmount == 200m);
+        journal.Transactions.Should().ContainSingle(t =>
+            t.AccountId == fixture.TargetCategory.AccumulatedDepreciationAccountId && t.CreditAmount == 200m);
+        journal.Transactions.Sum(t => t.DebitAmount).Should().Be(1400m);
+        journal.Transactions.Sum(t => t.CreditAmount).Should().Be(1400m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
+    [Trait("Category", "FixedAssets")]
+    public async Task GlReclassificationRequiresIndependentChecker()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedTransferFoundationAsync(db, tenantId);
         var services = CreateServices(db, tenantId);
-
         var dto = RequestDto(fixture.Asset.Id);
         dto.TransferType = AssetTransferType.GlReclassification;
+        dto.ToFixedAssetCategoryId = fixture.TargetCategory.Id;
+        dto.AccountingDate = new DateTime(2026, 7, 10);
+        dto.Reason = "Correct the account classification after independent review.";
+        var requested = await services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
 
-        var act = () => services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+        var act = () => services.Transfers.ApproveTransferAsync(
+            requested.Id,
+            fixture.RequestedBy.Id,
+            new ApproveAssetTransferDto { Comments = "Self approval attempt." });
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*GL reclassification transfers are not supported*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot approve*");
         (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.AssetTransfers.SingleAsync(t => t.Id == requested.Id)).Status.Should().Be(AssetTransferStatus.PendingApproval);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedBalanceInvalidatesApprovedReclassificationSnapshot()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedTransferFoundationAsync(db, tenantId, accumulatedDepreciation: 100m, netBookValue: 1100m);
+        var services = CreateServices(db, tenantId);
+        var dto = RequestDto(fixture.Asset.Id);
+        dto.TransferType = AssetTransferType.GlReclassification;
+        dto.ToFixedAssetCategoryId = fixture.TargetCategory.Id;
+        dto.AccountingDate = new DateTime(2026, 7, 10);
+        dto.Reason = "Move current balances to the corrected asset category accounts.";
+        var requested = await services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+
+        // Simulate a depreciation/valuation change after maker submission. The checker-approved
+        // request must not post stale amounts; a new request is required instead.
+        var book = await db.FixedAssetBookValues.SingleAsync(b => b.FixedAssetId == fixture.Asset.Id);
+        book.AccumulatedDepreciation += 50m;
+        book.NetBookValue -= 50m;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Transfers.ApproveTransferAsync(
+            requested.Id,
+            fixture.Approver.Id,
+            new ApproveAssetTransferDto { Comments = "Approved based on submitted evidence." });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*balances changed*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FixedAssets.SingleAsync(a => a.Id == fixture.Asset.Id)).FixedAssetCategoryId.Should().Be(fixture.Category.Id);
+        var failed = await db.AssetTransfers.SingleAsync(t => t.Id == requested.Id);
+        // The checker approved an earlier balance snapshot. That approval is terminal once the
+        // evidence drifts, allowing the maker to raise a new request instead of endlessly retrying.
+        failed.Status.Should().Be(AssetTransferStatus.Cancelled);
+        failed.FailureReason.Should().Contain("balances changed");
+
+        var replacement = await services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+        replacement.Id.Should().NotBe(requested.Id);
+        replacement.Status.Should().Be(AssetTransferStatus.PendingApproval);
+        replacement.ReclassificationAccumulatedDepreciation.Should().Be(150m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedCategoryMappingInvalidatesApprovedReclassificationSnapshot()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedTransferFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var dto = RequestDto(fixture.Asset.Id);
+        dto.TransferType = AssetTransferType.GlReclassification;
+        dto.ToFixedAssetCategoryId = fixture.TargetCategory.Id;
+        dto.AccountingDate = new DateTime(2026, 7, 10);
+        dto.Reason = "Move current balances to the corrected asset category accounts.";
+        var requested = await services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+
+        // Administrators may legitimately correct a category mapping while a request waits for
+        // review. The checker must approve a newly calculated request, not stale account evidence.
+        fixture.TargetCategory.AssetAccountId = fixture.Category.AssetAccountId;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Transfers.ApproveTransferAsync(
+            requested.Id,
+            fixture.Approver.Id,
+            new ApproveAssetTransferDto { Comments = "Approved based on submitted evidence." });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*account mapping changed*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FixedAssets.SingleAsync(a => a.Id == fixture.Asset.Id)).FixedAssetCategoryId.Should().Be(fixture.Category.Id);
+        var failed = await db.AssetTransfers.SingleAsync(t => t.Id == requested.Id);
+        // Mutable category setup cannot silently replace the account evidence approved by the
+        // checker. Cancelling the stale request permits a fresh controlled approval cycle.
+        failed.Status.Should().Be(AssetTransferStatus.Cancelled);
+        failed.FailureReason.Should().Contain("account mapping changed");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetTransfers")]
+    [Trait("Category", "FixedAssets")]
+    public async Task ChangedPostingBookConfigurationCancelsApprovedReclassification()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedTransferFoundationAsync(db, tenantId);
+        var services = CreateServices(db, tenantId);
+        var dto = RequestDto(fixture.Asset.Id);
+        dto.TransferType = AssetTransferType.GlReclassification;
+        dto.ToFixedAssetCategoryId = fixture.TargetCategory.Id;
+        dto.AccountingDate = new DateTime(2026, 7, 10);
+        dto.Reason = "Move current balances to the corrected asset category accounts.";
+        var requested = await services.Transfers.RequestTransferAsync(dto, fixture.RequestedBy.Id);
+
+        // Posting-book authority is mutable configuration. Disabling the book after submission
+        // invalidates the checker's evidence just as surely as changing a category account.
+        fixture.Book.AllowsPosting = false;
+        await db.SaveChangesAsync();
+
+        var act = () => services.Transfers.ApproveTransferAsync(
+            requested.Id,
+            fixture.Approver.Id,
+            new ApproveAssetTransferDto { Comments = "Approved based on submitted evidence." });
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*posting-book configuration changed*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        var failed = await db.AssetTransfers.SingleAsync(t => t.Id == requested.Id);
+        failed.Status.Should().Be(AssetTransferStatus.Cancelled);
+        failed.FailureReason.Should().Contain("posting-book configuration changed");
     }
 
     [Fact]
@@ -359,7 +553,10 @@ public sealed class FixedAssetTransferFoundationTests
         RequestAssetTransferDto? dto = null)
     {
         var request = dto ?? RequestDto(fixture.Asset.Id);
-        request.ToCustodianId ??= fixture.TargetCustodian.Id;
+        if (request.TransferType != AssetTransferType.GlReclassification)
+        {
+            request.ToCustodianId ??= fixture.TargetCustodian.Id;
+        }
         var requested = await service.RequestTransferAsync(request, fixture.RequestedBy.Id);
         return await service.ApproveTransferAsync(requested.Id, fixture.Approver.Id, new ApproveAssetTransferDto { Comments = "Approved" });
     }
@@ -436,7 +633,8 @@ public sealed class FixedAssetTransferFoundationTests
             currentUser.Object,
             numbering.Object,
             workflow.Object,
-            auditService);
+            auditService,
+            postingEngine);
 
         return new ServiceFixture(transferService, depreciationService);
     }
@@ -473,6 +671,9 @@ public sealed class FixedAssetTransferFoundationTests
         var assetAccount = SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Asset);
         var accumulatedAccount = SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}9", AccountType.Asset);
         var expenseAccount = SeedAccount(db, tenantId, $"67{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Expense);
+        var targetAssetAccount = SeedAccount(db, tenantId, $"17{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Asset);
+        var targetAccumulatedAccount = SeedAccount(db, tenantId, $"17{codePrefix[..Math.Min(2, codePrefix.Length)]}9", AccountType.Asset);
+        var targetExpenseAccount = SeedAccount(db, tenantId, $"68{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Expense);
 
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -490,6 +691,20 @@ public sealed class FixedAssetTransferFoundationTests
             AssetAccountId = assetAccount.Id,
             AccumulatedDepreciationAccountId = accumulatedAccount.Id,
             DepreciationExpenseAccountId = expenseAccount.Id,
+            DefaultMethod = DepreciationMethod.StraightLine,
+            DefaultUsefulLifeMonths = 12,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        };
+        var targetCategory = new FixedAssetCategory
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = $"TRG-{codePrefix}-{tenantId.ToString("N")[..4]}",
+            Name = "Target Transfer Assets",
+            AssetAccountId = targetAssetAccount.Id,
+            AccumulatedDepreciationAccountId = targetAccumulatedAccount.Id,
+            DepreciationExpenseAccountId = targetExpenseAccount.Id,
             DefaultMethod = DepreciationMethod.StraightLine,
             DefaultUsefulLifeMonths = 12,
             CreatedAt = DateTime.UtcNow,
@@ -571,6 +786,7 @@ public sealed class FixedAssetTransferFoundationTests
 
         asset.BookValues.Add(bookValue);
         db.FixedAssetCategories.Add(category);
+        db.FixedAssetCategories.Add(targetCategory);
         db.FixedAssets.Add(asset);
         await db.SaveChangesAsync();
 
@@ -579,6 +795,7 @@ public sealed class FixedAssetTransferFoundationTests
             book,
             asset,
             category,
+            targetCategory,
             sourceCustodian,
             targetCustodian,
             requestedBy,
@@ -729,6 +946,7 @@ public sealed class FixedAssetTransferFoundationTests
         AccountingBook Book,
         FixedAsset Asset,
         FixedAssetCategory Category,
+        FixedAssetCategory TargetCategory,
         Employee SourceCustodian,
         Employee TargetCustodian,
         Employee RequestedBy,

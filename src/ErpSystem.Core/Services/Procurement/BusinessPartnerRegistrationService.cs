@@ -79,8 +79,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         var statusHistory = await _statusHistoryRepository.GetHistoryByRegistrationAsync(id);
-
-        return MapToDetailDto(registration, statusHistory);
+        var result = MapToDetailDto(registration, statusHistory);
+        await PopulateEvidenceReadinessAsync(result, registration);
+        return result;
     }
 
     public async Task<BusinessPartnerRegistrationDetailDto?> GetByApplicationNumberAsync(string applicationNumber)
@@ -92,8 +93,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         var statusHistory = await _statusHistoryRepository.GetHistoryByRegistrationAsync(registration.Id);
-
-        return MapToDetailDto(registration, statusHistory);
+        var result = MapToDetailDto(registration, statusHistory);
+        await PopulateEvidenceReadinessAsync(result, registration);
+        return result;
     }
 
     public async Task<IEnumerable<BusinessPartnerRegistrationDto>> GetAllAsync()
@@ -244,7 +246,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         registration.ApplicantEmail = dto.Email;
         registration.ApplicantPhone = dto.Phone;
         registration.RegistrationCategory = dto.RegistrationCategory;
-        registration.RegistrationDataJson = System.Text.Json.JsonSerializer.Serialize(dto);
+        registration.RegistrationDataJson = NormalizeRegistrationDataJson(dto.RegistrationData);
         registration.UpdatedAt = DateTime.UtcNow;
 
         var updated = await _registrationRepository.UpdateAsync(registration);
@@ -253,8 +255,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         await _unitOfWork.SaveChangesAsync();
 
         var statusHistory = await _statusHistoryRepository.GetHistoryByRegistrationAsync(id);
-
-        return MapToDetailDto(updated, statusHistory);
+        var result = MapToDetailDto(updated, statusHistory);
+        await PopulateEvidenceReadinessAsync(result, updated);
+        return result;
     }
 
     public async Task DeleteAsync(Guid id, Guid userId)
@@ -336,7 +339,16 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         var registrations = await _registrationRepository.GetRejectedRegistrationsAsync();
         return registrations.Select(MapToDto);
     }
-    public async Task SubmitForReviewAsync(Guid id, Guid userId)
+    public Task SubmitForReviewAsync(Guid id, Guid userId) =>
+        SubmitForReviewCoreAsync(id, userId, userId);
+
+    public Task SubmitExternalApplicantForReviewAsync(Guid id, Guid applicantActorId) =>
+        SubmitForReviewCoreAsync(id, applicantActorId, changedByUserId: null);
+
+    private async Task SubmitForReviewCoreAsync(
+        Guid id,
+        Guid actionActorId,
+        Guid? changedByUserId)
     {
         var registration = await _registrationRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Registration with ID {id} not found");
         if (registration.Status != "Draft" && registration.Status != "MoreInfoRequired")
@@ -387,11 +399,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         await _evidencePackService.BindAndValidateRegistrationAsync(
             id,
-            userId,
+            actionActorId,
             $"supplier-registration-submit-{id:N}",
             CancellationToken.None);
 
-        await _registrationRepository.UpdateStatusAsync(id, "Submitted", userId, "Submitted for review");
+        await _registrationRepository.UpdateStatusAsync(
+            id, "Submitted", changedByUserId, "Submitted by verified supplier applicant");
 
         // Publish events for admin-configurable notification topics (best-effort).
         try
@@ -414,7 +427,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 Activity = "Submitted",
                 Audience = "Supplier",
                 EntityId = registration.Id,
-                TriggeredByUserId = userId,
+                TriggeredByUserId = changedByUserId,
                 Data = data
             });
 
@@ -425,7 +438,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 Activity = "Submitted",
                 Audience = "Internal",
                 EntityId = registration.Id,
-                TriggeredByUserId = userId,
+                TriggeredByUserId = changedByUserId,
                 Data = data
             });
         }
@@ -435,7 +448,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         // Send in-app notification to the applicant
-        if (_notificationService != null && registration.CreatedById.HasValue)
+        if (_notificationService != null && changedByUserId.HasValue &&
+            registration.CreatedById.HasValue)
         {
             try
             {
@@ -450,7 +464,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                     EntityId = id,
                     ActionUrl = $"/register/business-partner/status/{id}"
                 };
-                await _notificationService.CreateNotificationAsync(notificationDto, userId, registration.TenantId);
+                await _notificationService.CreateNotificationAsync(
+                    notificationDto, changedByUserId.Value, registration.TenantId);
                 _logger.LogInformation("Submission notification sent to user {UserId} for registration {RegistrationId}",
                     registration.CreatedById.Value, id);
             }
@@ -461,43 +476,25 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             }
         }
 
-        // Create in-app notification and queue email (fire-and-forget)
-        if (_notificationService != null && registration.CreatedById.HasValue)
+        // External applicant identities are not ERP Users, so do not create an
+        // in-app notification for them. Email delivery remains independent.
+        if (_notificationService != null &&
+            !string.IsNullOrEmpty(registration.ApplicantEmail))
         {
             try
             {
-                // 1. Create in-app notification with friendly message
-                var inAppNotificationDto = new CreateNotificationDto
-                {
-                    RecipientId = registration.CreatedById.Value,
-                    Type = "InApp",
-                    Title = "Registration Submitted Successfully",
-                    Message = $"Your business partner registration (Application #{registration.RegistrationNumber}) has been submitted and is now under review.",
-                    Priority = "Normal",
-                    EntityType = "BusinessPartnerRegistration",
-                    EntityId = id,
-                    ActionUrl = $"/external-portal/business-partner"
-                };
-                await _notificationService.CreateNotificationAsync(inAppNotificationDto, userId, registration.TenantId);
+                var emailSubject = "Business Partner Registration Submitted";
+                var emailBody = GenerateRegistrationSubmittedEmailBody(
+                    registration.ApplicantName, registration.RegistrationNumber);
+                await _notificationService.SendEmailAsync(
+                    registration.ApplicantEmail,
+                    emailSubject,
+                    emailBody,
+                    isHtml: true);
 
-                // 2. Send email notification
-                if (!string.IsNullOrEmpty(registration.ApplicantEmail))
-                {
-                    var emailSubject = "Business Partner Registration Submitted";
-                    var emailBody = GenerateRegistrationSubmittedEmailBody(registration.ApplicantName, registration.RegistrationNumber);
-
-                    await _notificationService.SendEmailAsync(
-                        registration.ApplicantEmail,
-                        emailSubject,
-                        emailBody,
-                        isHtml: true
-                    );
-
-                    _logger.LogInformation("Registration submitted email sent to {Email} for application {ApplicationNumber}",
-                        registration.ApplicantEmail, registration.RegistrationNumber);
-                }
-
-                _logger.LogInformation("Notifications created for registration submission {ApplicationNumber}", registration.RegistrationNumber);
+                _logger.LogInformation(
+                    "Registration submitted email sent for application {ApplicationNumber}",
+                    registration.RegistrationNumber);
             }
             catch (Exception ex)
             {
@@ -1426,10 +1423,12 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             // Primary Contact Information (from contact person)
             PrimaryContactName = additionalData.ContactPersonName,
             PrimaryContactTitle = additionalData.ContactPersonTitle,
-            // Preserve legacy account-first registrations. In the token-gated path,
-            // credential provisioning replaces the system actor with the approved
-            // supplier account while leaving registration audit fields unchanged.
-            UserId = registration.CreatedById,
+            // The registration creator is audit provenance, not necessarily an
+            // ApplicationUser. Token-gated applications are created by an
+            // applicant-session subject, so copying CreatedById into this foreign
+            // key can reference a non-existent Users row. Credential provisioning
+            // links the approved supplier account after that account is created.
+            UserId = null,
             // Operational status used across internal UIs and downstream docs.
             RegistrationStatus = BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus,
             ApprovalStatus = BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus,
@@ -1638,95 +1637,57 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         {
             try
             {
-                // First parse the outer DTO structure
-                var outerData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(registration.RegistrationDataJson);
-
-                System.Text.Json.JsonElement registrationData;
-
-                // Check if there's a nested "RegistrationData" property (from UpdateBusinessPartnerRegistrationDto)
-                // Note: Property name is case-sensitive, check both camelCase and PascalCase
-                if (outerData.TryGetProperty("RegistrationData", out var nestedData) && nestedData.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    // Parse the nested JSON string
-                    var nestedJsonString = nestedData.GetString();
-
-                    if (!string.IsNullOrEmpty(nestedJsonString))
-                    {
-                        registrationData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(nestedJsonString);
-                    }
-                    else
-                    {
-                        registrationData = outerData;
-                    }
-                }
-                else if (outerData.TryGetProperty("registrationData", out nestedData) && nestedData.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    // Try camelCase version
-                    var nestedJsonString = nestedData.GetString();
-
-                    if (!string.IsNullOrEmpty(nestedJsonString))
-                    {
-                        registrationData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(nestedJsonString);
-                    }
-                    else
-                    {
-                        registrationData = outerData;
-                    }
-                }
-                else
-                {
-                    // No nested structure, use the outer data directly
-                    registrationData = outerData;
-                }
+                var registrationData = ParseRegistrationData(registration.RegistrationDataJson);
+                dto.RegistrationData = registrationData.GetRawText();
 
                 // Company Information
-                if (registrationData.TryGetProperty("tradingName", out var tradingName))
+                if (TryGetProperty(registrationData, "tradingName", out var tradingName))
                     dto.TradingName = tradingName.GetString();
-                if (registrationData.TryGetProperty("registrationNumber", out var regNumber))
+                if (TryGetProperty(registrationData, "registrationNumber", out var regNumber))
                     dto.RegistrationNumber = regNumber.GetString();
-                if (registrationData.TryGetProperty("taxNumber", out var taxNumber))
+                if (TryGetProperty(registrationData, "taxNumber", out var taxNumber))
                     dto.TaxNumber = taxNumber.GetString();
-                if (registrationData.TryGetProperty("vatNumber", out var vatNumber))
+                if (TryGetProperty(registrationData, "vatNumber", out var vatNumber))
                     dto.VatNumber = vatNumber.GetString();
-                if (registrationData.TryGetProperty("website", out var website))
+                if (TryGetProperty(registrationData, "website", out var website))
                     dto.Website = website.GetString();
-                if (registrationData.TryGetProperty("industryType", out var industryType))
+                if (TryGetProperty(registrationData, "industryType", out var industryType))
                     dto.IndustryType = industryType.GetString();
-                if (registrationData.TryGetProperty("yearsInBusiness", out var yearsInBusiness) && yearsInBusiness.ValueKind == System.Text.Json.JsonValueKind.Number)
+                if (TryGetProperty(registrationData, "yearsInBusiness", out var yearsInBusiness) && yearsInBusiness.ValueKind == System.Text.Json.JsonValueKind.Number)
                     dto.YearsInBusiness = yearsInBusiness.GetInt32();
-                if (registrationData.TryGetProperty("numberOfEmployees", out var numberOfEmployees) && numberOfEmployees.ValueKind == System.Text.Json.JsonValueKind.Number)
+                if (TryGetProperty(registrationData, "numberOfEmployees", out var numberOfEmployees) && numberOfEmployees.ValueKind == System.Text.Json.JsonValueKind.Number)
                     dto.NumberOfEmployees = numberOfEmployees.GetInt32();
-                if (registrationData.TryGetProperty("annualRevenue", out var annualRevenue) && annualRevenue.ValueKind == System.Text.Json.JsonValueKind.Number)
+                if (TryGetProperty(registrationData, "annualRevenue", out var annualRevenue) && annualRevenue.ValueKind == System.Text.Json.JsonValueKind.Number)
                     dto.AnnualRevenue = annualRevenue.GetDecimal();
 
                 // Contact Information
-                if (registrationData.TryGetProperty("alternatePhone", out var alternatePhone))
+                if (TryGetProperty(registrationData, "alternatePhone", out var alternatePhone))
                     dto.AlternatePhone = alternatePhone.GetString();
-                if (registrationData.TryGetProperty("physicalAddress", out var physicalAddress))
+                if (TryGetProperty(registrationData, "physicalAddress", out var physicalAddress))
                     dto.PhysicalAddress = physicalAddress.GetString();
-                if (registrationData.TryGetProperty("city", out var city))
+                if (TryGetProperty(registrationData, "city", out var city))
                     dto.City = city.GetString();
-                if (registrationData.TryGetProperty("country", out var country))
+                if (TryGetProperty(registrationData, "country", out var country))
                     dto.Country = country.GetString();
-                if (registrationData.TryGetProperty("postalCode", out var postalCode))
+                if (TryGetProperty(registrationData, "postalCode", out var postalCode))
                     dto.PostalCode = postalCode.GetString();
 
                 // Primary Contact Person
-                if (registrationData.TryGetProperty("contactPersonName", out var contactPersonName))
+                if (TryGetProperty(registrationData, "contactPersonName", out var contactPersonName))
                     dto.ContactPersonName = contactPersonName.GetString();
-                if (registrationData.TryGetProperty("contactPersonTitle", out var contactPersonTitle))
+                if (TryGetProperty(registrationData, "contactPersonTitle", out var contactPersonTitle))
                     dto.ContactPersonTitle = contactPersonTitle.GetString();
-                if (registrationData.TryGetProperty("contactPersonEmail", out var contactPersonEmail))
+                if (TryGetProperty(registrationData, "contactPersonEmail", out var contactPersonEmail))
                     dto.ContactPersonEmail = contactPersonEmail.GetString();
-                if (registrationData.TryGetProperty("contactPersonPhone", out var contactPersonPhone))
+                if (TryGetProperty(registrationData, "contactPersonPhone", out var contactPersonPhone))
                     dto.ContactPersonPhone = contactPersonPhone.GetString();
 
                 // Banking Information
-                if (registrationData.TryGetProperty("bankName", out var bankName))
+                if (TryGetProperty(registrationData, "bankName", out var bankName))
                     dto.BankName = bankName.GetString();
-                if (registrationData.TryGetProperty("bankAccountNumber", out var bankAccountNumber))
+                if (TryGetProperty(registrationData, "bankAccountNumber", out var bankAccountNumber))
                     dto.BankAccountNumber = bankAccountNumber.GetString();
-                if (registrationData.TryGetProperty("bankBranchCode", out var bankBranchCode))
+                if (TryGetProperty(registrationData, "bankBranchCode", out var bankBranchCode))
                     dto.BankBranchCode = bankBranchCode.GetString();
             }
             catch (Exception ex)
@@ -1782,6 +1743,87 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
         }
 
         return dto;
+    }
+
+    private async Task PopulateEvidenceReadinessAsync(
+        BusinessPartnerRegistrationDetailDto result,
+        Entities.Procurement.BusinessPartnerRegistration registration)
+    {
+        if (_evidencePackService is null ||
+            !string.Equals(registration.PartnerType, "Supplier", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        result.EvidenceReadiness = await _evidencePackService
+            .GetRegistrationReadinessAsync(registration.Id, CancellationToken.None);
+    }
+
+    private static string NormalizeRegistrationDataJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "{}";
+        try
+        {
+            var parsed = ParseRegistrationData(value);
+            if (parsed.ValueKind != System.Text.Json.JsonValueKind.Object)
+                throw new InvalidOperationException(
+                    "Registration data must be a JSON object.");
+            return parsed.GetRawText();
+        }
+        catch (System.Text.Json.JsonException exception)
+        {
+            throw new InvalidOperationException(
+                "Registration data must contain valid JSON.", exception);
+        }
+    }
+
+    private static System.Text.Json.JsonElement ParseRegistrationData(string value)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(value);
+        var current = document.RootElement.Clone();
+
+        // Older saves serialized UpdateBusinessPartnerRegistrationDto itself,
+        // producing one or more RegistrationData string wrappers. Unwrap those
+        // shapes centrally so every client receives the same canonical object.
+        for (var depth = 0; depth < 3 &&
+             current.ValueKind == System.Text.Json.JsonValueKind.Object &&
+             TryGetProperty(current, "registrationData", out var nested); depth++)
+        {
+            if (nested.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                current = nested.Clone();
+                continue;
+            }
+
+            if (nested.ValueKind != System.Text.Json.JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(nested.GetString()))
+                break;
+
+            using var nestedDocument = System.Text.Json.JsonDocument.Parse(nested.GetString()!);
+            current = nestedDocument.RootElement.Clone();
+        }
+
+        return current;
+    }
+
+    private static bool TryGetProperty(
+        System.Text.Json.JsonElement source,
+        string propertyName,
+        out System.Text.Json.JsonElement value)
+    {
+        if (source.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            foreach (var property in source.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private static int CalculateCompletionPercentage(Entities.Procurement.BusinessPartnerRegistration registration)
@@ -1938,12 +1980,13 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             <div class='info-box'>
                 <strong>Your Partner Number:</strong> {partnerNumber}
             </div>
-            <p>You can now access all business partner features and services.</p>
+            <p>Your supplier approval is complete. Portal account access is activated through a separate credential-delivery step.</p>
             <p><strong>What's Next:</strong></p>
             <ul>
-                <li>Log in to your account using your credentials</li>
-                <li>Complete your profile information</li>
-                <li>Start exploring available opportunities</li>
+                <li>If this application uses the supplier portal, your login identifier and one-time temporary password will be sent separately to the verified application contact after account provisioning</li>
+                <li>Do not use the application token as your portal password</li>
+                <li>The temporary password must be changed at first login and expires after the configured validity period</li>
+                <li>If the separate credential message does not arrive, contact procurement support</li>
             </ul>
             <p>Welcome to our business partner network!</p>
             <p>Best regards,<br>Business Partner Registration Team</p>

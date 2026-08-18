@@ -7,6 +7,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Services.Maintenance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -415,6 +416,10 @@ public class WorkOrdersController : ControllerBase
             var parts = await _workOrderPartService.GetPartsByWorkOrderAsync(workOrderId);
             return Ok(parts);
         }
+        catch (InventoryWorkOrderReservationAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error retrieving parts for work order {workOrderId}");
@@ -435,8 +440,17 @@ public class WorkOrdersController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var part = await _workOrderPartService.AddPartAsync(createDto);
+            var part = await _workOrderPartService.AddPartAsync(createDto,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier);
             return Ok(part);
+        }
+        catch (InventoryWorkOrderReservationAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryWorkOrderReservationException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (Exception ex)
         {
@@ -471,8 +485,17 @@ public class WorkOrdersController : ControllerBase
                 part.WorkOrderId = workOrderId;
             }
 
-            var addedParts = await _workOrderPartService.AddPartsBulkAsync(parts);
+            var addedParts = await _workOrderPartService.AddPartsBulkAsync(parts,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier);
             return Ok(addedParts);
+        }
+        catch (InventoryWorkOrderReservationAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryWorkOrderReservationException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (Exception ex)
         {
@@ -496,9 +519,16 @@ public class WorkOrdersController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var part = await _workOrderPartService.UpdatePartAsync(id, updateDto);
+            var part = await _workOrderPartService.UpdatePartAsync(id, updateDto,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier);
             return Ok(part);
         }
+        catch (InventoryWorkOrderReservationAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryWorkOrderReservationNotFoundException ex) { return NotFound(new { code = "INV_WORK_ORDER_RESERVATION_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryWorkOrderReservationException ex) { return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error updating part {id}");
@@ -514,9 +544,13 @@ public class WorkOrdersController : ControllerBase
     {
         try
         {
-            await _workOrderPartService.DeletePartAsync(id);
+            await _workOrderPartService.DeletePartAsync(id,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier);
             return NoContent();
         }
+        catch (InventoryWorkOrderReservationAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryWorkOrderReservationNotFoundException ex) { return NotFound(new { code = "INV_WORK_ORDER_RESERVATION_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryWorkOrderReservationException ex) { return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error deleting part {id}");
@@ -532,22 +566,48 @@ public class WorkOrdersController : ControllerBase
     {
         try
         {
-            var part = await _workOrderPartService.ReturnUnusedPartsAsync(id);
+            var part = await _workOrderPartService.ReturnUnusedPartsAsync(id,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier);
             return Ok(part);
         }
-        catch (KeyNotFoundException)
+        catch (InventoryWorkOrderReservationAuthorizationException ex)
         {
-            return NotFound($"Part with ID {id} not found");
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
-        catch (InvalidOperationException ex)
+        catch (InventoryWorkOrderReservationNotFoundException ex)
         {
-            return BadRequest(ex.Message);
+            return NotFound(new { code = "INV_WORK_ORDER_RESERVATION_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryWorkOrderReservationException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Error returning unused parts for part {id}");
             return StatusCode(500, "An error occurred while returning unused parts");
         }
+    }
+
+    [HttpPost("parts/{id:guid}/reservation/retry")]
+    public async Task<ActionResult<WorkOrderPartDto>> RetryPartReservation(Guid id)
+    {
+        try
+        {
+            return Ok(await _workOrderPartService.RetryReservationAsync(id,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier));
+        }
+        catch (InventoryWorkOrderReservationAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryWorkOrderReservationNotFoundException ex) { return NotFound(new { code = "INV_WORK_ORDER_RESERVATION_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryWorkOrderReservationException ex) { return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+    }
+
+    [HttpGet("parts/{id:guid}/reservation/actions")]
+    public async Task<ActionResult<IReadOnlyList<ErpSystem.Core.DTOs.Inventory.InventoryWorkOrderReservationActionDto>>> GetPartReservationActions(Guid id)
+    {
+        try { return Ok(await _workOrderPartService.GetReservationActionsAsync(id)); }
+        catch (InventoryWorkOrderReservationAuthorizationException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
+        catch (InventoryWorkOrderReservationNotFoundException ex) { return NotFound(new { code = "INV_WORK_ORDER_RESERVATION_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier }); }
     }
 
     /// <summary>
@@ -563,8 +623,21 @@ public class WorkOrdersController : ControllerBase
                 return BadRequest("No part IDs provided");
             }
 
-            await _workOrderPartService.DeletePartsBulkAsync(ids);
+            await _workOrderPartService.DeletePartsBulkAsync(ids,
+                Request.Headers["Idempotency-Key"].FirstOrDefault(), HttpContext.TraceIdentifier);
             return NoContent();
+        }
+        catch (InventoryWorkOrderReservationAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "INV_WORK_ORDER_RESERVATION_FORBIDDEN", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryWorkOrderReservationNotFoundException ex)
+        {
+            return NotFound(new { code = "INV_WORK_ORDER_RESERVATION_NOT_FOUND", message = ex.Message, correlationId = HttpContext.TraceIdentifier });
+        }
+        catch (InventoryWorkOrderReservationException ex)
+        {
+            return Conflict(new { code = ex.Code, message = ex.Message, correlationId = HttpContext.TraceIdentifier });
         }
         catch (Exception ex)
         {

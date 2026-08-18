@@ -70,6 +70,57 @@ public sealed class ProcurementWorksCloseoutMigrationTests
             .Should().BeGreaterThan(0);
     }
 
+    [Fact]
+    public void Qs0504MigrationExtendsCanonicalLedgerWithoutCreatingParallelTables()
+    {
+        var operations = Operations(
+            new AddQuantitySurveyRetentionReleaseLifecycle());
+
+        operations.OfType<CreateTableOperation>().Should().BeEmpty();
+        operations.OfType<AddColumnOperation>()
+            .Where(item => item.Table == "ProcurementWorksCloseoutActions")
+            .Select(item => item.Name)
+            .Should().Contain([
+                "RetentionReleaseStage",
+                "QuantitySurveyConfigurationProfileId",
+                "QuantitySurveyRetentionDecisionId",
+                "RequestHash",
+                "RetentionHeldSnapshot",
+                "RetentionReleasedBefore",
+                "RetentionStageLimitAmount",
+                "RetentionReleasedAfter",
+                "UsesRetentionBond"
+            ]);
+        operations.OfType<AddForeignKeyOperation>().Should().Contain(item =>
+            item.PrincipalTable == "QuantitySurveyConfigurationProfiles");
+        operations.OfType<AddForeignKeyOperation>().Should().Contain(item =>
+            item.PrincipalTable == "QuantitySurveyConfigurationDecisions");
+        operations.OfType<CreateIndexOperation>().Should().Contain(item =>
+            item.Name.EndsWith(
+                "RetentionReleaseStage_ProjectHandoverItemId",
+                StringComparison.Ordinal) &&
+            item.IsUnique &&
+            item.Filter!.Contains("[ActionType] = 5",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Qs0504MigrationCreatesFailClosedPolicySourceAndApprovalGuards()
+    {
+        var sql = Sql(Operations(
+            new AddQuantitySurveyRetentionReleaseLifecycle()));
+
+        sql.Should().Contain(
+            "TR_ProcurementWorksCloseoutActions_QS0504RetentionGuard");
+        sql.Should().Contain("QS-DEC-009");
+        sql.Should().Contain("QS_RETENTION_RELEASE");
+        sql.Should().Contain("55041");
+        sql.Should().Contain("55042");
+        sql.Should().Contain("55043");
+        sql.Should().Contain("pb.[TenderAwardId] = bc.[TenderAwardId]");
+        sql.Should().NotContain("DISABLE TRIGGER");
+    }
+
     private static IReadOnlyList<MigrationOperation> Operations(Migration migration)
     {
         var builder = new MigrationBuilder(

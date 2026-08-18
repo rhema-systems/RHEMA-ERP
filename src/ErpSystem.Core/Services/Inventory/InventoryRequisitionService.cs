@@ -47,6 +47,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IInventoryReturnControlService _returnControls;
+    private readonly IInventoryIssueFinanceAssetService _issueFinanceAssets;
     private readonly ILogger<InventoryRequisitionService> _logger;
 
     public InventoryRequisitionService(
@@ -70,6 +71,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         IProcurementAccessControlService accessControl,
         IProcurementControlEventService controlEvents,
         IInventoryReturnControlService returnControls,
+        IInventoryIssueFinanceAssetService issueFinanceAssets,
         ILogger<InventoryRequisitionService> logger)
     {
         _requisitionRepository = requisitionRepository;
@@ -92,6 +94,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         _accessControl = accessControl;
         _controlEvents = controlEvents;
         _returnControls = returnControls;
+        _issueFinanceAssets = issueFinanceAssets;
         _logger = logger;
     }
 
@@ -431,6 +434,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         EnsureIssueActor();
         if (dto.Items.Count == 0)
             throw new InventoryIssueControlException("INV_ISSUE_LINES_REQUIRED", "At least one positive issue line is required.");
+        dto.MovementReasonCode = NormalizeMovementReason(dto.MovementReasonCode);
 
         if (_unitOfWork.HasActiveTransaction)
         {
@@ -481,6 +485,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         {
             requisitionId = id,
             receiverId,
+            movementReasonCode = dto.MovementReasonCode,
             notes = NormalizeOptional(dto.Notes, 2000),
             items = dto.Items.OrderBy(item => item.ItemId).Select(item => new
             {
@@ -547,7 +552,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             requisition.WarehouseId,
             requisition.LocationId,
             requisition.RequestedById,
-            requisition.ApprovedById
+            requisition.ApprovedById,
+            dto.MovementReasonCode
         });
         var voucher = new InventoryIssueVoucher
         {
@@ -568,6 +574,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             ReceiverUserId = receiverId,
             IssuedAtUtc = issuedAt,
             Notes = NormalizeOptional(dto.Notes, 2000),
+            MovementReasonCode = dto.MovementReasonCode,
             IdempotencyKey = normalizedKey,
             PayloadHash = payloadHash,
             CorrelationId = correlationId,
@@ -577,6 +584,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         voucher.IntegrityHash = VoucherIntegrity(voucher);
         await _unitOfWork.Repository<InventoryIssueVoucher>().AddAsync(voucher);
         var pendingMovements = new List<StockMovement>();
+        var pendingVoucherLines = new List<InventoryIssueVoucherLine>();
 
         foreach (var issueItem in dto.Items)
         {
@@ -800,8 +808,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 voucherLine.LocationId, voucherLine.Quantity, voucherLine.UnitCost, voucherLine.TotalValue,
                 voucherLine.UnitOfMeasure, voucherLine.LotNumber, voucherLine.BatchNumber, voucherLine.SerialNumber,
                 voucherLine.ManufactureDate, voucherLine.ExpiryDate, voucherLine.InventoryTrackingExceptionId });
-            voucher.Lines.Add(voucherLine);
-            await _unitOfWork.Repository<InventoryIssueVoucherLine>().AddAsync(voucherLine);
+            // Keep the line detached until the requisition's issued quantity is durable inside
+            // this transaction. The SQL line guard compares the aggregate voucher quantity to
+            // that value, while EF is otherwise free to insert a new line before updating its
+            // existing requisition item.
+            pendingVoucherLines.Add(voucherLine);
 
         }
 
@@ -828,15 +839,28 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
         await UpdateRequisitionTotals(requisition);
         await _requisitionRepository.UpdateAsync(requisition);
+
+        // Persist the approved-source quantities and balances before inserting voucher lines.
+        // This remains inside the same serializable transaction, so any later Finance, asset,
+        // stock-movement or evidence failure rolls the entire issue back atomically.
+        await _unitOfWork.SaveChangesAsync();
+        foreach (var voucherLine in pendingVoucherLines)
+        {
+            voucher.Lines.Add(voucherLine);
+            await _unitOfWork.Repository<InventoryIssueVoucherLine>().AddAsync(voucherLine);
+        }
         await AddVoucherActionAsync(voucher, InventoryIssueVoucherActionType.Issued,
             InventoryIssueVoucherStatus.Issued, dto.Notes ?? "Stock issued and handed over for receiver acknowledgement.",
             new { requisition.Id, requisition.RequisitionNumber, ReceiverUserId = receiverId, Lines = voucher.Lines.Count },
             correlationId);
         await AddIssueAuditAsync("InventoryRequisition.Issue", voucher, null,
             new { voucher.VoucherNumber, voucher.Status, voucher.ReceiverUserId, voucher.IssuedAtUtc, Lines = voucher.Lines.Count }, correlationId);
-        // Persist voucher/line evidence first inside the same transaction so the SQL issue guard
+        // Persist voucher-line evidence first inside the same transaction so the SQL issue guard
         // can validate each subsequently inserted stock movement against durable allowed quantity.
         await _unitOfWork.SaveChangesAsync();
+        // Finance and Fixed Assets join this same serializable transaction. A posting, custody
+        // registration or lineage failure therefore rolls back the issue balances and voucher too.
+        await _issueFinanceAssets.PostIssueAsync(voucher.Id);
         foreach (var movement in pendingMovements)
         {
             await _stockMovementRepository.AddAsync(movement);
@@ -1390,6 +1414,9 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         AcknowledgedAtUtc = voucher.AcknowledgedAtUtc,
         Notes = voucher.Notes,
         ReceiverComment = voucher.ReceiverComment,
+        MovementReasonCode = voucher.MovementReasonCode,
+        FinancePostingEventId = voucher.FinancePostingEventId,
+        FinanceJournalEntryId = voucher.FinanceJournalEntryId,
         RowVersion = Convert.ToBase64String(voucher.RowVersion ?? Array.Empty<byte>()),
         Lines = voucher.Lines.OrderBy(value => value.InventoryItem.ItemCode).Select(value => new InventoryIssueVoucherLineDto
         {
@@ -1449,6 +1476,9 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         voucher.IssuedAtUtc,
         voucher.AcknowledgedAtUtc,
         voucher.ReceiverComment,
+        voucher.MovementReasonCode,
+        voucher.FinancePostingEventId,
+        voucher.FinanceJournalEntryId,
         voucher.IdempotencyKey,
         voucher.PayloadHash,
         voucher.CorrelationId,
@@ -1465,6 +1495,15 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             throw new InventoryIssueControlException("INV_ISSUE_VALUE_REQUIRED", $"{field} is required.");
         if (normalized.Length > maxLength)
             throw new InventoryIssueControlException("INV_ISSUE_VALUE_TOO_LONG", $"{field} cannot exceed {maxLength} characters.");
+        return normalized;
+    }
+
+    private static string NormalizeMovementReason(string? value)
+    {
+        var normalized = NormalizeRequired(value, 50, "Movement reason").ToUpperInvariant();
+        if (!InventoryIssueMovementReasons.Labels.ContainsKey(normalized))
+            throw new InventoryIssueControlException("INV_ISSUE_MOVEMENT_REASON_INVALID",
+                "Select a supported inventory movement reason.");
         return normalized;
     }
 

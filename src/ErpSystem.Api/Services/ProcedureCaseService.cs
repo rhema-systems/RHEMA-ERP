@@ -971,8 +971,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return (
             procedure.Title,
-            BuildEstateFieldSeeds(procedure),
-            BuildEstateDocumentSeeds(procedure));
+            [],
+            []);
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildPropertyManagementSeed(string entityType)

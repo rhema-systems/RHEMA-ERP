@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -26,10 +26,7 @@ export default function ChangeTemporaryPasswordPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const user = useMemo(
-    () => authService.getStoredUser() as User | null,
-    []
-  );
+  const user = useMemo(() => authService.getStoredUser() as User | null, []);
 
   useEffect(() => {
     if (!authService.isAuthenticated()) router.replace('/login');
@@ -57,21 +54,21 @@ export default function ChangeTemporaryPasswordPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-5">
-      <Card className="w-full max-w-lg border-slate-800 bg-slate-900 text-slate-100">
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-5 text-slate-950">
+      <Card className="w-full max-w-lg border-slate-200 bg-white text-slate-950 shadow-lg">
         <CardHeader>
           <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/15">
-            <ShieldCheck className="h-6 w-6 text-emerald-400" />
+            <ShieldCheck className="h-6 w-6 text-emerald-700" />
           </div>
           <CardTitle>Replace your temporary password</CardTitle>
-          <CardDescription className="text-slate-400">
+          <CardDescription className="text-slate-600">
             This one-time step activates the approved supplier account. No other
             portal function is available until it is complete.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {user?.temporaryPasswordExpiresAtUtc && (
-            <Alert className="mb-5 border-amber-700 bg-amber-950/30 text-amber-100">
+            <Alert className="mb-5 border-amber-200 bg-amber-50 text-amber-950">
               <AlertDescription>
                 Temporary credential expires{' '}
                 {new Date(user.temporaryPasswordExpiresAtUtc).toLocaleString()}.
@@ -80,28 +77,28 @@ export default function ChangeTemporaryPasswordPage() {
           )}
           <form className="grid gap-4" onSubmit={submit}>
             <div className="grid gap-2">
-              <Label className="text-slate-200" htmlFor="temporary-password">
+              <Label className="text-slate-800" htmlFor="temporary-password">
                 Temporary password
               </Label>
               <Input
                 id="temporary-password"
                 type="password"
                 autoComplete="current-password"
-                className="border-slate-700 bg-slate-950"
+                className="border-slate-300 bg-white text-slate-950 caret-slate-950 focus:bg-white focus-visible:border-emerald-600 focus-visible:bg-white focus-visible:ring-emerald-600/20"
                 value={currentPassword}
                 onChange={(event) => setCurrentPassword(event.target.value)}
                 required
               />
             </div>
             <div className="grid gap-2">
-              <Label className="text-slate-200" htmlFor="new-password">
+              <Label className="text-slate-800" htmlFor="new-password">
                 New password
               </Label>
               <Input
                 id="new-password"
                 type="password"
                 autoComplete="new-password"
-                className="border-slate-700 bg-slate-950"
+                className="border-slate-300 bg-white text-slate-950 caret-slate-950 focus:bg-white focus-visible:border-emerald-600 focus-visible:bg-white focus-visible:ring-emerald-600/20"
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
                 minLength={8}
@@ -109,14 +106,14 @@ export default function ChangeTemporaryPasswordPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label className="text-slate-200" htmlFor="confirm-password">
+              <Label className="text-slate-800" htmlFor="confirm-password">
                 Confirm new password
               </Label>
               <Input
                 id="confirm-password"
                 type="password"
                 autoComplete="new-password"
-                className="border-slate-700 bg-slate-950"
+                className="border-slate-300 bg-white text-slate-950 caret-slate-950 focus:bg-white focus-visible:border-emerald-600 focus-visible:bg-white focus-visible:ring-emerald-600/20"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 minLength={8}

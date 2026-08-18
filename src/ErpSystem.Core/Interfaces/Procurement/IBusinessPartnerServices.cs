@@ -161,6 +161,7 @@ public interface IBusinessPartnerRegistrationService
     Task DeleteAsync(Guid id, Guid userId);
     Task<IEnumerable<BusinessPartnerRegistrationDto>> GetMyRegistrationsAsync(Guid userId);
     Task SubmitForReviewAsync(Guid id, Guid userId);
+    Task SubmitExternalApplicantForReviewAsync(Guid id, Guid applicantActorId);
 
     // Debug
     Task<IEnumerable<BusinessPartnerRegistrationDto>> GetAllRegistrationsForDebugAsync();

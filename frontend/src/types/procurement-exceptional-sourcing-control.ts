@@ -39,6 +39,9 @@ export interface ProcurementExceptionalSourcingReadiness {
   boardApprovalRequired: boolean;
   managingDirectorApprovalRequired: boolean;
   ppaApprovalRequired: boolean;
+  justificationRequired: boolean;
+  evidenceRequired: boolean;
+  postAwardFilingRequired: boolean;
   evidenceRequirements: ExceptionalEvidenceRequirement[];
   supplierOptions: ExceptionalSupplierOption[];
 }
@@ -79,9 +82,27 @@ export interface ProcurementExceptionalSourcingControl {
   integrityHash: string;
   rowVersion: string;
   suppliers: Array<{ businessPartnerId: string; supplierName: string }>;
-  evidenceChecklist: Array<ExceptionalEvidenceRequirement & { evidenceReference: string; verificationReference: string }>;
-  bids: Array<{ bidId: string; bidNumber: string; businessPartnerId: string; supplierName: string; bidAmount: number; currency: string; status: string }>;
-  milestones: Array<{ code: string; label: string; completedAtUtc?: string; reference?: string }>;
+  evidenceChecklist: Array<
+    ExceptionalEvidenceRequirement & {
+      evidenceReference: string;
+      verificationReference: string;
+    }
+  >;
+  bids: Array<{
+    bidId: string;
+    bidNumber: string;
+    businessPartnerId: string;
+    supplierName: string;
+    bidAmount: number;
+    currency: string;
+    status: string;
+  }>;
+  milestones: Array<{
+    code: string;
+    label: string;
+    completedAtUtc?: string;
+    reference?: string;
+  }>;
 }
 
 export interface PrepareExceptionalSourcingRequest {
@@ -89,5 +110,9 @@ export interface PrepareExceptionalSourcingRequest {
   justificationEvidenceReference: string;
   supplierSelectionEvidenceReference: string;
   businessPartnerIds: string[];
-  evidenceChecklist: Array<{ requirementKey: string; evidenceReference: string; verificationReference: string }>;
+  evidenceChecklist: Array<{
+    requirementKey: string;
+    evidenceReference: string;
+    verificationReference: string;
+  }>;
 }

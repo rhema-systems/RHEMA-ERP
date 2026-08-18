@@ -8,6 +8,10 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace ErpSystem.Data.Migrations;
 
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813150000_INVREQFU003AllowPostedFullReturnReversal")] partial class INVREQFU003AllowPostedFullReturnReversal { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813171000_INVREQFU004RequireCleanTransferEvidence")] partial class INVREQFU004RequireCleanTransferEvidence { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813143000_INVREQFU003ReturnReversalAllocationGate")] partial class INVREQFU003ReturnReversalAllocationGate { }
+
 [DbContext(typeof(ApplicationDbContext)), Migration("20260304155434_RecreateHRTables")] partial class RecreateHRTables { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260311184920_AddProjectMaterialCostLedger")] partial class AddProjectMaterialCostLedger { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260311213738_AddProjectDeliverableExternalReviews")] partial class AddProjectDeliverableExternalReviews { }
@@ -92,6 +96,7 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715205906_AddCentralDocumentManagement")] partial class AddCentralDocumentManagement { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715212107_AddEstateDocumentCentralDmsPublication")] partial class AddEstateDocumentCentralDmsPublication { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260715230135_AddCentralDocumentMetadataValues")] partial class AddCentralDocumentMetadataValues { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260719120000_FixFinanceWorkflowConformance")] partial class FixFinanceWorkflowConformance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260720010326_AddRecurringJournalWorkflow")] partial class AddRecurringJournalWorkflow { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260720221046_AddProcurementPolicyDomain")] partial class AddProcurementPolicyDomain { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260721012643_AddProcurementAccessControls")] partial class AddProcurementAccessControls { }
@@ -171,3 +176,20 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806010613_TDC0706SharedAuditGovernance")] partial class TDC0706SharedAuditGovernance { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806082400_TDC0809HrIdentityReconciliation")] partial class TDC0809HrIdentityReconciliation { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260806091039_TDC0808ProcurementCentralDmsAdoption")] partial class TDC0808ProcurementCentralDmsAdoption { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260808143557_AddQuantitySurveyTenderBoqSubmissions")] partial class AddQuantitySurveyTenderBoqSubmissions { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260808155330_AddQuantitySurveyRateLibrary")] partial class AddQuantitySurveyRateLibrary { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260809152905_AddQuantitySurveyEscalationFormulaRegister")] partial class AddQuantitySurveyEscalationFormulaRegister { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810103259_AddQuantitySurveyDesignRevisionImpacts")] partial class AddQuantitySurveyDesignRevisionImpacts { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810121810_AddQuantitySurveyValuationWorksheets")] partial class AddQuantitySurveyValuationWorksheets { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810134646_AddQuantitySurveyInterimValuationWorkflow")] partial class AddQuantitySurveyInterimValuationWorkflow { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810154236_AddQuantitySurveyPaymentCertificateLifecycle")] partial class AddQuantitySurveyPaymentCertificateLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810165005_AddQuantitySurveyRetentionReleaseLifecycle")] partial class AddQuantitySurveyRetentionReleaseLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle")] partial class AddQuantitySurveyAdvanceRecoveryLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810202208_AddQuantitySurveyFinalAccountLifecycle")] partial class AddQuantitySurveyFinalAccountLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle")] partial class AddQuantitySurveyMaterialReconciliationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260810234912_AddQuantitySurveyVariationLifecycle")] partial class AddQuantitySurveyVariationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260811010013_AddQuantitySurveyContractClaimLifecycle")] partial class AddQuantitySurveyContractClaimLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260811013838_AddQuantitySurveyDayworkLifecycle")] partial class AddQuantitySurveyDayworkLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260812195409_INVREQFU001GovernedReceiptSourceEvidence")] partial class INVREQFU001GovernedReceiptSourceEvidence { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813063001_INVREQFU002MaintenanceReservationLifecycle")] partial class INVREQFU002MaintenanceReservationLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260813103157_INVREQFU003IssueFinanceAssetLifecycle")] partial class INVREQFU003IssueFinanceAssetLifecycle { }

@@ -56,6 +56,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("Refund"),
         Normalize("BudgetScenario"),
         Normalize("BudgetReturn"),
+        Normalize("BudgetRevision"),
         Normalize("UnitJournalEntry"),
         Normalize("UnitAccountBudget"),
         Normalize("AllocationRule"),
@@ -811,6 +812,27 @@ public class FinanceApprovalsController : ControllerBase
             return item == null ? FinanceApprovalFacts.Empty : new(item.BudgetScenario?.Name, item.Notes, item.Status, item.SubmittedDate, null, null);
         }
 
+        if (key == Normalize("BudgetRevision"))
+        {
+            var item = await _db.BudgetRevisions.AsNoTracking()
+                .Include(x => x.SourceScenario)
+                .Include(x => x.Lines)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(
+                    $"{item.RevisionNumber} - {item.RevisionType}",
+                    $"{item.SourceScenario?.Name}; Board resolution {item.BoardResolutionReference}; {item.Justification}",
+                    item.Status,
+                    item.SubmittedAt,
+                    // Net change is zero for a valid virement, so the approval inbox
+                    // displays the gross increase being authorized rather than an
+                    // apparently immaterial zero-value request.
+                    item.Lines.Where(line => !line.IsDeleted && line.AdjustmentAmountBase > 0m)
+                        .Sum(line => line.AdjustmentAmountBase),
+                    item.SourceScenario?.BaseCurrencyCode);
+        }
+
         if (key == Normalize("UnitJournalEntry"))
         {
             var item = await _db.Set<UnitJournalEntry>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
@@ -1236,6 +1258,30 @@ public class FinanceApprovalsController : ControllerBase
                 entityId,
                 FinanceAuditEvents.BudgetScenarioApproved,
                 "InReview",
+                "Approved",
+                comments,
+                cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("BudgetRevision"))
+        {
+            await UpdateIfFoundAsync(_db.BudgetRevisions, tenantId, entityId, item =>
+            {
+                // Workflow approval authorizes the request only. A separate Finance
+                // Apply action creates and adopts the successor budget so reviewers
+                // can distinguish authorization from changing the official baseline.
+                item.Status = "Approved";
+                item.ApprovedAt = now;
+                item.ApprovedByUserId = userId;
+                item.RejectionReason = null;
+            }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetRevision",
+                entityId,
+                FinanceAuditEvents.BudgetRevisionApproved,
+                "Submitted",
                 "Approved",
                 comments,
                 cancellationToken);
@@ -1742,6 +1788,27 @@ public class FinanceApprovalsController : ControllerBase
                 FinanceAuditEvents.BudgetScenarioRejected,
                 "InReview",
                 "Collecting",
+                reason,
+                cancellationToken);
+            return;
+        }
+
+        if (key == Normalize("BudgetRevision"))
+        {
+            await UpdateIfFoundAsync(_db.BudgetRevisions, tenantId, entityId, item =>
+            {
+                item.Status = "Rejected";
+                item.ApprovedAt = null;
+                item.ApprovedByUserId = null;
+                item.RejectionReason = reason;
+            }, cancellationToken);
+            await RecordBudgetAuditAsync(
+                tenantId,
+                "BudgetRevision",
+                entityId,
+                FinanceAuditEvents.BudgetRevisionRejected,
+                "Submitted",
+                "Rejected",
                 reason,
                 cancellationToken);
             return;

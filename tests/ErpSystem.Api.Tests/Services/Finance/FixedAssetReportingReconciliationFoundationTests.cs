@@ -236,6 +236,66 @@ public sealed class FixedAssetReportingReconciliationFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
     [Trait("Category", "FixedAssets")]
+    public async Task RevaluationSurplusReconciliationSubtractsCompletedDisposalEquityTransfer()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedReportingFoundationAsync(db, tenantId, "TEN");
+        var retainedEarnings = SeedAccount(db, tenantId, "TEN-3100", "Retained Earnings", AccountType.Equity, "Equity");
+        var disposalId = Guid.NewGuid();
+        var (journalId, postingEventId) = SeedJournal(
+            db,
+            tenantId,
+            fixture.Period.Id,
+            new DateTime(2026, 7, 28),
+            "FixedAssets",
+            "FixedAssetDisposal",
+            disposalId,
+            "Disposal",
+            ("Transfer asset reserve", fixture.Accounts.RevaluationSurplus.Id, 200m, 0m, $"FixedAssetId={fixture.ApAsset.Id:N};AssetDisposalId={disposalId:N};Book=IFRS", "FA-DisposalRevaluationSurplus", fixture.ApAsset.AssetCode),
+            ("Transfer to retained earnings", retainedEarnings.Id, 0m, 200m, $"FixedAssetId={fixture.ApAsset.Id:N};AssetDisposalId={disposalId:N};Book=IFRS", "FA-DisposalRetainedEarnings", fixture.ApAsset.AssetCode));
+
+        // This focused disposal record represents the asset-specific equity movement. The asset
+        // register status is intentionally irrelevant here: the reconciliation must compare the
+        // reserve GL after the transfer with the reserve subledger after the same transfer.
+        db.AssetDisposals.Add(new AssetDisposal
+        {
+            Id = disposalId,
+            TenantId = tenantId,
+            FixedAssetId = fixture.ApAsset.Id,
+            DisposalDate = new DateTime(2026, 7, 28),
+            AccountingDate = new DateTime(2026, 7, 28),
+            FiscalPeriodId = fixture.Period.Id,
+            AccountingBookId = fixture.Book.Id,
+            BookClassification = "IFRS",
+            DisposalType = DisposalType.Scrap,
+            Status = AssetDisposalStatus.Completed,
+            Reason = "Focused reserve reconciliation fixture",
+            ProceedsCurrencyCode = "GHS",
+            RevaluationSurplusAtDisposal = 200m,
+            RevaluationSurplusAccountId = fixture.Accounts.RevaluationSurplus.Id,
+            RetainedEarningsAccountId = retainedEarnings.Id,
+            RevaluationSurplusTransferAmount = 200m,
+            JournalEntryId = journalId,
+            PostingEventId = postingEventId,
+            PostedAt = new DateTime(2026, 7, 28),
+            CompletedAt = new DateTime(2026, 7, 28),
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var service = CreateReportsService(db, tenantId);
+
+        var report = await service.GetGlReconciliationReportAsync(Query(accountId: fixture.Accounts.RevaluationSurplus.Id));
+        var reserve = report.Rows.Single(r => r.AccountId == fixture.Accounts.RevaluationSurplus.Id);
+
+        reserve.SubledgerBalance.Should().Be(0m);
+        reserve.GlBalance.Should().Be(0m);
+        reserve.Variance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-FixedAssetReporting")]
+    [Trait("Category", "FixedAssets")]
     public async Task ReconciliationDetectsMissingPostingReferencesAndSubledgerWithoutGl()
     {
         var tenantId = Guid.NewGuid();

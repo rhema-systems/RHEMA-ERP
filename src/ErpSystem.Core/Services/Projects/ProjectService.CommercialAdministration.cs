@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Projects;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.QuantitySurvey;
 
 namespace ErpSystem.Core.Services.Projects;
 
@@ -102,6 +103,9 @@ public partial class ProjectService
 
     public async Task<ProjectInterimValuationDto> AddProjectInterimValuationAsync(Guid projectId, CreateProjectInterimValuationDto dto)
     {
+        if (!string.IsNullOrWhiteSpace(dto.Status) &&
+            !string.Equals(dto.Status.Trim(), ProjectInterimValuationStatuses.Draft, StringComparison.Ordinal))
+            throw new InvalidOperationException("New interim valuations must start as Draft. Use the governed valuation workflow to change status.");
         var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
         var phase = await ValidateProjectDesignPhaseAsync(projectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(projectId, dto.ProjectPackageId);
@@ -126,7 +130,7 @@ public partial class ProjectService
             ContractId = contract?.Id,
             ValuationNumber = TrimOrNull(dto.ValuationNumber),
             Title = dto.Title.Trim(),
-            Status = NormalizeProjectInterimValuationStatus(dto.Status),
+            Status = ProjectInterimValuationStatuses.Draft,
             ValuationDate = dto.ValuationDate ?? DateTime.UtcNow,
             GrossWorkValue = derivation.GrossWorkValue,
             MaterialsOnSiteValue = derivation.MaterialsOnSiteValue,
@@ -151,6 +155,16 @@ public partial class ProjectService
     public async Task<ProjectInterimValuationDto> UpdateProjectInterimValuationAsync(Guid interimValuationId, UpdateProjectInterimValuationDto dto)
     {
         var entity = await GetProjectInterimValuationEntityAsync(interimValuationId);
+        if (!string.Equals(entity.Status, ProjectInterimValuationStatuses.Draft, StringComparison.Ordinal))
+            throw new InvalidOperationException("Only a Draft interim valuation can be edited. Use the governed valuation workflow for submitted records.");
+        if (!string.IsNullOrWhiteSpace(dto.Status) &&
+            !string.Equals(dto.Status.Trim(), ProjectInterimValuationStatuses.Draft, StringComparison.Ordinal))
+            throw new InvalidOperationException("Interim-valuation status is controlled by the governed valuation workflow.");
+        var worksheet = await _unitOfWork.Repository<QuantitySurveyValuationWorksheet>()
+            .FirstOrDefaultAsync(value => value.TenantId == _currentUserProvider.TenantId &&
+                value.ProjectInterimValuationId == entity.Id && !value.IsDeleted);
+        if (worksheet is not null && worksheet.Status != QuantitySurveyValuationWorkflowStatuses.Draft)
+            throw new InvalidOperationException("The interim valuation cannot be edited after contractor submission.");
         var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
@@ -171,7 +185,7 @@ public partial class ProjectService
         entity.ContractId = contract?.Id;
         entity.ValuationNumber = TrimOrNull(dto.ValuationNumber);
         entity.Title = dto.Title.Trim();
-        entity.Status = NormalizeProjectInterimValuationStatus(dto.Status);
+        entity.Status = ProjectInterimValuationStatuses.Draft;
         entity.ValuationDate = dto.ValuationDate ?? entity.ValuationDate;
         entity.GrossWorkValue = derivation.GrossWorkValue;
         entity.MaterialsOnSiteValue = derivation.MaterialsOnSiteValue;
@@ -196,6 +210,11 @@ public partial class ProjectService
     {
         var entity = await GetProjectInterimValuationEntityAsync(interimValuationId);
         var project = await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        if (!string.Equals(entity.Status, ProjectInterimValuationStatuses.Draft, StringComparison.Ordinal))
+            throw new InvalidOperationException("Only a Draft interim valuation can be deleted.");
+        if (await _unitOfWork.Repository<QuantitySurveyValuationWorksheet>().ExistsAsync(value =>
+                value.TenantId == _currentUserProvider.TenantId && value.ProjectInterimValuationId == entity.Id && !value.IsDeleted))
+            throw new InvalidOperationException("Delete the Draft QS valuation worksheet before deleting this interim valuation.");
         await DeleteProjectInterimValuationCompletedPackagesAsync(entity.Id);
         await _unitOfWork.Repository<ProjectInterimValuation>().DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -215,6 +234,9 @@ public partial class ProjectService
         var package = await ValidateProjectDesignPackageAsync(projectId, dto.ProjectPackageId);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
         var interimValuation = await ValidateProjectCommercialInterimValuationAsync(projectId, dto.ProjectInterimValuationId);
+        if (interimValuation is not null && await _unitOfWork.Repository<QuantitySurveyValuationWorksheet>().ExistsAsync(value =>
+                value.TenantId == _currentUserProvider.TenantId && value.ProjectInterimValuationId == interimValuation.Id && !value.IsDeleted))
+            throw new InvalidOperationException("Use the governed QS payment-certificate workspace for a valuation that has a QS worksheet.");
 
         var now = DateTime.UtcNow;
         var entity = new ProjectPaymentCertificate
@@ -256,6 +278,8 @@ public partial class ProjectService
     {
         var entity = await GetProjectPaymentCertificateEntityAsync(paymentCertificateId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        if (entity.QuantitySurveyValuationWorksheetId.HasValue)
+            throw new InvalidOperationException("Governed QS payment certificates can be amended only through their dedicated lifecycle workspace.");
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
         var package = await ValidateProjectDesignPackageAsync(entity.ProjectId, dto.ProjectPackageId);
         var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
@@ -297,6 +321,8 @@ public partial class ProjectService
     {
         var entity = await GetProjectPaymentCertificateEntityAsync(paymentCertificateId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManageFinancials);
+        if (entity.QuantitySurveyValuationWorksheetId.HasValue)
+            throw new InvalidOperationException("Governed QS payment certificates cannot be deleted from the legacy Projects endpoint.");
         var before = CapturePaymentCertificateSnapshot(entity);
         var now = DateTime.UtcNow;
         await _unitOfWork.Repository<ProjectPaymentCertificate>().DeleteAsync(entity);
@@ -397,46 +423,9 @@ public partial class ProjectService
 
     public async Task<ProjectFinalAccountDto> UpsertProjectFinalAccountAsync(Guid projectId, UpsertProjectFinalAccountDto dto)
     {
-        var project = await RequireProjectAsync(projectId, ProjectAccessOperation.ManageFinancials);
-        var contract = await ValidateProjectCommercialContractAsync(dto.ContractId);
-        var entity = await GetProjectFinalAccountEntityAsync(projectId);
-        var isNew = entity == null;
-        var computation = await BuildProjectFinalAccountDerivationAsync(project, contract?.Id, dto.Currency, dto.SettlementDate);
-
-        entity ??= new ProjectFinalAccount
-        {
-            TenantId = _currentUserProvider.TenantId,
-            ProjectId = projectId,
-            CreatedBy = _currentUserProvider.Username,
-            CreatedById = _currentUserProvider.UserId
-        };
-
-        entity.ContractId = computation.ContractId ?? contract?.Id;
-        entity.Status = NormalizeProjectFinalAccountStatus(dto.Status);
-        entity.SettlementDate = computation.SettlementDate;
-        entity.OriginalContractValue = computation.OriginalContractValue;
-        entity.ApprovedVariationAmount = computation.ApprovedVariationAmount;
-        entity.CertifiedToDate = computation.CertifiedToDate;
-        entity.RetentionHeldAmount = computation.RetentionHeldAmount;
-        entity.RetentionReleasedAmount = computation.RetentionReleasedAmount;
-        entity.FinalAccountValue = computation.FinalAccountValue;
-        entity.Currency = computation.CurrencyCode;
-        entity.Notes = TrimOrNull(dto.Notes);
-        entity.UpdatedBy = _currentUserProvider.Username;
-        entity.LastModifiedById = _currentUserProvider.UserId;
-
-        if (isNew)
-        {
-            await _unitOfWork.Repository<ProjectFinalAccount>().AddAsync(entity);
-        }
-        else
-        {
-            await _unitOfWork.Repository<ProjectFinalAccount>().UpdateAsync(entity);
-        }
-
-        await SyncProjectFinalPaymentBillingStepAsync(project, computation);
-        await _unitOfWork.SaveChangesAsync();
-        return await MapProjectFinalAccountAsync(entity);
+        await Task.CompletedTask;
+        throw new InvalidOperationException(
+            "Use the governed Quantity Survey final-account workspace so reconciliation, workflow, separation of duties and immutable audit controls are applied.");
     }
 
     private async Task<ProjectVariationOrderDto> GetProjectVariationOrderDtoAsync(Guid projectId, Guid variationOrderId)

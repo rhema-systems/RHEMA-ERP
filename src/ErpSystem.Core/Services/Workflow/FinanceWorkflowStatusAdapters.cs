@@ -37,6 +37,8 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
         "Budget Scenario",
         "BudgetReturn",
         "Budget Return",
+        "BudgetRevision",
+        "Budget Revision",
         "UnitJournalEntry",
         "Unit Journal Entry",
         "UnitAccountBudget",
@@ -140,6 +142,22 @@ public sealed class FinanceWorkflowStatusAdapter : IWorkflowStatusAdapter
             case BudgetReturn budgetReturn:
                 SetTextStatus(budgetReturn, "Status", outcome, "Draft", "Submitted", "Approved", "Rejected");
                 StampWorkflowAudit(budgetReturn, outcome, userId, rejectionReason);
+                return;
+            case BudgetRevision budgetRevision:
+                SetTextStatus(budgetRevision, "Status", outcome, "Draft", "Submitted", "Approved", "Rejected");
+                if (outcome == WorkflowOutcome.Approved)
+                {
+                    budgetRevision.ApprovedAt = DateTime.UtcNow;
+                    budgetRevision.ApprovedByUserId = userId;
+                    budgetRevision.RejectionReason = null;
+                }
+                else if (outcome == WorkflowOutcome.Rejected)
+                {
+                    budgetRevision.ApprovedAt = null;
+                    budgetRevision.ApprovedByUserId = null;
+                    budgetRevision.RejectionReason = rejectionReason;
+                }
+                StampWorkflowAudit(budgetRevision, outcome, userId, rejectionReason);
                 return;
             case UnitJournalEntry unitJournalEntry:
                 SetScalarStatus(unitJournalEntry, "Status", outcome, UnitJournalEntryStatus.Draft, UnitJournalEntryStatus.PendingApproval, UnitJournalEntryStatus.Approved, UnitJournalEntryStatus.Rejected);

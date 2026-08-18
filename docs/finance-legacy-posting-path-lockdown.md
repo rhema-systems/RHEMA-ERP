@@ -29,7 +29,7 @@ Manual journal posting remains the approved manual GL path through `IJournalEntr
 | Ghana tax posting | Uses `IFinancePostingEngine` | Tax accounting is posted through AP/AR/payment posting flows and tax snapshots. |
 | FX realized/unrealized/revaluation | Uses `IFinancePostingEngine` | FX accounting services post through the engine. |
 | Fixed asset capitalization/depreciation/valuation/disposal | Uses `IFinancePostingEngine` | Fixed asset accounting services post through the engine. |
-| Fixed asset custody/location transfer | Read-side/history only | Supported transfer types do not create GL journals. Unsupported GL reclassification transfers remain rejected under `FIN-LIM-0038`. |
+| Fixed asset custody/location transfer | Read-side/history only | Physical/custody transfers do not create GL journals. The dedicated `GlReclassification` type now posts through `IFinancePostingEngine` under resolved `FIN-LIM-0038`. |
 | Manual journals | Approved manual journal path | Use `JournalEntryService` lifecycle, workflow controls, and posting-engine validation where implemented. |
 | Generic `FinanceController` post-to-ledger endpoint | Unsafe legacy/direct posting path | Disabled. Attempts are rejected and audited with `Finance.PostingEngine.BypassRejected`. |
 | `GeneralLedgerService.PostJournalEntryAsync` | Unsafe legacy/direct posting path | Disabled and marked obsolete. Callers must use manual journal lifecycle or module services through `IFinancePostingEngine`. |

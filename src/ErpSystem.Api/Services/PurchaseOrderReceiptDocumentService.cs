@@ -219,7 +219,10 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     {
         var correlation = Correlation(correlationId);
         var document = await LoadDocumentAsync(documentId, cancellationToken);
-        await EnsureCapabilityAsync(ManagePermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
+        // Signing is authorized by the immutable DEC-013 signatory role. A
+        // read-only Internal Audit role must be able to attest without being
+        // granted the Stores receipt-mutation permission.
+        await EnsureCapabilityAsync(ReadPermission, document.PurchaseOrderReceipt, correlation, cancellationToken);
         EnsureRowVersion(document.RowVersion, request.RowVersion);
         if (document.Status is ProcurementReceiptDocumentStatus.Issued or ProcurementReceiptDocumentStatus.Cancelled)
             throw Conflict("RCV_DOCUMENT_NOT_SIGNABLE", "Issued or cancelled receipt documents cannot be signed.");
@@ -228,7 +231,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             string.Equals(item.Trim(), request.RequiredRole.Trim(), StringComparison.OrdinalIgnoreCase));
         if (role is null)
             throw Validation("RCV_DOCUMENT_SIGNATURE_ROLE_INVALID", "The selected signature role is not required by DEC-013.");
-        if (!IsAdministrator() && !_currentUser.Roles.Any(item => string.Equals(item, role, StringComparison.OrdinalIgnoreCase)))
+        if (!IsAdministrator() && !HasConfiguredSignatureRole(role))
             throw new ProcurementReceiptDocumentAuthorizationException($"The current user is not assigned the required {role} role.");
         if (document.Signatures.Any(item => string.Equals(item.RequiredRole, role, StringComparison.OrdinalIgnoreCase)))
             throw Conflict("RCV_DOCUMENT_ALREADY_SIGNED", $"The {role} signature has already been recorded.");
@@ -237,7 +240,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
 
         var now = DateTime.UtcNow;
         var signaturePayload = Serialize(new { document.Id, role, userId = _currentUser.UserId, now, request.Comment });
-        document.Signatures.Add(new ProcurementReceiptDocumentSignature
+        var signature = new ProcurementReceiptDocumentSignature
         {
             TenantId = _currentUser.TenantId,
             ReceiptDocumentId = document.Id,
@@ -250,7 +253,12 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             CreatedAt = now,
             CreatedBy = ActorName,
             CreatedById = _currentUser.UserId
-        });
+        };
+        document.Signatures.Add(signature);
+        // BaseEntity assigns a GUID before EF sees the dependent. Register it
+        // explicitly as Added so EF cannot infer an UPDATE for a new immutable
+        // signature row merely because its key is already non-empty.
+        _db.ProcurementReceiptDocumentSignatures.Add(signature);
         AddAction(document, "Signed", document.Status.ToString(),
             ProcurementReceiptDocumentStatus.PendingSignatures.ToString(), correlation,
             $"{role} signature recorded.", signaturePayload);
@@ -710,10 +718,9 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             .Where(value => value.Length > 0).ToList();
         var missingSignatures = requiredSignatures.Where(role => !item.Signatures.Any(signature =>
             string.Equals(signature.RequiredRole, role, StringComparison.OrdinalIgnoreCase))).ToList();
-        var allowedSignatureRoles = manageAllowed
-            ? missingSignatures.Where(role => IsAdministrator() || _currentUser.Roles.Any(actorRole =>
-                string.Equals(actorRole, role, StringComparison.OrdinalIgnoreCase))).ToList()
-            : [];
+        var allowedSignatureRoles = missingSignatures
+            .Where(role => IsAdministrator() || HasConfiguredSignatureRole(role))
+            .ToList();
         return new ProcurementReceiptDocumentDto
         {
             Id = item.Id,
@@ -1327,7 +1334,7 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
     {
         var now = DateTime.UtcNow;
         var hash = Hash(Serialize(new { document.Id, action, from, to, correlation, reason, details, now }));
-        document.Actions.Add(new ProcurementReceiptDocumentAction
+        var receiptAction = new ProcurementReceiptDocumentAction
         {
             TenantId = document.TenantId,
             ReceiptDocumentId = document.Id,
@@ -1344,13 +1351,42 @@ public sealed class PurchaseOrderReceiptDocumentService : IProcurementReceiptDoc
             CreatedAt = now,
             CreatedBy = ActorName,
             CreatedById = _currentUser.UserId
-        });
+        };
+        document.Actions.Add(receiptAction);
+        // Actions are append-only and BaseEntity pre-generates their keys. An
+        // explicit Added state prevents navigation fix-up from treating a new
+        // action as an update to a row that cannot yet exist.
+        _db.ProcurementReceiptDocumentActions.Add(receiptAction);
     }
 
     private static ProcurementReceiptDocumentCheckDto Check(string code, string label, bool passed, string message) => new() { Code = code, Label = label, Passed = passed, Message = message };
     private static string KindLabel(ProcurementReceiptDocumentKind kind) => kind == ProcurementReceiptDocumentKind.Grn ? "Goods Receipt Note (GRN)" : "Material Receipt Note (MRN)";
     private static string ResetPolicy(string format) => format.Contains("{MM}", StringComparison.OrdinalIgnoreCase) ? "Monthly" : format.Contains("{YYYY}", StringComparison.OrdinalIgnoreCase) || format.Contains("{YY}", StringComparison.OrdinalIgnoreCase) ? "Yearly" : "Never";
     private bool IsAdministrator() => _currentUser.HasRole("SuperAdmin") || _currentUser.HasRole("TenantAdmin");
+
+    private bool HasConfiguredSignatureRole(string requiredRole)
+    {
+        if (_currentUser.Roles.Any(role =>
+                string.Equals(role, requiredRole, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        // DEC-013 stores business-facing signatory labels. Resolve the two
+        // approved TDC labels to their governed technical roles instead of
+        // requiring tenants to create duplicate ASP.NET roles named after UI
+        // labels. Keep this list explicit so a broad text match cannot grant a
+        // signatory capability accidentally.
+        var normalized = new string(requiredRole
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+        return normalized switch
+        {
+            "STORES" => _currentUser.HasRole("TDC_STORES_OFFICER") ||
+                        _currentUser.HasRole("TDC_STORES_MANAGER"),
+            "INTERNALAUDIT" => _currentUser.HasRole(ProcurementAccessControlRegistry.InternalAuditRole),
+            _ => false
+        };
+    }
     private string ActorName => string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName;
     private static string Correlation(string? value) => string.IsNullOrWhiteSpace(value) ? Guid.NewGuid().ToString("N") : value.Trim()[..Math.Min(value.Trim().Length, 100)];
     private static string? Trim(string? value, int max) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, max)];

@@ -75,7 +75,7 @@ Focused suite: `FixedAssetDisposalFoundationTests`, trait `Batch=FinanceGoLive-F
 | Cross-tenant disposal account rejected | `CrossTenantDisposalAccountRejected` |
 | Duplicate disposal is idempotent/safe | `DuplicateDisposalIsIdempotentOrSafelyRejected` |
 | Missing required depreciation blocks disposal | `DisposalWithMissingRequiredDepreciationIsRejected` |
-| Revaluation surplus is not recycled to P&L | `RevaluationSurplusIsNotRecycledToProfitAndLoss` |
+| Revaluation surplus transfers within equity and never affects P&L | `RevaluationSurplusTransfersDirectlyToRetainedEarningsWithoutAffectingProfitAndLoss` |
 | Foreign-currency proceeds rejected clearly | `ForeignCurrencyProceedsRejectedClearly` |
 | Disposal audit events are emitted | `DisposalAuditEventsAreEmitted` |
 
@@ -102,7 +102,7 @@ Results:
 - Whole-asset write-off/no-proceeds disposal derecognizes carrying amount and recognizes write-off loss.
 - Accumulated depreciation and accumulated impairment are cleared through derecognition lines.
 - Acquisition cost, prior depreciation schedules, prior valuation/impairment records, and acquisition FX snapshots are not rewritten.
-- Revaluation surplus is not recycled to profit or loss.
+- Revaluation surplus is not recycled to profit or loss. The later `FIN-LIM-0041` slice now transfers the remaining asset-specific reserve directly to retained earnings in the same disposal journal.
 
 ## Supported Disposal Behavior
 
@@ -115,15 +115,15 @@ Supported:
 
 Unsupported and tracked:
 
-- Final/partial-period depreciation on disposal: `FIN-LIM-0039`.
+- Final/partial-period depreciation on disposal was subsequently resolved under `FIN-LIM-0039`; see `docs/fixed-asset-disposal-date-depreciation-foundation.md`.
 - Disposal sale VAT/AR/cash integration: `FIN-LIM-0040`.
-- Revaluation surplus equity transfer policy: `FIN-LIM-0041`.
-- Partial/component disposal: `FIN-LIM-0042`.
+- Revaluation surplus equity transfer policy: resolved by the follow-up documented in `docs/fixed-asset-disposal-revaluation-surplus-policy-foundation.md`.
+- Partial/component disposal was subsequently resolved under `FIN-LIM-0042`; see `docs/fixed-asset-partial-component-disposal-foundation.md`.
 - Foreign-currency disposal proceeds: `FIN-LIM-0043`.
 
 ## Depreciation Interaction
 
-Disposal requires depreciation posted through the prior fiscal period for assets placed in service before the disposal period. It does not calculate final/partial-period depreciation through the disposal date. Prior posted depreciation schedules are immutable.
+Disposal still requires depreciation posted through the prior fiscal period. The subsequent `FIN-LIM-0039` slice calculates final depreciation through the disposal date and retains prior posted schedules as immutable history.
 
 ## Revaluation And Impairment Interaction
 
@@ -173,10 +173,10 @@ Implemented/emitted where applicable:
 ## Limitations Register
 
 - `FIN-LIM-0026`: resolved for whole-asset disposal/write-off foundation.
-- `FIN-LIM-0039`: opened for final/partial-period depreciation on disposal.
-- `FIN-LIM-0040`: opened for disposal sale tax, AR, and cash/bank integration.
-- `FIN-LIM-0041`: opened for revaluation surplus equity transfer policy.
-- `FIN-LIM-0042`: opened for partial/component disposal.
+- `FIN-LIM-0039`: subsequently resolved for whole-asset disposal.
+- `FIN-LIM-0040`: opened by this historical batch and subsequently resolved by `docs/fixed-asset-sale-settlement-foundation.md`.
+- `FIN-LIM-0041`: resolved by the dedicated whole-asset disposal equity-transfer policy slice.
+- `FIN-LIM-0042`: resolved by controlled proportional partial/component derecognition.
 - `FIN-LIM-0043`: opened for foreign-currency disposal proceeds.
 - `FIN-LIM-0027`: fixed asset reporting/reconciliation remains open.
 

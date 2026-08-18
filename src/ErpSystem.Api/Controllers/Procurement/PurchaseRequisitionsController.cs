@@ -911,7 +911,9 @@ public class PurchaseRequisitionsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error approving purchase requisition {RequisitionId}", id);
-            return StatusCode(500, "An error occurred while approving the purchase requisition");
+            // Preserve the central exception-handling boundary so the caller receives
+            // safe ProblemDetails while support retains the complete incident record.
+            throw;
         }
     }
 

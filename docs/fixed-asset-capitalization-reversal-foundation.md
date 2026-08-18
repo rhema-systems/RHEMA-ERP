@@ -123,5 +123,7 @@ The tests carry `FR-GL-008`, `FR-GL-010`, and `FIN-LIM-0030` traits so requireme
 ## Remaining boundaries
 
 - Revaluation/impairment reversal and correction remain governed by their dedicated limitation slices (`FIN-LIM-0035` and `FIN-LIM-0037`).
-- Cross-module procurement/stores acquisition interfaces remain deferred under the agreed Finance-only scope.
+- This correction feature does not own Procurement receiving. Procurement-origin capitalization
+  and its reversal lineage are now composed separately through FIN-INT-007 without moving receipt
+  workflow logic into Finance.
 - Richer reporting presentation can expose the same persisted lineage; the accounting and audit evidence is already available.

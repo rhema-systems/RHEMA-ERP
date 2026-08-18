@@ -359,10 +359,33 @@ public sealed class InventoryDirectedOperationService : IInventoryDirectedOperat
             }
             else if (task.TaskType == InventoryDirectedTaskType.Picking)
             {
+                var directedIssueContext = await _unitOfWork.Repository<InventoryRequisition>().GetQueryable()
+                    .AsNoTracking()
+                    .Where(value => value.TenantId == TenantId && value.Id == task.SourceDocumentId && !value.IsDeleted)
+                    .Select(value => new
+                    {
+                        value.RequestedById,
+                        value.ProjectId,
+                        value.RowVersion
+                    })
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InventoryDirectedOperationConflictException("INV_DIRECTED_REQUISITION_NOT_FOUND",
+                        "The picking requisition was not found in the current tenant.");
+                var directedItemType = await Items.AsNoTracking()
+                    .Where(value => value.TenantId == TenantId && value.Id == task.InventoryItemId && !value.IsDeleted)
+                    .Select(value => value.ItemType)
+                    .SingleAsync(cancellationToken);
                 var issued = await _requisitions.IssueAsync(task.SourceDocumentId, new IssueRequisitionDto
                 {
                     IdempotencyKey = $"directed:{task.Id:N}",
                     CorrelationId = correlationId,
+                    RowVersion = Convert.ToBase64String(directedIssueContext.RowVersion),
+                    ReceiverUserId = directedIssueContext.RequestedById,
+                    MovementReasonCode = directedItemType == ItemType.FixedAsset
+                        ? InventoryIssueMovementReasons.AssetCustody
+                        : directedIssueContext.ProjectId.HasValue
+                            ? InventoryIssueMovementReasons.ProjectConsumption
+                            : InventoryIssueMovementReasons.DepartmentConsumption,
                     Items = new List<IssueRequisitionItemDto>
                     {
                         new()

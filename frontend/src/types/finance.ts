@@ -1082,6 +1082,8 @@ export interface CreateOpeningBalanceLineDto {
     accountId: string;
     debitAmount: number;
     creditAmount: number;
+    transactionDebitAmount?: number;
+    transactionCreditAmount?: number;
     transactionCurrencyCode?: string;
     functionalCurrencyCode?: string;
     exchangeRateId?: string;
@@ -1092,6 +1094,119 @@ export interface CreateOpeningBalanceLineDto {
     counterpartyId?: string;
     sourceReference?: string;
     notes?: string;
+}
+
+export interface CreateFixedAssetOpeningBalanceBatchDto {
+    batchNumber?: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    idempotencyKey?: string;
+    fixedAssetBookValueIds: string[];
+}
+
+export interface CreateSpecializedOpeningBalanceDto {
+    batchNumber?: string;
+    sourceReference?: string;
+    description?: string;
+    openingDate: string;
+    fiscalPeriodId: string;
+    bookClassification: string;
+    currencyCode: string;
+    amount: number;
+    exchangeRateId?: string;
+    exchangeRate: number;
+}
+
+export interface CreateSupplierAdvanceOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    supplierId: string;
+}
+
+export interface CreateCustomerAdvanceOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    customerId: string;
+}
+
+export interface CreateApWithholdingOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    supplierId: string;
+    taxId: string;
+    withholdingTaxAccountId: string;
+    taxableBase: number;
+    netPaidAmount: number;
+}
+
+export interface CreateArWithholdingOpeningBalanceDto extends CreateSpecializedOpeningBalanceDto {
+    customerId: string;
+    taxId: string;
+    withholdingTaxAccountId: string;
+    certificateNumber?: string;
+    certificateDate?: string;
+}
+
+export interface SpecializedOpeningBalanceOptions {
+    functionalCurrencyCode: string;
+    suppliers: OpeningBalancePartyOption[];
+    customers: OpeningBalancePartyOption[];
+    withholdingTaxes: OpeningBalanceWhtOption[];
+}
+
+export interface OpeningBalancePartyOption {
+    id: string;
+    code: string;
+    name: string;
+}
+
+export interface OpeningBalanceWhtOption {
+    id: string;
+    code: string;
+    name: string;
+    rate: number;
+    payableAccountId?: string;
+    receivableAccountId?: string;
+}
+
+export interface FixedAssetOpeningBalanceCandidate {
+    fixedAssetId: string;
+    fixedAssetBookValueId: string;
+    assetCode: string;
+    assetName: string;
+    categoryCode: string;
+    bookClassification: string;
+    openingAsOfDate?: string;
+    acquisitionCost: number;
+    accumulatedDepreciation: number;
+    netBookValue: number;
+    openingPostedToGl: boolean;
+    openingJournalEntryId?: string;
+}
+
+export interface SubledgerOpeningBalanceReadiness {
+    apOpeningInvoiceCount: number;
+    postedApOpeningInvoiceCount: number;
+    apOpeningInvoiceFunctionalAmount: number;
+    arOpeningInvoiceCount: number;
+    postedArOpeningInvoiceCount: number;
+    arOpeningInvoiceFunctionalAmount: number;
+    supplierAdvanceOpeningCount: number;
+    postedSupplierAdvanceOpeningCount: number;
+    supplierAdvanceOpeningFunctionalAmount: number;
+    customerAdvanceOpeningCount: number;
+    postedCustomerAdvanceOpeningCount: number;
+    customerAdvanceOpeningFunctionalAmount: number;
+    apWithholdingOpeningCount: number;
+    postedApWithholdingOpeningCount: number;
+    apWithholdingOpeningAmount: number;
+    arWithholdingOpeningCount: number;
+    postedArWithholdingOpeningCount: number;
+    arWithholdingOpeningAmount: number;
+    fixedAssetOpeningBookValueCount: number;
+    postedFixedAssetOpeningBookValueCount: number;
+    fixedAssetOpeningCost: number;
+    fixedAssetOpeningAccumulatedDepreciation: number;
+    fixedAssetOpeningNetBookValue: number;
+    fixedAssetCandidates: FixedAssetOpeningBalanceCandidate[];
+    warnings: string[];
 }
 
 export interface UpdateCurrencyLinkRatePolicyDto {
@@ -1149,6 +1264,8 @@ export interface OpeningBalanceLine {
     accountName: string;
     debitAmount: number;
     creditAmount: number;
+    transactionDebitAmount?: number;
+    transactionCreditAmount?: number;
     transactionCurrencyCode: string;
     functionalCurrencyCode: string;
     exchangeRateId?: string;

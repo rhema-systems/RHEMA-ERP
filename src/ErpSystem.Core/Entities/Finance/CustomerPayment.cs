@@ -37,6 +37,18 @@ public class CustomerPayment : BusinessEntity
     /// </summary>
     public bool IsCustomerAdvance { get; set; }
 
+    /// <summary>
+    /// Classifies a receipt-shaped cutover fact whose cash movement occurred before go-live.
+    /// Canonical CustomerPayment identity is retained for advance application and WHT inquiry,
+    /// while the opening journal offsets migration clearing instead of a live bank account.
+    /// </summary>
+    [MaxLength(40)]
+    public string? OpeningBalanceType { get; set; }
+    public Guid? OpeningBalanceBatchId { get; set; }
+
+    [MaxLength(100)]
+    public string? OpeningSourceReference { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
 

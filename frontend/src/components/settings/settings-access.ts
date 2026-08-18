@@ -175,6 +175,20 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     'procurement.inventory.master-data.manage',
   ]),
   anyAccess(pathPrefix('/administration/finance'), ['Finance.Admin']),
+  anyAccess(
+    pathPrefix('/administration/project-management/quantity-survey-config'),
+    ['quantity-survey.configuration.read']
+  ),
+  anyAccess(
+    pathPrefix('/administration/project-management/quantity-survey-catalogues'),
+    ['quantity-survey.configuration.read']
+  ),
+  anyAccess(
+    pathPrefix(
+      '/administration/project-management/quantity-survey-rate-library'
+    ),
+    ['quantity-survey.workspace.read']
+  ),
   anyAccess(pathPrefix('/administration/project-management'), [
     'admin.project-management',
   ]),

@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
+using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -163,6 +164,12 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
             : request.ActorName.Trim();
         var documentReference = BuildDocumentReference(
             sourceModule, now);
+        var versionStatus = Required(
+            request.VersionStatus, nameof(request.VersionStatus), 80);
+        var isPublished = string.Equals(
+            versionStatus,
+            CentralDocumentEvidenceRules.PublishedVersionStatus,
+            StringComparison.OrdinalIgnoreCase);
 
         var record = new CentralDocumentRecord
         {
@@ -182,13 +189,15 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
             RepositoryPath = upload.FilePath,
             CurrentVersion = Required(
                 request.VersionNumber, nameof(request.VersionNumber), 120),
-            VersionStatus = Required(
-                request.VersionStatus, nameof(request.VersionStatus), 80),
+            VersionStatus = versionStatus,
             AnnotationStatus = "PDF rendition required",
             CommentStatus = "No comments",
             AccessProfile = accessProfile,
             RetentionStatus = "Current",
             LifecycleStatus = "Active",
+            PublishedAt = isPublished ? now : null,
+            PublishedById = isPublished ? request.ActorUserId : null,
+            EffectiveDate = isPublished ? now : null,
             Notes = Trim(
                 string.IsNullOrWhiteSpace(request.Notes)
                     ? $"Document type: {documentType}"
@@ -215,6 +224,8 @@ public sealed class CentralDocumentRepositoryFileService : ICentralDocumentRepos
             FileUploadRecordId = upload.Id,
             ChangeSummary = Trim(request.ChangeSummary, 1000),
             CreatedByUserId = request.ActorUserId,
+            PublishedAt = isPublished ? now : null,
+            PublishedById = isPublished ? request.ActorUserId : null,
             CreatedAt = now,
             CreatedBy = actorName,
             CreatedById = request.ActorUserId

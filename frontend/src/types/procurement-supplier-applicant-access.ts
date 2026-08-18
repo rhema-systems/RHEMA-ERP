@@ -114,3 +114,13 @@ export interface SupplierApplicantAccessHistory {
   notificationAttemptCount: number;
   lastNotificationStatus?: string;
 }
+
+export interface SupplierApplicantContactCorrectionResult {
+  registrationId: string;
+  maskedContact: string;
+  status: string | number;
+  contactCorrected: boolean;
+  provisioningRetried: boolean;
+  credentialDelivered: boolean;
+  message: string;
+}

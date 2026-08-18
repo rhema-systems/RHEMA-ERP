@@ -671,7 +671,9 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
         var activity = segments[1];
         var isApprovalRequest = string.Equals(activity, "WorkflowApprovalRequest", StringComparison.OrdinalIgnoreCase);
         var isStepAssignment = string.Equals(activity, "WorkflowStepAssignment", StringComparison.OrdinalIgnoreCase);
-        if (!isApprovalRequest && !isStepAssignment) return topic;
+        var isSubcontractCharge = string.Equals(key, "QuantitySurvey.SubcontractChargeNoticeIssued", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(key, "QuantitySurvey.SubcontractChargeDecision", StringComparison.OrdinalIgnoreCase);
+        if (!isApprovalRequest && !isStepAssignment && !isSubcontractCharge) return topic;
 
         var changed = false;
         if (topic == null)
@@ -681,14 +683,16 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 Id = Guid.NewGuid(),
                 TenantId = evt.TenantId,
                 Key = key,
-                Name = isApprovalRequest ? $"{segments[0]} approval required" : $"{segments[0]} workflow assignment",
-                Description = isApprovalRequest ? "A workflow request is waiting for approval." : "A workflow step has been assigned.",
+                Name = isSubcontractCharge ? "Quantity Survey subcontract charge communication" :
+                    isApprovalRequest ? $"{segments[0]} approval required" : $"{segments[0]} workflow assignment",
+                Description = isSubcontractCharge ? "A governed subcontract charge notice or decision is available in the external project portal." :
+                    isApprovalRequest ? "A workflow request is waiting for approval." : "A workflow step has been assigned.",
                 EntityType = evt.EntityType ?? segments[0],
                 IsSystem = true,
                 IsRequired = true,
                 IsActive = true,
                 EnableInApp = true,
-                EnableEmail = false,
+                EnableEmail = isSubcontractCharge,
                 EnableSms = false,
                 InAppTitleTemplate = "{{Title}}",
                 InAppBodyTemplate = "{{Message}}",
@@ -705,6 +709,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
             if (!topic.IsRequired) { topic.IsRequired = true; changed = true; }
             if (!topic.IsActive) { topic.IsActive = true; changed = true; }
             if (!topic.EnableInApp) { topic.EnableInApp = true; changed = true; }
+            if (isSubcontractCharge && !topic.EnableEmail) { topic.EnableEmail = true; changed = true; }
             if (string.IsNullOrWhiteSpace(topic.InAppTitleTemplate)) { topic.InAppTitleTemplate = "{{Title}}"; changed = true; }
             if (string.IsNullOrWhiteSpace(topic.InAppBodyTemplate)) { topic.InAppBodyTemplate = "{{Message}}"; changed = true; }
             if (string.IsNullOrWhiteSpace(topic.ActionUrlTemplate)) { topic.ActionUrlTemplate = "{{ActionUrl}}"; changed = true; }
@@ -715,9 +720,15 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
             }
         }
 
-        var requiredRules = isApprovalRequest
-            ? new[] { (Kind: "UserFromData", Value: "TargetUserId"), (Kind: "RoleFromData", Value: "TargetRole") }
-            : new[] { (Kind: "UserFromData", Value: "TargetUserId") };
+        var requiredRules = isSubcontractCharge
+            ? new[] { (Kind: "BusinessPartnerFromData", Value: "BusinessPartnerId", SendEmail: true) }
+            : isApprovalRequest
+                ? new[]
+                {
+                    (Kind: "UserFromData", Value: "TargetUserId", SendEmail: false),
+                    (Kind: "RoleFromData", Value: "TargetRole", SendEmail: false)
+                }
+                : new[] { (Kind: "UserFromData", Value: "TargetUserId", SendEmail: false) };
         var activeRecipients = (topic.Recipients ?? new List<NotificationTopicRecipient>())
             .Where(recipient => !recipient.IsDeleted)
             .ToList();
@@ -733,6 +744,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 var recipientChanged = false;
                 if (!matchingRecipient.IsSystem) { matchingRecipient.IsSystem = true; recipientChanged = true; }
                 if (!matchingRecipient.SendInApp) { matchingRecipient.SendInApp = true; recipientChanged = true; }
+                if (rule.SendEmail && !matchingRecipient.SendEmail) { matchingRecipient.SendEmail = true; recipientChanged = true; }
                 if (recipientChanged)
                 {
                     matchingRecipient.UpdatedAt = DateTime.UtcNow;
@@ -751,7 +763,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
                 RecipientValue = rule.Value,
                 IsSystem = true,
                 SendInApp = true,
-                SendEmail = false,
+                SendEmail = rule.SendEmail,
                 SendSms = false,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = "System"

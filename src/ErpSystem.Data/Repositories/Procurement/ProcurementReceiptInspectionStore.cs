@@ -20,14 +20,21 @@ public sealed class ProcurementReceiptInspectionStore :
     public Task SetMutationContextAsync(
         Guid inspectionCaseId,
         CancellationToken cancellationToken = default) =>
-        SetContextAsync(inspectionCaseId, cancellationToken);
+        SetContextAsync(inspectionCaseId, null, cancellationToken);
+
+    public Task SetWorkflowRebindContextAsync(
+        Guid inspectionCaseId,
+        Guid workflowDefinitionId,
+        CancellationToken cancellationToken = default) =>
+        SetContextAsync(inspectionCaseId, workflowDefinitionId, cancellationToken);
 
     public Task ClearMutationContextAsync(
         CancellationToken cancellationToken = default) =>
-        SetContextAsync(null, cancellationToken);
+        SetContextAsync(null, null, cancellationToken);
 
     private Task SetContextAsync(
         Guid? inspectionCaseId,
+        Guid? workflowDefinitionId,
         CancellationToken cancellationToken)
     {
         if (!_context.Database.IsRelational()) return Task.CompletedTask;
@@ -39,7 +46,11 @@ public sealed class ProcurementReceiptInspectionStore :
              EXEC sys.sp_set_session_context
                  @key=N'TDC0502_RECEIPT_INSPECTION_CASE_ID',
                  @value={inspectionCaseId},
-                 @read_only=0
+                 @read_only=0;
+             EXEC sys.sp_set_session_context
+                 @key=N'TDC0502_RECEIPT_INSPECTION_WORKFLOW_ID',
+                 @value={workflowDefinitionId},
+                 @read_only=0;
              """,
             cancellationToken);
     }

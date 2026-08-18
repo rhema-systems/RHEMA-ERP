@@ -345,6 +345,13 @@ public class PurchaseOrder : TenantEntity
     public Guid? SourcingCaseId { get; set; }
     public Guid? AwardReadinessDecisionId { get; set; }
 
+    /// <summary>
+    /// Immutable category snapshot inherited from the approved requisition.
+    /// It selects the Goods receipt, Services completion, or Works certificate
+    /// acceptance owner without relying on descriptions or inventory mapping.
+    /// </summary>
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
+
     [Column(TypeName = "nvarchar(max)")]
     public string? SourceSnapshotJson { get; set; }
 

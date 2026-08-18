@@ -32,6 +32,7 @@ import {
   Mail,
   Building,
   BarChart3,
+  LineChart,
   Bell,
   Database,
   Home,
@@ -87,6 +88,7 @@ import {
   ShieldPlus,
   ScanLine,
   WalletCards,
+  Layers3,
 } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
@@ -147,6 +149,16 @@ export const navigationItems: NavItem[] = [
             title: 'Journal Entries',
             href: '/finance/journal-entries',
             icon: FileText,
+          },
+          {
+            // Journal batches were delivered as a complete controlled workspace, but the
+            // route was previously absent from navigation. Keep this operational feature
+            // beside individual journals and let the existing permission filter hide it
+            // from users who are not authorised to view Finance batch controls.
+            title: 'Journal Batches',
+            href: '/finance/journal-batches',
+            icon: Layers3,
+            permissions: ['Finance.JournalBatches.View'],
           },
           {
             title: 'Recurring Journals',
@@ -428,6 +440,17 @@ export const navigationItems: NavItem[] = [
             icon: CreditCard,
           },
           { title: 'Receipts', href: '/finance/ar/receipts', icon: CreditCard },
+          {
+            title: 'Collection Follow-up',
+            href: '/finance/ar/collections',
+            icon: BellRing,
+            permissions: [
+              'Finance.AR.Collections.View',
+              'Finance.AR.Collections.Manage',
+              'Finance.Admin',
+            ],
+            accessMode: 'any',
+          },
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
           {
             title: 'Adjustment Journal',
@@ -535,6 +558,11 @@ export const navigationItems: NavItem[] = [
             title: 'My Returns',
             href: '/finance/budgeting/my-returns',
             icon: FileText,
+          },
+          {
+            title: 'Budget Revisions',
+            href: '/finance/budgeting/revisions',
+            icon: RefreshCw,
           },
         ],
       },
@@ -2224,11 +2252,17 @@ export const navigationItems: NavItem[] = [
         icon: CreditCard,
       },
       {
+        title: 'Report Automation',
+        href: '/reports/automation',
+        icon: CalendarClock,
+      },
+      {
         title: 'Procurement Reports',
         href: '/reports/purchasing',
         icon: ShoppingCart,
       },
       { title: 'Inventory Reports', href: '/reports/inventory', icon: Package },
+      { title: 'Quantity Survey Reports', href: '/reports/quantity-survey', icon: Scale },
       {
         title: 'Audit & Compliance Reports',
         href: '/reports/audit-compliance',
@@ -2700,6 +2734,12 @@ export const navigationItems: NavItem[] = [
             href: '/administration/inventory/warehouses',
             icon: Building2,
           },
+          {
+            title: 'Issue Accounting & Asset Custody',
+            href: '/administration/inventory/issue-accounting',
+            icon: Landmark,
+            permissions: ['procurement.inventory.master-data.manage'],
+          },
         ],
       },
       {
@@ -2800,7 +2840,12 @@ export const navigationItems: NavItem[] = [
         title: 'Projects',
         href: '/administration/project-management',
         icon: Briefcase,
-        permissions: ['admin.project-management'],
+        permissions: [
+          'admin.project-management',
+          'quantity-survey.configuration.read',
+          'quantity-survey.workspace.read',
+        ],
+        accessMode: 'any',
         children: [
           {
             title: 'Overview',
@@ -2836,6 +2881,30 @@ export const navigationItems: NavItem[] = [
             title: 'Settings',
             href: '/administration/project-management/settings',
             icon: Settings,
+          },
+          {
+            title: 'Quantity Survey Policy',
+            href: '/administration/project-management/quantity-survey-config',
+            icon: ShieldCheck,
+            permissions: ['quantity-survey.configuration.read'],
+          },
+          {
+            title: 'Quantity Survey Catalogues',
+            href: '/administration/project-management/quantity-survey-catalogues',
+            icon: Package,
+            permissions: ['quantity-survey.configuration.read'],
+          },
+          {
+            title: 'Quantity Survey Rate Library',
+            href: '/administration/project-management/quantity-survey-rate-library',
+            icon: BarChart3,
+            permissions: ['quantity-survey.workspace.read'],
+          },
+          {
+            title: 'QS Escalation Formulas',
+            href: '/administration/project-management/quantity-survey-escalation',
+            icon: LineChart,
+            permissions: ['quantity-survey.workspace.read'],
           },
         ],
       },

@@ -87,6 +87,59 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
+    public void Plan_item_purchase_order_conversion_uses_only_the_governed_commitment()
+    {
+        var plan = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementPlanService.cs");
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementPurchaseOrderSourceService.cs");
+
+        plan.Should().NotContain("Don't fail the PO creation if budget commitment fails");
+        plan.Should().NotContain("Failed to commit budget for PO");
+        source.Should().Contain("await EnsureBudgetCommitmentAsync(");
+        source.Should().Contain(
+            "ProcurementPurchaseOrderComplianceRules.ValidateCommitment(");
+    }
+
+    [Fact]
+    public void Contract_activation_and_commitment_release_are_fail_closed()
+    {
+        var activation = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementContractActivationService.cs");
+        var budget = ReadRepositoryFile(
+            "src", "ErpSystem.Core", "Services", "Procurement",
+            "ProcurementRequisitionBudgetControlService.cs");
+
+        activation.Should().Contain("await EvaluateBudgetCommitmentAsync(");
+        activation.Should().Contain("CONTRACT_ACTIVATION_BUDGET_COMMITMENT_MISSING");
+        budget.Should().Contain("await EnsureNoDownstreamExposureAsync(");
+        budget.Should().Contain("PR_BUDGET_DOWNSTREAM_EXPOSURE_ACTIVE");
+        budget.Should().Contain("item.Status != \"Terminated\"");
+    }
+
+    [Fact]
+    public void Commitment_lifecycle_migration_hard_stops_invalid_issuance_and_early_release()
+    {
+        var source = ReadRepositoryFile(
+            "src", "ErpSystem.Data", "Migrations",
+            "20260812100000_HardenProcurementCommitmentLifecycle.cs");
+
+        source.Should().Contain("TR_PurchaseOrders_GovernedCommitment");
+        source.Should().Contain(
+            "release.BudgetCommitmentReference <> commitment.ReservationReference");
+        source.Should().Contain("budget.Status NOT IN ('Approved', 'Active')");
+        source.Should().Contain("SUM(po.TotalAmount)");
+        source.Should().Contain(
+            "TR_ProcurementBudgetCommitments_DownstreamExposure");
+        source.Should().Contain("d.Status = 1");
+        source.Should().Contain("i.Status = 2");
+        source.Should().Contain("active purchase-order or contract exposure");
+    }
+
+    [Fact]
     public void Final_receipt_inspection_workflow_decision_is_inside_atomic_outcome_scope()
     {
         var source = ReadRepositoryFile(

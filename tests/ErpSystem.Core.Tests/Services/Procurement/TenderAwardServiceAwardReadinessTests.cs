@@ -55,7 +55,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
 
         currentUser.SetupGet(provider => provider.TenantId).Returns(tenantId);
         currentUser.SetupGet(provider => provider.UserId).Returns(userId);
-        tenderControl.Setup(service => service.IsNctOrIctAsync(
+        tenderControl.Setup(service => service.IsControlledTenderMethodAsync(
                 tender.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         exceptionalControl.Setup(service => service.IsExceptionalAsync(
@@ -159,7 +159,7 @@ public sealed class TenderAwardServiceAwardReadinessTests
             new Mock<IProcurementExceptionalSourcingControlService>();
         var readiness = new Mock<IProcurementAwardReadinessService>();
 
-        tenderControl.Setup(service => service.IsNctOrIctAsync(
+        tenderControl.Setup(service => service.IsControlledTenderMethodAsync(
                 tender.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         exceptionalControl.Setup(service => service.IsExceptionalAsync(

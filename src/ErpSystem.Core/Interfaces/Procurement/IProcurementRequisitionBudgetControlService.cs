@@ -8,6 +8,9 @@ public interface IProcurementRequisitionBudgetControlService
     Task<PurchaseRequisitionBudgetReadinessDto> GetReadinessAsync(
         Guid requisitionId,
         CancellationToken cancellationToken = default);
+    Task<PurchaseRequisitionBudgetReadinessDto> GetLinkedControlReadinessAsync(
+        Guid requisitionId,
+        CancellationToken cancellationToken = default);
 
     Task<PurchaseRequisitionBudgetReadinessDto> ReserveAsync(
         PurchaseRequisition requisition,

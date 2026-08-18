@@ -17,6 +17,10 @@ public interface IFixedAssetService
     // Lifecycle Management
     Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CapitalizeAsync(Guid id, CapitalizeFixedAssetDto dto);
+    Task<FixedAssetDto> CapitalizeFromProcurementAsync(
+        Guid id,
+        ProcurementFixedAssetPostingInstructionDto dto,
+        CancellationToken cancellationToken = default);
     Task<FixedAssetCapitalizationReversalDto> RequestCapitalizationReversalAsync(
         Guid id,
         RequestFixedAssetCapitalizationReversalDto dto,
@@ -49,6 +53,20 @@ public interface IFixedAssetService
         Guid reversalJournalEntryId,
         Guid reversalPostingEventId,
         string reason,
+        CancellationToken cancellationToken = default);
+
+    // Governed Inventory issue/return integration. The central Finance engine owns the
+    // journal; Fixed Assets owns registration, custody and register compensation.
+    Task<FixedAssetDto> RegisterInventoryIssueAssetAsync(
+        RegisterInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+    Task ReverseInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReverseInventoryIssueFixedAssetDto dto,
+        CancellationToken cancellationToken = default);
+    Task ReinstateInventoryIssueAssetAsync(
+        Guid fixedAssetId,
+        ReinstateInventoryIssueFixedAssetDto dto,
         CancellationToken cancellationToken = default);
 
     // Dashboard

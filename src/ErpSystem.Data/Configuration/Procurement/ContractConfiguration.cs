@@ -12,6 +12,13 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         {
             table.HasTrigger("TR_Contracts_TDC0407ActivationGuard");
             table.HasTrigger("TR_Contracts_TDC0409CloseoutGuard");
+            table.HasTrigger("TR_Contracts_QS0520CommercialTerms");
+            table.HasCheckConstraint("CK_Contracts_QS0520_Amounts",
+                "[ProvisionalSumAmount] >= 0 AND [ContingencyAmount] >= 0 AND [ProvisionalSumAmount] + [ContingencyAmount] <= [ContractValue] AND [RetentionPercentage] >= 0 AND [RetentionPercentage] <= 100 AND ([DefectsLiabilityDays] IS NULL OR [DefectsLiabilityDays] BETWEEN 0 AND 3650) AND ([ClaimNoticePeriodDays] IS NULL OR [ClaimNoticePeriodDays] BETWEEN 0 AND 3650)");
+            table.HasCheckConstraint("CK_Contracts_QS0520_Lineage",
+                "([CommercialTermsPolicyHash] IS NULL AND [CommercialTermsConfigurationProfileId] IS NULL AND [ContractControlsDecisionId] IS NULL AND [RetentionDecisionId] IS NULL AND [CommercialTermsClientRequestId] IS NULL AND [CommercialTermsRequestHash] IS NULL AND [CommercialTermsConfiguredAt] IS NULL AND [CommercialTermsConfiguredById] IS NULL) OR ([CommercialTermsPolicyHash] IS NOT NULL AND LEN([CommercialTermsPolicyHash]) = 64 AND [CommercialTermsConfigurationProfileId] IS NOT NULL AND [ContractControlsDecisionId] IS NOT NULL AND [RetentionDecisionId] IS NOT NULL AND [CommercialTermsClientRequestId] IS NOT NULL AND LEN([CommercialTermsRequestHash]) = 64 AND [CommercialTermsConfiguredAt] IS NOT NULL AND [CommercialTermsConfiguredById] IS NOT NULL AND [PaymentTermId] IS NOT NULL)");
+            table.HasCheckConstraint("CK_Contracts_QS0520_Clauses",
+                "([RetentionPercentage] = 0 OR NULLIF(LTRIM(RTRIM([RetentionClause])), '') IS NOT NULL) AND ([AllowSectionalTakeover] = 0 OR NULLIF(LTRIM(RTRIM([SectionalTakeoverClause])), '') IS NOT NULL) AND ([AllowSubcontracting] = 0 OR ([SubcontractPaymentTermId] IS NOT NULL AND NULLIF(LTRIM(RTRIM([SubcontractTerms])), '') IS NOT NULL))");
         });
 
         builder.HasKey(c => c.Id);
@@ -46,6 +53,30 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         builder.Property(c => c.RetentionPercentage)
             .HasPrecision(5, 2);
 
+        builder.Property(c => c.ProvisionalSumAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(c => c.ContingencyAmount)
+            .HasPrecision(18, 2);
+
+        builder.Property(c => c.RetentionClause)
+            .HasMaxLength(2000);
+
+        builder.Property(c => c.SectionalTakeoverClause)
+            .HasMaxLength(2000);
+
+        builder.Property(c => c.SubcontractTerms)
+            .HasMaxLength(2000);
+
+        builder.Property(c => c.ClaimClause)
+            .HasMaxLength(2000);
+
+        builder.Property(c => c.CommercialTermsRequestHash)
+            .HasMaxLength(64);
+
+        builder.Property(c => c.CommercialTermsPolicyHash)
+            .HasMaxLength(64);
+
         builder.Property(c => c.ScopeOfWork);
 
         builder.Property(c => c.Deliverables);
@@ -74,6 +105,15 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         builder.HasIndex(c => c.Status);
         builder.HasIndex(c => c.BusinessPartnerId);
         builder.HasIndex(c => c.TenderAwardId);
+        builder.HasIndex(c => c.PaymentTermId);
+        builder.HasIndex(c => c.SubcontractPaymentTermId);
+        builder.HasIndex(c => c.CommercialTermsContractDocumentId);
+        builder.HasIndex(c => c.CommercialTermsConfigurationProfileId);
+        builder.HasIndex(c => c.ContractControlsDecisionId);
+        builder.HasIndex(c => c.RetentionDecisionId);
+        builder.HasIndex(c => new { c.TenantId, c.CommercialTermsClientRequestId })
+            .IsUnique()
+            .HasFilter("[CommercialTermsClientRequestId] IS NOT NULL AND [IsDeleted] = 0");
 
         // Relationships
         builder.HasOne(c => c.TenderAward)
@@ -89,6 +129,41 @@ public class ContractConfiguration : IEntityTypeConfiguration<Contract>
         builder.HasOne(c => c.Tender)
             .WithMany()
             .HasForeignKey(c => c.TenderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.PaymentTerm)
+            .WithMany()
+            .HasForeignKey(c => c.PaymentTermId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.SubcontractPaymentTerm)
+            .WithMany()
+            .HasForeignKey(c => c.SubcontractPaymentTermId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.CommercialTermsContractDocument)
+            .WithMany()
+            .HasForeignKey(c => c.CommercialTermsContractDocumentId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.CommercialTermsConfigurationProfile)
+            .WithMany()
+            .HasForeignKey(c => c.CommercialTermsConfigurationProfileId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.ContractControlsDecision)
+            .WithMany()
+            .HasForeignKey(c => c.ContractControlsDecisionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.RetentionDecision)
+            .WithMany()
+            .HasForeignKey(c => c.RetentionDecisionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.CommercialTermsConfiguredBy)
+            .WithMany()
+            .HasForeignKey(c => c.CommercialTermsConfiguredById)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(c => c.Milestones)

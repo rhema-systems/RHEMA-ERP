@@ -173,9 +173,11 @@ public class PurchaseOrderSummaryDto
     public DateTime? PromisedDate { get; set; }
     public string Status { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
     public string? RequestedByName { get; set; }
     public ProcurementPurchaseOrderSourceType? ProcurementSourceType { get; set; }
+    public ProcurementCategoryClass? ProcurementCategory { get; set; }
     public string? ProcurementSourceReference { get; set; }
     /// <summary>
     /// Runtime workflow info (populated when status is workflow-driven)

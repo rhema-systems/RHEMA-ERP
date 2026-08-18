@@ -7,6 +7,7 @@ using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Data.Repositories;
 using ErpSystem.Data.Services;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -23,11 +24,15 @@ public sealed class E2E020Phase7ReportingAcceptanceTests
     {
         var cases = Cases();
 
-        cases.Should().HaveCount(24);
+        cases.Should().HaveCount(28);
         cases.Select(item => item.Query).Should().OnlyHaveUniqueItems();
         cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.AppVsActualCode);
         cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.ContractRegisterCode);
         cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.SupplierPerformanceCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.RequisitionStatusCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.PurchaseOrderRegisterCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.CommitmentRegisterCode);
+        cases.Should().Contain(item => item.Code == ProcurementStatutoryReportCatalogue.CertificateTrackingCode);
         cases.Should().Contain(item => item.Code == InventoryStatutoryReportCatalogue.BalanceCode);
         cases.Should().Contain(item => item.Code == InventoryStatutoryReportCatalogue.MovementCode);
         cases.Should().Contain(item => item.Code == InventoryStatutoryReportCatalogue.AgeingCode);
@@ -87,6 +92,7 @@ public sealed class E2E020Phase7ReportingAcceptanceTests
         await db.SaveChangesAsync();
 
         var byQuery = cases.ToDictionary(item => item.Query, StringComparer.OrdinalIgnoreCase);
+        var exportExecutions = 0;
         var provider = new Mock<ISystemReportProvider>();
         provider.Setup(item => item.CanHandle(It.IsAny<string?>()))
             .Returns((string? query) => query is not null && byQuery.ContainsKey(query));
@@ -105,6 +111,7 @@ public sealed class E2E020Phase7ReportingAcceptanceTests
                 It.IsAny<string>(), It.IsAny<ExecuteReportDto>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string query, ExecuteReportDto request, bool _, CancellationToken _) =>
             {
+                if (request.IsExportExecution) exportExecutions++;
                 var reportCase = byQuery[query];
                 var columns = reportCase.Columns.Select((column, index) => new ReportColumnDto
                 {
@@ -220,6 +227,8 @@ public sealed class E2E020Phase7ReportingAcceptanceTests
                 item.Parameters.Contains("E2E-020") && item.Parameters.Contains("startDate"))).Should().BeTrue();
         provider.Verify(item => item.AuthorizeExportAsync(
             It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Exactly(cases.Count * 2));
+        exportExecutions.Should().Be(cases.Count * 2,
+            "every XLSX/PDF provider execution must retain its server-only export purpose");
     }
 
     private static IReadOnlyList<ReportCase> Cases() =>

@@ -65,8 +65,16 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         CancellationToken cancellationToken = default)
     {
         EnsureReader();
+        return await GetLinkedControlReadinessAsync(requisitionId, cancellationToken);
+    }
+
+    public async Task<PurchaseRequisitionSourcingReadinessDto> GetLinkedControlReadinessAsync(
+        Guid requisitionId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
         var requisition = await LoadRequisitionAsync(requisitionId, false, cancellationToken);
-        return await EvaluateAsync(requisition, cancellationToken);
+        return await EvaluateAsync(requisition, cancellationToken, linkedControl: true);
     }
 
     public async Task<IReadOnlyList<PurchaseRequisitionSourcingReleaseDto>> GetHistoryAsync(
@@ -189,12 +197,19 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
 
     private async Task<PurchaseRequisitionSourcingReadinessDto> EvaluateAsync(
         PurchaseRequisition requisition,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool linkedControl = false)
     {
         var evaluatedAtUtc = DateTime.UtcNow;
-        var submission = await _submissionControl.GetReadinessAsync(requisition.Id, cancellationToken);
-        var budget = await _budgetControl.GetReadinessAsync(requisition.Id, cancellationToken);
-        var authority = await _authorityControl.GetReadinessAsync(requisition.Id, cancellationToken);
+        var submission = linkedControl
+            ? await _submissionControl.GetLinkedControlReadinessAsync(requisition.Id, cancellationToken)
+            : await _submissionControl.GetReadinessAsync(requisition.Id, cancellationToken);
+        var budget = linkedControl
+            ? await _budgetControl.GetLinkedControlReadinessAsync(requisition.Id, cancellationToken)
+            : await _budgetControl.GetReadinessAsync(requisition.Id, cancellationToken);
+        var authority = linkedControl
+            ? await _authorityControl.GetLinkedControlReadinessAsync(requisition.Id, cancellationToken)
+            : await _authorityControl.GetReadinessAsync(requisition.Id, cancellationToken);
         var items = await RequisitionItems.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                 item.RequisitionId == requisition.Id && !item.IsDeleted)
             .AsNoTracking().OrderBy(item => item.CreatedAt).ToListAsync(cancellationToken);

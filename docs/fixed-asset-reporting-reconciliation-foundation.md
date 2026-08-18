@@ -100,6 +100,8 @@ The GL reconciliation report compares posted GL balances against fixed asset sub
 - disposal proceeds clearing accounts
 - disposal gain/loss accounts
 
+For revaluation surplus, the remaining subledger reserve is posted valuation surplus less completed whole-asset disposal transfers to retained earnings. This keeps an authorised `FIN-LIM-0041` equity transfer aligned with the reserve GL instead of reporting a false reconciliation variance.
+
 Each reconciliation row includes:
 
 - GL balance
@@ -149,7 +151,7 @@ Transfer reports show:
 - journal/posting references where present
 - whether the transfer had GL impact
 
-Custody/location and prospective segment transfers do not mutate historical GL or prior depreciation schedules. GL-impacting reclassification transfers remain unsupported under `FIN-LIM-0038` and should not appear as normal fixed asset GL movement.
+Custody/location and prospective segment transfers do not mutate historical GL or prior depreciation schedules. As of 9 August 2026, controlled GL-impacting reclassifications are supported under resolved `FIN-LIM-0038`: the retained transfer snapshots and posting-engine journal must appear as reclassification movement without rewriting prior schedules.
 
 ## Audit Events
 
@@ -333,8 +335,8 @@ Rollback is code-only for this batch. Removing the report endpoints/service meth
 All open limitations remain centralized in `docs/finance-go-live-limitations-register.md`.
 
 - `FIN-LIM-0027`: resolved for backend fixed asset reporting and GL reconciliation foundation.
-- `FIN-LIM-0038`: GL-impacting fixed asset transfer reclassification remains unsupported.
-- `FIN-LIM-0039` through `FIN-LIM-0043`: disposal-related limitations remain open.
+- `FIN-LIM-0038`: resolved by the controlled fixed-asset GL reclassification transfer foundation.
+- `FIN-LIM-0039`, `FIN-LIM-0040`, `FIN-LIM-0042` and `FIN-LIM-0043` are resolved: disposal-date depreciation, statutory sale settlement, proportional partial/component derecognition and foreign-currency disposal evidence now reconcile through the established Finance ledgers and reports.
 - `FIN-LIM-0044`: broader financial statement classification for disposal gains remains open.
 
 ## PR Definition Of Done

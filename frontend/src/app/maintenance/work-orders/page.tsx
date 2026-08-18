@@ -1001,7 +1001,16 @@ function WorkOrdersPageContent() {
 
   // Load warehouse inventory when warehouse changes (consumables: itemType=1, tools: itemType=4)
   useEffect(() => {
-    if (!selectedWarehouse) return;
+    setSelectedWarehouseLocationId(
+      editingPart?.warehouseId === selectedWarehouse && editingPart.warehouseLocationId
+        ? editingPart.warehouseLocationId
+        : ''
+    );
+    if (!selectedWarehouse) {
+      setWarehouseInventory([]);
+      setWarehouseTools([]);
+      return;
+    }
 
     const loadWarehouseInventory = async () => {
       try {
@@ -1020,7 +1029,7 @@ function WorkOrdersPageContent() {
     };
 
     loadWarehouseInventory();
-  }, [selectedWarehouse]);
+  }, [selectedWarehouse, editingPart?.warehouseId, editingPart?.warehouseLocationId]);
 
   const handleCreateWorkOrder = async () => {
     try {
@@ -4486,14 +4495,15 @@ function WorkOrdersPageContent() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-12 gap-4">
                       <div className="col-span-4 space-y-2">
-                        <Label htmlFor="warehouse-select">Location <span className="text-red-500">*</span></Label>
+                        <Label htmlFor="warehouse-select">Warehouse <span className="text-red-500">*</span></Label>
                         <Select
                           value={selectedWarehouse}
                           onValueChange={(value) => setSelectedWarehouse(value)}
+                          disabled={Boolean(editingPart && !isTempId(editingPart.id))}
                           required
                         >
                           <SelectTrigger id="warehouse-select">
-                            <SelectValue placeholder="Select location" />
+                            <SelectValue placeholder="Select warehouse" />
                           </SelectTrigger>
                           <SelectContent>
                             {warehouses.map((warehouse) => (
@@ -4503,18 +4513,33 @@ function WorkOrdersPageContent() {
                             ))}
                             {warehouses.length === 0 && (
                               <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-                                No locations available
+                                No warehouses available
                               </div>
                             )}
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="col-span-8">
-                        <p className="text-sm text-muted-foreground mt-6">
-                          {selectedWarehouse
-                            ? `Showing consumables available in ${warehouses.find(w => w.id === selectedWarehouse)?.name}.`
-                            : 'Please select a location to view available consumables.'}
-                        </p>
+                      <div className="col-span-4 space-y-2">
+                        <Label htmlFor="warehouse-location-select">Stock location <span className="text-red-500">*</span></Label>
+                        <Select
+                          value={selectedWarehouseLocationId}
+                          onValueChange={setSelectedWarehouseLocationId}
+                          disabled={!selectedWarehouse}
+                          required
+                        >
+                          <SelectTrigger id="warehouse-location-select">
+                            <SelectValue placeholder="Select stock location" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {warehouseLocations
+                              .filter(location => location.warehouseId === selectedWarehouse && location.isActive)
+                              .map(location => (
+                                <SelectItem key={location.id} value={location.id}>
+                                  {location.locationCode}{location.name ? ` - ${location.name}` : ''}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
 
@@ -4534,7 +4559,8 @@ function WorkOrdersPageContent() {
                         <div className="col-span-4 space-y-2">
                           <Label htmlFor="consumable-select">Select Consumable <span className="text-red-500">*</span></Label>
                           <Select
-                            value={selectedInventoryItem?.id || ''}
+                          value={selectedInventoryItem?.id || ''}
+                          disabled={Boolean(editingPart && !isTempId(editingPart.id))}
                             onValueChange={(value) => {
                               const item = warehouseInventory.find(i => i.inventoryItemId === value);
                               if (item) {
@@ -4626,7 +4652,7 @@ function WorkOrdersPageContent() {
                     </div>
                     <div className="col-span-2 flex items-end">
                       <Button
-                        onClick={() => {
+                        onClick={async () => {
                           if (!selectedInventoryItem) return;
                           if (partQuantity < 1) return;
                           if (!selectedWarehouse) {
@@ -4637,24 +4663,57 @@ function WorkOrdersPageContent() {
                             });
                             return;
                           }
+                          if (!selectedWarehouseLocationId) {
+                            toast({
+                              title: 'Stock location required',
+                              description: 'Select the exact warehouse location that will reserve this item.',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
 
                           if (editingPart) {
                             const lineUnitPrice = getPartSellingPrice(selectedInventoryItem);
-                            // Update existing part in local state
-                            setWorkOrderParts(prev => prev.map(part =>
-                              part.id === editingPart.id
+                            try {
+                              const updated = isTempId(editingPart.id)
                                 ? {
-                                    ...part,
+                                    ...editingPart,
                                     inventoryItemId: selectedInventoryItem.id,
                                     itemCode: selectedInventoryItem.itemCode,
                                     itemName: selectedInventoryItem.name,
                                     quantityRequired: partQuantity,
                                     unitCost: lineUnitPrice,
                                     totalCost: partQuantity * lineUnitPrice,
-                                    notes: partNotes
+                                    warehouseId: selectedWarehouse,
+                                    warehouseLocationId: selectedWarehouseLocationId,
+                                    notes: partNotes,
                                   }
-                                : part
-                            ));
+                                : await workOrderPartService.updatePart(editingPart.id, {
+                                    quantityRequired: partQuantity,
+                                    quantityUsed: editingPart.quantityUsed,
+                                    quantityReturned: editingPart.quantityReturned,
+                                    unitCost: lineUnitPrice,
+                                    warehouseLocationId: selectedWarehouseLocationId,
+                                    serialNumber: editingPart.serialNumber,
+                                    lotNumber: editingPart.lotNumber,
+                                    status: editingPart.status,
+                                    notes: partNotes,
+                                  });
+                              setWorkOrderParts(prev => prev.map(part =>
+                                part.id === editingPart.id ? updated : part
+                              ));
+                              toast({
+                                title: 'Reservation updated',
+                                description: `${editingPart.itemName} and its inventory reservation were updated together.`,
+                              });
+                            } catch (error: any) {
+                              toast({
+                                title: 'Reservation update failed',
+                                description: error.response?.data?.message || 'The consumable reservation could not be updated.',
+                                variant: 'destructive',
+                              });
+                              return;
+                            }
                             setEditingPart(null);
                           } else {
                             const lineUnitPrice = getPartSellingPrice(selectedInventoryItem);
@@ -4676,6 +4735,7 @@ function WorkOrdersPageContent() {
                               notes: partNotes,
                               createdAt: new Date().toISOString(),
                               warehouseId: selectedWarehouse,
+                              warehouseLocationId: selectedWarehouseLocationId,
                               warehouseName: warehouse?.name,
                               // Store the warehouse ID for saving
                               ...(selectedWarehouse && { _warehouseId: selectedWarehouse })
@@ -4717,6 +4777,7 @@ function WorkOrdersPageContent() {
                           <TableHead>Item Code</TableHead>
                           <TableHead>Item Name</TableHead>
                           <TableHead>Qty Required</TableHead>
+                          <TableHead>Status</TableHead>
                           <TableHead>Unit Cost</TableHead>
                           <TableHead>Total Cost</TableHead>
                           <TableHead>Actions</TableHead>
@@ -4725,7 +4786,7 @@ function WorkOrdersPageContent() {
                       <TableBody>
                         {workOrderParts.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center text-muted-foreground">
+                            <TableCell colSpan={8} className="text-center text-muted-foreground">
                               No consumables added yet
                             </TableCell>
                           </TableRow>
@@ -4736,6 +4797,7 @@ function WorkOrdersPageContent() {
                               <TableCell className="font-medium">{part.itemCode}</TableCell>
                               <TableCell>{part.itemName}</TableCell>
                               <TableCell>{part.quantityRequired}</TableCell>
+                              <TableCell><Badge variant="outline">{part.status}</Badge></TableCell>
                               <TableCell>{formatMoney(part.unitCost)}</TableCell>
                               <TableCell>{formatMoney(part.totalCost)}</TableCell>
                               <TableCell>
@@ -4747,12 +4809,36 @@ function WorkOrdersPageContent() {
                                       setEditingPart(part);
                                       const item = inventoryItems.find(i => i.id === part.inventoryItemId);
                                       setSelectedInventoryItem(item || null);
+                                      setSelectedWarehouse(part.warehouseId || '');
+                                      setSelectedWarehouseLocationId(part.warehouseLocationId || '');
                                       setPartQuantity(part.quantityRequired);
                                       setPartNotes(part.notes || '');
                                     }}
                                   >
                                     <Pencil className="h-4 w-4" />
                                   </Button>
+                                  {!part.id.startsWith('temp-') && !part.allocationId && (
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      title="Retry inventory reservation"
+                                      onClick={async () => {
+                                        try {
+                                          const updated = await workOrderPartService.retryReservation(part.id);
+                                          setWorkOrderParts(prev => prev.map(value => value.id === part.id ? updated : value));
+                                          toast({ title: 'Reservation completed', description: `${part.itemName} is now reserved.` });
+                                        } catch (error: any) {
+                                          toast({
+                                            title: 'Reservation failed',
+                                            description: error.response?.data?.message || 'The reservation could not be completed.',
+                                            variant: 'destructive',
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                    </Button>
+                                  )}
                                   <Button
                                     size="icon"
                                     variant="ghost"
@@ -4780,7 +4866,7 @@ function WorkOrdersPageContent() {
                       </TableBody>
                       <tfoot>
                         <TableRow className="bg-muted/50 font-semibold">
-                          <TableCell colSpan={5} className="text-right">Total:</TableCell>
+                          <TableCell colSpan={6} className="text-right">Total:</TableCell>
                           <TableCell>{formatMoney(workOrderParts.reduce((sum, part) => sum + part.totalCost, 0))}</TableCell>
                           <TableCell></TableCell>
                         </TableRow>
@@ -5268,6 +5354,7 @@ function WorkOrdersPageContent() {
                       quantityRequired: part.quantityRequired,
                       unitCost: part.unitCost,
                       warehouseId: part._warehouseId || part.warehouseId,
+                      warehouseLocationId: part.warehouseLocationId,
                       notes: part.notes
                     }));
 

@@ -263,29 +263,14 @@ public class ResourceAllocationController : ControllerBase
     [HttpPost("inventory/allocate")]
     public async Task<ActionResult<InventoryAllocationDto>> AllocateInventory([FromBody] AllocateInventoryDto request)
     {
-        try
+        await Task.CompletedTask;
+        return Conflict(new
         {
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(ModelState);
-            }
-
-            var allocation = await _inventoryService.AllocateForWorkOrderAsync(request);
-            return Ok(allocation);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error allocating inventory");
-            return StatusCode(500, "An error occurred while allocating inventory");
-        }
+            code = "INV_WORK_ORDER_RESERVATION_GOVERNED_ROUTE_REQUIRED",
+            message = "Add or retry the part through the governed work-order parts endpoint.",
+            route = "/api/maintenance/work-orders/parts",
+            correlationId = HttpContext.TraceIdentifier
+        });
     }
 
     /// <summary>
@@ -303,8 +288,13 @@ public class ResourceAllocationController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var success = await _inventoryService.ConsumeAllocatedInventoryAsync(allocationId, request.Quantity, request.UserId);
-            return Ok(new { Success = success, Message = "Inventory consumed successfully" });
+            return Conflict(new
+            {
+                code = "INV_WORK_ORDER_RESERVATION_GOVERNED_ROUTE_REQUIRED",
+                message = "Record consumption by updating the governed work-order part; actor identity is derived from the authenticated session.",
+                route = "/api/maintenance/work-orders/parts/{partId}",
+                correlationId = HttpContext.TraceIdentifier
+            });
         }
         catch (ArgumentException ex)
         {
@@ -334,8 +324,13 @@ public class ResourceAllocationController : ControllerBase
                 return BadRequest(ModelState);
             }
 
-            var success = await _inventoryService.ReleaseAllocationAsync(allocationId, request.UserId);
-            return Ok(new { Success = success, Message = "Allocation released successfully" });
+            return Conflict(new
+            {
+                code = "INV_WORK_ORDER_RESERVATION_GOVERNED_ROUTE_REQUIRED",
+                message = "Return or remove the governed work-order part; actor identity is derived from the authenticated session.",
+                route = "/api/maintenance/work-orders/parts/{partId}/return",
+                correlationId = HttpContext.TraceIdentifier
+            });
         }
         catch (ArgumentException ex)
         {

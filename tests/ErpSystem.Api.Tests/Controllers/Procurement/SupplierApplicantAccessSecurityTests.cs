@@ -42,6 +42,10 @@ public sealed class SupplierApplicantAccessSecurityTests
             .Should().Be("InternalOnly");
         Policy(controller, nameof(SupplierApplicantAccessController.RetryActivation))
             .Should().Be("InternalOnly");
+        Policy(controller, nameof(SupplierApplicantAccessController.RequestContactCorrectionChallenge))
+            .Should().Be("InternalOnly");
+        Policy(controller, nameof(SupplierApplicantAccessController.ConfirmContactCorrection))
+            .Should().Be("InternalOnly");
 
         controller.GetMethod(nameof(SupplierApplicantAccessController.StartSession))!
             .GetCustomAttribute<AllowAnonymousAttribute>().Should().NotBeNull();
@@ -189,6 +193,12 @@ public sealed class SupplierApplicantAccessSecurityTests
 
         registrations.Verify(item => item.ApproveRegistrationAsync(
             registrationId, actorId, "approved"), Times.Once);
+        applicantAccess.Verify(item =>
+            item.ValidateApprovedSupplierProvisioningAsync(
+                registrationId,
+                actorId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()), Times.Once);
         registrations.Verify(item => item.RejectRegistrationAsync(
             registrationId, actorId, "rejected"), Times.Once);
         applicantAccess.Verify(item => item.CloseForTerminalRegistrationAsync(
@@ -197,6 +207,75 @@ public sealed class SupplierApplicantAccessSecurityTests
             actorId,
             It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegistrationApprovalPreflightConflictDoesNotCommitApproval()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        var applicantAccess = new Mock<IProcurementSupplierApplicantAccessService>();
+        applicantAccess.Setup(item =>
+                item.ValidateApprovedSupplierProvisioningAsync(
+                    registrationId,
+                    actorId,
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementSupplierApplicantAccessException(
+                "SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS",
+                "The verified contact belongs to an existing ERP account.",
+                StatusCodes.Status409Conflict));
+        var controller = RegistrationController(
+            registrations.Object, actorId, applicantAccess.Object);
+
+        var result = await controller.ApproveRegistration(
+            registrationId, new ApproveRegistrationRequest("approved"));
+
+        var conflict = result.Result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = conflict.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Detail.Should().Contain("existing ERP account");
+        problem.Extensions["code"].Should()
+            .Be("SUPPLIER_APPLICANT_LOGIN_ALREADY_EXISTS");
+        registrations.Verify(item => item.ApproveRegistrationAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RegistrationApprovalLetsUnexpectedFailuresReachCentralExceptionHandling()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.ApproveRegistrationAsync(
+                registrationId, actorId, It.IsAny<string?>()))
+            .ThrowsAsync(new ApplicationException("database failure"));
+        var controller = RegistrationController(registrations.Object, actorId);
+
+        var action = () => controller.ApproveRegistration(
+            registrationId, new ApproveRegistrationRequest("approved"));
+
+        await action.Should().ThrowAsync<ApplicationException>()
+            .WithMessage("database failure");
+    }
+
+    [Fact]
+    public async Task DocumentVerificationLetsUnexpectedFailuresReachCentralExceptionHandling()
+    {
+        var actorId = Guid.NewGuid();
+        var registrationId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var registrations = new Mock<IBusinessPartnerRegistrationService>();
+        registrations.Setup(item => item.VerifyDocumentAsync(
+                registrationId, documentId, actorId))
+            .ThrowsAsync(new ApplicationException("control event failure"));
+        var controller = RegistrationController(registrations.Object, actorId);
+
+        var action = () => controller.VerifyDocument(registrationId, documentId);
+
+        await action.Should().ThrowAsync<ApplicationException>()
+            .WithMessage("control event failure");
     }
 
     [Fact]

@@ -26,6 +26,24 @@ public sealed class AuditGovernanceServiceTests
         yield return ["ReverseStockAdjustment", AuditOperationKind.Reverse];
         yield return ["Dispatch", AuditOperationKind.Dispatch];
         yield return ["Receive", AuditOperationKind.Receive];
+        yield return ["CalculateEscalationRun", AuditOperationKind.Create];
+        yield return ["ReviewEscalationRun", AuditOperationKind.Update];
+        yield return ["OpenEscalationDispute", AuditOperationKind.Create];
+        yield return ["RecordEscalationContractorResponse", AuditOperationKind.Update];
+        yield return ["AttachMeasurementEvidence", AuditOperationKind.Create];
+        yield return ["RecordMeasurementSheet", AuditOperationKind.Approve];
+        yield return ["ScheduleJointMeasurement", AuditOperationKind.Update];
+        yield return ["EndorseJointMeasurement", AuditOperationKind.Approve];
+        yield return ["ApplyJointMeasurementBoqRevision", AuditOperationKind.Approve];
+        yield return ["SettleContractClaim", AuditOperationKind.Update];
+        yield return ["SignDayworkSheet", AuditOperationKind.Create];
+        yield return ["VerifyDayworkSheet", AuditOperationKind.Approve];
+        yield return ["AssessSubcontractValuation", AuditOperationKind.Update];
+        yield return ["IssueSubcontractCharge", AuditOperationKind.Dispatch];
+        yield return ["RespondSubcontractCharge", AuditOperationKind.Update];
+        yield return ["CommunicateSubcontractCharge", AuditOperationKind.Update];
+        yield return ["AllocateSubcontractCharge", AuditOperationKind.Update];
+        yield return ["ReleaseSubcontractChargeAllocation", AuditOperationKind.Update];
     }
 
     [Theory]

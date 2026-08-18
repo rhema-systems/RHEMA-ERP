@@ -25,6 +25,9 @@ public sealed class ProcurementTenderControlDto
     public DateTime? OpenedAtUtc { get; set; }
     public DateTime? TechnicalEvaluatedAtUtc { get; set; }
     public DateTime? FinancialEvaluatedAtUtc { get; set; }
+    public decimal MinimumTechnicalScore { get; set; }
+    public decimal TechnicalWeight { get; set; }
+    public decimal FinancialWeight { get; set; }
     public Guid? RecommendedBidId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
     public string? AuthorityApprovalReference { get; set; }
@@ -37,6 +40,7 @@ public sealed class ProcurementTenderControlDto
     public string RowVersion { get; set; } = string.Empty;
     public List<ProcurementTenderDocumentIssueDto> DocumentIssues { get; set; } = new();
     public List<ProcurementTenderSubmissionReceiptDto> SubmissionReceipts { get; set; } = new();
+    public List<ProcurementTenderTechnicalResultDto> TechnicalResults { get; set; } = new();
     public List<ProcurementTenderMilestoneDto> Milestones { get; set; } = new();
 }
 
@@ -63,7 +67,16 @@ public sealed class ProcurementTenderSubmissionReceiptDto
     public DateTime ReceivedAtUtc { get; set; }
     public ProcurementTenderSubmissionDisposition Disposition { get; set; }
     public DateTime? OpenedAtUtc { get; set; }
+    public decimal BidAmount { get; set; }
+    public string Currency { get; set; } = string.Empty;
     public string IntegrityHash { get; set; } = string.Empty;
+}
+
+public sealed class ProcurementTenderTechnicalResultDto
+{
+    public Guid BidId { get; set; }
+    public decimal Score { get; set; }
+    public bool Qualified { get; set; }
 }
 
 public sealed class ProcurementTenderMilestoneDto

@@ -9,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Audit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -89,7 +90,7 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (existing is not null)
         {
-            if (string.Equals(existing.IntegrityHash, entity.IntegrityHash, StringComparison.OrdinalIgnoreCase))
+            if (IsIdempotentReplay(existing, entity))
                 return Map(existing);
             throw new ProcurementControlEventConflictException("EventKey already identifies a different immutable control event.");
         }
@@ -99,7 +100,7 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
         {
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException exception)
+        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
         {
             _logger.LogWarning(exception, "Control event append conflicted for tenant {TenantId}, key {EventKey}",
                 _currentUser.TenantId, entity.EventKey);
@@ -183,14 +184,14 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             .Include(item => item.EvidenceLinks).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
         if (existing is not null)
         {
-            if (string.Equals(existing.IntegrityHash, entity.IntegrityHash, StringComparison.OrdinalIgnoreCase))
+            if (IsIdempotentReplay(existing, entity))
                 return Map(existing);
             throw new ProcurementControlEventConflictException("EventKey already identifies a different immutable control event.");
         }
 
         await Events.AddAsync(entity);
         try { await _unitOfWork.SaveChangesAsync(cancellationToken); }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
         {
             throw new ProcurementControlEventConflictException(
                 "The system control event could not be appended because its immutable key already exists.");
@@ -492,6 +493,73 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             Evidence = evidence
         }, JsonOptions);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    private static bool IsIdempotentReplay(
+        ProcurementControlEvent existing,
+        ProcurementControlEvent candidate)
+    {
+        if (string.Equals(existing.IntegrityHash, candidate.IntegrityHash,
+                StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // The first successful append owns OccurredAtUtc. A later delivery attempt for the
+        // same immutable event naturally has a later timestamp, but every business and audit
+        // value (including actor, correlation, payload and evidence lineage) must still match.
+        return string.Equals(ComputeReplayHash(existing), ComputeReplayHash(candidate),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ComputeReplayHash(ProcurementControlEvent item)
+    {
+        var evidence = item.EvidenceLinks.OrderBy(link => link.ReferenceKind).ThenBy(link => link.Reference)
+            .Select(link => new
+            {
+                Kind = (int)link.ReferenceKind,
+                link.WorkflowEvidenceDocumentId,
+                link.FileUploadRecordId,
+                link.Reference,
+                link.Label,
+                link.RequirementKey
+            }).ToList();
+        var payload = JsonSerializer.Serialize(new
+        {
+            item.SchemaVersion,
+            item.EventKey,
+            item.EventType,
+            item.Action,
+            Operation = (int)item.Operation,
+            Result = (int)item.Result,
+            item.RuleCode,
+            item.RuleId,
+            item.RuleVersion,
+            item.DecisionKeysJson,
+            item.SourceType,
+            item.SourceId,
+            item.SourceReference,
+            item.ActorUserId,
+            item.ActorName,
+            item.ActorRolesJson,
+            item.Reason,
+            item.InputValuesJson,
+            item.ResultValuesJson,
+            item.BeforeJson,
+            item.AfterJson,
+            item.CorrelationId,
+            item.CausationId,
+            Evidence = evidence
+        }, JsonOptions);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    private static bool IsUniqueConstraintViolation(Exception exception)
+    {
+        if (exception is DbUpdateException { InnerException: not null } updateException)
+            return IsUniqueConstraintViolation(updateException.InnerException);
+        if (exception is SqlException sqlException)
+            return sqlException.Number is 2601 or 2627;
+        return exception.InnerException is not null &&
+               IsUniqueConstraintViolation(exception.InnerException);
     }
 
     private static void ValidateWrite(ProcurementControlEventWriteRequest request)

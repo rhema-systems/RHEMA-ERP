@@ -609,12 +609,16 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
                     item.Status == ProcurementCommitteeStatus.Active && item.EffectiveFrom <= now &&
                     (!item.EffectiveTo.HasValue || item.EffectiveTo >= now))
                 .Include(item => item.Members.Where(member => !member.IsDeleted && member.IsActive))
+                    .ThenInclude(member => member.Assignment)
                 .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
             var activeVoting = committee?.Members.Count(member => member.IsVoting && IsEffective(member.EffectiveFrom, member.EffectiveTo)) ?? 0;
-            var memberAssignments = committee?.Members.Where(member => IsEffective(member.EffectiveFrom, member.EffectiveTo))
-                .Select(member => member.AssignmentId).ToHashSet() ?? [];
-            matches = matches.Where(item => memberAssignments.Contains(item.Id)).ToList();
-            if (committee is null || activeVoting < committee.RequiredQuorum || matches.Count == 0)
+            var actorIsEffectiveMember = committee?.Members.Any(member =>
+                IsEffective(member.EffectiveFrom, member.EffectiveTo) &&
+                IsEffective(member.Assignment.EffectiveFrom, member.Assignment.EffectiveTo) &&
+                member.Assignment.IsActive &&
+                member.Assignment.UserId == _currentUser.UserId) == true;
+            if (committee is null || activeVoting < committee.RequiredQuorum ||
+                matches.Count == 0 || !actorIsEffectiveMember)
             {
                 code = "ACCESS_COMMITTEE_DENIED";
                 message = "The committee is inactive, below quorum, or the current actor is not an effective member.";
@@ -648,7 +652,7 @@ public sealed class ProcurementAccessControlService : IProcurementAccessControlS
             await _controlEvents.RecordAsync(new ProcurementControlEventWriteRequest
             {
                 EventKey = ProcurementControlEventKey.Create("access", _currentUser.TenantId, _currentUser.UserId,
-                    correlationId, permission.Code, request.SourceType, request.SourceReference),
+                    correlationId, permission.Code, request.SourceType, request.SourceReference, Guid.NewGuid()),
                 EventType = "AccessDecision",
                 Action = "EnforceCapability",
                 Result = decision.Allowed ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Denied,

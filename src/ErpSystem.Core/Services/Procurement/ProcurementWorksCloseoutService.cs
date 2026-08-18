@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.QuantitySurvey;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
@@ -10,6 +11,8 @@ using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces.QuantitySurvey;
+using ErpSystem.Core.Services.QuantitySurvey;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -38,6 +41,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
     private readonly IProcurementControlEventService _controlEvents;
     private readonly INotificationTopicPublisher _notifications;
     private readonly ILogger<ProcurementWorksCloseoutService> _logger;
+    private readonly IQuantitySurveyConfigurationService? _quantitySurveyConfiguration;
 
     public ProcurementWorksCloseoutService(
         IUnitOfWork unitOfWork,
@@ -49,7 +53,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         IWorkflowIntegrationService workflow,
         IProcurementControlEventService controlEvents,
         INotificationTopicPublisher notifications,
-        ILogger<ProcurementWorksCloseoutService> logger)
+        ILogger<ProcurementWorksCloseoutService> logger,
+        IQuantitySurveyConfigurationService? quantitySurveyConfiguration = null)
     {
         _unitOfWork = unitOfWork;
         _store = store;
@@ -61,6 +66,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         _controlEvents = controlEvents;
         _notifications = notifications;
         _logger = logger;
+        _quantitySurveyConfiguration = quantitySurveyConfiguration;
     }
 
     private IGenericRepository<Contract> Contracts => _unitOfWork.Repository<Contract>();
@@ -129,6 +135,25 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 exception.Code, exception.Message));
         }
 
+        RetentionPolicyContext? retentionPolicy = null;
+        if (source is not null)
+        {
+            try
+            {
+                retentionPolicy = await LoadRetentionPolicyAsync(
+                    DateTime.UtcNow, cancellationToken);
+                checks.Add(Passed("qs-retention-policy", "QS retention policy",
+                    "QS_RETENTION_POLICY_READY",
+                    $"QS-DEC-009 is approved and effective in profile v{retentionPolicy.ProfileVersion}.",
+                    retentionPolicy.DecisionId));
+            }
+            catch (ProcurementWorksCloseoutException exception)
+            {
+                checks.Add(Pending("qs-retention-policy", "QS retention policy",
+                    exception.Code, exception.Message));
+            }
+        }
+
         return new ProcurementWorksCloseoutOverviewDto
         {
             ContractId = contract.Id,
@@ -147,6 +172,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 new ProcurementWorksHandoverSourceDto
                 {
                     Id = item.Id,
+                    ProjectUnitId = item.ProjectUnitId,
                     HandoverType = item.HandoverType,
                     Title = item.Title,
                     Status = item.Status,
@@ -182,6 +208,10 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                     Id = source.PerformanceBond.Id,
                     Status = source.PerformanceBond.Status
                 },
+            RetentionPolicy = retentionPolicy is null ? null : Map(retentionPolicy),
+            RetentionLedger = source is null
+                ? []
+                : BuildRetentionLedger(source),
             Checks = checks,
             History = history.Select(Map).ToList()
         };
@@ -201,6 +231,16 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         if (!Enum.IsDefined(request.ActionType))
             throw Validation("WORKS_CLOSEOUT_ACTION_TYPE_INVALID",
                 "The Works closeout action type is invalid.");
+        if (request.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease &&
+            (!request.RetentionReleaseStage.HasValue ||
+             !Enum.IsDefined(request.RetentionReleaseStage.Value)))
+            throw Validation("QS_RETENTION_RELEASE_STAGE_REQUIRED",
+                "Select a valid controlled retention-release stage.");
+        if (request.ActionType != ProcurementWorksCloseoutActionType.RetentionRelease &&
+            (request.RetentionReleaseStage.HasValue || request.UsesRetentionBond))
+            throw Validation("QS_RETENTION_RELEASE_STAGE_NOT_APPLICABLE",
+                "Retention-release controls apply only to a retention-release action.");
+        var requestHash = RequestHash(contractId, request);
         var contract = await LoadContractAsync(contractId, cancellationToken);
         await EnsureCapabilityAsync(ManagePermission, contract.ContractNumber,
             correlation, cancellationToken);
@@ -217,6 +257,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             if (existing.ContractId != contractId)
                 throw Conflict("WORKS_CLOSEOUT_IDEMPOTENCY_CONFLICT",
                     "The idempotency key belongs to another contract.");
+            EnsureRetryMatches(existing, requestHash);
             return Map(existing);
         }
 
@@ -233,6 +274,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 if (concurrent.ContractId != contractId)
                     throw Conflict("WORKS_CLOSEOUT_IDEMPOTENCY_CONFLICT",
                         "The idempotency key belongs to another contract.");
+                EnsureRetryMatches(concurrent, requestHash);
                 created = concurrent;
                 return;
             }
@@ -281,12 +323,26 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 PolicyVersion = evaluation.Authority.Policy.Version,
                 AuthorityRuleId = evaluation.Authority.Steps.First().RuleId,
                 AuthorityName = evaluation.Authority.Steps.First().AuthorityName,
-                WorkflowDefinitionId = evaluation.Authority.Workflow!.WorkflowDefinitionId,
+                WorkflowDefinitionId = evaluation.RetentionPolicy?.Value.ApprovalWorkflowDefinitionId
+                                       ?? evaluation.Authority.Workflow!.WorkflowDefinitionId,
                 ProjectHandoverItemId = request.ProjectHandoverItemId,
                 ProjectDefectLiabilityCaseId = request.ProjectDefectLiabilityCaseId,
                 ProjectFinalAccountId = request.ProjectFinalAccountId,
                 ProjectPaymentCertificateId = request.ProjectPaymentCertificateId,
                 PerformanceBondRequestId = request.PerformanceBondRequestId,
+                RetentionReleaseStage = request.RetentionReleaseStage,
+                QuantitySurveyConfigurationProfileId = evaluation.RetentionPolicy?.ProfileId,
+                QuantitySurveyConfigurationProfileVersion = evaluation.RetentionPolicy?.ProfileVersion,
+                QuantitySurveyRetentionDecisionId = evaluation.RetentionPolicy?.DecisionId,
+                QuantitySurveyRetentionPolicyHash = evaluation.RetentionPolicy?.PolicyHash,
+                RequestHash = requestHash,
+                RetentionHeldSnapshot = evaluation.RetentionComputation?.RetentionHeld,
+                RetentionReleasedBefore = evaluation.RetentionComputation?.RetentionReleased,
+                RetentionStageLimitAmount = evaluation.RetentionComputation?.StageLimit,
+                RetentionReleasedAfter = evaluation.RetentionComputation is null
+                    ? null
+                    : decimal.Round(evaluation.RetentionComputation.RetentionReleased + (request.Amount ?? 0m), 2),
+                UsesRetentionBond = request.UsesRetentionBond,
                 EffectiveAtUtc = request.EffectiveAtUtc.HasValue
                     ? EnsureUtc(request.EffectiveAtUtc.Value)
                     : now,
@@ -330,7 +386,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             var workflow = await _workflow.SubmitAsync(
-                WorkflowEntityType, created.Id, created.WorkflowDefinitionId);
+                WorkflowEntityTypeFor(created.ActionType), created.Id, created.WorkflowDefinitionId);
             if (!workflow.ExecutionResult.Success)
                 throw Conflict("WORKS_CLOSEOUT_WORKFLOW_START_FAILED",
                     workflow.ExecutionResult.Message ??
@@ -411,7 +467,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         else
         {
             var workflow = await _workflow.ProcessApprovalAsync(
-                WorkflowEntityType, action.Id, _currentUser.UserId,
+                WorkflowEntityTypeFor(action.ActionType), action.Id, _currentUser.UserId,
                 request.Approved ? "Approve" : "Reject", request.Comment.Trim());
             if (!workflow.ExecutionResult.Success)
                 throw Conflict("WORKS_CLOSEOUT_WORKFLOW_DECISION_FAILED",
@@ -487,6 +543,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             var evaluation = await EvaluateAsync(
                 contract, project!, history.Where(item => item.Id != action.Id).ToList(),
                 replay, action.Evidence.ToList(), correlation, cancellationToken);
+            evaluation = AddRetentionDriftChecks(action, evaluation);
             if (!IsReady(evaluation.Checks))
             {
                 action.Status = ProcurementWorksCloseoutActionStatus.RevalidationFailed;
@@ -601,6 +658,17 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             $"{profile.ProfileCode} v{profile.Version}", profile.Id,
             $"{profile.ProfileCode}:v{profile.Version}"));
 
+        RetentionPolicyContext? retentionPolicy = null;
+        if (request.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease)
+        {
+            retentionPolicy = await LoadRetentionPolicyAsync(
+                request.EffectiveAtUtc ?? DateTime.UtcNow, cancellationToken);
+            checks.Add(Passed("qs-retention-policy", "QS retention policy",
+                "QS_RETENTION_POLICY_READY",
+                $"QS-DEC-009 is approved and effective in profile v{retentionPolicy.ProfileVersion}.",
+                retentionPolicy.DecisionId, $"QS-DEC-009/{retentionPolicy.PolicyHash[..12]}"));
+        }
+
         var amount = request.Amount ??
                      (request.ActionType is ProcurementWorksCloseoutActionType.InitialTakeover
                          or ProcurementWorksCloseoutActionType.FinalTakeover
@@ -626,13 +694,36 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             $"{authority.Steps.First().AuthorityName} / {authority.Workflow.Name} v{authority.Workflow.Version}"));
 
         var state = await LoadSourceStateAsync(contract, project, history, cancellationToken);
+        RetentionComputation? retentionComputation = null;
+        if (retentionPolicy is not null && request.RetentionReleaseStage.HasValue)
+        {
+            var releasedForStage = history.Where(item =>
+                    item.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease &&
+                    item.Status == ProcurementWorksCloseoutActionStatus.Approved &&
+                    item.RetentionReleaseStage == request.RetentionReleaseStage &&
+                    item.Amount.HasValue)
+                .Sum(item => item.Amount!.Value);
+            retentionComputation = new RetentionComputation(
+                state.RetentionHeld,
+                state.RetentionReleased,
+                releasedForStage,
+                ProcurementWorksCloseoutRules.RetentionStageLimit(
+                    state.RetentionHeld,
+                    state.RetentionReleased,
+                    releasedForStage,
+                    request.RetentionReleaseStage.Value,
+                    retentionPolicy.Value.PracticalCompletionReleasePercent,
+                    retentionPolicy.Value.SectionalTakeoverReleasePercent,
+                    retentionPolicy.Value.DefectsReleasePercent));
+        }
         checks.Add(Passed("contract-type", "Works contract",
             "WORKS_CONTRACT_CONFIRMED", "The contract is classified as Works.",
             contract.Id, contract.ContractNumber));
         checks.Add(Passed("project", "Linked project", "WORKS_PROJECT_LINKED",
             $"Project {project.ProjectCode} is linked to the contract.",
             project.Id, project.ProjectCode));
-        AddActionChecks(checks, contract, state, history, request);
+        AddActionChecks(checks, contract, state, history, request,
+            retentionPolicy, retentionComputation);
 
         foreach (var key in ProcurementWorksCloseoutRules.RequiredEvidence[request.ActionType])
         {
@@ -682,6 +773,15 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 .Select(item => item.Id),
             state.RetentionHeld,
             state.RetentionReleased,
+            RetentionPolicy = retentionPolicy is null ? null : new
+            {
+                retentionPolicy.ProfileId,
+                retentionPolicy.ProfileVersion,
+                retentionPolicy.DecisionId,
+                retentionPolicy.PolicyHash,
+                retentionPolicy.Value
+            },
+            RetentionComputation = retentionComputation,
             FinalAccount = state.FinalAccount is null ? null : new
             {
                 state.FinalAccount.Id,
@@ -696,11 +796,14 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             request.ProjectFinalAccountId,
             request.ProjectPaymentCertificateId,
             request.PerformanceBondRequestId,
+            request.RetentionReleaseStage,
+            request.UsesRetentionBond,
             request.EffectiveAtUtc,
             request.Amount,
             RequestCurrency = request.Currency
         });
-        return new Evaluation(profile, authority, checks, snapshot);
+        return new Evaluation(profile, authority, checks, snapshot,
+            retentionPolicy, retentionComputation);
     }
 
     private static void AddActionChecks(
@@ -708,7 +811,9 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         Contract contract,
         SourceState state,
         IReadOnlyCollection<ProcurementWorksCloseoutAction> history,
-        SubmitProcurementWorksCloseoutActionRequest request)
+        SubmitProcurementWorksCloseoutActionRequest request,
+        RetentionPolicyContext? retentionPolicy,
+        RetentionComputation? retentionComputation)
     {
         var hasInitial = history.Any(item =>
             item.ActionType == ProcurementWorksCloseoutActionType.InitialTakeover &&
@@ -734,7 +839,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
 
         if (request.ActionType is not ProcurementWorksCloseoutActionType.DisputeOpen
             and not ProcurementWorksCloseoutActionType.DisputeResolve
-            and not ProcurementWorksCloseoutActionType.DefectRectification)
+            and not ProcurementWorksCloseoutActionType.DefectRectification
+            and not ProcurementWorksCloseoutActionType.RetentionRelease)
             AddCondition(checks, !alreadyApproved, "duplicate", "Prior approved action",
                 "WORKS_ACTION_AVAILABLE", "No equivalent approved action exists.",
                 "WORKS_ACTION_ALREADY_APPROVED",
@@ -835,18 +941,147 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 break;
 
             case ProcurementWorksCloseoutActionType.RetentionRelease:
-                AddPostCompletionChecks(checks, hasFinal, dlpEnded, openDefects, activeDispute);
-                var available = Math.Max(state.RetentionHeld - state.RetentionReleased, 0m);
+                if (retentionPolicy is null || retentionComputation is null ||
+                    !request.RetentionReleaseStage.HasValue)
+                {
+                    checks.Add(Failed("qs-retention-policy", "QS retention policy",
+                        "QS_RETENTION_POLICY_REQUIRED",
+                        "An approved effective QS-DEC-009 policy and release stage are required."));
+                    break;
+                }
+
                 AddCondition(checks,
-                    available > 0m &&
-                    ProcurementWorksCloseoutRules.AmountMatches(
-                        request.Amount, available),
+                    contract.RetentionPercentage <= retentionPolicy.Value.MaximumRetentionPercent,
+                    "retention-percentage", "Contract retention percentage",
+                    "QS_RETENTION_PERCENTAGE_WITHIN_POLICY",
+                    $"Contract retention {contract.RetentionPercentage:N2}% is within the {retentionPolicy.Value.MaximumRetentionPercent:N2}% policy ceiling.",
+                    "QS_RETENTION_PERCENTAGE_EXCEEDS_POLICY",
+                    $"Contract retention {contract.RetentionPercentage:N2}% exceeds the {retentionPolicy.Value.MaximumRetentionPercent:N2}% QS ceiling.");
+                var policyAmountCeiling = decimal.Round(
+                    contract.ContractValue * retentionPolicy.Value.MaximumRetentionPercent / 100m, 2);
+                AddCondition(checks, state.RetentionHeld <= policyAmountCeiling + 0.01m,
+                    "retention-ceiling", "Retention ceiling",
+                    "QS_RETENTION_HELD_WITHIN_CEILING",
+                    $"Retention held {state.RetentionHeld:N2} is within the policy ceiling {policyAmountCeiling:N2}.",
+                    "QS_RETENTION_HELD_EXCEEDS_CEILING",
+                    $"Retention held {state.RetentionHeld:N2} exceeds the policy ceiling {policyAmountCeiling:N2}.");
+                AddCondition(checks,
+                    !request.UsesRetentionBond || retentionPolicy.Value.AllowRetentionBond,
+                    "retention-bond", "Retention bond",
+                    "QS_RETENTION_BOND_ALLOWED",
+                    request.UsesRetentionBond
+                        ? "The effective policy permits a retention-bond alternative."
+                        : "No retention-bond substitution is requested.",
+                    "QS_RETENTION_BOND_NOT_ALLOWED",
+                    "The effective QS retention policy does not permit a retention-bond alternative.");
+                AddCondition(checks,
+                    !request.UsesRetentionBond ||
+                    (request.PerformanceBondRequestId.HasValue &&
+                     state.PerformanceBond?.Id == request.PerformanceBondRequestId.Value &&
+                     string.Equals(state.PerformanceBond.Status, "Approved",
+                         StringComparison.OrdinalIgnoreCase)),
+                    "retention-bond-source", "Retention bond source",
+                    "QS_RETENTION_BOND_SOURCE_READY",
+                    request.UsesRetentionBond
+                        ? "An approved controlled performance-security record is linked."
+                        : "No retention-bond substitution is requested.",
+                    "QS_RETENTION_BOND_SOURCE_REQUIRED",
+                    "Select the approved controlled performance-security record before using retention-bond substitution.");
+                AddCondition(checks,
+                    request.Amount.HasValue && request.Amount.Value > 0m &&
+                    request.Amount.Value <= retentionComputation.StageLimit + 0.01m,
                     "retention-amount", "Retention release amount",
                     "WORKS_RETENTION_AMOUNT_READY",
-                    $"The requested amount matches available retention {available:N2}.",
+                    $"The requested amount is within the controlled stage limit {retentionComputation.StageLimit:N2}.",
                     "WORKS_RETENTION_AMOUNT_INVALID",
-                    $"The controlled release must equal available retention {available:N2}.");
+                    $"The controlled release must be greater than zero and no more than {retentionComputation.StageLimit:N2}.");
                 AddCurrencyCheck(checks, request.Currency, state.Currency);
+
+                var releaseStage = request.RetentionReleaseStage.Value;
+                var releaseHandover = request.ProjectHandoverItemId.HasValue
+                    ? state.HandoverItems.SingleOrDefault(item =>
+                        item.Id == request.ProjectHandoverItemId.Value)
+                    : null;
+                if (releaseStage == ProcurementRetentionReleaseStage.PracticalCompletion)
+                {
+                    AddCondition(checks, hasInitial,
+                        "initial-takeover", "Initial takeover",
+                        "WORKS_INITIAL_TAKEOVER_APPROVED",
+                        "The controlled practical-completion takeover is approved.",
+                        "WORKS_INITIAL_TAKEOVER_REQUIRED",
+                        "Approve initial takeover before releasing practical-completion retention.");
+                    AddCondition(checks,
+                        releaseHandover is not null &&
+                        string.Equals(releaseHandover.HandoverType,
+                            ProjectHandoverItemTypes.PracticalCompletion,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(releaseHandover.Status,
+                            ProjectHandoverItemStatuses.Completed,
+                            StringComparison.OrdinalIgnoreCase),
+                        "practical-completion-source", "Practical-completion source",
+                        "QS_RETENTION_PRACTICAL_SOURCE_READY",
+                        "A completed practical-completion handover item is linked.",
+                        "QS_RETENTION_PRACTICAL_SOURCE_REQUIRED",
+                        "Select the completed practical-completion handover item.");
+                }
+                else if (releaseStage == ProcurementRetentionReleaseStage.SectionalTakeover)
+                {
+                    AddCondition(checks,
+                        releaseHandover is not null &&
+                        releaseHandover.ProjectUnitId.HasValue &&
+                        string.Equals(releaseHandover.HandoverType,
+                            ProjectHandoverItemTypes.PracticalCompletion,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(releaseHandover.Status,
+                            ProjectHandoverItemStatuses.Completed,
+                            StringComparison.OrdinalIgnoreCase),
+                        "sectional-takeover-source", "Sectional-takeover source",
+                        "QS_RETENTION_SECTIONAL_SOURCE_READY",
+                        "A completed unit-scoped practical-completion handover item is linked.",
+                        "QS_RETENTION_SECTIONAL_SOURCE_REQUIRED",
+                        "Select a completed practical-completion item linked to a project unit.");
+                }
+                else
+                {
+                    var retentionDlpEnd = ProcurementWorksCloseoutRules.DefectsLiabilityEnd(
+                        initial?.EffectiveAtUtc ?? initial?.DecidedAtUtc,
+                        retentionPolicy.Value.DefectsLiabilityDays);
+                    var retentionDlpEnded = retentionDlpEnd.HasValue &&
+                                            retentionDlpEnd.Value <= DateTime.UtcNow;
+                    AddPostCompletionChecks(checks, hasFinal, retentionDlpEnded,
+                        openDefects, activeDispute);
+                    if (releaseStage == ProcurementRetentionReleaseStage.FinalRelease)
+                    {
+                        AddCondition(checks,
+                            state.FinalAccount is not null &&
+                            (string.Equals(state.FinalAccount.Status,
+                                 ProjectFinalAccountStatuses.Approved,
+                                 StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(state.FinalAccount.Status,
+                                 ProjectFinalAccountStatuses.Closed,
+                                 StringComparison.OrdinalIgnoreCase)),
+                            "final-account", "Approved final account",
+                            "QS_RETENTION_FINAL_ACCOUNT_APPROVED",
+                            "The project final account is approved for final retention release.",
+                            "QS_RETENTION_FINAL_ACCOUNT_REQUIRED",
+                            "Approve the project final account before final retention release.");
+                    }
+                }
+
+                if (request.ProjectHandoverItemId.HasValue)
+                {
+                    AddCondition(checks,
+                        !history.Any(item =>
+                            item.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease &&
+                            item.Status == ProcurementWorksCloseoutActionStatus.Approved &&
+                            item.RetentionReleaseStage == request.RetentionReleaseStage &&
+                            item.ProjectHandoverItemId == request.ProjectHandoverItemId),
+                        "retention-source-duplicate", "Retention source",
+                        "QS_RETENTION_SOURCE_AVAILABLE",
+                        "The handover source has not already funded an approved release at this stage.",
+                        "QS_RETENTION_SOURCE_ALREADY_RELEASED",
+                        "This handover source already has an approved retention release for the selected stage.");
+                }
                 break;
 
             case ProcurementWorksCloseoutActionType.DisputeOpen:
@@ -1059,6 +1294,12 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 string.Equals(item.Status, ProjectPaymentCertificateStatuses.Paid,
                     StringComparison.OrdinalIgnoreCase))
             .ToList();
+        var certificateReleased = certified.Sum(item => item.RetentionReleasedAmount);
+        var controlledReleased = history.Where(item =>
+                item.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease &&
+                item.Status == ProcurementWorksCloseoutActionStatus.Approved &&
+                item.Amount.HasValue)
+            .Sum(item => item.Amount!.Value);
         return new SourceState(
             project,
             handovers,
@@ -1080,7 +1321,7 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
                 string.Equals(item.Status, ProjectHandoverItemStatuses.Completed,
                     StringComparison.OrdinalIgnoreCase)),
             certified.Sum(item => item.RetentionHeldAmount),
-            certified.Sum(item => item.RetentionReleasedAmount),
+            Math.Max(certificateReleased, controlledReleased),
             finalAccount?.Currency ?? contract.Currency,
             history);
     }
@@ -1271,6 +1512,73 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             throw Validation("WORKS_CLOSEOUT_CONFIGURATION_INCOMPLETE",
                 "The effective profile must contain fourteen complete approved decisions.");
         return profile;
+    }
+
+    private async Task<RetentionPolicyContext> LoadRetentionPolicyAsync(
+        DateTime atUtc,
+        CancellationToken cancellationToken)
+    {
+        if (_quantitySurveyConfiguration is null)
+            throw Validation("QS_RETENTION_CONFIGURATION_UNAVAILABLE",
+                "The shared Quantity Survey configuration service is unavailable.");
+
+        var at = EnsureUtc(atUtc);
+        var profile = await _quantitySurveyConfiguration.GetEffectiveProfileAsync(
+            at, cancellationToken)
+            ?? throw Validation("QS_RETENTION_CONFIGURATION_MISSING",
+                "No effective Published Quantity Survey profile exists for the release date.");
+        var decision = profile.Decisions.SingleOrDefault(item =>
+            string.Equals(item.DecisionKey, "QS-DEC-009", StringComparison.OrdinalIgnoreCase))
+            ?? throw Validation("QS_RETENTION_DECISION_MISSING",
+                "The effective Quantity Survey profile does not contain QS-DEC-009.");
+        if (!decision.IsComplete ||
+            decision.Status != QuantitySurveyConfigurationDecisionStatus.Approved ||
+            decision.ApprovalStatus != QuantitySurveyConfigurationApprovalStatus.Approved ||
+            decision.EvidenceStatus != QuantitySurveyConfigurationEvidenceStatus.Verified ||
+            decision.EffectiveFrom.HasValue && EnsureUtc(decision.EffectiveFrom.Value) > at ||
+            decision.EffectiveTo.HasValue && EnsureUtc(decision.EffectiveTo.Value) < at)
+            throw Validation("QS_RETENTION_DECISION_NOT_EFFECTIVE",
+                "QS-DEC-009 must be approved, evidence-verified and effective for the release date.");
+
+        var value = decision.Value.Deserialize<QsRetentionValue>(JsonOptions)
+                    ?? throw Validation("QS_RETENTION_DECISION_INVALID",
+                        "QS-DEC-009 could not be read.");
+        if (value.ApprovalWorkflowDefinitionId == Guid.Empty ||
+            value.PracticalCompletionReleasePercent +
+            value.SectionalTakeoverReleasePercent +
+            value.DefectsReleasePercent > 100m)
+            throw Validation("QS_RETENTION_DECISION_INVALID",
+                "QS-DEC-009 requires a workflow and staged release percentages whose total does not exceed 100%. ");
+
+        var workflow = await _unitOfWork.Repository<WorkflowDefinition>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.Id == value.ApprovalWorkflowDefinitionId &&
+                item.IsActive && !item.IsDeleted)
+            .Include(item => item.EntityType)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (workflow is null ||
+            workflow.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published ||
+            workflow.EntityType is null || !workflow.EntityType.IsActive ||
+            !string.Equals(workflow.EntityType.Code,
+                QuantitySurveyWorkflowBindingRegistry.RetentionRelease,
+                StringComparison.OrdinalIgnoreCase))
+            throw Validation("QS_RETENTION_WORKFLOW_INVALID",
+                "The QS-DEC-009 workflow must be a Published active QS_RETENTION_RELEASE definition.");
+
+        var policyHash = Hash(Serialize(new
+        {
+            ProfileId = profile.Id,
+            ProfileVersion = profile.Version,
+            DecisionId = decision.Id,
+            decision.SchemaVersion,
+            decision.EffectiveFrom,
+            decision.EffectiveTo,
+            decision.Value
+        }));
+        return new RetentionPolicyContext(
+            profile.Id, profile.Version, decision.Id, value, policyHash);
     }
 
     private async Task<Contract> LoadContractAsync(
@@ -1531,6 +1839,189 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         ProjectClosureStatus = state.ProjectClosure?.Status
     };
 
+    private static Evaluation AddRetentionDriftChecks(
+        ProcurementWorksCloseoutAction action,
+        Evaluation evaluation)
+    {
+        if (action.ActionType != ProcurementWorksCloseoutActionType.RetentionRelease ||
+            string.IsNullOrWhiteSpace(action.RequestHash))
+            return evaluation;
+
+        var checks = evaluation.Checks.ToList();
+        var policy = evaluation.RetentionPolicy;
+        var computation = evaluation.RetentionComputation;
+        AddCondition(checks,
+            policy is not null &&
+            action.QuantitySurveyConfigurationProfileId == policy.ProfileId &&
+            action.QuantitySurveyConfigurationProfileVersion == policy.ProfileVersion &&
+            action.QuantitySurveyRetentionDecisionId == policy.DecisionId &&
+            FixedEquals(action.QuantitySurveyRetentionPolicyHash, policy.PolicyHash),
+            "qs-retention-policy-drift", "QS retention policy drift",
+            "QS_RETENTION_POLICY_UNCHANGED",
+            "The approved QS retention policy is unchanged since submission.",
+            "QS_RETENTION_POLICY_CHANGED",
+            "The QS retention policy changed after submission; reject and resubmit the release.");
+        AddCondition(checks,
+            computation is not null &&
+            NearlyEqual(action.RetentionHeldSnapshot, computation.RetentionHeld) &&
+            NearlyEqual(action.RetentionReleasedBefore, computation.RetentionReleased) &&
+            NearlyEqual(action.RetentionStageLimitAmount, computation.StageLimit),
+            "qs-retention-ledger-drift", "Retention ledger drift",
+            "QS_RETENTION_LEDGER_UNCHANGED",
+            "The governed retention ledger is unchanged since submission.",
+            "QS_RETENTION_LEDGER_CHANGED",
+            "The retention ledger changed after submission; reject and resubmit the release.");
+        return evaluation with { Checks = checks };
+    }
+
+    private static ProcurementRetentionPolicyDto Map(RetentionPolicyContext value) => new()
+    {
+        ProfileId = value.ProfileId,
+        ProfileVersion = value.ProfileVersion,
+        DecisionId = value.DecisionId,
+        MaximumRetentionPercent = value.Value.MaximumRetentionPercent,
+        PracticalCompletionReleasePercent = value.Value.PracticalCompletionReleasePercent,
+        SectionalTakeoverReleasePercent = value.Value.SectionalTakeoverReleasePercent,
+        DefectsReleasePercent = value.Value.DefectsReleasePercent,
+        DefectsLiabilityDays = value.Value.DefectsLiabilityDays,
+        ApprovalWorkflowDefinitionId = value.Value.ApprovalWorkflowDefinitionId,
+        AllowRetentionBond = value.Value.AllowRetentionBond,
+        PolicyHash = value.PolicyHash
+    };
+
+    private static IReadOnlyList<ProcurementRetentionLedgerEntryDto> BuildRetentionLedger(
+        SourceState state)
+    {
+        var events = new List<RetentionLedgerSource>();
+        foreach (var certificate in state.Certificates.Where(item =>
+                     string.Equals(item.Status, ProjectPaymentCertificateStatuses.Approved,
+                         StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(item.Status, ProjectPaymentCertificateStatuses.Paid,
+                         StringComparison.OrdinalIgnoreCase)))
+        {
+            if (certificate.RetentionHeldAmount > 0m)
+                events.Add(new RetentionLedgerSource(
+                    "CertificateHeld", certificate.Id,
+                    certificate.CertificateNumber ?? certificate.Title,
+                    EnsureUtc(certificate.IssueDate), 0,
+                    certificate.RetentionHeldAmount, 0m, null,
+                    certificate.Currency, certificate.Status));
+            if (certificate.RetentionReleasedAmount > 0m)
+                events.Add(new RetentionLedgerSource(
+                    "CertificateReleased", certificate.Id,
+                    certificate.CertificateNumber ?? certificate.Title,
+                    EnsureUtc(certificate.IssueDate), 1,
+                    0m, certificate.RetentionReleasedAmount, null,
+                    certificate.Currency, certificate.Status));
+        }
+
+        foreach (var action in state.History.Where(item =>
+                     item.ActionType == ProcurementWorksCloseoutActionType.RetentionRelease &&
+                     item.Status == ProcurementWorksCloseoutActionStatus.Approved &&
+                     item.Amount.HasValue && item.Amount.Value > 0m))
+            events.Add(new RetentionLedgerSource(
+                "ApprovedRelease", action.Id,
+                $"Retention release #{action.Sequence}",
+                EnsureUtc(action.EffectiveAtUtc ?? action.DecidedAtUtc ?? action.SubmittedAtUtc),
+                2, 0m, action.Amount!.Value, action.RetentionReleaseStage,
+                action.Currency ?? state.Currency, action.Status.ToString()));
+
+        var rows = new List<ProcurementRetentionLedgerEntryDto>();
+        decimal held = 0m;
+        decimal certificateReleased = 0m;
+        decimal approvedReleased = 0m;
+        decimal effectiveReleased = 0m;
+        foreach (var item in events.OrderBy(value => value.AtUtc)
+                     .ThenBy(value => value.Order).ThenBy(value => value.SourceId))
+        {
+            held = decimal.Round(held + item.HeldAmount, 2);
+            if (item.SourceType == "CertificateReleased")
+                certificateReleased = decimal.Round(certificateReleased + item.ReleaseAmount, 2);
+            else if (item.SourceType == "ApprovedRelease")
+                approvedReleased = decimal.Round(approvedReleased + item.ReleaseAmount, 2);
+            var nextEffectiveReleased = Math.Max(certificateReleased, approvedReleased);
+            var effectiveDelta = decimal.Round(nextEffectiveReleased - effectiveReleased, 2);
+            effectiveReleased = nextEffectiveReleased;
+            rows.Add(new ProcurementRetentionLedgerEntryDto
+            {
+                SourceType = item.SourceType,
+                SourceId = item.SourceId,
+                SourceReference = item.Reference,
+                EffectiveAtUtc = item.AtUtc,
+                ReleaseStage = item.Stage,
+                HeldAmount = decimal.Round(item.HeldAmount, 2),
+                ReleasedAmount = Math.Max(effectiveDelta, 0m),
+                RunningHeldAmount = held,
+                RunningReleasedAmount = effectiveReleased,
+                OutstandingAmount = Math.Max(decimal.Round(held - effectiveReleased, 2), 0m),
+                Currency = item.Currency,
+                Status = item.Status
+            });
+        }
+        return rows;
+    }
+
+    private static string RequestHash(
+        Guid contractId,
+        SubmitProcurementWorksCloseoutActionRequest request) =>
+        Hash(Serialize(new
+        {
+            schemaVersion = "tdc.works-closeout.request.v2",
+            contractId,
+            request.ActionType,
+            request.ProjectHandoverItemId,
+            request.ProjectDefectLiabilityCaseId,
+            request.ProjectFinalAccountId,
+            request.ProjectPaymentCertificateId,
+            request.PerformanceBondRequestId,
+            request.RetentionReleaseStage,
+            request.UsesRetentionBond,
+            EffectiveAtUtc = request.EffectiveAtUtc.HasValue
+                ? EnsureUtc(request.EffectiveAtUtc.Value)
+                : (DateTime?)null,
+            request.Amount,
+            Currency = request.Currency?.Trim().ToUpperInvariant(),
+            Reason = request.Reason.Trim(),
+            Evidence = request.Evidence.OrderBy(item => item.RequirementKey,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(item => new
+                {
+                    RequirementKey = item.RequirementKey.Trim().ToLowerInvariant(),
+                    item.ReferenceKind,
+                    item.WorkflowEvidenceDocumentId,
+                    item.FileUploadRecordId,
+                    EvidenceReference = item.EvidenceReference.Trim()
+                })
+        }));
+
+    private static void EnsureRetryMatches(
+        ProcurementWorksCloseoutAction existing,
+        string requestHash)
+    {
+        if (!string.IsNullOrWhiteSpace(existing.RequestHash) &&
+            !FixedEquals(existing.RequestHash, requestHash))
+            throw Conflict("WORKS_CLOSEOUT_IDEMPOTENCY_CONFLICT",
+                "The idempotency key was already used for a different Works closeout request.");
+    }
+
+    private static string WorkflowEntityTypeFor(
+        ProcurementWorksCloseoutActionType actionType) =>
+        actionType == ProcurementWorksCloseoutActionType.RetentionRelease
+            ? QuantitySurveyWorkflowBindingRegistry.RetentionRelease
+            : WorkflowEntityType;
+
+    private static bool NearlyEqual(decimal? left, decimal right) =>
+        left.HasValue && Math.Abs(left.Value - right) <= 0.01m;
+
+    private static bool FixedEquals(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            return false;
+        var a = Encoding.UTF8.GetBytes(left);
+        var b = Encoding.UTF8.GetBytes(right);
+        return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
     private static ProcurementWorksCloseoutActionDto Map(
         ProcurementWorksCloseoutAction item) => new()
     {
@@ -1553,6 +2044,16 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         ProjectFinalAccountId = item.ProjectFinalAccountId,
         ProjectPaymentCertificateId = item.ProjectPaymentCertificateId,
         PerformanceBondRequestId = item.PerformanceBondRequestId,
+        RetentionReleaseStage = item.RetentionReleaseStage,
+        QuantitySurveyConfigurationProfileId = item.QuantitySurveyConfigurationProfileId,
+        QuantitySurveyConfigurationProfileVersion = item.QuantitySurveyConfigurationProfileVersion,
+        QuantitySurveyRetentionDecisionId = item.QuantitySurveyRetentionDecisionId,
+        QuantitySurveyRetentionPolicyHash = item.QuantitySurveyRetentionPolicyHash,
+        RetentionHeldSnapshot = item.RetentionHeldSnapshot,
+        RetentionReleasedBefore = item.RetentionReleasedBefore,
+        RetentionStageLimitAmount = item.RetentionStageLimitAmount,
+        RetentionReleasedAfter = item.RetentionReleasedAfter,
+        UsesRetentionBond = item.UsesRetentionBond,
         EffectiveAtUtc = item.EffectiveAtUtc,
         DefectsLiabilityEndsAtUtc = item.DefectsLiabilityEndsAtUtc,
         Amount = item.Amount,
@@ -1593,6 +2094,8 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         ProjectFinalAccountId = action.ProjectFinalAccountId,
         ProjectPaymentCertificateId = action.ProjectPaymentCertificateId,
         PerformanceBondRequestId = action.PerformanceBondRequestId,
+        RetentionReleaseStage = action.RetentionReleaseStage,
+        UsesRetentionBond = action.UsesRetentionBond,
         EffectiveAtUtc = action.EffectiveAtUtc,
         Amount = action.Amount,
         Currency = action.Currency,
@@ -1641,6 +2144,17 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
             item.ProjectFinalAccountId,
             item.ProjectPaymentCertificateId,
             item.PerformanceBondRequestId,
+            item.RetentionReleaseStage,
+            item.QuantitySurveyConfigurationProfileId,
+            item.QuantitySurveyConfigurationProfileVersion,
+            item.QuantitySurveyRetentionDecisionId,
+            item.QuantitySurveyRetentionPolicyHash,
+            item.RequestHash,
+            item.RetentionHeldSnapshot,
+            item.RetentionReleasedBefore,
+            item.RetentionStageLimitAmount,
+            item.RetentionReleasedAfter,
+            item.UsesRetentionBond,
             item.EffectiveAtUtc,
             item.DefectsLiabilityEndsAtUtc,
             item.Amount,
@@ -1792,7 +2306,34 @@ public sealed class ProcurementWorksCloseoutService : IProcurementWorksCloseoutS
         ProcurementConfigurationProfileDto Profile,
         ProcurementAuthorityRouteDecisionDto Authority,
         IReadOnlyList<ProcurementWorksCloseoutCheckDto> Checks,
-        string SourceSnapshot);
+        string SourceSnapshot,
+        RetentionPolicyContext? RetentionPolicy,
+        RetentionComputation? RetentionComputation);
+
+    private sealed record RetentionPolicyContext(
+        Guid ProfileId,
+        int ProfileVersion,
+        Guid DecisionId,
+        QsRetentionValue Value,
+        string PolicyHash);
+
+    private sealed record RetentionComputation(
+        decimal RetentionHeld,
+        decimal RetentionReleased,
+        decimal ReleasedForStage,
+        decimal StageLimit);
+
+    private sealed record RetentionLedgerSource(
+        string SourceType,
+        Guid SourceId,
+        string Reference,
+        DateTime AtUtc,
+        int Order,
+        decimal HeldAmount,
+        decimal ReleaseAmount,
+        ProcurementRetentionReleaseStage? Stage,
+        string Currency,
+        string Status);
 
     private sealed record SourceState(
         Project Project,

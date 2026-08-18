@@ -27,6 +27,17 @@ public sealed class ProcurementWorksCloseoutAction : TenantEntity
     public Guid? ProjectFinalAccountId { get; set; }
     public Guid? ProjectPaymentCertificateId { get; set; }
     public Guid? PerformanceBondRequestId { get; set; }
+    public ProcurementRetentionReleaseStage? RetentionReleaseStage { get; set; }
+    public Guid? QuantitySurveyConfigurationProfileId { get; set; }
+    public int? QuantitySurveyConfigurationProfileVersion { get; set; }
+    public Guid? QuantitySurveyRetentionDecisionId { get; set; }
+    [StringLength(64)] public string? QuantitySurveyRetentionPolicyHash { get; set; }
+    [StringLength(64)] public string? RequestHash { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? RetentionHeldSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? RetentionReleasedBefore { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? RetentionStageLimitAmount { get; set; }
+    [Column(TypeName = "decimal(18,2)")] public decimal? RetentionReleasedAfter { get; set; }
+    public bool UsesRetentionBond { get; set; }
     public DateTime? EffectiveAtUtc { get; set; }
     public DateTime? DefectsLiabilityEndsAtUtc { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal? Amount { get; set; }

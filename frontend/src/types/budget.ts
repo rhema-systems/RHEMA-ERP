@@ -9,6 +9,9 @@ export interface BudgetScenario {
     id: string;
     name: string;
     description?: string;
+    versionType: 'Original' | 'Virement' | 'Supplementary' | string;
+    versionNumber: number;
+    parentScenarioId?: string;
     fiscalYearId: string;
     baseCurrencyCode: string;
     isActive: boolean;
@@ -269,4 +272,64 @@ export interface BudgetScenarioComparison {
     comparisonTotal: number;
     differenceTotal: number;
     lines: BudgetScenarioComparisonLine[];
+}
+
+export type BudgetRevisionType = 'Virement' | 'Supplementary';
+export type BudgetRevisionStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Applied';
+
+export interface BudgetRevisionLineInput {
+    segmentValueId?: string;
+    accountId: string;
+    fiscalPeriodId: string;
+    adjustmentAmountBase: number;
+    notes?: string;
+}
+
+export interface CreateBudgetRevisionDto {
+    sourceScenarioId: string;
+    revisionType: BudgetRevisionType;
+    effectiveDate: string;
+    boardResolutionReference: string;
+    boardResolutionDate: string;
+    justification: string;
+    lines: BudgetRevisionLineInput[];
+}
+
+export interface BudgetRevisionLine extends BudgetRevisionLineInput {
+    id: string;
+    segmentCode: string;
+    segmentName: string;
+    accountCode: string;
+    accountName: string;
+    periodCode: string;
+    periodName: string;
+    currentAmountBase: number;
+    revisedAmountBase: number;
+}
+
+export interface BudgetRevision {
+    id: string;
+    revisionNumber: string;
+    revisionType: BudgetRevisionType;
+    sourceScenarioId: string;
+    sourceScenarioName: string;
+    fiscalYearId: string;
+    fiscalYearName: string;
+    resultScenarioId?: string;
+    resultScenarioName?: string;
+    effectiveDate: string;
+    boardResolutionReference: string;
+    boardResolutionDate: string;
+    justification: string;
+    status: BudgetRevisionStatus;
+    increaseAmountBase: number;
+    reductionAmountBase: number;
+    netChangeAmountBase: number;
+    submittedAt?: string;
+    approvedAt?: string;
+    appliedAt?: string;
+    rejectionReason?: string;
+    createdAt: string;
+    rowVersion: string;
+    lines: BudgetRevisionLine[];
 }

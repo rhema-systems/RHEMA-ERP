@@ -90,6 +90,22 @@ public sealed class InventoryTransferControlTests : IDisposable
     }
 
     [Fact]
+    public void Transfer_evidence_hardening_is_a_focused_trigger_delta_requiring_a_clean_scan()
+    {
+        var migration = new INVREQFU004RequireCleanTransferEvidence();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(migration, new object[] { builder });
+
+        builder.Operations.Should().OnlyContain(operation => operation is SqlOperation);
+        var sql = string.Join(Environment.NewLine, builder.Operations.OfType<SqlOperation>().Select(value => value.Sql));
+        sql.Should().Contain("TR_InventoryTransferDiscrepancyEvidence_AppendOnly");
+        sql.Should().Contain("f.VirusScanStatus <> 2");
+        sql.Should().Contain("INV_TRANSFER_EVIDENCE_TRIGGER_DRIFT");
+        sql.Contains("CREATE TABLE", StringComparison.OrdinalIgnoreCase).Should().BeFalse();
+    }
+
+    [Fact]
     public void Action_types_cover_cost_dispatch_receipt_resolution_closure_reversal_and_cancellation()
     {
         Enum.GetValues<InventoryTransferActionType>().Should().BeEquivalentTo(new[]
@@ -149,6 +165,30 @@ public sealed class InventoryTransferControlTests : IDisposable
         capacity.Should().Contain("location.MaxWeight");
         capacity.Should().Contain("location.MaxVolume");
         capacity.Should().Contain("location.MaxItems");
+    }
+
+    [Fact]
+    public void Transfer_discrepancy_summary_updates_follow_the_durable_register_and_evidence_requires_clean_scan()
+    {
+        var source = ReadTransferService();
+        var receiveStart = source.IndexOf("public async Task<bool> ReceiveAsync", StringComparison.Ordinal);
+        var receiveEnd = source.IndexOf("private async Task<bool> ReceiveCoreAsync", receiveStart, StringComparison.Ordinal);
+        var receive = source[receiveStart..receiveEnd];
+        var resolveStart = source.IndexOf("public async Task<bool> ResolveDiscrepanciesAsync", StringComparison.Ordinal);
+        var resolveEnd = source.IndexOf("public async Task<bool> CloseAsync", resolveStart, StringComparison.Ordinal);
+        var resolve = source[resolveStart..resolveEnd];
+
+        receive.IndexOf("if (evidenceByLine.Count > 0) await _unitOfWork.SaveChangesAsync();", StringComparison.Ordinal)
+            .Should().BeLessThan(receive.IndexOf("ReceiveCoreAsync", StringComparison.Ordinal));
+        resolve.IndexOf("await _unitOfWork.SaveChangesAsync();", resolve.IndexOf("foreach (var discrepancy", StringComparison.Ordinal), StringComparison.Ordinal)
+            .Should().BeLessThan(resolve.IndexOf("transfer.HasOpenDiscrepancy =", StringComparison.Ordinal));
+        source.Should().Contain("upload.VirusScanStatus == FileVirusScanStatus.Clean");
+        source.Should().Contain("must have a successful clean malware scan");
+        receive.IndexOf("await _unitOfWork.SaveChangesAsync();", receive.IndexOf("AddAuditAsync", StringComparison.Ordinal), StringComparison.Ordinal)
+            .Should().BeLessThan(receive.IndexOf("RecordControlEventAsync", StringComparison.Ordinal));
+        receive.Should().NotContain("_transferRepository.UpdateAsync(transfer)");
+        resolve.IndexOf("await _unitOfWork.SaveChangesAsync();", resolve.IndexOf("AddAuditAsync", StringComparison.Ordinal), StringComparison.Ordinal)
+            .Should().BeLessThan(resolve.IndexOf("RecordControlEventAsync", StringComparison.Ordinal));
     }
 
     [Fact]

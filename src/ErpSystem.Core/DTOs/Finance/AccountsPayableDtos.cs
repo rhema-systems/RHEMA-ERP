@@ -65,6 +65,11 @@ public class VendorInvoiceDto
     public decimal MatchingPriceTolerancePercent { get; set; }
     public decimal MatchingQuantityTolerancePercent { get; set; }
     public Guid? MatchExceptionControlEventId { get; set; }
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
+    public string? AcceptedSupplySourceReference { get; set; }
+    public string? AcceptedSupplySnapshotHash { get; set; }
+    public DateTime? AcceptedSupplyValidatedAtUtc { get; set; }
 
     // Status
     public VendorInvoiceStatus Status { get; set; }
@@ -123,6 +128,16 @@ public class VendorInvoiceCreateDto
     // Matching
     public InvoiceMatchingType MatchingType { get; set; } = InvoiceMatchingType.None;
 
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
+
+    /// <summary>
+    /// Server-only flag used by the QS owner when handing an approved Works
+    /// certificate to AP. It cannot be supplied by an API client.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsTrustedAcceptedSupplyHandoff { get; set; }
+
     // GL accounts
     public Guid? ExpenseAccountId { get; set; }
     public Guid? ApAccountId { get; set; }
@@ -142,6 +157,8 @@ public class VendorInvoiceUpdateDto
 
     public string? SupplierInvoiceNumber { get; set; }
     public Guid? PurchaseOrderId { get; set; }
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+    public Guid? AcceptedSupplySourceId { get; set; }
 
     public DateTime InvoiceDate { get; set; }
     public DateTime? ReceivedDate { get; set; }
@@ -573,6 +590,26 @@ public class VendorPaymentDto
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<VendorPaymentAllocationDto> Allocations { get; set; } = new();
+}
+
+/// <summary>
+/// Restricted Finance-owned read model used by downstream contract controls. It deliberately
+/// excludes bank, cheque and authorization details while proving that the supplier advance is
+/// posted, active and still has an unapplied balance.
+/// </summary>
+public sealed class PostedSupplierAdvanceDto
+{
+    public Guid Id { get; set; }
+    public string PaymentNumber { get; set; } = string.Empty;
+    public Guid SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public DateTime PaymentDate { get; set; }
+    public decimal TotalAmount { get; set; }
+    public decimal AllocatedAmount { get; set; }
+    public decimal AvailableAmount { get; set; }
+    public string CurrencyCode { get; set; } = string.Empty;
+    public VendorPaymentStatus Status { get; set; }
+    public Guid JournalEntryId { get; set; }
 }
 
 public class VendorPaymentCreateDto

@@ -77,6 +77,14 @@ public sealed class ProcurementPolicyServiceTests
             ProcurementPolicyRuleKind.Exception
         });
         created.Rules.Should().OnlyContain(item => item.SourceDecisionKey.StartsWith("DEC-"));
+        var pettyEvidence = created.Rules.Single(item =>
+            item.Kind == ProcurementPolicyRuleKind.Evidence && item.SourceDecisionKey == "DEC-005");
+        JsonSerializer.Deserialize<SaveProcurementPolicyEvidenceRuleValue>(pettyEvidence.Value.GetRawText(), JsonOptions)!
+            .Method.Should().Be(ProcurementMethodType.PettyPurchase);
+        var exceptionEvidence = created.Rules.Single(item =>
+            item.Kind == ProcurementPolicyRuleKind.Evidence && item.SourceDecisionKey == "DEC-006");
+        JsonSerializer.Deserialize<SaveProcurementPolicyEvidenceRuleValue>(exceptionEvidence.Value.GetRawText(), JsonOptions)!
+            .Method.Should().Be(ProcurementMethodType.SingleSource);
         created.Validation.IsValid.Should().BeFalse();
         created.Validation.Errors.Should().Contain(item =>
             item.Code == "RULE_FAMILY_MISSING" && item.RuleKind == ProcurementPolicyRuleKind.SegregationOfDuties);
@@ -140,6 +148,26 @@ public sealed class ProcurementPolicyServiceTests
         clone.Rules.Should().HaveCount(published.Rules.Count);
         clone.Rules.Should().OnlyContain(rule => rule.SourceRuleId.HasValue);
 
+        var storedInheritedThreshold = await fixture.Context.ProcurementPolicyThresholdRules.SingleAsync(item =>
+            item.PolicySetId == clone.Id);
+        storedInheritedThreshold.RowVersion = new byte[] { 1, 2, 3, 4 };
+        await fixture.Context.SaveChangesAsync();
+        clone = await fixture.Service.GetPolicySetAsync(clone.Id);
+        var inheritedThreshold = clone.Rules.Single(item => item.Kind == ProcurementPolicyRuleKind.Threshold);
+        var inheritedThresholdValue = JsonSerializer.Deserialize<SaveProcurementPolicyThresholdRuleValue>(
+            inheritedThreshold.Value.GetRawText(), JsonOptions)!;
+        inheritedThresholdValue.Name = "Annual refresh threshold";
+        var revisedThreshold = await fixture.Service.SaveRuleAsync(clone.Id, inheritedThreshold.Id,
+            new SaveProcurementPolicyRuleRequest
+            {
+                Kind = ProcurementPolicyRuleKind.Threshold,
+                Threshold = inheritedThresholdValue,
+                RowVersion = inheritedThreshold.RowVersion
+            }, "edit-cloned-baseline-rule");
+        revisedThreshold.Name.Should().Be("Annual refresh threshold");
+        revisedThreshold.SourceRuleId.Should().Be(inheritedThreshold.SourceRuleId);
+
+        clone = await fixture.Service.GetPolicySetAsync(clone.Id);
         var publishedClone = await fixture.Service.PublishPolicySetAsync(clone.Id,
             new ProcurementPolicyLifecycleRequest { RowVersion = clone.RowVersion }, "publish-clone");
         publishedClone.LifecycleStatus.Should().Be(ProcurementPolicyLifecycleStatus.Published);
@@ -328,6 +356,19 @@ public sealed class ProcurementPolicyServiceTests
                     }
                 }, "invalid-workflow-reference"))
             .Should().ThrowAsync<ProcurementPolicyValidationException>().WithMessage("*active Published workflow definition*");
+    }
+
+    [Fact]
+    public async Task RfqPolicyCannotPublishWithoutPositiveCompetitionAndSharedApprovalWorkflow()
+    {
+        await using var fixture = new ServiceFixture("SuperAdmin");
+        var source = await fixture.AddSourceConfigurationAsync();
+        var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id), "create-rfq-operational-validation");
+
+        var validation = await fixture.Service.ValidatePolicySetAsync(created.Id, "validate-rfq-operational");
+
+        validation.Errors.Should().Contain(item => item.Code == "RFQ_COMPETITION_REQUIRED");
+        validation.Errors.Should().Contain(item => item.Code == "RFQ_WORKFLOW_REQUIRED");
     }
 
     [Fact]
@@ -572,6 +613,13 @@ public sealed class ProcurementPolicyServiceTests
                     }
                 }, "add-required-sod");
             }
+
+            var method = await Context.ProcurementPolicyMethodRules.SingleAsync(item =>
+                item.PolicySetId == policyId && item.Method == ProcurementMethodType.RequestForQuotation);
+            method.RequiresCompetition = true;
+            method.MinimumQuotationCount = 3;
+            method.WorkflowDefinitionId = Guid.NewGuid();
+            await Context.SaveChangesAsync();
         }
 
         private static JsonElement ValidDecisionValue(string key)

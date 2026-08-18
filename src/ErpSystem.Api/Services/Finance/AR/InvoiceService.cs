@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.AR;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities;
@@ -218,17 +219,31 @@ namespace ErpSystem.Api.Services.Finance.AR
             // Process line items and calculate taxes
             decimal subtotal = 0;
             decimal totalTax = 0;
+            var permitsDisposalAdjustment = await IsApprovedFixedAssetDisposalInvoiceAsync(
+                dto.CustomerId,
+                dto.Reference,
+                cancellationToken);
 
             foreach (var lineDto in dto.LineItems)
             {
+                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
+                    ? parsedType
+                    : LineItemType.Product;
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
                 var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
+                ValidateControlledNegativeInvoiceLine(
+                    lineItemType,
+                    lineDto.TaxTreatment,
+                    lineDto.DiscountPercentage,
+                    lineNetAmount,
+                    permitsDisposalAdjustment);
+
                 // Calculate tax for this line if tax code provided
                 decimal lineTax = 0;
-                if (lineDto.TaxTreatment == TaxTreatment.Standard &&
+                if (lineNetAmount > 0m && lineDto.TaxTreatment == TaxTreatment.Standard &&
                     (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
@@ -242,11 +257,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                     var taxResult = await _taxEngine.CalculateTaxesAsync(taxRequest, cancellationToken);
                     lineTax = taxResult.TotalTaxAmount;
                 }
-
-                // Parse LineItemType from string
-                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
-                    ? parsedType
-                    : LineItemType.Product;
 
                 var lineItem = new InvoiceLineItem
                 {
@@ -379,13 +389,25 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             foreach (var lineDto in dto.LineItems)
             {
+                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
+                    ? parsedType
+                    : LineItemType.Product;
                 var lineTotal = lineDto.Quantity * lineDto.UnitPrice;
                 var lineDiscount = lineTotal * (lineDto.DiscountPercentage / 100);
                 var lineNetAmount = lineTotal - lineDiscount;
                 var effectiveTaxGroupId = dto.IsOpeningBalance ? null : (lineDto.TaxGroupId ?? dto.TaxGroupId);
 
+                // A posted disposal invoice is immutable, and general draft edits must never gain
+                // the orchestrator-only negative-line privilege.
+                ValidateControlledNegativeInvoiceLine(
+                    lineItemType,
+                    lineDto.TaxTreatment,
+                    lineDto.DiscountPercentage,
+                    lineNetAmount,
+                    permitsDisposalAdjustment: false);
+
                 decimal lineTax = 0;
-                if (lineDto.TaxTreatment == TaxTreatment.Standard &&
+                if (lineNetAmount > 0m && lineDto.TaxTreatment == TaxTreatment.Standard &&
                     (effectiveTaxGroupId.HasValue || !string.IsNullOrWhiteSpace(lineDto.TaxCode)))
                 {
                     var taxRequest = new TaxCalculationRequestDto
@@ -401,10 +423,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 }
 
                 // Parse LineItemType from string (mirrors CreateAsync logic)
-                var lineItemType = Enum.TryParse<LineItemType>(lineDto.LineItemType, out var parsedType)
-                    ? parsedType
-                    : LineItemType.Product;
-
                 var lineItem = new InvoiceLineItem
                 {
                     Id = lineDto.Id ?? Guid.NewGuid(),
@@ -822,6 +840,11 @@ namespace ErpSystem.Api.Services.Finance.AR
             var postingLines = new List<FinancePostingLineDto>();
             var documentDiscountAmount = RoundMoney(activeLines.Sum(l => l.DiscountAmount) + invoice.DiscountAmount);
             var lineNumber = 1;
+            var permitsDisposalAdjustment = !activeLines.Any(line => line.Quantity * line.UnitPrice < 0m)
+                || await IsApprovedFixedAssetDisposalInvoiceAsync(
+                    invoice.CustomerId,
+                    invoice.Reference,
+                    cancellationToken);
 
             foreach (var line in activeLines)
             {
@@ -829,7 +852,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     throw new InvalidOperationException("AR invoice line discount and tax amounts cannot be negative.");
 
                 var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
-                if (grossAmount <= 0m)
+                if (grossAmount == 0m)
                 {
                     continue;
                 }
@@ -838,18 +861,46 @@ namespace ErpSystem.Api.Services.Finance.AR
                     ?? throw new InvalidOperationException($"No revenue account specified for AR line '{line.Description}'.");
                 await ResolvePostingAccountAsync(revenueAccountId, "revenue account", accountCache, allowControlAccount: false, requireDirectPosting: true, cancellationToken);
 
-                postingLines.Add(BuildPostingLine(
-                    revenueAccountId,
-                    $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
-                    debitTransactionAmount: 0m,
-                    creditTransactionAmount: grossAmount,
-                    invoiceCurrency,
-                    functionalCurrency,
-                    exchangeRate,
-                    invoice.InvoiceDate,
-                    invoice.InvoiceNumber,
-                    lineNumber++,
-                    ResolveLineTag(line)));
+                if (grossAmount < 0m)
+                {
+                    // FIN-LIM-0040: a disposal may record an auctioneer/buyer deduction from the
+                    // amount remitted. It is intentionally a debit to the same proceeds-clearing
+                    // account and is allowed only for the dedicated non-taxable adjustment type;
+                    // ordinary AR users cannot construct arbitrary negative invoice lines.
+                    ValidateControlledNegativeInvoiceLine(
+                        line.LineItemType,
+                        line.TaxTreatment,
+                        line.DiscountPercentage,
+                        grossAmount,
+                        permitsDisposalAdjustment);
+                    postingLines.Add(BuildPostingLine(
+                        revenueAccountId,
+                        $"Asset-sale proceeds deduction - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: Math.Abs(grossAmount),
+                        creditTransactionAmount: 0m,
+                        invoiceCurrency,
+                        functionalCurrency,
+                        exchangeRate,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        "AR-FixedAssetDisposalAdjustment"));
+                }
+                else
+                {
+                    postingLines.Add(BuildPostingLine(
+                        revenueAccountId,
+                        $"Revenue - {invoice.InvoiceNumber} - {line.Description}",
+                        debitTransactionAmount: 0m,
+                        creditTransactionAmount: grossAmount,
+                        invoiceCurrency,
+                        functionalCurrency,
+                        exchangeRate,
+                        invoice.InvoiceDate,
+                        invoice.InvoiceNumber,
+                        lineNumber++,
+                        ResolveLineTag(line)));
+                }
 
                 if (line.LineItemType == LineItemType.Inventory && line.CostTotal.HasValue && line.CostTotal.Value > 0m)
                 {
@@ -1519,7 +1570,71 @@ namespace ErpSystem.Api.Services.Finance.AR
         private static string ResolveLineTag(InvoiceLineItem line)
             => line.LineItemType == LineItemType.Inventory
                 ? "AR-InventoryRevenue"
-                : "AR-Revenue";
+                : line.LineItemType == LineItemType.FixedAssetDisposal
+                    ? "AR-FixedAssetDisposalProceeds"
+                    : line.LineItemType == LineItemType.FixedAssetDisposalAdjustment
+                        ? "AR-FixedAssetDisposalAdjustment"
+                        : "AR-Revenue";
+
+        private static void ValidateControlledNegativeInvoiceLine(
+            LineItemType lineItemType,
+            TaxTreatment taxTreatment,
+            decimal discountPercentage,
+            decimal lineNetAmount,
+            bool permitsDisposalAdjustment)
+        {
+            if (lineNetAmount >= 0m)
+            {
+                return;
+            }
+
+            // Negative lines have material credit-note implications. The only supported create-
+            // time exception is the disposal proceeds deduction produced by the Finance-owned
+            // orchestrator; all other reductions must use the canonical credit-note workflow.
+            if (!permitsDisposalAdjustment ||
+                lineItemType != LineItemType.FixedAssetDisposalAdjustment ||
+                taxTreatment != TaxTreatment.OutOfScope ||
+                discountPercentage != 0m)
+            {
+                throw new InvalidOperationException(
+                    "Negative AR invoice lines are restricted to non-taxable fixed-asset disposal adjustments. Use the credit-note workflow for other reductions.");
+            }
+        }
+
+        private async Task<bool> IsApprovedFixedAssetDisposalInvoiceAsync(
+            Guid customerId,
+            string? reference,
+            CancellationToken cancellationToken)
+        {
+            const string prefix = "FA-DISPOSAL:";
+            if (string.IsNullOrWhiteSpace(reference) || !reference.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var disposalReference = reference[prefix.Length..].Trim();
+            if (string.IsNullOrWhiteSpace(disposalReference))
+            {
+                return false;
+            }
+
+            // The public AR API can receive a LineItemType string, so the enum alone is not an
+            // authorization boundary. A negative adjustment is accepted only while the Finance
+            // disposal orchestrator has a completed, same-tenant sale for this exact buyer and
+            // immutable disposal reference. This prevents ordinary invoice callers from posing as
+            // the trusted internal workflow merely by supplying the dedicated line type.
+            return await _unitOfWork.Repository<AssetDisposal>()
+                .GetQueryable(disposal =>
+                    disposal.TenantId == TenantId &&
+                    disposal.BuyerBusinessPartnerId == customerId &&
+                    disposal.ReferenceNumber == disposalReference &&
+                    disposal.DisposalType == DisposalType.Sale &&
+                    disposal.Status == AssetDisposalStatus.Completed &&
+                    disposal.CustomerInvoiceId == null &&
+                    disposal.DisposalCost > 0m &&
+                    !disposal.IsDeleted)
+                .AnyAsync(cancellationToken);
+        }
 
         private static bool IsNoTaxTreatment(TaxTreatment treatment)
             => treatment == TaxTreatment.Exempt

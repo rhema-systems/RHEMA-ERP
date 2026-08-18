@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
-public class FixedAssetDepreciationService : IFixedAssetDepreciationService
+public partial class FixedAssetDepreciationService : IFixedAssetDepreciationService
 {
     private const string SourceModule = "FixedAssets";
     private const string SourceDocumentType = "FixedAssetDepreciationRun";
@@ -22,6 +22,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
     private readonly IFinancePostingEngine? _financePostingEngine;
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowService? _workflowService;
+    private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
 
     public FixedAssetDepreciationService(
         ApplicationDbContext context,
@@ -30,7 +31,8 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         IAccountingBookService? accountingBookService = null,
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
-        IWorkflowService? workflowService = null)
+        IWorkflowService? workflowService = null,
+        IFinanceReversalPolicyService? financeReversalPolicyService = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -38,6 +40,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
+        _financeReversalPolicyService = financeReversalPolicyService;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -82,11 +85,25 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         var runBookClassification = postAllBooks
             ? "ALL_ACTIVE_BOOKS"
             : requestedBook ?? defaultBook.Code;
-        var idempotencyKey = BuildRunIdempotencyKey(tenantId, fiscalPeriod.Id, runBookClassification, dto.FixedAssetId, dto.PostToGl);
-
-        var existingRun = await _context.FixedAssetDepreciationRuns
+        var baseIdempotencyKey = BuildRunIdempotencyKey(
+            tenantId,
+            fiscalPeriod.Id,
+            runBookClassification,
+            dto.FixedAssetId,
+            dto.PostToGl,
+            correctionSequence: 0);
+        var scopeRuns = await _context.FixedAssetDepreciationRuns
             .Include(r => r.Lines)
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.IdempotencyKey == idempotencyKey, cancellationToken);
+            .Where(r => r.TenantId == tenantId &&
+                (r.IdempotencyKey == baseIdempotencyKey || r.IdempotencyKey.StartsWith(baseIdempotencyKey + ":C")))
+            .OrderByDescending(r => r.CorrectionSequence)
+            .ToListAsync(cancellationToken);
+
+        // A posted revision must be reversed before another run for the same scope is allowed.
+        // Reversed revisions remain in scopeRuns so the next correction sequence is monotonic and
+        // every idempotency key stays unique without rewriting the historical run.
+        var existingRun = scopeRuns.FirstOrDefault(r =>
+            !string.Equals(r.Status, "Reversed", StringComparison.OrdinalIgnoreCase));
         if (existingRun != null)
         {
             if (string.Equals(existingRun.Status, "Posted", StringComparison.OrdinalIgnoreCase) ||
@@ -101,6 +118,17 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
 
             throw new InvalidOperationException("A depreciation run already exists for this tenant, period, and scope and must be reviewed before retry.");
         }
+
+        var correctionSequence = scopeRuns.Count == 0
+            ? 0
+            : scopeRuns.Max(r => r.CorrectionSequence) + 1;
+        var idempotencyKey = BuildRunIdempotencyKey(
+            tenantId,
+            fiscalPeriod.Id,
+            runBookClassification,
+            dto.FixedAssetId,
+            dto.PostToGl,
+            correctionSequence);
 
         var assetsQuery = _context.FixedAssets
             .Include(a => a.Category)
@@ -125,7 +153,10 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         }
 
         var existingScheduleKeys = await _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted)
+            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed
+                // A disposal-linked partial charge belongs only to the portion that left service;
+                // the retained asset still needs its ordinary depreciation for this period.
+                && (s.AssetDisposalId == null || s.AssetDisposal!.DisposalScope == AssetDisposalScope.WholeAsset))
             .Select(s => new { s.FixedAssetId, s.BookClassification })
             .ToListAsync(cancellationToken);
 
@@ -170,7 +201,15 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
                 }
 
                 ValidateBookValueForDepreciation(asset, bookValue, fiscalPeriod, postingDate);
-                var depreciationAmount = CalculateStraightLineDepreciation(bookValue);
+                if (dto.PostToGl &&
+                    bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction &&
+                    _workflowService == null)
+                {
+                    throw new InvalidOperationException("Units-of-production depreciation requires the configured depreciation-run approval workflow before GL posting.");
+                }
+                var productionUsage = ResolveProductionUsage(dto, asset, bookValue);
+                var calculation = FixedAssetDepreciationCalculator.Calculate(bookValue, productionUsage);
+                var depreciationAmount = calculation.DepreciationAmount;
                 if (depreciationAmount <= 0m)
                 {
                     UpdateAssetDepreciationStatus(asset);
@@ -210,6 +249,14 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
                     ResidualValueSnapshot = bookValue.ResidualValue,
                     UsefulLifeMonthsSnapshot = bookValue.UsefulLifeMonths,
                     DepreciationMethodSnapshot = bookValue.DepreciationMethod,
+                    DiminishingBalanceRatePercentSnapshot = calculation.EffectiveDiminishingBalanceRatePercent,
+                    LifetimeProductionCapacitySnapshot = calculation.LifetimeProductionCapacity,
+                    PeriodProductionUnits = calculation.PeriodProductionUnits,
+                    CumulativeProductionUnitsBefore = calculation.CumulativeProductionUnitsBefore,
+                    CumulativeProductionUnitsAfter = calculation.CumulativeProductionUnitsAfter,
+                    ProductionEvidenceReference = calculation.ProductionEvidenceReference,
+                    ProductionEvidenceNotes = calculation.ProductionEvidenceNotes,
+                    CorrectionSequence = correctionSequence,
                     PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
                     IsPosted = false,
                     IsProjected = !dto.PostToGl,
@@ -242,6 +289,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             PostingDate = postingDate,
             Status = dto.PostToGl ? "Calculated" : "Calculated",
             TotalDepreciationAmount = RoundMoney(depreciationLines.Sum(line => line.Schedule.DepreciationAmount)),
+            CorrectionSequence = correctionSequence,
             IdempotencyKey = idempotencyKey,
             CalculatedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -503,6 +551,8 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
                      value.BookClassification.Equals(schedule.BookClassification, StringComparison.OrdinalIgnoreCase)))
                 ?? throw new InvalidOperationException("Depreciation run references a fixed asset book value that was not found for this tenant.");
 
+            ValidatePersistedCalculationStillMatchesBook(bookValue, schedule);
+
             var expenseAccount = await ResolveDepreciationAccountAsync(
                 asset.Category.DepreciationExpenseAccountId,
                 "depreciation expense account",
@@ -754,6 +804,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
 
         item.BookValue.AccumulatedDepreciation = item.Schedule.AccumulatedDepreciation;
         item.BookValue.NetBookValue = item.Schedule.NetBookValue;
+        item.BookValue.AccumulatedProductionUnits = item.Schedule.CumulativeProductionUnitsAfter;
         item.BookValue.LastDepreciationDate = postingDate;
         if (item.BookValue.RemainingUsefulLifeMonths.HasValue && item.BookValue.RemainingUsefulLifeMonths.Value > 0)
         {
@@ -767,6 +818,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             item.Asset.NetBookValue = item.Schedule.NetBookValue;
             item.Asset.ResidualValue = item.BookValue.ResidualValue;
             item.Asset.UsefulLifeMonths = item.BookValue.UsefulLifeMonths;
+            item.Asset.AccumulatedProductionUnits = item.BookValue.AccumulatedProductionUnits;
         }
 
         UpdateAssetDepreciationStatus(item.Asset);
@@ -810,8 +862,12 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         Guid fiscalPeriodId,
         string bookClassification,
         Guid? fixedAssetId,
-        bool postToGl)
-        => $"FA:Depreciation:{tenantId:N}:{fiscalPeriodId:N}:{bookClassification}:{fixedAssetId?.ToString("N") ?? "ALL"}:{(postToGl ? "Post" : "Calculate")}";
+        bool postToGl,
+        int correctionSequence)
+    {
+        var baseKey = $"FA:Depreciation:{tenantId:N}:{fiscalPeriodId:N}:{bookClassification}:{fixedAssetId?.ToString("N") ?? "ALL"}:{(postToGl ? "Post" : "Calculate")}";
+        return correctionSequence == 0 ? baseKey : $"{baseKey}:C{correctionSequence}";
+    }
 
     private bool EnsureAssetEligibleForDepreciation(
         FixedAsset asset,
@@ -878,9 +934,9 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             throw new InvalidOperationException("Fixed asset book value belongs to another tenant.");
         }
 
-        if (bookValue.DepreciationMethod != DepreciationMethod.StraightLine)
+        if (bookValue.DepreciationMethod is DepreciationMethod.SumOfYearsDigits or DepreciationMethod.None)
         {
-            throw new InvalidOperationException("Only straight-line depreciation is supported in the Batch 20 depreciation foundation.");
+            throw new InvalidOperationException("TDC supports straight-line, diminishing-balance, double-declining, and units-of-production depreciation only.");
         }
 
         if (bookValue.UsefulLifeMonths <= 0)
@@ -896,6 +952,32 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         if (bookValue.ResidualValue > bookValue.AcquisitionCost)
         {
             throw new InvalidOperationException("Fixed asset residual value cannot exceed capitalized cost.");
+        }
+
+        if (bookValue.DepreciationMethod == DepreciationMethod.DecliningBalance &&
+            (bookValue.DiminishingBalanceRatePercent <= 0m || bookValue.DiminishingBalanceRatePercent > 100m))
+        {
+            throw new InvalidOperationException("Diminishing-balance depreciation requires an approved annual rate greater than 0% and no more than 100%.");
+        }
+
+        if (bookValue.DepreciationMethod == DepreciationMethod.DoubleDecliningBalance &&
+            (bookValue.DiminishingBalanceRatePercent < 0m || bookValue.DiminishingBalanceRatePercent > 100m))
+        {
+            throw new InvalidOperationException("A double-declining override rate must be between 0% and 100%; zero uses the useful-life-derived rate.");
+        }
+
+        if (bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction)
+        {
+            if (bookValue.LifetimeProductionCapacity <= 0m)
+            {
+                throw new InvalidOperationException("Units-of-production depreciation requires a positive lifetime production capacity.");
+            }
+
+            if (bookValue.AccumulatedProductionUnits < 0m ||
+                bookValue.AccumulatedProductionUnits > bookValue.LifetimeProductionCapacity)
+            {
+                throw new InvalidOperationException("Accumulated production usage must be between zero and the approved lifetime capacity.");
+            }
         }
 
         var placedInServiceDate = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate;
@@ -915,36 +997,66 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
         }
     }
 
-    private static decimal CalculateStraightLineDepreciation(FixedAssetBookValue bookValue)
+    private static FixedAssetProductionUsageDto? ResolveProductionUsage(
+        RunDepreciationDto dto,
+        FixedAsset asset,
+        FixedAssetBookValue bookValue)
     {
-        var remaining = RoundMoney(bookValue.NetBookValue - bookValue.ResidualValue);
-        if (remaining <= 0m)
+        var matches = (dto.ProductionUsageEntries ?? new List<FixedAssetProductionUsageDto>())
+            .Where(entry => entry.FixedAssetId == asset.Id &&
+                (string.IsNullOrWhiteSpace(entry.BookClassification) ||
+                 entry.BookClassification.Trim().Equals(bookValue.BookClassification, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (matches.Count > 1)
         {
-            return 0m;
+            throw new InvalidOperationException($"Multiple production-usage entries were supplied for asset '{asset.AssetCode}' and book '{bookValue.BookClassification}'.");
         }
 
-        var remainingUsefulLife = bookValue.RemainingUsefulLifeMonths.GetValueOrDefault(bookValue.UsefulLifeMonths);
-        if (remainingUsefulLife <= 0)
+        if (bookValue.DepreciationMethod != DepreciationMethod.UnitsOfProduction)
         {
-            return remaining;
+            if (matches.Count != 0)
+            {
+                throw new InvalidOperationException($"Production usage can only be supplied for a units-of-production asset. Asset '{asset.AssetCode}' uses {bookValue.DepreciationMethod}.");
+            }
+
+            return null;
         }
 
-        var unadjustedNetBookValue = RoundMoney(bookValue.AcquisitionCost - bookValue.AccumulatedDepreciation);
-        var hasValuationAdjustment = Math.Abs(unadjustedNetBookValue - RoundMoney(bookValue.NetBookValue)) >= 0.01m;
-        var depreciationBase = hasValuationAdjustment
-            ? remaining
-            : RoundMoney(bookValue.AcquisitionCost - bookValue.ResidualValue);
-        var divisor = hasValuationAdjustment
-            ? remainingUsefulLife
-            : bookValue.UsefulLifeMonths;
+        return matches.SingleOrDefault()
+            ?? throw new InvalidOperationException($"Verified production usage is required for units-of-production asset '{asset.AssetCode}' and book '{bookValue.BookClassification}'.");
+    }
 
-        if (divisor <= 0)
+    private static void ValidatePersistedCalculationStillMatchesBook(
+        FixedAssetBookValue bookValue,
+        AssetDepreciationSchedule schedule)
+    {
+        // Workflow approval may take time. Rechecking the calculation assumptions and usage counter
+        // at posting prevents an approved schedule from being posted after another process changes
+        // the book or consumes the same production capacity.
+        // Compare the effective rate, not merely the stored override. This also catches a switch
+        // between an explicit double-declining rate and the useful-life-derived default while an
+        // approved run is waiting to post.
+        var diminishingRateChanged = schedule.DepreciationMethodSnapshot is
+                DepreciationMethod.DecliningBalance or DepreciationMethod.DoubleDecliningBalance &&
+            FixedAssetDepreciationCalculator.ResolveEffectiveDiminishingBalanceRate(bookValue) !=
+            FixedAssetDepreciationCalculator.RoundRate(schedule.DiminishingBalanceRatePercentSnapshot);
+        var productionAssumptionsChanged = schedule.DepreciationMethodSnapshot == DepreciationMethod.UnitsOfProduction &&
+            (FixedAssetDepreciationCalculator.RoundUnits(bookValue.LifetimeProductionCapacity) !=
+                FixedAssetDepreciationCalculator.RoundUnits(schedule.LifetimeProductionCapacitySnapshot) ||
+             FixedAssetDepreciationCalculator.RoundUnits(bookValue.AccumulatedProductionUnits) !=
+                FixedAssetDepreciationCalculator.RoundUnits(schedule.CumulativeProductionUnitsBefore));
+
+        if (bookValue.DepreciationMethod != schedule.DepreciationMethodSnapshot ||
+            RoundMoney(bookValue.NetBookValue) != RoundMoney(schedule.NetBookValueBefore) ||
+            RoundMoney(bookValue.AccumulatedDepreciation) != RoundMoney(schedule.AccumulatedDepreciationBefore) ||
+            RoundMoney(bookValue.ResidualValue) != RoundMoney(schedule.ResidualValueSnapshot) ||
+            bookValue.UsefulLifeMonths != schedule.UsefulLifeMonthsSnapshot ||
+            diminishingRateChanged ||
+            productionAssumptionsChanged)
         {
-            return remaining;
+            throw new InvalidOperationException("Fixed asset depreciation assumptions or carrying values changed after calculation. Reverse/cancel the pending run and recalculate before posting.");
         }
-
-        var monthlyCharge = RoundMoney(depreciationBase / divisor);
-        return monthlyCharge > remaining ? remaining : monthlyCharge;
     }
 
     private void EnsureLegacyBookValues(
@@ -975,6 +1087,9 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
                 RemainingUsefulLifeMonths = asset.UsefulLifeMonths,
                 DepreciationMethod = asset.DepreciationMethod,
                 DepreciationConvention = asset.DepreciationConvention,
+                DiminishingBalanceRatePercent = asset.DiminishingBalanceRatePercent,
+                LifetimeProductionCapacity = asset.LifetimeProductionCapacity,
+                AccumulatedProductionUnits = asset.AccumulatedProductionUnits,
                 PlacedInServiceDate = asset.PlacedInServiceDate,
                 CapitalizationDate = asset.CapitalizationDate,
                 CapitalizationJournalEntryId = asset.JournalEntryId,
@@ -1100,6 +1215,7 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             Id = schedule.Id,
             FixedAssetId = schedule.FixedAssetId,
             FixedAssetDepreciationRunId = schedule.FixedAssetDepreciationRunId,
+            AssetDisposalId = schedule.AssetDisposalId,
             AccountingBookId = schedule.AccountingBookId,
             BookClassification = schedule.BookClassification,
             FiscalPeriodId = schedule.FiscalPeriodId,
@@ -1112,13 +1228,26 @@ public class FixedAssetDepreciationService : IFixedAssetDepreciationService
             ResidualValueSnapshot = schedule.ResidualValueSnapshot,
             UsefulLifeMonthsSnapshot = schedule.UsefulLifeMonthsSnapshot,
             DepreciationMethodSnapshot = schedule.DepreciationMethodSnapshot,
+            DiminishingBalanceRatePercentSnapshot = schedule.DiminishingBalanceRatePercentSnapshot,
+            LifetimeProductionCapacitySnapshot = schedule.LifetimeProductionCapacitySnapshot,
+            PeriodProductionUnits = schedule.PeriodProductionUnits,
+            CumulativeProductionUnitsBefore = schedule.CumulativeProductionUnitsBefore,
+            CumulativeProductionUnitsAfter = schedule.CumulativeProductionUnitsAfter,
+            ProductionEvidenceReference = schedule.ProductionEvidenceReference,
+            ProductionEvidenceNotes = schedule.ProductionEvidenceNotes,
             PlacedInServiceDateSnapshot = schedule.PlacedInServiceDateSnapshot,
             IsPosted = schedule.IsPosted,
             PostedDate = schedule.PostedDate,
             PostingDate = schedule.PostingDate,
             JournalEntryId = schedule.JournalEntryId,
             PostingEventId = schedule.PostingEventId,
-            IsProjected = schedule.IsProjected
+            IsProjected = schedule.IsProjected,
+            CorrectionSequence = schedule.CorrectionSequence,
+            IsReversed = schedule.IsReversed,
+            ReversedAt = schedule.ReversedAt,
+            ReversalJournalEntryId = schedule.ReversalJournalEntryId,
+            ReversalPostingEventId = schedule.ReversalPostingEventId,
+            DepreciationReversalId = schedule.DepreciationReversalId
         };
     }
 

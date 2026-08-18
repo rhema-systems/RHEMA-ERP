@@ -25,6 +25,11 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
     public Task<IActionResult> Summary(CancellationToken cancellationToken) =>
         ExecuteAsync(async () => Ok(await _service.GetSummaryAsync(cancellationToken)));
 
+    [HttpGet("issue-options")]
+    public Task<IActionResult> IssueOptions(CancellationToken cancellationToken) =>
+        ExecuteAsync(async () => Ok(await _service.GetIssueOptionsAsync(
+            CorrelationId, cancellationToken)));
+
     [HttpGet]
     public Task<IActionResult> Search(
         [FromQuery] ProcurementSupplierOnboardingTokenSearchRequest request,

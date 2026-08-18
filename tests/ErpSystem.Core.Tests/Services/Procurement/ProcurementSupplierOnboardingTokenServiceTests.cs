@@ -27,6 +27,27 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementSupplierOnboardingTokenServiceTests
 {
+    [Fact]
+    public async Task IssueOptionsReturnTenantDraftsWithoutExistingTokens()
+    {
+        await using var fixture = new Fixture(paid: false);
+
+        var beforeIssue = await fixture.Service.GetIssueOptionsAsync(
+            "issue-options-before");
+        await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest
+            {
+                RegistrationId = fixture.Registration.Id
+            },
+            "issue-options-token");
+        var afterIssue = await fixture.Service.GetIssueOptionsAsync(
+            "issue-options-after");
+
+        beforeIssue.Should().ContainSingle().Which.RegistrationId
+            .Should().Be(fixture.Registration.Id);
+        afterIssue.Should().BeEmpty();
+    }
+
     private static readonly JsonSerializerOptions DecisionJsonOptions = CreateDecisionJsonOptions();
 
     [Fact]

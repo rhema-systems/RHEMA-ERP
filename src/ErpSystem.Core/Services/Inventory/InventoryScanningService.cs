@@ -493,10 +493,38 @@ public sealed class InventoryScanningService : IInventoryScanningService
                 await _goodsReceipts.PostToInventoryAsync(documentId, UserId);
                 break;
             case InventoryScanOperation.RequisitionIssue:
+                var scanIssueContext = await _unitOfWork.Repository<InventoryRequisition>().GetQueryable()
+                    .AsNoTracking()
+                    .Where(value => value.TenantId == TenantId && value.Id == documentId && !value.IsDeleted)
+                    .Select(value => new
+                    {
+                        value.RequestedById,
+                        value.ProjectId,
+                        value.RowVersion
+                    })
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InventoryScanningException("INV_SCAN_REQUISITION_NOT_FOUND",
+                        "The issue requisition was not found in the current tenant.");
+                var scannedItemTypes = await _unitOfWork.Repository<InventoryItem>().GetQueryable().AsNoTracking()
+                    .Where(value => value.TenantId == TenantId &&
+                        transactionLines.Select(line => line.InventoryItemId).Contains(value.Id) && !value.IsDeleted)
+                    .Select(value => value.ItemType)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+                if (scannedItemTypes.Contains(ItemType.FixedAsset) && scannedItemTypes.Any(value => value != ItemType.FixedAsset))
+                    throw new InventoryScanningException("INV_SCAN_MIXED_ISSUE_TREATMENT",
+                        "Fixed assets and consumption stock must be issued in separate scan batches.");
                 await _requisitions.IssueAsync(documentId, new IssueRequisitionDto
                 {
                     IdempotencyKey = transactionIdempotencyKey,
                     CorrelationId = correlationId,
+                    RowVersion = Convert.ToBase64String(scanIssueContext.RowVersion),
+                    ReceiverUserId = scanIssueContext.RequestedById,
+                    MovementReasonCode = scannedItemTypes.All(value => value == ItemType.FixedAsset)
+                        ? InventoryIssueMovementReasons.AssetCustody
+                        : scanIssueContext.ProjectId.HasValue
+                            ? InventoryIssueMovementReasons.ProjectConsumption
+                            : InventoryIssueMovementReasons.DepartmentConsumption,
                     Notes = "Applied from authenticated mobile scan synchronization.",
                     Items = transactionLines.Select(line => new IssueRequisitionItemDto
                     {

@@ -244,6 +244,25 @@ public class VendorInvoice : TenantEntity
     /// </summary>
     public Guid? MatchExceptionControlEventId { get; set; }
 
+    // ── Authoritative supply acceptance lineage ────────────────────────
+
+    /// <summary>
+    /// Typed owner of the accepted performance record used by matching.
+    /// Goods remains owned by Procurement receiving/inspection, Services by
+    /// Projects deliverables, and Works by QS payment certificates.
+    /// </summary>
+    public ProcurementAcceptedSupplyKind? AcceptedSupplyKind { get; set; }
+
+    public Guid? AcceptedSupplySourceId { get; set; }
+
+    [MaxLength(100)]
+    public string? AcceptedSupplySourceReference { get; set; }
+
+    [MaxLength(64)]
+    public string? AcceptedSupplySnapshotHash { get; set; }
+
+    public DateTime? AcceptedSupplyValidatedAtUtc { get; set; }
+
     // ── Status & Approval ───────────────────────────────────────────────
 
     public VendorInvoiceStatus Status { get; set; } = VendorInvoiceStatus.Draft;
@@ -445,6 +464,19 @@ public class VendorPayment : TenantEntity
     /// account. Later allocations must reclassify that advance through the Finance posting engine.
     /// </summary>
     public bool IsSupplierAdvance { get; set; }
+
+    /// <summary>
+    /// Identifies a canonical AP record created from approved cutover evidence rather than a
+    /// current-period bank disbursement. The type distinguishes supplier advances from WHT
+    /// liabilities so downstream settlement and compliance services can reuse this payment
+    /// without mistaking the migration-clearing journal for a cash movement.
+    /// </summary>
+    [MaxLength(40)]
+    public string? OpeningBalanceType { get; set; }
+    public Guid? OpeningBalanceBatchId { get; set; }
+
+    [MaxLength(100)]
+    public string? OpeningSourceReference { get; set; }
 
     [NotMapped]
     public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;

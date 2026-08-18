@@ -4,20 +4,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FileText, LogOut, RefreshCw, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,6 +22,59 @@ function formatFileSize(bytes: number) {
   if (!bytes) return 'configured size';
   if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+type RegistrationDataRecord = Record<string, unknown>;
+
+const editableRegistrationKeys = new Set(
+  [
+    'companyName',
+    'partnerType',
+    'registrationCategory',
+    'email',
+    'phone',
+    'taxNumber',
+    'physicalAddress',
+    'city',
+    'country',
+  ].map((key) => key.toLowerCase())
+);
+
+function parseRegistrationData(value?: string): RegistrationDataRecord {
+  if (!value?.trim()) return {};
+
+  let current: unknown = JSON.parse(value);
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || Array.isArray(current) || typeof current !== 'object')
+      break;
+    const record = current as RegistrationDataRecord;
+    const wrapper = Object.keys(record).find(
+      (key) => key.toLowerCase() === 'registrationdata'
+    );
+    if (!wrapper) break;
+    const nested = record[wrapper];
+    if (typeof nested === 'string' && nested.trim()) {
+      current = JSON.parse(nested);
+      continue;
+    }
+    if (nested && !Array.isArray(nested) && typeof nested === 'object') {
+      current = nested;
+      continue;
+    }
+    break;
+  }
+
+  return current && !Array.isArray(current) && typeof current === 'object'
+    ? (current as RegistrationDataRecord)
+    : {};
+}
+
+function registrationString(data: RegistrationDataRecord, key: string) {
+  const actualKey = Object.keys(data).find(
+    (candidate) => candidate.toLowerCase() === key.toLowerCase()
+  );
+  const value = actualKey ? data[actualKey] : undefined;
+  return typeof value === 'string' ? value : '';
 }
 
 export default function SupplierApplicantPortalPage() {
@@ -57,6 +100,8 @@ export default function SupplierApplicantPortalPage() {
   const [expiryDate, setExpiryDate] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [savedRegistrationData, setSavedRegistrationData] =
+    useState<RegistrationDataRecord>({});
 
   const hydrate = useCallback((value: SupplierApplicantPortal) => {
     setPortal(value);
@@ -66,7 +111,11 @@ export default function SupplierApplicantPortalPage() {
     setPhone(value.phone || '');
     setEvidenceRequirementCode((current) => {
       const requirements = value.evidenceReadiness?.requirements || [];
-      if (requirements.some((requirement) => requirement.requirementCode === current)) {
+      if (
+        requirements.some(
+          (requirement) => requirement.requirementCode === current
+        )
+      ) {
         return current;
       }
       return (
@@ -80,17 +129,15 @@ export default function SupplierApplicantPortalPage() {
       );
     });
     try {
-      const raw = JSON.parse(value.registrationData || '{}');
-      const data =
-        typeof raw.registrationData === 'string'
-          ? JSON.parse(raw.registrationData)
-          : raw;
-      setTaxNumber(data.taxNumber || '');
-      setPhysicalAddress(data.physicalAddress || '');
-      setCity(data.city || '');
-      setCountry(data.country || 'Ghana');
+      const data = parseRegistrationData(value.registrationData);
+      setSavedRegistrationData(data);
+      setTaxNumber(registrationString(data, 'taxNumber'));
+      setPhysicalAddress(registrationString(data, 'physicalAddress'));
+      setCity(registrationString(data, 'city'));
+      setCountry(registrationString(data, 'country') || 'Ghana');
     } catch {
       // Retain editable defaults when a legacy draft has non-standard JSON.
+      setSavedRegistrationData({});
     }
   }, []);
 
@@ -111,7 +158,9 @@ export default function SupplierApplicantPortalPage() {
       }
     } catch (loadError) {
       const message =
-        loadError instanceof Error ? loadError.message : 'Could not load application.';
+        loadError instanceof Error
+          ? loadError.message
+          : 'Could not load application.';
       setError(message);
     } finally {
       setBusy(false);
@@ -122,30 +171,35 @@ export default function SupplierApplicantPortalPage() {
     void load();
   }, [load]);
 
-  const registrationData = useMemo(
-    () =>
-      JSON.stringify({
-        companyName,
-        partnerType: 'Supplier',
-        registrationCategory: category,
-        email: email || null,
-        phone: phone || null,
-        taxNumber,
-        physicalAddress,
-        city,
-        country,
-      }),
-    [
-      category,
-      city,
+  const registrationData = useMemo(() => {
+    const preserved = Object.fromEntries(
+      Object.entries(savedRegistrationData).filter(
+        ([key]) => !editableRegistrationKeys.has(key.toLowerCase())
+      )
+    );
+    return JSON.stringify({
+      ...preserved,
       companyName,
-      country,
-      email,
-      phone,
-      physicalAddress,
+      partnerType: 'Supplier',
+      registrationCategory: category,
+      email: email || null,
+      phone: phone || null,
       taxNumber,
-    ]
-  );
+      physicalAddress,
+      city,
+      country,
+    });
+  }, [
+    category,
+    city,
+    companyName,
+    country,
+    email,
+    phone,
+    physicalAddress,
+    savedRegistrationData,
+    taxNumber,
+  ]);
 
   const evidenceRequirements = portal?.evidenceReadiness?.requirements || [];
   const selectedEvidenceRequirement = evidenceRequirements.find(
@@ -164,7 +218,9 @@ export default function SupplierApplicantPortalPage() {
   const requirementFileLimit =
     selectedEvidenceRequirement?.maxFileSizeBytes || 0;
   const exceedsRequirementFileLimit =
-    file !== null && requirementFileLimit > 0 && file.size > requirementFileLimit;
+    file !== null &&
+    requirementFileLimit > 0 &&
+    file.size > requirementFileLimit;
   const uploadReady =
     Boolean(portal?.canEdit) &&
     Boolean(file) &&
@@ -189,7 +245,9 @@ export default function SupplierApplicantPortalPage() {
       toast.success('Application saved.');
     } catch (saveError) {
       toast.error(
-        saveError instanceof Error ? saveError.message : 'Application was not saved.'
+        saveError instanceof Error
+          ? saveError.message
+          : 'Application was not saved.'
       );
     } finally {
       setBusy(false);
@@ -203,7 +261,9 @@ export default function SupplierApplicantPortalPage() {
       toast.success('Application submitted for review.');
     } catch (submitError) {
       toast.error(
-        submitError instanceof Error ? submitError.message : 'Submission failed.'
+        submitError instanceof Error
+          ? submitError.message
+          : 'Submission failed.'
       );
     } finally {
       setBusy(false);
@@ -219,10 +279,11 @@ export default function SupplierApplicantPortalPage() {
         paymentReference: paymentReference || undefined,
         rowVersion: portal.tokenRowVersion,
       });
-      await load();
+      service.clearSession();
       toast.success(
-        'Payment submitted. Application access will unlock after trusted verification.'
+        'Payment submitted. Return here after the application token is sent following trusted verification.'
       );
+      router.replace('/supplier-application?tab=login&payment=pending');
     } catch (paymentError) {
       toast.error(
         paymentError instanceof Error ? paymentError.message : 'Payment failed.'
@@ -322,12 +383,23 @@ export default function SupplierApplicantPortalPage() {
                 {portal?.registrationNumber || 'Loading…'}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge>{portal?.status || 'Loading'}</Badge>
-              <Badge variant="outline">Token {String(portal?.tokenStatus ?? '')}</Badge>
-              <Badge variant="outline">
-                Payment {String(portal?.paymentStatus ?? '')}
-              </Badge>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Badge>{portal?.status || 'Loading'}</Badge>
+                <Badge variant="outline">
+                  Token {String(portal?.tokenStatus ?? '')}
+                </Badge>
+                <Badge variant="outline">
+                  Payment {String(portal?.paymentStatus ?? '')}
+                </Badge>
+              </div>
+              <Button
+                type="button"
+                disabled={busy || !portal?.canSubmit}
+                onClick={submit}
+              >
+                Submit for review
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -335,12 +407,18 @@ export default function SupplierApplicantPortalPage() {
         {portal?.paymentOnly && (
           <Alert className="border-amber-300 bg-amber-50">
             <AlertDescription>
-              The effective configuration requires a trusted provider or cashier to
-              verify payment before application editing, document submission and
-              status tracking are unlocked.
+              The effective configuration requires a trusted provider or cashier
+              to verify payment before application editing, document submission
+              and status tracking are unlocked.
             </AlertDescription>
           </Alert>
         )}
+
+        <div className="flex justify-end">
+          <Button disabled={busy || !portal?.canSubmit} onClick={submit}>
+            Submit for review
+          </Button>
+        </div>
 
         <Tabs defaultValue="payment">
           <TabsList className="grid w-full grid-cols-4 md:w-[620px]">
@@ -389,7 +467,9 @@ export default function SupplierApplicantPortalPage() {
                     value={category}
                     disabled={!portal?.canEdit}
                     onChange={(event) =>
-                      setCategory(event.target.value as SupplierRegistrationCategory)
+                      setCategory(
+                        event.target.value as SupplierRegistrationCategory
+                      )
                     }
                   >
                     <option>Goods</option>
@@ -400,13 +480,6 @@ export default function SupplierApplicantPortalPage() {
                 <div className="flex gap-2 md:col-span-2">
                   <Button disabled={busy || !portal?.canEdit} onClick={save}>
                     Save application
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={busy || !portal?.canSubmit}
-                    onClick={submit}
-                  >
-                    Submit for review
                   </Button>
                 </div>
               </CardContent>
@@ -446,7 +519,9 @@ export default function SupplierApplicantPortalPage() {
                               value={requirement.requirementCode}
                             >
                               {requirement.name}
-                              {requirement.isMandatory ? ' (required)' : ' (optional)'}
+                              {requirement.isMandatory
+                                ? ' (required)'
+                                : ' (optional)'}
                               {requirement.isSatisfied ? ' — supplied' : ''}
                             </option>
                           ))}
@@ -475,7 +550,8 @@ export default function SupplierApplicantPortalPage() {
                             </span>
                           </div>
                           <div className="text-xs text-slate-600">
-                            Maximum {formatFileSize(
+                            Maximum{' '}
+                            {formatFileSize(
                               selectedEvidenceRequirement.maxFileSizeBytes
                             )}
                             {selectedEvidenceRequirement.allowedMimeTypes.length
@@ -497,44 +573,50 @@ export default function SupplierApplicantPortalPage() {
                         </div>
                       )}
 
-                      {requiresClassification && selectedEvidenceRequirement && (
-                        <div className="grid gap-2">
-                          <Label htmlFor="evidence-classification">
-                            {selectedEvidenceRequirement.classificationScheme ||
-                              'Evidence'}{' '}
-                            classification
-                          </Label>
-                          {selectedEvidenceRequirement.allowedClassifications.length ? (
-                            <select
-                              id="evidence-classification"
-                              className="h-10 rounded-md border bg-white px-3"
-                              value={classificationCode}
-                              disabled={busy || !portal?.canEdit}
-                              onChange={(event) =>
-                                setClassificationCode(event.target.value)
-                              }
-                            >
-                              <option value="">Select classification</option>
-                              {selectedEvidenceRequirement.allowedClassifications.map(
-                                (classification) => (
-                                  <option key={classification} value={classification}>
-                                    {classification}
-                                  </option>
-                                )
-                              )}
-                            </select>
-                          ) : (
-                            <Input
-                              id="evidence-classification"
-                              value={classificationCode}
-                              disabled={busy || !portal?.canEdit}
-                              onChange={(event) =>
-                                setClassificationCode(event.target.value)
-                              }
-                            />
-                          )}
-                        </div>
-                      )}
+                      {requiresClassification &&
+                        selectedEvidenceRequirement && (
+                          <div className="grid gap-2">
+                            <Label htmlFor="evidence-classification">
+                              {selectedEvidenceRequirement.classificationScheme ||
+                                'Evidence'}{' '}
+                              classification
+                            </Label>
+                            {selectedEvidenceRequirement.allowedClassifications
+                              .length ? (
+                              <select
+                                id="evidence-classification"
+                                className="h-10 rounded-md border bg-white px-3"
+                                value={classificationCode}
+                                disabled={busy || !portal?.canEdit}
+                                onChange={(event) =>
+                                  setClassificationCode(event.target.value)
+                                }
+                              >
+                                <option value="">Select classification</option>
+                                {selectedEvidenceRequirement.allowedClassifications.map(
+                                  (classification) => (
+                                    <option
+                                      key={classification}
+                                      value={classification}
+                                    >
+                                      {classification}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+                            ) : (
+                              <Alert variant="destructive">
+                                <AlertDescription>
+                                  This evidence requirement needs a
+                                  classification, but no permitted
+                                  classifications are configured. Ask a
+                                  procurement administrator to correct the
+                                  published evidence pack.
+                                </AlertDescription>
+                              </Alert>
+                            )}
+                          </div>
+                        )}
 
                       <div className="grid gap-2">
                         <Label htmlFor="evidence-issue-date">Issue date</Label>
@@ -557,7 +639,9 @@ export default function SupplierApplicantPortalPage() {
                             type="date"
                             value={expiryDate}
                             disabled={busy || !portal?.canEdit}
-                            onChange={(event) => setExpiryDate(event.target.value)}
+                            onChange={(event) =>
+                              setExpiryDate(event.target.value)
+                            }
                           />
                         </div>
                       )}
@@ -569,8 +653,9 @@ export default function SupplierApplicantPortalPage() {
                           id="evidence-file"
                           type="file"
                           accept={
-                            selectedEvidenceRequirement?.allowedMimeTypes.join(',') ||
-                            undefined
+                            selectedEvidenceRequirement?.allowedMimeTypes.join(
+                              ','
+                            ) || undefined
                           }
                           disabled={
                             busy ||
@@ -608,7 +693,9 @@ export default function SupplierApplicantPortalPage() {
                           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
                         >
                           <div>
-                            <div className="font-medium">{requirement.name}</div>
+                            <div className="font-medium">
+                              {requirement.name}
+                            </div>
                             <div className="text-xs text-slate-500">
                               {requirement.requirementCode}
                               {requirement.matchedDocumentName
@@ -617,7 +704,9 @@ export default function SupplierApplicantPortalPage() {
                             </div>
                           </div>
                           <Badge
-                            variant={requirement.isSatisfied ? 'default' : 'outline'}
+                            variant={
+                              requirement.isSatisfied ? 'default' : 'outline'
+                            }
                           >
                             {requirement.isSatisfied
                               ? 'Satisfied'
@@ -633,8 +722,8 @@ export default function SupplierApplicantPortalPage() {
                   <Alert className="border-amber-300 bg-amber-50">
                     <AlertDescription>
                       Evidence requirements are not available for the selected
-                      supplier category. Save the application category and refresh
-                      before uploading documents.
+                      supplier category. Save the application category and
+                      refresh before uploading documents.
                     </AlertDescription>
                   </Alert>
                 )}
@@ -646,7 +735,9 @@ export default function SupplierApplicantPortalPage() {
                     <div className="flex items-center gap-3">
                       <FileText className="h-5 w-5 text-slate-500" />
                       <div>
-                        <div className="font-medium">{document.documentName}</div>
+                        <div className="font-medium">
+                          {document.documentName}
+                        </div>
                         <div className="text-xs text-slate-500">
                           {document.documentType} ·{' '}
                           {Math.ceil(document.fileSize / 1024)} KB
@@ -656,7 +747,9 @@ export default function SupplierApplicantPortalPage() {
                         </div>
                       </div>
                     </div>
-                    <Badge variant={document.isVerified ? 'default' : 'outline'}>
+                    <Badge
+                      variant={document.isVerified ? 'default' : 'outline'}
+                    >
                       {document.isRejected
                         ? 'Rejected'
                         : document.isVerified
@@ -689,13 +782,17 @@ export default function SupplierApplicantPortalPage() {
                       </span>
                     </div>
                     {entry.notes && (
-                      <p className="mt-1 text-sm text-slate-600">{entry.notes}</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {entry.notes}
+                      </p>
                     )}
                   </div>
                 ))}
                 {portal?.rejectionReason && (
                   <Alert variant="destructive">
-                    <AlertDescription>{portal.rejectionReason}</AlertDescription>
+                    <AlertDescription>
+                      {portal.rejectionReason}
+                    </AlertDescription>
                   </Alert>
                 )}
               </CardContent>
@@ -718,7 +815,9 @@ export default function SupplierApplicantPortalPage() {
                       <select
                         className="h-10 rounded-md border bg-white px-3"
                         value={paymentMethodId}
-                        onChange={(event) => setPaymentMethodId(event.target.value)}
+                        onChange={(event) =>
+                          setPaymentMethodId(event.target.value)
+                        }
                       >
                         {methods.map((method) => (
                           <option key={method.id} value={method.id}>
@@ -731,7 +830,9 @@ export default function SupplierApplicantPortalPage() {
                       <Label>Payment reference</Label>
                       <Input
                         value={paymentReference}
-                        onChange={(event) => setPaymentReference(event.target.value)}
+                        onChange={(event) =>
+                          setPaymentReference(event.target.value)
+                        }
                       />
                     </div>
                     <Button

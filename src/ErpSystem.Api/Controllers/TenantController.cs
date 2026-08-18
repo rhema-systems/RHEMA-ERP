@@ -22,9 +22,12 @@ public class TenantController : ControllerBase
     private readonly FinanceCloseTemplateBaselineSeeder _financeCloseTemplateBaselineSeeder;
     private readonly ProcurementConfigurationProfileSeeder? _procurementConfigurationProfileSeeder;
     private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
+    private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
+    private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
     private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
     private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
+    private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
 
     public TenantController(
         ITenantService tenantService,
@@ -36,9 +39,12 @@ public class TenantController : ControllerBase
         FinanceCloseTemplateBaselineSeeder financeCloseTemplateBaselineSeeder,
         ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
         ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
+        QuantitySurveyConfigurationProfileSeeder? quantitySurveyConfigurationProfileSeeder = null,
+        QuantitySurveyAccessControlSeeder? quantitySurveyAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
         InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
-        AuditComplianceReportSeeder? auditComplianceReportSeeder = null)
+        AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
+        QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null)
     {
         _tenantService = tenantService;
         _logger = logger;
@@ -49,9 +55,12 @@ public class TenantController : ControllerBase
         _financeCloseTemplateBaselineSeeder = financeCloseTemplateBaselineSeeder;
         _procurementConfigurationProfileSeeder = procurementConfigurationProfileSeeder;
         _procurementAccessControlSeeder = procurementAccessControlSeeder;
+        _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
+        _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
         _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
         _auditComplianceReportSeeder = auditComplianceReportSeeder;
+        _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
     }
 
     /// <summary>
@@ -219,6 +228,17 @@ public class TenantController : ControllerBase
                     : (Guid?)null;
                 await _procurementAccessControlSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
             }
+            if (_quantitySurveyConfigurationProfileSeeder is not null)
+            {
+                var initializerActorId = Guid.TryParse(_currentUserService.UserId, out var parsedQsInitializerActorId)
+                    ? parsedQsInitializerActorId
+                    : (Guid?)null;
+                await _quantitySurveyConfigurationProfileSeeder.SeedTenantAsync(createdTenant.Id, initializerActorId);
+            }
+            if (_quantitySurveyAccessControlSeeder is not null)
+            {
+                await _quantitySurveyAccessControlSeeder.SeedAsync();
+            }
             if (_procurementStatutoryReportSeeder is not null)
             {
                 await _procurementStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
@@ -230,6 +250,10 @@ public class TenantController : ControllerBase
             if (_auditComplianceReportSeeder is not null)
             {
                 await _auditComplianceReportSeeder.SeedTenantAsync(createdTenant.Id);
+            }
+            if (_quantitySurveyStatutoryReportSeeder is not null)
+            {
+                await _quantitySurveyStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
             }
 
             // Tenant provisioning owns baseline installation; startup reconciliation is only the safety net.

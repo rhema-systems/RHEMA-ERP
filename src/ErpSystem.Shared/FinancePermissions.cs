@@ -76,6 +76,9 @@ public static class FinancePermissions
     public const string VoidArInvoices = "Finance.AR.Invoices.Void";
     public const string ReceiveCustomerPayments = "Finance.AR.Payments.Receive";
     public const string ReverseArPayments = "Finance.AR.Payments.Reverse";
+    public const string ViewArCollections = "Finance.AR.Collections.View";
+    public const string ManageArCollections = "Finance.AR.Collections.Manage";
+    public const string RecordArCollectionReminders = "Finance.AR.Collections.Reminders.Record";
 
     public const string ManageBankAccounts = "Finance.BankAccounts.Manage";
     public const string RecordCashBankTransactions = "Finance.CashBank.Transactions.Record";
@@ -105,11 +108,22 @@ public static class FinancePermissions
     public const string DisposeFixedAssets = "Finance.FixedAssets.Disposal.Run";
     public const string ReverseFixedAssetCapitalization = "Finance.FixedAssets.Capitalization.Reverse";
     public const string ApproveFixedAssetCapitalizationReversal = "Finance.FixedAssets.Capitalization.Reversal.Approve";
+    public const string ReverseFixedAssetDepreciation = "Finance.FixedAssets.Depreciation.Reverse";
+    public const string ApproveFixedAssetDepreciationReversal = "Finance.FixedAssets.Depreciation.Reversal.Approve";
+    public const string ReverseFixedAssetValuation = "Finance.FixedAssets.Valuation.Reversal";
+    public const string ApproveFixedAssetValuationReversal = "Finance.FixedAssets.Valuation.Reversal.Approve";
+    public const string ReclassifyFixedAssets = "Finance.FixedAssets.Reclassification.Request";
+    public const string ApproveFixedAssetReclassification = "Finance.FixedAssets.Reclassification.Approve";
 
     public const string RunFinanceReports = "Finance.Reports.Run";
     public const string ExportFinanceReports = "Finance.Reports.Export";
+    public const string BuildAdHocReports = "Finance.Reports.AdHoc.Build";
+    public const string ShareAdHocReports = "Finance.Reports.AdHoc.Share";
     public const string ManageFinancialStatementLayouts = "Finance.Reports.Layouts.Manage";
     public const string PublishFinancialStatementLayouts = "Finance.Reports.Layouts.Publish";
+    public const string ViewReportSchedules = "Finance.Reports.Schedules.View";
+    public const string ManageReportSchedules = "Finance.Reports.Schedules.Manage";
+    public const string RunReportSchedules = "Finance.Reports.Schedules.Run";
 
     public const string OpenAccountingPeriods = "Finance.PeriodOpen";
     public const string CloseAccountingPeriods = "Finance.PeriodClose";
@@ -137,6 +151,10 @@ public static class FinancePermissions
     public const string SubmitBudgetReturns = "Finance.BudgetReturns.Submit";
     public const string ApproveBudgetReturns = "Finance.BudgetReturns.Approve";
     public const string LockBudgets = "Finance.Budgeting.Lock";
+    public const string ViewBudgetRevisions = "Finance.BudgetRevisions.Read";
+    public const string MaintainBudgetRevisions = "Finance.BudgetRevisions.Write";
+    public const string SubmitBudgetRevisions = "Finance.BudgetRevisions.Submit";
+    public const string ApplyBudgetRevisions = "Finance.BudgetRevisions.Apply";
 
     public static readonly FinancePermissionDefinition[] All =
     {
@@ -189,6 +207,9 @@ public static class FinancePermissions
         new(VoidArInvoices, "Void AR Invoices", "Void customer invoices with reversal controls.", CategoryAccountsReceivable),
         new(ReceiveCustomerPayments, "Receive Customer Payments", "Record, allocate, clear, bounce, and credit customer payments.", CategoryAccountsReceivable),
         new(ReverseArPayments, "Reverse AR Payments", "Reverse posted customer receipts through controlled compensating journals.", CategoryAccountsReceivable),
+        new(ViewArCollections, "View AR Collections", "View overdue AR exposures, collection work queues, promises, and follow-up history.", CategoryAccountsReceivable),
+        new(ManageArCollections, "Manage AR Collections", "Generate, assign, prioritize, and resolve controlled AR collection tasks.", CategoryAccountsReceivable),
+        new(RecordArCollectionReminders, "Record AR Collection Reminders", "Prepare and record customer reminders and collection-contact evidence.", CategoryAccountsReceivable),
 
         new(ManageBankAccounts, "Manage Bank Accounts", "Create, update, delete, and configure bank accounts.", CategoryCashBank),
         new(RecordCashBankTransactions, "Record Cash/Bank Transactions", "Record cash receipts, payments, and transfers.", CategoryCashBank),
@@ -218,11 +239,22 @@ public static class FinancePermissions
         new(DisposeFixedAssets, "Dispose Fixed Assets", "Request, approve, complete, and process fixed asset disposals.", CategoryFixedAssets),
         new(ReverseFixedAssetCapitalization, "Reverse Fixed Asset Capitalization", "Request and post linked fixed asset capitalization correction journals.", CategoryFixedAssets),
         new(ApproveFixedAssetCapitalizationReversal, "Approve Fixed Asset Capitalization Reversal", "Independently approve or reject fixed asset capitalization reversal requests.", CategoryFixedAssets),
+        new(ReverseFixedAssetDepreciation, "Reverse Fixed Asset Depreciation", "Request and post linked fixed asset depreciation correction journals.", CategoryFixedAssets),
+        new(ApproveFixedAssetDepreciationReversal, "Approve Fixed Asset Depreciation Reversal", "Independently approve or reject fixed asset depreciation reversal requests.", CategoryFixedAssets),
+        new(ReverseFixedAssetValuation, "Reverse Fixed Asset Valuation", "Request and post a linked correction for an incorrectly posted fixed asset valuation.", CategoryFixedAssets),
+        new(ApproveFixedAssetValuationReversal, "Approve Fixed Asset Valuation Reversal", "Independently approve or reject fixed asset valuation correction requests.", CategoryFixedAssets),
+        new(ReclassifyFixedAssets, "Request Fixed Asset Reclassification", "Request a controlled category/account or reporting-dimension reclassification of current fixed asset balances.", CategoryFixedAssets),
+        new(ApproveFixedAssetReclassification, "Approve Fixed Asset Reclassification", "Independently approve or reject fixed asset GL reclassification requests before posting.", CategoryFixedAssets),
 
         new(RunFinanceReports, "Run Finance Reports", "Run finance statements, aging, cash, bank, tax, FX, and fixed asset reports.", CategoryReporting),
         new(ExportFinanceReports, "Export/Print Finance Reports", "Export or print finance reports and finance-controlled documents.", CategoryReporting),
+        new(BuildAdHocReports, "Build Finance Ad Hoc Reports", "Create and maintain private reports from governed Finance datasets without direct SQL access.", CategoryReporting),
+        new(ShareAdHocReports, "Share Finance Ad Hoc Reports", "Publish governed ad hoc definitions to other authorised Finance report users.", CategoryReporting),
         new(ManageFinancialStatementLayouts, "Manage Financial Statement Layouts", "Create and maintain draft financial statement layouts and mappings.", CategoryReporting),
         new(PublishFinancialStatementLayouts, "Publish Financial Statement Layouts", "Validate and publish versioned financial statement layouts for production reporting.", CategoryReporting),
+        new(ViewReportSchedules, "View Finance Report Schedules", "View Finance report schedules, delivery history, and retained artifacts.", CategoryReporting),
+        new(ManageReportSchedules, "Manage Finance Report Schedules", "Create, update, pause, and resume controlled Finance report schedules.", CategoryReporting),
+        new(RunReportSchedules, "Run Finance Report Schedules", "Run due or on-demand Finance report schedule occurrences.", CategoryReporting),
 
         new(OpenAccountingPeriods, "Open Accounting Periods", "Open future fiscal periods for controlled transaction posting.", CategoryPeriodClose),
         new(CloseAccountingPeriods, "Close Accounting Periods", "Close fiscal periods after month-end checks.", CategoryPeriodClose),
@@ -249,7 +281,11 @@ public static class FinancePermissions
         new(EditBudgetReturns, "Edit Assigned Budget Returns", "Edit assigned budget worksheets before submission.", CategoryBudgeting),
         new(SubmitBudgetReturns, "Submit Budget Returns", "Submit assigned budget worksheets.", CategoryBudgeting),
         new(ApproveBudgetReturns, "Approve Budget Returns", "Approve or reject submitted budget worksheets.", CategoryBudgeting),
-        new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting)
+        new(LockBudgets, "Lock Budgets", "Lock approved budget scenarios.", CategoryBudgeting),
+        new(ViewBudgetRevisions, "View Budget Revisions", "View virements, supplementary budgets, Board evidence, and resulting official versions.", CategoryBudgeting),
+        new(MaintainBudgetRevisions, "Maintain Budget Revisions", "Prepare controlled virement and supplementary-budget requests.", CategoryBudgeting),
+        new(SubmitBudgetRevisions, "Submit Budget Revisions", "Submit validated budget revisions to the configured Board approval workflow.", CategoryBudgeting),
+        new(ApplyBudgetRevisions, "Apply Budget Revisions", "Apply an approved revision by creating and adopting an immutable successor budget.", CategoryBudgeting)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();

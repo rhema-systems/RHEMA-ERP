@@ -173,6 +173,8 @@ public sealed class ProcurementSupplierPerformanceScorecardService :
             .FirstOrDefaultAsync(cancellationToken);
         var current = row is not null && policy is not null &&
             IsCurrent(row, policy, now);
+        var firstAwardBaseline = row is not null && policy is not null &&
+            IsFirstAwardBaseline(row, policy, now);
         var reasons = new List<string>();
         if (policy is null)
             reasons.Add("A unique valid effective DEC-011 performance policy is unavailable.");
@@ -180,7 +182,7 @@ public sealed class ProcurementSupplierPerformanceScorecardService :
             reasons.Add("No governed supplier-performance scorecard exists.");
         else
         {
-            if (!current)
+            if (!current && !firstAwardBaseline)
                 reasons.Add("The latest scorecard is stale, expired, incomplete, or bound to a prior policy.");
             if (row.MinimumScoreBreached &&
                 row.EligibilityAction ==
@@ -1152,6 +1154,28 @@ public sealed class ProcurementSupplierPerformanceScorecardService :
         item.PolicyDecisionId == policy.Decision.Id &&
         string.Equals(item.PolicyValueHash, Hash(policy.Decision.ValueJson),
             StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFirstAwardBaseline(
+        ProcurementSupplierPerformanceScorecard item,
+        PolicyResolution policy,
+        DateTime now)
+    {
+        var observedScores = new decimal?[]
+        {
+            item.DeliveryTimelinessScore, item.GrnQualityScore,
+            item.RejectionRateScore, item.PriceCompetitivenessScore,
+            item.ResponsivenessScore, item.ComplaintResolutionScore,
+            item.ContractCompletionScore
+        };
+        return item.PurchaseOrderCount == 0 && item.ReceiptCount == 0 &&
+            observedScores.Any(score => score.HasValue) &&
+            observedScores.Where(score => score.HasValue)
+                .All(score => score!.Value >= item.MinimumScore) &&
+            item.NextReviewDueAtUtc > now && item.IntegrityHash.Length == 64 &&
+            item.PolicyDecisionId == policy.Decision.Id &&
+            string.Equals(item.PolicyValueHash, Hash(policy.Decision.ValueJson),
+                StringComparison.OrdinalIgnoreCase);
+    }
 
     private static void Capture(ProcurementSupplierPerformanceScorecard item)
     {

@@ -20,12 +20,15 @@ public partial class ProjectService
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.ManagePlan);
         var phase = await ValidateProjectDesignPhaseAsync(projectId, dto.ProjectPhaseId);
+        var superseded = await ValidateSupersededDrawingAsync(projectId, dto.SupersedesDrawingId,
+            dto.DrawingNumber, dto.Revision, null);
 
         var entity = new ProjectDrawing
         {
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             ProjectPhaseId = phase?.Id,
+            SupersedesDrawingId = superseded?.Id,
             DrawingNumber = dto.DrawingNumber.Trim(),
             Title = dto.Title.Trim(),
             Discipline = NormalizeProjectDrawingDiscipline(dto.Discipline),
@@ -51,8 +54,11 @@ public partial class ProjectService
         var entity = await GetProjectDrawingEntityAsync(drawingId);
         await RequireProjectAsync(entity.ProjectId, ProjectAccessOperation.ManagePlan);
         var phase = await ValidateProjectDesignPhaseAsync(entity.ProjectId, dto.ProjectPhaseId);
+        var superseded = await ValidateSupersededDrawingAsync(entity.ProjectId, dto.SupersedesDrawingId,
+            dto.DrawingNumber, dto.Revision, entity.Id);
 
         entity.ProjectPhaseId = phase?.Id;
+        entity.SupersedesDrawingId = superseded?.Id;
         entity.DrawingNumber = dto.DrawingNumber.Trim();
         entity.Title = dto.Title.Trim();
         entity.Discipline = NormalizeProjectDrawingDiscipline(dto.Discipline);
@@ -451,6 +457,7 @@ public partial class ProjectService
             ProjectId = entity.ProjectId,
             ProjectPhaseId = entity.ProjectPhaseId,
             ProjectPhaseName = entity.ProjectPhaseId.HasValue && phases.TryGetValue(entity.ProjectPhaseId.Value, out var phase) ? phase.Name : null,
+            SupersedesDrawingId = entity.SupersedesDrawingId,
             DrawingNumber = entity.DrawingNumber,
             Title = entity.Title,
             Discipline = entity.Discipline,
@@ -463,6 +470,23 @@ public partial class ProjectService
             ResponsibleParty = entity.ResponsibleParty,
             Notes = entity.Notes
         };
+
+    private async Task<ProjectDrawing?> ValidateSupersededDrawingAsync(
+        Guid projectId, Guid? supersedesDrawingId, string? drawingNumber, string? revision, Guid? currentDrawingId)
+    {
+        if (!supersedesDrawingId.HasValue) return null;
+        if (currentDrawingId == supersedesDrawingId)
+            throw new InvalidOperationException("A drawing cannot supersede itself.");
+        var prior = await _unitOfWork.Repository<ProjectDrawing>().GetByIdAsync(supersedesDrawingId.Value)
+            ?? throw new InvalidOperationException("The selected prior drawing revision was not found.");
+        if (prior.TenantId != _currentUserProvider.TenantId || prior.ProjectId != projectId || prior.IsDeleted)
+            throw new InvalidOperationException("The selected prior drawing revision must belong to this tenant and project.");
+        if (!string.Equals(prior.DrawingNumber.Trim(), drawingNumber?.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("A revised drawing must retain the prior drawing number.");
+        if (string.Equals(prior.Revision?.Trim(), revision?.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("A revised drawing must use a different revision code.");
+        return prior;
+    }
 
     private static Task<List<ProjectSubmittalDto>> MapProjectSubmittalsAsync(
         IReadOnlyCollection<ProjectSubmittal> entities,
