@@ -80,6 +80,17 @@ public class ProbationReminderDispatchLog : TenantEntity
     /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
     public int EscalationTier { get; set; }
 
+    /// <summary>
+    /// The confirming authority this reminder was routed to, when one resolved.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null is meaningful, not missing: it records that the sweep found work to route and had
+    /// <b>nobody to route it to</b>. FR-HR-032 is a routing requirement, so a reminder that cannot
+    /// say who it went to has not implemented it — and an unrouted item is exactly what HR needs
+    /// surfaced rather than silently swallowed.
+    /// </remarks>
+    public Guid? RoutedToEmployeeId { get; set; }
+
     [Required]
     [MaxLength(300)]
     public string DedupeKey { get; set; } = string.Empty;

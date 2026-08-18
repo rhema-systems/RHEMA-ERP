@@ -34,6 +34,11 @@ public class ProbationReminderPreviewItemDto
     public DateTime? DueDate { get; set; }
     public int DaysRemaining { get; set; }
     public int EscalationTier { get; set; }
+
+    /// <summary>Who this was routed to; null means no confirming authority resolved.</summary>
+    public Guid? RoutedToEmployeeId { get; set; }
+    public string? RoutedToName { get; set; }
+
     public string DedupeKey { get; set; } = string.Empty;
 }
 
@@ -49,6 +54,7 @@ public class ProbationReminderLogEntryDto
     public DateTime? DueDate { get; set; }
     public int DaysRemaining { get; set; }
     public int EscalationTier { get; set; }
+    public Guid? RoutedToEmployeeId { get; set; }
     public DateTime DispatchedAt { get; set; }
 }
 

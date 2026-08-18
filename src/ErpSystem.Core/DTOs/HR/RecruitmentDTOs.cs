@@ -4111,6 +4111,18 @@ public class ProbationPolicyDto
 
     /// <summary>How many days before the end date the expiry alerts start (FR-HR-140).</summary>
     public int EndLeadDays { get; set; }
+
+    /// <summary>
+    /// Who will confirm this probation (FR-HR-032), or null when no rule covers the employee.
+    /// </summary>
+    /// <remarks>
+    /// Carried here so a create form can show, before the probation is even opened, who is going to
+    /// have to act on it — and so an unconfigured tenant is visible at the point of creation rather
+    /// than a month later when the reminder has nobody to go to.
+    /// </remarks>
+    public Guid? ConfirmingAuthorityEmployeeId { get; set; }
+    public string? ConfirmingAuthorityName { get; set; }
+    public string? ConfirmingAuthorityScope { get; set; }
 }
 
 public class ExtendProbationPeriodDto

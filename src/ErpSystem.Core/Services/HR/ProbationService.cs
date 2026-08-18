@@ -19,6 +19,7 @@ public class ProbationService : IProbationService
     private readonly IProbationExtensionRepository _extensionRepository;
     private readonly IEmployeeRepository _employeeRepository;
     private readonly ICompanyHrPolicySettingsService _policySettings;
+    private readonly IProbationConfirmingAuthorityService _authorities;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ProbationService> _logger;
@@ -29,6 +30,7 @@ public class ProbationService : IProbationService
         IProbationExtensionRepository extensionRepository,
         IEmployeeRepository employeeRepository,
         ICompanyHrPolicySettingsService policySettings,
+        IProbationConfirmingAuthorityService authorities,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ProbationService> logger)
@@ -38,6 +40,7 @@ public class ProbationService : IProbationService
         _extensionRepository = extensionRepository;
         _employeeRepository = employeeRepository;
         _policySettings = policySettings;
+        _authorities = authorities;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -214,7 +217,22 @@ public class ProbationService : IProbationService
 
     /// <inheritdoc />
     public async Task<ProbationPolicyDto> GetPolicyForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
-        => BuildPolicy(await GetOwnedEmployeeAsync(employeeId), await _policySettings.GetAsync(cancellationToken));
+    {
+        var employee = await GetOwnedEmployeeAsync(employeeId);
+        var policy = BuildPolicy(employee, await _policySettings.GetAsync(cancellationToken));
+
+        // Who will have to act on this probation, shown before it is even opened — so an
+        // unconfigured tenant is visible at creation rather than a month later when the reminder
+        // has nobody to go to.
+        var authority = await _authorities.ResolveInternalAsync(GetTenantId(), employee, cancellationToken);
+        policy.ConfirmingAuthorityEmployeeId = authority?.AuthorityEmployeeId;
+        policy.ConfirmingAuthorityName = authority?.AuthorityEmployee?.FullName;
+        policy.ConfirmingAuthorityScope = authority is null
+            ? null
+            : $"{authority.OrganizationUnit?.Name ?? "All units"} — {authority.StaffLevel?.Name ?? "all levels"}";
+
+        return policy;
+    }
 
     private static ProbationPolicyDto BuildPolicy(Employee employee, CompanyHrPolicySettingsDto settings)
     {

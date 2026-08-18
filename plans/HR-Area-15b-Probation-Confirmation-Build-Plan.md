@@ -392,7 +392,7 @@ the JWT key ([[hr-harness-run-environment]]).
 ## 9. Slice log
 
 Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging** with the JWT
-key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 / 37 = 283**.
+key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 = 324**.
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -612,3 +612,33 @@ had not followed it.
 `dotnet ef migrations add`, add the shim line, then verify **in SQL** — the history row, the tables,
 and the unique index — because the log line is a claim, not evidence. Recorded in
 [[migration-ownership-and-chain]].
+
+### Slice 8a — the confirming authority (2026-08-18) — `run-slice8a.mjs`, 41 assertions
+
+Decision D-2, built. FR-HR-032 routes the month-5 form to "the head"; the org data cannot say who
+that is, and this was the **fourth** requirement to hit that wall (area 8's establishment rule,
+area 9's `MinimumAuthority`, FR-HR-181's grievance ladder, now this). So the authority is stated in
+a small map — unit and/or staff level → the confirming employee — resolved most-specific-first:
+unit + level, then unit, then level, then a tenant-wide default. A tenant can start with **one**
+default row and refine later without re-keying anything.
+
+⚠ **The judgement that matters: an unmatched employee resolves to *nothing*, not to HR.** A silent
+fallback would make an unconfigured tenant look configured, and FR-HR-032's routing would appear to
+work while going nowhere in particular — precisely the failure this table exists to prevent. The
+same reasoning runs through the engine: an unroutable confirmation form **still fires**, with
+`RoutedToEmployeeId` null and "(no confirming authority set)" in its reference, because work that is
+due and has no owner is the case HR most needs surfaced. Both directions are asserted.
+
+The unique `(TenantId, OrganizationUnitId, StaffLevelId)` index is **filtered on `IsDeleted = 0`**,
+verified in SQL after the migration applied (`([IsDeleted]=(0))`). The harness proves the
+consequence rather than the schema: it deletes a rule and re-fills the slot, which is exactly what
+area 13's five-faced defect made impossible. SQL Server treating NULLs as equal for uniqueness is
+what makes "one tenant-wide default" and "one rule per unit" fall out of the same index.
+
+Also wired: `GET api/probations/policy/{employeeId}` now names who will confirm, so a create form
+shows the eventual actor **before** the probation is opened — an unconfigured tenant becomes visible
+at creation rather than a month later when the reminder has nobody to go to.
+
+✅ The slice-7 migration lesson held on first use: the shim line went into
+`FastBuildMigrationMetadata.cs` in the same edit as the guard, and the schema was verified in SQL
+(history row, table, column, **and the index's filter predicate**) rather than from the log.

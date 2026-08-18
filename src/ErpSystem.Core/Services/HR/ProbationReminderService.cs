@@ -26,15 +26,22 @@ namespace ErpSystem.Core.Services.HR;
 /// end date changes the key, which re-arms the ladder — deliberately, since a rescheduled deadline
 /// is a new deadline.</para>
 ///
-/// <para><b>Who receives them is not this engine's business yet.</b> The dispatch log records the
-/// item, not the person. FR-HR-032 routes the form to "the head", and 0 of 41 organisation units
-/// carry one (build plan §3.10) — decision D-2 puts a named confirming authority behind slice 8, and
-/// this engine gains its recipient there rather than inventing one now.</para>
+/// <para><b>What a reminder carries.</b> The dispatch log records the item and, for the
+/// confirmation form, who it was routed to — never a rating, a recommendation or a reviewer's
+/// comment. A reminder travels further than the record it is about, so it names a person and a date
+/// and makes the reader open the record for anything else.</para>
+///
+/// <para><b>Routing (slice 8a).</b> FR-HR-032 sends the form to "the head", and 0 of 41 organisation
+/// units carry one (build plan §3.10), so the recipient comes from the explicit confirming-authority
+/// map (decision D-2). ⚠ When nothing resolves, the reminder still fires with
+/// <c>RoutedToEmployeeId</c> null and says so in its reference text: work that is due and has no
+/// owner is the case HR most needs surfaced, not the one to suppress.</para>
 /// </remarks>
 public class ProbationReminderService : IProbationReminderService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICompanyHrPolicySettingsService _policySettings;
+    private readonly IProbationConfirmingAuthorityService _authorities;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<ProbationReminderService> _logger;
 
@@ -49,11 +56,13 @@ public class ProbationReminderService : IProbationReminderService
     public ProbationReminderService(
         IUnitOfWork unitOfWork,
         ICompanyHrPolicySettingsService policySettings,
+        IProbationConfirmingAuthorityService authorities,
         ICurrentUserProvider currentUserProvider,
         ILogger<ProbationReminderService> logger)
     {
         _unitOfWork = unitOfWork;
         _policySettings = policySettings;
+        _authorities = authorities;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -110,6 +119,7 @@ public class ProbationReminderService : IProbationReminderService
                 DueDate = item.DueDate,
                 DaysRemaining = item.DaysRemaining,
                 EscalationTier = item.EscalationTier,
+                RoutedToEmployeeId = item.RoutedToEmployeeId,
                 DedupeKey = item.DedupeKey,
             });
         }
@@ -145,7 +155,7 @@ public class ProbationReminderService : IProbationReminderService
         var items = new List<ProbationReminderPreviewItemDto>();
 
         var probations = await _unitOfWork.Repository<ProbationPeriod>().GetQueryable()
-            .Include(p => p.Employee)
+            .Include(p => p.Employee).ThenInclude(e => e.Position)
             .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.Status == ProbationStatus.Active)
             .ToListAsync(cancellationToken);
 
@@ -155,22 +165,33 @@ public class ProbationReminderService : IProbationReminderService
             var end = probation.CurrentEndDate;
             var daysRemaining = end.DayNumber - today.DayNumber;
 
-            // FR-HR-032 — the confirmation form goes out one month before the end. Stated as a
-            // month rather than "the 5th month" so a junior's 3-month probation is served by the
-            // same rule; for the spec's 6-month case the two are the same date.
+            // FR-HR-032 — the confirmation form goes out one month before the end, TO THE
+            // CONFIRMING AUTHORITY. Stated as a month rather than "the 5th month" so a junior's
+            // 3-month probation is served by the same rule; for the spec's 6-month case the two are
+            // the same date.
             var formDue = end.AddMonths(-1);
             if (today >= formDue && daysRemaining >= 0)
             {
+                // ⚠ An unresolved authority still fires the reminder, routed to nobody. Suppressing
+                // it would hide the one case HR most needs to see: work that is due and has no owner.
+                var authority = probation.Employee is null
+                    ? null
+                    : await _authorities.ResolveInternalAsync(tenantId, probation.Employee, cancellationToken);
+
                 items.Add(new ProbationReminderPreviewItemDto
                 {
                     Kind = "ConfirmationFormDue",
                     ItemType = "Probation period",
                     EntityId = probation.Id,
                     ProbationPeriodId = probation.Id,
-                    Reference = $"{who} — confirmation form due",
+                    Reference = authority is null
+                        ? $"{who} — confirmation form due (no confirming authority set)"
+                        : $"{who} — confirmation form due",
                     DueDate = formDue.ToDateTime(TimeOnly.MinValue),
                     DaysRemaining = formDue.DayNumber - today.DayNumber,
                     EscalationTier = 0,
+                    RoutedToEmployeeId = authority?.AuthorityEmployeeId,
+                    RoutedToName = authority?.AuthorityEmployee?.FullName,
                     DedupeKey = Key("ConfirmationFormDue", probation.Id, formDue, 0),
                 });
             }
@@ -335,6 +356,7 @@ public class ProbationReminderService : IProbationReminderService
                 DueDate = d.DueDate,
                 DaysRemaining = d.DaysRemaining,
                 EscalationTier = d.EscalationTier,
+                RoutedToEmployeeId = d.RoutedToEmployeeId,
                 DispatchedAt = d.CreatedAt,
             })
             .ToListAsync(cancellationToken);

@@ -344,6 +344,7 @@ public partial class ApplicationDbContext
     // it sits with the grievance sets rather than the disciplinary ones.
     public DbSet<DisciplineReminderRun> DisciplineReminderRuns { get; set; } = null!;
     public DbSet<DisciplineReminderDispatchLog> DisciplineReminderDispatchLogs { get; set; } = null!;
+    public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
     public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
     public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
@@ -8527,6 +8528,32 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.DispatchLogs)
                 .HasForeignKey(x => x.RunId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Probation confirming authority (area 15b slice 8a, decision D-2) ----
+        builder.Entity<ProbationConfirmingAuthority>(e =>
+        {
+            // One rule per (unit, level) slot. ⚠ The filter MUST include IsDeleted: a soft delete
+            // does not release a unique index, so without it one deleted rule would hold a slot no
+            // live rule could ever occupy — the defect that cost area 13 five separate faces.
+            e.HasIndex(x => new { x.TenantId, x.OrganizationUnitId, x.StaffLevelId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            e.HasOne(x => x.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.StaffLevel)
+                .WithMany()
+                .HasForeignKey(x => x.StaffLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.AuthorityEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.AuthorityEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---- Probation reminder engine (area 15b slice 7) ----
