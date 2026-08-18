@@ -1484,6 +1484,45 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = plan.Status.ToString();
         }
 
+        if (IsEntityType(entityTypeRecord, "PROBATION_PERIOD", "ProbationPeriod", "Probation Period"))
+        {
+            var probation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.ProbationPeriod>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Probation period not found");
+
+            // What a routing rule could reasonably branch on. The staff category is the one that
+            // matters most: FR-HR-031 already separates senior from junior probation, and a tenant
+            // may well want the two confirmed at different levels. Extensions are here because a
+            // probation extended twice is a different conversation from one that ran straight
+            // through, and the reviews' recommendation is the evidence the decision rests on.
+            context["employeeId"] = probation.EmployeeId;
+            context["durationMonths"] = probation.DurationMonths;
+            context["extensionCount"] = probation.ExtensionCount;
+            context["startDate"] = probation.StartDate.ToString("yyyy-MM-dd");
+            context["endDate"] = probation.CurrentEndDate.ToString("yyyy-MM-dd");
+            context["wasExtended"] = probation.ExtensionCount > 0;
+
+            var employee = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Employee>()
+                .FirstOrDefaultAsync(e => e.Id == probation.EmployeeId);
+            if (employee != null)
+            {
+                context["organizationUnitId"] = employee.OrganizationUnitId;
+                context["departmentId"] = employee.DepartmentId;
+                context["positionId"] = employee.PositionId;
+                context["employmentType"] = employee.EmploymentType.ToString();
+            }
+
+            var latestRecommendation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.ProbationReview>()
+                .GetQueryable()
+                .Where(r => r.ProbationPeriodId == probation.Id && !r.IsDeleted && r.Recommendation != null)
+                .OrderByDescending(r => r.ActualDate ?? r.ScheduledDate)
+                .Select(r => r.Recommendation)
+                .FirstOrDefaultAsync();
+            context["latestReviewRecommendation"] = latestRecommendation?.ToString();
+
+            return context;
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_MOVEMENT", "StaffMovement", "Staff Movement"))
         {
             var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()

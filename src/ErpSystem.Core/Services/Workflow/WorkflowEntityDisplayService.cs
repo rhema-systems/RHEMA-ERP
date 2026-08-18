@@ -227,6 +227,29 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("ProbationPeriod") || key == Normalize("PROBATION_PERIOD") || key == Normalize("Probation Period"))
+            {
+                // Two plain lookups rather than an Include: this file has no EF Core dependency and
+                // every other resolver here reads the same way. Keeping it that way is cheaper than
+                // pulling EntityFrameworkCore into the display layer for one navigation.
+                var probation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.ProbationPeriod>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var probationEmployee = probation == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Employee>()
+                        .FirstOrDefaultAsync(e => e.Id == probation.EmployeeId);
+                info.EntityType = "ProbationPeriod";
+                info.EntityNumber = probationEmployee?.EmployeeNumber;
+                // The approver is being asked to make someone permanent, so the name and the date
+                // the probation ends are what they need before they open it. Deliberately no rating
+                // or recommendation here: a notification travels further than the record.
+                info.EntityName = probation == null
+                    ? null
+                    : $"{probationEmployee?.FullName ?? "Employee"} — probation ends {probation.CurrentEndDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/probation/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("StaffMovement") || key == Normalize("STAFF_MOVEMENT") || key == Normalize("Staff Movement"))
             {
                 var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()

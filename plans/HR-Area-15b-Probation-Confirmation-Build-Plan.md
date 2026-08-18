@@ -392,7 +392,7 @@ the JWT key ([[hr-harness-run-environment]]).
 ## 9. Slice log
 
 Harness: `D:\Rhema\TDC ERPS\dev-harness\hr-probation\`. Run the API in **Staging** with the JWT
-key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 = 324**.
+key passed in ([[hr-harness-run-environment]]). Running totals: **38 / 50 / 61 / 40 / 32 / 25 / 37 / 41 / 34 = 358**.
 
 ### Slice 0 — gate the area (2026-08-18) — `run-slice0.mjs`, 38 assertions
 
@@ -642,3 +642,46 @@ at creation rather than a month later when the reminder has nobody to go to.
 ✅ The slice-7 migration lesson held on first use: the shim line went into
 `FastBuildMigrationMetadata.cs` in the same edit as the guard, and the schema was verified in SQL
 (history row, table, column, **and the index's filter predicate**) rather than from the log.
+
+### Slice 8b — confirmation on the workflow engine (2026-08-18) — `run-slice8b.mjs`, 34 assertions
+
+FR-HR-032's chain is *system (month 5) → head confirms → HR issues the confirmation letter*. The
+middle step is an approval by a named person who is not HR, which is what the generic engine is for
+— and slice 8a is what gives that person a resolvable identity. Recipe followed unchanged: entity
+type in the catalog, an auto-discovered adapter, a `BuildEntityContextAsync` case (staff category,
+extension count, latest review recommendation), and a display resolver for notification deep-links.
+
+**Approval stops at `ConfirmationApproved`, not `Completed`.** A status adapter is synchronous and
+sees only the entity, so it cannot write the employee record — and confirmation's whole point is
+clearing `StaffStatus.Probation` and stamping `ConfirmationDate`. Letting the adapter finish the job
+would produce a probation reading as confirmed while the employee still read as on probation:
+exactly the divergence slice 5 converged. So the engine owns the decision and HR's confirm call —
+one method both routes reach — owns the consequences. Same call the proposals made: leave the
+terminal step off the engine.
+
+**Rejection returns to `Active`, and there is deliberately no Rejected status.** A movement can be
+rejected and die; a probation cannot. Declining to confirm ends nothing — the employee is still on
+probation and someone must now extend or terminate — and the reminder engine picks the case up again
+next morning instead of it falling silent.
+
+**The gate is conditional.** With a definition published, direct confirm is refused; with none, it
+stays open. Making the engine mandatory everywhere would leave probation unconfirmable on any tenant
+that has not authored a definition — dead rather than safe — and the harness asserts both directions.
+
+⚠ **Two enum members made existing prose wrong, in two different files.** The letter service
+described a probation at `ConfirmationApproved` as *"was ConfirmationApproved"* — past tense, as if
+it had failed, when it is one click from done. And the confirm guard said *"cannot be confirmed
+again"* for a `Terminated` probation that was never confirmed once. Both now switch on the status
+with a sentence true of that state. **Adding an enum member silently invalidates every message that
+enumerated the old ones**, and only assertions on what a refusal *says* catch it — a status-code
+harness passes straight through both.
+
+⚠⚠ **The worse fault was in the harness, and no assertion caught it: a cleanup step needs assertions
+as much as the feature does.** This run publishes a definition, which flips the confirm gate
+tenant-wide, so it retires it in a `finally`. That cleanup printed **"retired 0"** and I nearly moved
+on; the definition was still live, and slices 0/1/3/4/6/7 would all have started failing on their
+next run for reasons that looked nothing like the cause. Two faults compounded: the sweep read
+`GET /api/Workflow/definitions`, which is **paged** (25 rows of 274, so the row was never in the
+list), and the retire call was wrapped in `.catch(() => {})`, so "found nothing" and "failed" both
+reported success. Now it retires the **known id** from publish — no listing — and a failure prints
+the remediation command and sets a non-zero exit. Verified in SQL after every run since.

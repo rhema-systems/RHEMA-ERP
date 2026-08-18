@@ -55,6 +55,23 @@ public interface IProbationService
     /// could only ever be empty, and <c>ExtensionCount</c> disagreed with it by construction.
     /// </remarks>
     Task<ProbationExtensionDto> ExtendAsync(Guid probationId, CreateProbationExtensionDto dto, Guid actorEmployeeId, CancellationToken cancellationToken = default);
+    // ── Confirmation on the workflow engine (slice 8b) ────────────────────────
+    // FR-HR-032's chain is "head confirms → HR issues the confirmation letter". The middle step is
+    // an approval by a named person who is not HR, so it runs on the generic engine; the approver
+    // comes from the confirming-authority map (slice 8a), without which it would route to nobody.
+
+    /// <summary>Sends the probation to its confirming authority for a decision.</summary>
+    Task<ProbationPeriodDto> SubmitForConfirmationAsync(Guid probationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Records the authority's approval. Stops at ConfirmationApproved — HR then confirms.</summary>
+    Task<ProbationPeriodDto> ApproveConfirmationAsync(Guid probationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Records a refusal to confirm. The probation returns to Active, still open.</summary>
+    Task<ProbationPeriodDto> RejectConfirmationAsync(Guid probationId, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>Pulls a submitted probation back before the authority has acted.</summary>
+    Task<ProbationPeriodDto> RecallConfirmationAsync(Guid probationId, string? reason, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Confirms the probation and records the confirmation on the <b>employee</b> record.
     /// </summary>

@@ -77,11 +77,25 @@ public sealed class ProbationLetterService : IProbationLetterService
 
         // FR-HR-032: HR issues the letter AFTER confirmation. Producing one for a probation that is
         // still running would be a letter asserting something that has not happened.
+        // ⚠ Each state gets its own sentence, and each says what to do next. Slice 8b added two
+        // statuses and the original two-branch message immediately went wrong: a probation sitting
+        // at ConfirmationApproved was described as "was ConfirmationApproved", past tense, as if it
+        // had failed — when in fact it is one click from done. A new enum member silently makes old
+        // messages wrong; the harness caught this one.
         if (probation.Status != ProbationStatus.Completed)
-            throw ProbationWorkflowException.InvalidState(
-                probation.Status == ProbationStatus.Active
-                    ? "This probation has not been confirmed yet, so there is no confirmation to issue a letter for."
-                    : $"This probation was {probation.Status}; a confirmation letter can only be issued for a confirmed probation.");
+            throw ProbationWorkflowException.InvalidState(probation.Status switch
+            {
+                ProbationStatus.Active =>
+                    "This probation has not been confirmed yet, so there is no confirmation to issue a letter for.",
+                ProbationStatus.PendingConfirmation =>
+                    "This probation is still with the confirming authority. The letter can be issued once they have approved it and HR has recorded the confirmation.",
+                ProbationStatus.ConfirmationApproved =>
+                    "The confirming authority has approved this probation, but the confirmation has not been recorded yet. Confirm it to issue the letter.",
+                ProbationStatus.Terminated =>
+                    "This probation was terminated; a confirmation letter can only be issued for a confirmed probation.",
+                _ =>
+                    $"This probation is {probation.Status}; a confirmation letter can only be issued for a confirmed probation.",
+            });
 
         var employee = await _employeeRepository.GetByIdWithDetailsAsync(probation.EmployeeId);
         if (employee == null || employee.TenantId != tenantId)

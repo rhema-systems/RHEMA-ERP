@@ -2369,9 +2369,38 @@ public enum OnboardingAssetProvisionStatus
 
 public enum ProbationStatus
 {
+    /// <summary>Running. Reviews are held, and the outcome has not been asked for yet.</summary>
     Active = 1,
+
+    /// <summary>Confirmed: the employee's appointment is permanent.</summary>
     Completed = 2,
-    Terminated = 3
+
+    /// <summary>Ended without confirmation. Area 15b records the decision and hands off.</summary>
+    Terminated = 3,
+
+    /// <summary>
+    /// Submitted to the confirming authority and awaiting their decision (area 15b slice 8b).
+    /// </summary>
+    /// <remarks>
+    /// Added because nothing could otherwise tell "running" from "out for confirmation" — on a
+    /// screen or in a query — and the reminder engine would have kept chasing a form that had
+    /// already gone out. Statuses are stored as int and the DB is built from the EF model, so
+    /// adding members is schema-safe.
+    /// </remarks>
+    PendingConfirmation = 4,
+
+    /// <summary>
+    /// The authority has approved confirmation; HR has yet to record it and issue the letter.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This exists because the FRD chain has two human steps — <i>head confirms → HR issues the
+    /// confirmation letter</i> — and because a workflow status adapter is synchronous and sees only
+    /// the entity, so it cannot write the employee record. Approval lands here; HR's confirm call
+    /// applies <c>StaffStatus</c> and <c>ConfirmationDate</c> and moves it to <c>Completed</c>.
+    /// Same shape as the proposals: leave the terminal step off the engine, because it records that
+    /// the work was DONE rather than that anyone approved it.
+    /// </remarks>
+    ConfirmationApproved = 5
 }
 
 public enum ProbationReviewStatus

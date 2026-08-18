@@ -8,6 +8,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -20,6 +21,8 @@ public class ProbationService : IProbationService
     private readonly IEmployeeRepository _employeeRepository;
     private readonly ICompanyHrPolicySettingsService _policySettings;
     private readonly IProbationConfirmingAuthorityService _authorities;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ProbationService> _logger;
@@ -31,6 +34,8 @@ public class ProbationService : IProbationService
         IEmployeeRepository employeeRepository,
         ICompanyHrPolicySettingsService policySettings,
         IProbationConfirmingAuthorityService authorities,
+        IWorkflowIntegrationService workflowIntegration,
+        IWorkflowStatusAdapterRegistry workflowAdapters,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<ProbationService> logger)
@@ -41,6 +46,8 @@ public class ProbationService : IProbationService
         _employeeRepository = employeeRepository;
         _policySettings = policySettings;
         _authorities = authorities;
+        _workflowIntegration = workflowIntegration;
+        _workflowAdapters = workflowAdapters;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -381,9 +388,38 @@ public class ProbationService : IProbationService
     {
         var entity = await GetOwnedProbationAsync(probationId);
 
-        if (entity.Status != ProbationStatus.Active)
+        // ⚠ The engine is the gate WHEN IT IS CONFIGURED, and only then. If a ProbationPeriod
+        // definition is published, confirmation must come through the authority's approval, and a
+        // direct call here is refused — otherwise the whole point of naming an authority is
+        // bypassable by anyone holding Admin. If no definition is published, the direct path stays
+        // open, because making the engine mandatory on an unconfigured tenant would leave the
+        // feature dead rather than safe.
+        if (entity.Status == ProbationStatus.ConfirmationApproved)
+        {
+            // The authority has decided; HR is recording it and issuing the letter.
+        }
+        else if (entity.Status != ProbationStatus.Active)
+        {
+            // One sentence per state, and each true of that state. "cannot be confirmed again" is
+            // right for a Completed probation and wrong for a Terminated one, which was never
+            // confirmed in the first place.
+            throw ProbationWorkflowException.InvalidState(entity.Status switch
+            {
+                ProbationStatus.Completed =>
+                    "This probation is already Completed and cannot be confirmed again.",
+                ProbationStatus.PendingConfirmation =>
+                    "This probation is with the confirming authority; it cannot be confirmed until they have approved it.",
+                ProbationStatus.Terminated =>
+                    "This probation was Terminated, so there is nothing to confirm.",
+                _ => $"This probation is {entity.Status} and cannot be confirmed.",
+            });
+        }
+        else if (await IsConfirmationWorkflowConfiguredAsync(cancellationToken))
+        {
             throw ProbationWorkflowException.InvalidState(
-                $"This probation is already {entity.Status} and cannot be confirmed again.");
+                "Probation confirmation is routed through the confirming authority on this tenant. "
+                + "Submit the probation for confirmation instead of confirming it directly.");
+        }
 
         entity.Status = ProbationStatus.Completed;
         if (!string.IsNullOrWhiteSpace(notes)) entity.OutcomeNotes = notes;
@@ -424,6 +460,158 @@ public class ProbationService : IProbationService
 
         _logger.LogInformation("Probation {ProbationId} terminated", dto.ProbationId);
         return true;
+    }
+
+    // ── Confirmation on the workflow engine (slice 8b) ────────────────────────
+
+    private const string WorkflowEntityType = "ProbationPeriod";
+
+    /// <summary>
+    /// Whether this tenant has a published probation-confirmation workflow.
+    /// </summary>
+    /// <remarks>
+    /// Asked rather than assumed, so the same build serves a tenant that has configured the chain
+    /// and one that has not. Treated as "not configured" if the engine cannot answer: refusing to
+    /// confirm because a workflow lookup failed would be worse than allowing the direct path.
+    /// </remarks>
+    private async Task<bool> IsConfirmationWorkflowConfiguredAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // ⚠ Asked of the definition store directly: IWorkflowIntegrationService has no
+            // "is anything published for this type?" method, and inventing one on a shared
+            // interface for a single caller is not this slice's business.
+            return await _unitOfWork.Repository<Entities.Workflow.WorkflowDefinition>().GetQueryable()
+                .AnyAsync(d => d.TenantId == GetTenantId()
+                            && !d.IsDeleted
+                            && d.IsActive
+                            && d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                            && d.EntityType != null
+                            && d.EntityType.Code == "PROBATION_PERIOD",
+                    cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not determine whether a probation confirmation workflow is published; allowing the direct path.");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationPeriodDto> SubmitForConfirmationAsync(
+        Guid probationId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedProbationAsync(probationId);
+
+        if (entity.Status == ProbationStatus.PendingConfirmation)
+            throw ProbationWorkflowException.InvalidState("This probation is already awaiting confirmation.");
+        if (entity.Status != ProbationStatus.Active)
+            throw ProbationWorkflowException.InvalidState(
+                $"A {entity.Status} probation cannot be submitted for confirmation.");
+
+        // ⚠ Refuse before troubling the engine if nobody would receive it. An approval step that
+        // resolves to no approver publishes happily and can never be approved — the trap recorded
+        // in workflow-engine-integration — and here we can see it coming.
+        var employee = await GetOwnedEmployeeAsync(entity.EmployeeId);
+        var authority = await _authorities.ResolveInternalAsync(GetTenantId(), employee, cancellationToken);
+        if (authority is null)
+            throw ProbationWorkflowException.InvalidState(
+                "No confirming authority covers this employee, so there is nobody to send the confirmation to. "
+                + "Set one under Administration → HR → Probation before submitting.");
+
+        var result = await _workflowIntegration.SubmitAsync(WorkflowEntityType, probationId);
+        if (!result.ExecutionResult.Success)
+            throw ProbationWorkflowException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to start the probation confirmation workflow.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplySubmitOutcome(entity, result.Outcome, _currentUserProvider.UserId);
+
+        await _probationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Probation {ProbationId} submitted for confirmation to authority {AuthorityId}",
+            probationId, authority.AuthorityEmployeeId);
+
+        return (await GetOwnedProbationWithDetailsAsync(probationId)).ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationPeriodDto> ApproveConfirmationAsync(
+        Guid probationId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedProbationAsync(probationId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, probationId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await _workflowIntegration.ProcessApprovalAsync(WorkflowEntityType, probationId, userId, "Approve");
+        if (!result.ExecutionResult.Success)
+            throw ProbationWorkflowException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the confirmation approval.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+
+        await _probationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await GetOwnedProbationWithDetailsAsync(probationId)).ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationPeriodDto> RejectConfirmationAsync(
+        Guid probationId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedProbationAsync(probationId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, probationId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await _workflowIntegration.ProcessApprovalAsync(
+            WorkflowEntityType, probationId, userId, "Reject", reason);
+        if (!result.ExecutionResult.Success)
+            throw ProbationWorkflowException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId, reason);
+
+        await _probationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await GetOwnedProbationWithDetailsAsync(probationId)).ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<ProbationPeriodDto> RecallConfirmationAsync(
+        Guid probationId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedProbationAsync(probationId);
+
+        if (entity.Status != ProbationStatus.PendingConfirmation)
+            throw ProbationWorkflowException.InvalidState(
+                "Only a probation awaiting confirmation can be recalled.");
+
+        var result = await _workflowIntegration.RecallAsync(
+            WorkflowEntityType, probationId, _currentUserProvider.UserId, reason);
+        if (!result.ExecutionResult.Success)
+            throw ProbationWorkflowException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to recall the confirmation request.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);
+
+        await _probationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await GetOwnedProbationWithDetailsAsync(probationId)).ToDto();
     }
 
     // ── Reviews ───────────────────────────────────────────────────────────────

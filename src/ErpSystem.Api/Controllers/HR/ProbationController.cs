@@ -207,6 +207,42 @@ public class ProbationController : ControllerBase
     public async Task<ActionResult<IEnumerable<ProbationExtensionDto>>> GetExtensions(Guid id)
         => Ok(await _service.GetExtensionsAsync(id));
 
+    /// <summary>Sends the probation to its confirming authority for a decision (FR-HR-032).</summary>
+    /// <remarks>
+    /// HR's act, not a decision: submitting asks the authority, it does not pre-empt them. Refused
+    /// when no confirming authority covers the employee — an approval step that resolves to nobody
+    /// publishes happily and can never be approved, so it is better to say so up front.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.ProbationWritePolicy)]
+    [HttpPost("{id:guid}/submit-for-confirmation")]
+    public async Task<ActionResult<ProbationPeriodDto>> SubmitForConfirmation(Guid id)
+        => Ok(await _service.SubmitForConfirmationAsync(id));
+
+    /// <summary>The confirming authority approves. Authority comes from the workflow step.</summary>
+    /// <remarks>
+    /// Plain <c>[Authorize]</c>: the approver is a named line manager who holds no HR permission,
+    /// and the engine — not a role — decides whether this caller may act. Same reasoning as the
+    /// reviewer actions; see the note on the class.
+    /// </remarks>
+    [Authorize]
+    [HttpPost("{id:guid}/confirmation/approve")]
+    public async Task<ActionResult<ProbationPeriodDto>> ApproveConfirmation(Guid id)
+        => Ok(await _service.ApproveConfirmationAsync(id));
+
+    /// <summary>The confirming authority declines. The probation stays open.</summary>
+    [Authorize]
+    [HttpPost("{id:guid}/confirmation/reject")]
+    public async Task<ActionResult<ProbationPeriodDto>> RejectConfirmation(
+        Guid id, [FromBody] TerminateProbationPeriodDto? body = null)
+        => Ok(await _service.RejectConfirmationAsync(id, body?.Notes));
+
+    /// <summary>HR pulls a submitted probation back before the authority has acted.</summary>
+    [Authorize(Policy = HrPermissions.ProbationWritePolicy)]
+    [HttpPost("{id:guid}/confirmation/recall")]
+    public async Task<ActionResult<ProbationPeriodDto>> RecallConfirmation(
+        Guid id, [FromBody] TerminateProbationPeriodDto? body = null)
+        => Ok(await _service.RecallConfirmationAsync(id, body?.Notes));
+
     [Authorize(Policy = HrPermissions.ProbationAdminPolicy)]
     [HttpPost("{id:guid}/confirm")]
     public async Task<IActionResult> Confirm(Guid id)

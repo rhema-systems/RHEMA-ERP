@@ -154,9 +154,20 @@ public class ProbationReminderService : IProbationReminderService
         var today = DateOnly.FromDateTime(asOf);
         var items = new List<ProbationReminderPreviewItemDto>();
 
+        // ⚠ Three statuses, not one. A probation out for confirmation, or approved and awaiting
+        // HR's letter, is still unconfirmed — so its end date still matters and its reviews still
+        // need chasing. Sweeping only Active would have gone quiet on a case the moment it was
+        // submitted, which is exactly when someone is waiting on someone else.
+        var openStatuses = new[]
+        {
+            ProbationStatus.Active,
+            ProbationStatus.PendingConfirmation,
+            ProbationStatus.ConfirmationApproved,
+        };
+
         var probations = await _unitOfWork.Repository<ProbationPeriod>().GetQueryable()
             .Include(p => p.Employee).ThenInclude(e => e.Position)
-            .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.Status == ProbationStatus.Active)
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && openStatuses.Contains(p.Status))
             .ToListAsync(cancellationToken);
 
         foreach (var probation in probations)
@@ -170,7 +181,7 @@ public class ProbationReminderService : IProbationReminderService
             // 3-month probation is served by the same rule; for the spec's 6-month case the two are
             // the same date.
             var formDue = end.AddMonths(-1);
-            if (today >= formDue && daysRemaining >= 0)
+            if (today >= formDue && daysRemaining >= 0 && probation.Status == ProbationStatus.Active)
             {
                 // ⚠ An unresolved authority still fires the reminder, routed to nobody. Suppressing
                 // it would hide the one case HR most needs to see: work that is due and has no owner.
