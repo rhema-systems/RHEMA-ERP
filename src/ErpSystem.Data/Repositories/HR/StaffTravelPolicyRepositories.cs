@@ -23,12 +23,20 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
             .Include(p => p.AppliesToLevelFrom)
             .Include(p => p.AppliesToLevelTo)
             .Include(p => p.AppliesToOrganizationUnit)
+            // The fourth read feeding a policy DTO. Without this the approve endpoint returns its
+            // own response with a null approver — the one field the caller just created.
+            .Include(p => p.ApprovedBy)
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
 
     public async Task<IEnumerable<StaffTravelPolicy>> GetCurrentVersionsAsync()
     {
         return await _dbSet
+            // Same includes as the other two reads that feed StaffTravelPolicySummaryDto: without
+            // Rules the RuleCount is always 0, and without ApprovedBy the approver never resolves —
+            // so "which policies are in force" showed no rules and no approver. Uneven siblings.
+            .Include(p => p.Rules)
+            .Include(p => p.ApprovedBy)
             .Where(p => p.IsCurrentVersion && !p.IsDeleted)
             .OrderBy(p => p.PolicyName)
             .ToListAsync();
@@ -55,6 +63,8 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
     public async Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate)
     {
         var candidates = await _dbSet
+            .Include(p => p.Rules)
+            .Include(p => p.ApprovedBy)
             .Where(p => p.IsCurrentVersion && !p.IsDeleted
                      && p.EffectiveFrom <= onDate
                      && (p.EffectiveTo == null || p.EffectiveTo >= onDate)

@@ -111,6 +111,7 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         return (await _policyRepository.GetQueryable()
                 .Where(p => p.TenantId == tenantId && !p.IsDeleted)
                 .Include(p => p.Rules)
+                .Include(p => p.ApprovedBy)
                 .ToListAsync(cancellationToken))
             .Select(p => p.ToSummaryDto())
             .ToList();
@@ -134,14 +135,97 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
             .ToList();
     }
 
+    /// <summary>
+    /// Raises a travel policy. <b>It is a draft: it enforces nothing until it is approved.</b>
+    /// </summary>
+    /// <remarks>
+    /// A policy caps what everyone may spend on travel and, since slice 8, actually refuses bookings
+    /// above those caps — so authoring one and having it bind immediately would let any
+    /// <c>HR.Travel.Write</c> holder set the organisation's travel spending rules unilaterally.
+    /// <see cref="StaffTravelPolicyGuard"/> ignores an unapproved policy entirely.
+    /// </remarks>
     public async Task<StaffTravelPolicyDto> CreatePolicyAsync(CreateStaffTravelPolicyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // A new policy never arrives current — approval is what puts one in force (ApprovePolicyAsync).
+        // Accepting the payload's word for it let two policies covering the same scope both claim to
+        // be in force, and the guard then picked between them by ordering alone.
+        entity.IsCurrentVersion = false;
+        entity.ApprovedById = null;
+        entity.ApprovedAt = null;
+
         await _policyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Travel policy created: {PolicyName} v{Version}", entity.PolicyName, entity.VersionNumber);
+        _logger.LogInformation("Travel policy drafted: {PolicyName} v{Version}", entity.PolicyName, entity.VersionNumber);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Approves a policy, making it eligible to enforce its caps.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Admin-gated, and the approver is the token's.</b> <c>ApprovedById</c> and
+    /// <c>ApprovedAt</c> existed on the entity and the read DTO with <b>no writer anywhere</b> —
+    /// the reader-with-no-writer shape — so every policy in every tenant was unapproved and the
+    /// field was decoration. It stopped being decoration when policy caps started refusing
+    /// bookings.</para>
+    ///
+    /// <para>Approving also makes the policy the current version for its scope, superseding
+    /// whichever policy held that place: approving a rule and then separately remembering to
+    /// activate it is two chances to get it wrong, and a policy approved but not in force is not a
+    /// state anyone asked for.</para>
+    /// </remarks>
+    public async Task<StaffTravelPolicyDto> ApprovePolicyAsync(
+        Guid policyId, Guid approverEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPolicyAsync(policyId);
+
+        if (entity.ApprovedById is not null)
+            throw new InvalidOperationException("This policy has already been approved.");
+
+        entity.ApprovedById = approverEmployeeId;
+        entity.ApprovedAt = DateTime.UtcNow;
+        await SupersedeSiblingsAsync(entity, cancellationToken);
+        entity.IsCurrentVersion = true;
+
+        await _policyRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Travel policy approved and now in force: {PolicyName} v{Version}",
+            entity.PolicyName, entity.VersionNumber);
+
+        var refreshed = await _policyRepository.GetWithRulesAsync(entity.Id);
+        return (refreshed ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// Stands down every other current policy covering the same scope, so exactly one is in force.
+    /// </summary>
+    /// <remarks>
+    /// Scope is the pair the guard resolves on — the organisation unit and the staff-level band.
+    /// Two policies covering different units may both be current; two covering the same one may
+    /// not, because the guard would then pick between them by ordering alone and which cap applied
+    /// would be an accident.
+    /// </remarks>
+    private async Task SupersedeSiblingsAsync(
+        StaffTravelPolicy entity, CancellationToken cancellationToken)
+    {
+        var siblings = (await _policyRepository.GetCurrentVersionsAsync())
+            .Where(p => p.TenantId == entity.TenantId
+                     && p.Id != entity.Id
+                     && p.AppliesToOrganizationUnitId == entity.AppliesToOrganizationUnitId
+                     && p.AppliesToLevelFromId == entity.AppliesToLevelFromId
+                     && p.AppliesToLevelToId == entity.AppliesToLevelToId)
+            .ToList();
+
+        foreach (var sibling in siblings)
+        {
+            sibling.IsCurrentVersion = false;
+            await _policyRepository.UpdateAsync(sibling);
+        }
     }
 
     public async Task<StaffTravelPolicyDto> UpdatePolicyAsync(UpdateStaffTravelPolicyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -149,7 +233,17 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         await GetOwnedPolicyAsync(updateDto.Id);
 
         var entity = await _policyRepository.GetByIdAsync(updateDto.Id);
-        entity!.UpdateEntity(updateDto, updatedByUserId);
+
+        // Editing an approved policy would change what everyone may spend without anyone approving
+        // the change. Raise a new version instead — that is what versions are for.
+        if (entity!.ApprovedById is not null)
+            throw new InvalidOperationException(
+                "An approved policy cannot be edited. Raise a new version and have it approved.");
+
+        var wasCurrent = entity.IsCurrentVersion;
+        entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.IsCurrentVersion = wasCurrent;   // not the payload's to change; approval sets it
+
         await _policyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -157,6 +251,41 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         if (refreshed == null || refreshed.TenantId != GetTenantId())
             throw new ArgumentException($"Travel policy with ID '{entity.Id}' not found.");
         return refreshed.ToDto();
+    }
+
+    /// <summary>
+    /// Stands an approved policy down so it no longer caps anything, without deleting it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The verb that was missing.</b> Once approval began putting a policy in force, the
+    /// only ways one could stop binding were another policy for <i>exactly</i> the same scope being
+    /// approved, or an administrator hard-deleting it. A policy approved in error therefore capped
+    /// everyone's travel until somebody drafted and approved a replacement with an identical scope
+    /// — which is a strange thing to have to do to undo a mistake.</para>
+    ///
+    /// <para><b>It stays approved.</b> Approval is a fact about the past and withdrawing does not
+    /// unmake it; what changes is whether the policy is currently in force. Deleting would erase
+    /// the record of a rule that really did govern spending for a period, which is the opposite of
+    /// what an audit trail is for.</para>
+    /// </remarks>
+    public async Task<StaffTravelPolicyDto> WithdrawPolicyAsync(
+        Guid policyId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPolicyAsync(policyId);
+
+        if (!entity.IsCurrentVersion)
+            throw new InvalidOperationException("This policy is not in force.");
+
+        entity.IsCurrentVersion = false;
+        await _policyRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Travel policy withdrawn from force: {PolicyName} v{Version}",
+            entity.PolicyName, entity.VersionNumber);
+
+        var refreshed = await _policyRepository.GetWithRulesAsync(entity.Id);
+        return (refreshed ?? entity).ToDto();
     }
 
     public async Task<bool> DeletePolicyAsync(Guid id, CancellationToken cancellationToken = default)

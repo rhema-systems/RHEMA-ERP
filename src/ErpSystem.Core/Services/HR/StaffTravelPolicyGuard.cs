@@ -80,9 +80,17 @@ public sealed class StaffTravelPolicyGuard
         var candidates = await _policies.GetApplicablePoliciesAsync(
             staffLevelId, request.OrganizationUnitId, request.TravelStartDate);
 
-        // ⚠ The repository is unscoped, like the rest of this area's reads — filter here rather
-        // than letting another tenant's policy decide what this one may book.
-        var policy = candidates.FirstOrDefault(p => p.TenantId == request.TenantId);
+        // ⚠ Two filters, both load-bearing.
+        //
+        // TENANT: the repository is unscoped, like the rest of this area's reads — without this,
+        // another tenant's policy would decide what this one may book.
+        //
+        // APPROVED: a policy is a draft until someone with `HR.Travel.Admin` signs it. `ApprovedById`
+        // had no writer at all when the caps were first enforced, which meant any holder of
+        // `HR.Travel.Write` could author the rule constraining everyone's travel spending and have
+        // it bind immediately. An unapproved policy caps nothing.
+        var policy = candidates.FirstOrDefault(
+            p => p.TenantId == request.TenantId && p.ApprovedById is not null);
         if (policy is null) return TravelPolicyCaps.None;
 
         return new TravelPolicyCaps(

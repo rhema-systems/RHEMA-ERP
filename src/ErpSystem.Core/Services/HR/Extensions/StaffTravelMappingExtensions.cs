@@ -1739,6 +1739,9 @@ public static class StaffTravelMappingExtensions
             EffectiveFrom = entity.EffectiveFrom,
             EffectiveTo = entity.EffectiveTo,
             MaxSingleTripBudget = entity.MaxSingleTripBudget,
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy != null ? entity.ApprovedBy.FullName : null,
+            ApprovedAt = entity.ApprovedAt,
             RuleCount = entity.Rules.Count,
         };
     }

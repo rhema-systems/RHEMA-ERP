@@ -18,6 +18,20 @@ public interface IStaffTravelPolicyService
     Task<IEnumerable<StaffTravelPolicySummaryDto>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate, CancellationToken cancellationToken = default);
     Task<StaffTravelPolicyDto> CreatePolicyAsync(CreateStaffTravelPolicyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelPolicyDto> UpdatePolicyAsync(UpdateStaffTravelPolicyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves a policy and puts it in force, superseding whichever policy covered the same scope.
+    /// Until this happens the policy is a draft and <c>StaffTravelPolicyGuard</c> ignores it.
+    /// </summary>
+    /// <param name="approverEmployeeId">The caller's Employee id — never a payload value.</param>
+    Task<StaffTravelPolicyDto> ApprovePolicyAsync(Guid policyId, Guid approverEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stands an approved policy down so it stops capping, without deleting it or unmaking the
+    /// approval. Without this the only way to undo an approval was to approve a replacement with an
+    /// identical scope.
+    /// </summary>
+    Task<StaffTravelPolicyDto> WithdrawPolicyAsync(Guid policyId, CancellationToken cancellationToken = default);
     Task<bool> DeletePolicyAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Policy rules

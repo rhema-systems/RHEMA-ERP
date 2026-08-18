@@ -217,7 +217,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
 
         entity.IsVerified = true;
         entity.VerifiedById = verifierEmployeeId;   // the caller, not a payload value
-        entity.VerifiedAt = verifyDto.VerifiedAt;
+        entity.VerifiedAt = DateTime.UtcNow;        // ...and the clock, not one either
         // UpdatedBy is an audit field and takes the USER id; VerifiedById above is the Employee
         // FK. Two identifiers, two different things — the same split slice 1 had to untangle.
         entity.UpdatedBy = _currentUserProvider.UserId.ToString();
@@ -405,10 +405,19 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
             .ToList();
     }
 
-    public async Task<StaffTravelRiskAssessmentDto> CreateRiskAssessmentAsync(CreateStaffTravelRiskAssessmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    /// <summary>Records a risk assessment for a trip's destination.</summary>
+    /// <remarks>
+    /// ⚠ <b><c>AssessedById</c> on the payload is ignored.</b> It is an Employee FK naming who
+    /// judged the destination safe or unsafe, and it was a client input — so a security assessment
+    /// could be attributed to a colleague who never made it. The assessor is the caller, falling
+    /// back to null for an account with no employee link rather than refusing the write, since the
+    /// assessment itself is still worth recording.
+    /// </remarks>
+    public async Task<StaffTravelRiskAssessmentDto> CreateRiskAssessmentAsync(CreateStaffTravelRiskAssessmentDto createDto, Guid tenantId, Guid createdByUserId, Guid? assessorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        createDto.AssessedById = assessorEmployeeId;
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _riskAssessmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -426,12 +435,34 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         return (reloaded ?? entity).ToDto();
     }
 
-    public async Task<bool> AcknowledgeRiskAssessmentAsync(AcknowledgeStaffTravelRiskAssessmentDto acknowledgeDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Records that the traveller has read and accepted the risk assessment for their trip.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Only the traveller can acknowledge.</b> The endpoint took no actor at all and is
+    /// <c>HR.Travel.Write</c>-gated, so a travel clerk could set <c>EmployeeAcknowledged</c> on the
+    /// employee's behalf — making the record assert something that had not happened, about a safety
+    /// briefing, for a trip the assessment exists to warn someone about. The entity has no
+    /// <c>AcknowledgedById</c> column, so rather than add one the caller is required to *be* the
+    /// traveller; that is what the flag has always claimed.</para>
+    ///
+    /// <para>This is the area-9 acknowledge-with-no-actor shape. There it was a disciplinary
+    /// notice; here it is a security warning about a destination.</para>
+    /// </remarks>
+    public async Task<bool> AcknowledgeRiskAssessmentAsync(AcknowledgeStaffTravelRiskAssessmentDto acknowledgeDto, Guid acknowledgerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRiskAssessmentAsync(acknowledgeDto.RiskAssessmentId);
 
+        var request = await _requestRepository.GetByIdAsync(entity.StaffTravelRequestId);
+        if (request is null || request.TenantId != GetTenantId())
+            throw new ArgumentException("The travel request for this risk assessment was not found.");
+
+        if (request.EmployeeId != acknowledgerEmployeeId)
+            throw new UnauthorizedAccessException(
+                "Only the traveller can acknowledge their own travel risk assessment.");
+
         entity.EmployeeAcknowledged = true;
-        entity.AcknowledgedAt = acknowledgeDto.AcknowledgedAt;
+        entity.AcknowledgedAt = DateTime.UtcNow;   // the clock, not a payload value
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _riskAssessmentRepository.UpdateAsync(entity);
@@ -691,12 +722,24 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
             .ToList();
     }
 
-    public async Task<bool> AcknowledgeNotificationAsync(AcknowledgeStaffTravelAlertNotificationDto acknowledgeDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Records that the employee an alert was sent to has seen it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Only that employee may acknowledge — the notification carries its own <c>EmployeeId</c>, so
+    /// unlike the risk assessment there is no lookup needed to know whose it is. Same reasoning:
+    /// an acknowledgement anyone can record on your behalf records nothing.
+    /// </remarks>
+    public async Task<bool> AcknowledgeNotificationAsync(AcknowledgeStaffTravelAlertNotificationDto acknowledgeDto, Guid acknowledgerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNotificationAsync(acknowledgeDto.NotificationId);
 
+        if (entity.EmployeeId != acknowledgerEmployeeId)
+            throw new UnauthorizedAccessException(
+                "Only the employee an alert was sent to can acknowledge it.");
+
         entity.IsAcknowledged = true;
-        entity.AcknowledgedAt = acknowledgeDto.AcknowledgedAt;
+        entity.AcknowledgedAt = DateTime.UtcNow;   // the clock, not a payload value
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _notificationRepository.UpdateAsync(entity);

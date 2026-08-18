@@ -75,6 +75,41 @@ public class StaffTravelPoliciesController : HrControllerBase
         return Ok(await _service.UpdatePolicyAsync(dto, ctx.Value.userId));
     }
 
+    /// <summary>Approve a travel policy and put it in force.</summary>
+    /// <remarks>
+    /// <para><b>Admin-gated, deliberately.</b> A policy decides what everyone may spend on travel
+    /// and its caps genuinely refuse bookings, so approving one is the same authority as
+    /// authorising a booking above a cap — <c>HR.Travel.Admin</c>, which HR does not hold. Before
+    /// this endpoint existed nothing wrote <c>ApprovedById</c> at all, so every policy was
+    /// unapproved and the field was decoration.</para>
+    ///
+    /// <para>Approving supersedes whichever policy covered the same scope, so exactly one is ever
+    /// in force for a given unit and staff-level band.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("{id:guid}/approve")]
+    public async Task<ActionResult<StaffTravelPolicyDto>> Approve(Guid id, CancellationToken ct)
+    {
+        // ApprovedById is an Employee FK, so this is one of the travel writes that genuinely needs
+        // the caller's employee link — an unlinked administrator cannot sign a spending policy.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Approving a travel policy") is { } contextError) return contextError;
+
+        return Ok(await _service.ApprovePolicyAsync(id, employeeId, ct));
+    }
+
+    /// <summary>Stand an approved policy down so it stops capping bookings.</summary>
+    /// <remarks>
+    /// Admin-gated like approval — putting a rule in force and taking it out are the same
+    /// authority. The policy stays approved; approval is a fact about the past and withdrawing does
+    /// not unmake it. Without this, undoing an approval meant approving a replacement with an
+    /// identical scope, or deleting the record of a rule that really did govern spending.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("{id:guid}/withdraw")]
+    public async Task<ActionResult<StaffTravelPolicyDto>> Withdraw(Guid id, CancellationToken ct)
+        => Ok(await _service.WithdrawPolicyAsync(id, ct));
+
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)

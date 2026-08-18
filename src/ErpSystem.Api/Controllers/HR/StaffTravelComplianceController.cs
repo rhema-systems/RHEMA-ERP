@@ -226,7 +226,11 @@ public class StaffTravelComplianceController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        var created = await _service.CreateRiskAssessmentAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
+        // The assessor is the caller. An unlinked administrative account records no assessor rather
+        // than being refused — the assessment is still worth having. `AssessedById` on the payload
+        // is ignored either way.
+        var created = await _service.CreateRiskAssessmentAsync(
+            dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId);
         return CreatedAtAction(nameof(GetRiskAssessmentById), new { id = created.Id }, created);
     }
 
@@ -242,11 +246,21 @@ public class StaffTravelComplianceController : HrControllerBase
         return Ok(await _service.UpdateRiskAssessmentAsync(dto, ctx.Value.userId));
     }
 
+    /// <summary>The traveller confirms they have read the risk assessment for their trip.</summary>
+    /// <remarks>
+    /// ⚠ <b>Only the traveller.</b> This took no actor at all, so a travel clerk could record the
+    /// employee's acknowledgement of a security briefing on their behalf. The service refuses
+    /// anyone but the traveller with a 403.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("risk-assessments/{id:guid}/acknowledge")]
-    public async Task<IActionResult> AcknowledgeRiskAssessment(Guid id)
+    public async Task<IActionResult> AcknowledgeRiskAssessment(Guid id, CancellationToken ct)
     {
-        await _service.AcknowledgeRiskAssessmentAsync(new AcknowledgeStaffTravelRiskAssessmentDto { RiskAssessmentId = id });
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Acknowledging a travel risk assessment") is { } contextError) return contextError;
+
+        await _service.AcknowledgeRiskAssessmentAsync(
+            new AcknowledgeStaffTravelRiskAssessmentDto { RiskAssessmentId = id }, employeeId, ct);
         return Ok(new { message = "Risk assessment acknowledged." });
     }
 
@@ -331,11 +345,17 @@ public class StaffTravelComplianceController : HrControllerBase
         return Ok(await _service.CreateAlertNotificationAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    /// <summary>The employee an alert was sent to confirms they have seen it.</summary>
+    /// <remarks>⚠ Only that employee — see the risk-assessment acknowledgement above.</remarks>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("alert-notifications/{id:guid}/acknowledge")]
-    public async Task<IActionResult> AcknowledgeNotification(Guid id)
+    public async Task<IActionResult> AcknowledgeNotification(Guid id, CancellationToken ct)
     {
-        await _service.AcknowledgeNotificationAsync(new AcknowledgeStaffTravelAlertNotificationDto { NotificationId = id });
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Acknowledging a travel alert") is { } contextError) return contextError;
+
+        await _service.AcknowledgeNotificationAsync(
+            new AcknowledgeStaffTravelAlertNotificationDto { NotificationId = id }, employeeId, ct);
         return Ok(new { message = "Notification acknowledged." });
     }
 

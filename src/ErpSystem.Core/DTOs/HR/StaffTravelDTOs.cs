@@ -2429,6 +2429,15 @@ public class StaffTravelPolicySummaryDto
     public DateOnly? EffectiveTo { get; set; }
     public decimal MaxSingleTripBudget { get; set; }
     public int RuleCount { get; set; }
+
+    /// <summary>
+    /// Who approved the policy, and when. <b>Null means it is a draft that enforces nothing</b> —
+    /// which a list of policies must be able to show: an unapproved policy caps nothing and is
+    /// otherwise indistinguishable from one in force.
+    /// </summary>
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ApprovedAt { get; set; }
 }
 
 public class CreateStaffTravelPolicyDto : CreateDtoBase
