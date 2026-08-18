@@ -524,15 +524,19 @@ public class UpdateSuccessionCandidateDto : UpdateDtoBase
     public string? RiskMitigationPlan { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>AssessedById</c> and <c>AssessmentDate</c> were removed deliberately, and this one mattered
+/// more than the others. Measured 2026-08-18: a desk actor posted an assessment naming an unrelated
+/// employee as the assessor, and it was stored — <c>assessedByName</c> came back as someone who had
+/// never seen the candidate. Worse, the same call sets <c>IsRecommended</c>, and being recommended
+/// is the gate on <c>SelectCandidateAsync</c>. So a caller could manufacture a recommendation under
+/// a colleague's name and then select the candidate on the strength of it. The assessor is the
+/// signed-in user and the date is the clock.
+/// </remarks>
 public class AssessCandidateDto
 {
     [Required]
     public Guid CandidateId { get; set; }
-
-    [Required]
-    public Guid AssessedById { get; set; }
-
-    public DateTime AssessmentDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(4000)]
     public string? AssessmentNotes { get; set; }

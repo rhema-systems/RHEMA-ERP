@@ -34,6 +34,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { successionService } from '@/services/hr/succession.service';
+import { CandidatesPanel } from '@/components/hr/succession/CandidatesPanel';
 import type { SuccessionPlan } from '@/types/hr/succession';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -324,70 +325,7 @@ export default function SuccessionPlanDetailPage({ params }: { params: Promise<{
         </TabsContent>
 
         <TabsContent value="candidates" className="pt-4">
-          <Card>
-            <CardContent className="p-0">
-              {p.candidates.length === 0 ? (
-                <EmptyState
-                  icon={Users}
-                  title="No successors identified"
-                  description="A plan with nobody on it records the risk but does not reduce it."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">#</TableHead>
-                      <TableHead>Candidate</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Readiness</TableHead>
-                      <TableHead>Performance</TableHead>
-                      <TableHead>Potential</TableHead>
-                      <TableHead>Retention risk</TableHead>
-                      <TableHead>Feedback</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {[...p.candidates]
-                      .sort((a, b) => a.rank - b.rank)
-                      .map((c) => (
-                        <TableRow key={c.id}>
-                          <TableCell>{c.rank}</TableCell>
-                          <TableCell>
-                            <div className="font-medium">{c.employeeName}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {c.employeeNumber}
-                              {c.isSelected && ' · selected'}
-                              {c.isEmergencyOnly && ' · emergency only'}
-                            </div>
-                          </TableCell>
-                          <TableCell>{c.type}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={READINESS_TONE[c.currentReadiness] ?? ''}
-                            >
-                              {spaced(c.currentReadiness)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{spaced(c.latestPerformanceRating)}</TableCell>
-                          <TableCell>{spaced(c.potentialRating)}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={RETENTION_TONE[c.retentionRisk] ?? ''}>
-                              {spaced(c.retentionRisk)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {c.feedbackCount === 0
-                              ? '—'
-                              : `${c.supportCount} for / ${c.opposeCount} against`}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <CandidatesPanel plan={p} />
         </TabsContent>
 
         <TabsContent value="competencies" className="pt-4">

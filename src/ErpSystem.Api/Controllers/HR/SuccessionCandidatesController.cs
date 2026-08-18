@@ -108,8 +108,15 @@ public class SuccessionCandidatesController : ControllerBase
     public async Task<IActionResult> Assess(Guid id, [FromBody] AssessCandidateDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        // The assessor is whoever is signed in. It used to arrive on the body, and recommending a
+        // candidate is the gate on selecting them.
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
         dto.CandidateId = id;
-        await _service.AssessAsync(dto);
+        await _service.AssessAsync(dto, employeeId.Value);
         return Ok(new { message = "Candidate assessment recorded." });
     }
 

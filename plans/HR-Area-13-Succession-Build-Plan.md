@@ -209,6 +209,35 @@ column on every row, beside filtered views that render it correctly. The positio
 of a succession plan. The summary DTO also carried no `PositionId`, so a row could not link to its
 position.
 
+### 3.12 ⚠ The assessment actor was a route to a forged recommendation
+
+Measured 2026-08-18 while surveying slice 4 (`probe-candidates.mjs`). `AssessCandidateDto` carried a
+**required** `AssessedById` and an `AssessmentDate`, both caller-declared. Posting an assessment
+that named an unrelated employee stored it verbatim — `assessedByName` came back as an actor left
+over from the *area-10* harness, someone who had never seen the candidate.
+
+That is worse than the other caller-declared actors in §3.5, because the same call sets
+`IsRecommended`, and `SelectCandidateAsync` refuses any candidate who is not recommended. So the
+chain was: forge a recommendation in a colleague's name → select the candidate on the strength of
+it → that candidate is now the named successor to the post. Two of the three steps look legitimate
+in the audit trail.
+
+Note how it was found. The endpoint returned 200 and stored a well-formed record every time; only
+passing a *deliberately wrong* actor and then reading the row back showed it. **Posting the value
+you expect proves nothing about whether the server was going to accept a value you did not.**
+
+### 3.13 The candidate engine itself is healthy
+
+Everything else in `probe-candidates.mjs` worked on the first attempt: nomination, the readiness and
+retention-risk filters, `select` deselecting the previously selected candidate, feedback with a
+resolved reviewer name, and the plan's rollup counters (`numberOfIdentifiedSuccessors`,
+`hasReadyNowSuccessor`, `feedbackCount`/`supportCount`/`opposeCount`) all moving correctly. Unlike
+the plan spine, this part needed hardening, not resurrection.
+
+⚠ Two shapes worth knowing before building on it: the employee list is a **POST to
+`/api/hr/Employees/paged`** — a GET 405s; and `bulk-rank` is a **PATCH taking a bare array**, not a
+wrapper object.
+
 ---
 
 ## 4. Scope and boundaries — two calls needed before slice 1
@@ -268,7 +297,8 @@ collision in the UI matters: two screens both called "talent pool" would be a su
 | F-02 | `ReviewedById` / `ApprovedById` caller-declared on the approve path (§3.5) | **High** | **fixed, slice 1** |
 | F-03 | ~~Duplicate-plan rule surfaces as an unexplained 500~~ — **misdiagnosed**, see F-09 | Medium | superseded |
 | F-04 | Create response omits resolved `positionTitle` (§3.7) | Medium | **fixed, slice 2** |
-| F-05 | `NominatedById` / `FacilitatedById` / `SnapshotCreatedById` caller-declared (§3.5) | Medium | open |
+| F-05 | `NominatedById` / `FacilitatedById` / `SnapshotCreatedById` caller-declared (§3.5) | Medium | partly — **`AssessedById` fixed, slice 4**; the rest belong to slices 6 and 7 |
+| F-13 | A caller-declared assessor could manufacture a recommendation, which gates selection (§3.12) | **High** | **fixed, slice 4** |
 | F-09 | **A soft delete does not release a unique index** — three faces, all 500s (§3.9) | **Critical** | **fixed, slice 2** |
 | F-10 | The detail read 500s once a plan is approved — 8060-byte row (§3.10) | **Critical** | **fixed, slice 2** |
 | F-11 | `positionTitle` blank on the default list reads while filtered views resolve it (§3.11) | **High** | **fixed, slice 2** |
@@ -418,3 +448,29 @@ button, then be refused — correctly, because approval is Admin. The detail pag
 with the server's message rather than swallowing it, and says plainly that the decision sits with a
 tenant administrator. A screen must not hide a button on the strength of being able to read the
 record.
+
+### Slice 4 — candidates and readiness (2026-08-18)
+
+Closes **F-13**, and the succession-plan half of **F-05**. Harness `run-slice4.mjs` —
+**34 passed, 0 failed**. All four harnesses green together: 32 + 27 + 49 + 34 = **142 assertions**.
+`tsc` and `eslint` clean.
+
+Backend: `AssessedById` and `AssessmentDate` removed from `AssessCandidateDto`; the assessor is the
+token and the date is the clock. The harness proves both by sending an unrelated employee **and** a
+backdated `2020-01-01`, then asserting neither was honoured.
+
+Frontend: `components/hr/succession/CandidatesPanel.tsx` replaces the read-only candidates tab —
+nominate, re-rank (neighbour swap, one PATCH carrying both rows), assess, select, and per-candidate
+feedback with its dispositions.
+
+⚠ **Two UI decisions that encode a backend rule rather than duplicating it.** The Select button is
+*disabled with an explaining tooltip* when a candidate is not recommended, because the server
+refuses with a bare 400 and a user cannot tell a missing precondition from a broken button. And the
+assess dialog states outright that there is no field to name a different assessor — an absence that
+looks like an omission unless it is labelled as a decision.
+
+⚠ **A harness lesson, third of its kind:** `run-slice12.mjs` asserted `versionNumber === 2` and
+failed with `got 10`, because version numbers count every plan a position has ever carried and
+earlier runs had left nine behind. The product was right. **An assertion on an absolute count is an
+assumption that the fixture is pristine** — assert the delta instead. Same root as the fixed-index
+position picker two slices ago.

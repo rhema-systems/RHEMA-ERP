@@ -302,3 +302,175 @@ export interface CompetencyLookup {
   competencyCategory: string;
   proficiencyScaleMax: number;
 }
+
+// ── Candidates (slice 4) ─────────────────────────────────────────────────────
+
+export type GapStatus = 'Gap' | 'Met' | 'Exceeded';
+export type FeedbackDisposition = 'Support' | 'Neutral' | 'Oppose';
+
+export interface SuccessionCandidateGap {
+  id: string;
+  candidateId: string;
+  competencyId: string;
+  competencyCode: string;
+  competencyName: string;
+  competencyCategory: string;
+  competencyCategoryName: string;
+  requiredLevel: number;
+  currentLevel: number;
+  /** Server-computed. Do not recalculate it in the UI — the two would drift. */
+  gapSize: number;
+  status: GapStatus;
+  statusName: string;
+  gapNotes?: string | null;
+  addressed: boolean;
+  addressedDate?: string | null;
+  addressedByActivityId?: string | null;
+  addressedByActivityName?: string | null;
+}
+
+export interface SuccessionCandidateFeedback {
+  id: string;
+  candidateId: string;
+  reviewerId: string;
+  reviewerName: string;
+  note: string;
+  disposition: FeedbackDisposition;
+  dispositionName: string;
+  createdAt: string;
+}
+
+export interface SuccessionDevelopmentActivitySummary {
+  id: string;
+  activityName: string;
+  type: string;
+  status: string;
+  plannedStartDate: string;
+  plannedEndDate?: string | null;
+  competencyGained: boolean;
+}
+
+export interface SuccessionCandidate {
+  id: string;
+  tenantId: string;
+  successionPlanId: string;
+  planNumber: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  employeePosition?: string | null;
+  employeeDepartment?: string | null;
+  dateOfBirth?: string | null;
+  age?: number | null;
+  yearsOfService?: number | null;
+  retirementDate?: string | null;
+  serviceYearsLeft?: number | null;
+  talentPoolMemberId?: string | null;
+  talentPoolName?: string | null;
+  type: CandidateType;
+  typeName: string;
+  rank: number;
+  currentReadiness: ReadinessLevel;
+  currentReadinessName: string;
+  readyByDate?: string | null;
+  monthsToReady?: number | null;
+  isEmergencyOnly: boolean;
+  latestPerformanceRating?: PerformanceRating | null;
+  latestPerformanceRatingName?: string | null;
+  potentialRating?: PotentialRating | null;
+  potentialRatingName?: string | null;
+  talentReviewRatingId?: string | null;
+  strengths?: string | null;
+  developmentGaps?: string | null;
+  developmentPlan?: string | null;
+  yearsInCurrentRole: number;
+  yearsWithCompany: number;
+  hasRelevantExperience: boolean;
+  relevantExperienceDetails?: string | null;
+  willingToRelocate: boolean;
+  availableForPromotion: boolean;
+  availableFrom?: string | null;
+  retentionRisk: RetentionRisk;
+  retentionRiskName: string;
+  riskMitigationPlan?: string | null;
+  assessedById?: string | null;
+  assessedByName?: string | null;
+  assessmentDate?: string | null;
+  assessmentNotes?: string | null;
+  /** ⚠ The gate on selection: only a recommended candidate can be selected. */
+  isRecommended: boolean;
+  recommendationNotes?: string | null;
+  recommendationDate?: string | null;
+  recommendedById?: string | null;
+  recommendedByName?: string | null;
+  isSelected: boolean;
+  selectionDate?: string | null;
+  successionCompleted: boolean;
+  successionDate?: string | null;
+  developmentActivities: SuccessionDevelopmentActivitySummary[];
+  competencyGaps: SuccessionCandidateGap[];
+  feedback: SuccessionCandidateFeedback[];
+}
+
+export interface CreateSuccessionCandidate {
+  successionPlanId: string;
+  employeeId: string;
+  talentPoolMemberId?: string | null;
+  type: CandidateType;
+  rank: number;
+  currentReadiness: ReadinessLevel;
+  readyByDate?: string | null;
+  monthsToReady?: number | null;
+  isEmergencyOnly: boolean;
+  latestPerformanceRating?: PerformanceRating | null;
+  potentialRating?: PotentialRating | null;
+  talentReviewRatingId?: string | null;
+  strengths?: string | null;
+  developmentGaps?: string | null;
+  developmentPlan?: string | null;
+  yearsInCurrentRole: number;
+  yearsWithCompany: number;
+  hasRelevantExperience: boolean;
+  relevantExperienceDetails?: string | null;
+  willingToRelocate: boolean;
+  availableForPromotion: boolean;
+  availableFrom?: string | null;
+  retentionRisk: RetentionRisk;
+  riskMitigationPlan?: string | null;
+}
+
+/** ⚠ No `successionPlanId` and no `employeeId` — neither can be changed after nomination. */
+export type UpdateSuccessionCandidate = Omit<
+  CreateSuccessionCandidate,
+  'successionPlanId' | 'employeeId'
+>;
+
+/**
+ * ⚠ Carries no assessor and no date. Both were removed in slice 4: an assessment naming someone
+ * else as the assessor was stored, and since `isRecommended` gates selection, that was a way to
+ * manufacture a recommendation in a colleague's name.
+ */
+export interface AssessCandidate {
+  candidateId: string;
+  assessmentNotes?: string | null;
+  isRecommended: boolean;
+  recommendationNotes?: string | null;
+}
+
+export interface CandidateRankUpdate {
+  id: string;
+  rank: number;
+}
+
+export interface CreateSuccessionCandidateFeedback {
+  note: string;
+  disposition: FeedbackDisposition;
+}
+
+export interface CreateSuccessionCandidateGap {
+  candidateId: string;
+  competencyId: string;
+  requiredLevel: number;
+  currentLevel: number;
+  gapNotes?: string | null;
+}

@@ -1319,17 +1319,22 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         return true;
     }
 
-    public async Task<bool> AssessAsync(AssessCandidateDto assessDto, CancellationToken cancellationToken = default)
+    public async Task<bool> AssessAsync(AssessCandidateDto assessDto, Guid assessedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(assessDto.CandidateId);
 
-        entity.AssessedById = assessDto.AssessedById;
-        entity.AssessmentDate = assessDto.AssessmentDate;
+        // Both the assessor and the date used to arrive on the body. Recommending a candidate is
+        // what unlocks selecting them, so a caller-declared assessor was a way to manufacture a
+        // recommendation in someone else's name.
+        var assessedOn = DateTime.UtcNow;
+
+        entity.AssessedById = assessedByEmployeeId;
+        entity.AssessmentDate = assessedOn;
         entity.AssessmentNotes = assessDto.AssessmentNotes;
         entity.IsRecommended = assessDto.IsRecommended;
         entity.RecommendationNotes = assessDto.RecommendationNotes;
-        entity.RecommendationDate = assessDto.IsRecommended ? assessDto.AssessmentDate : null;
-        entity.RecommendedById = assessDto.IsRecommended ? assessDto.AssessedById : null;
+        entity.RecommendationDate = assessDto.IsRecommended ? assessedOn : null;
+        entity.RecommendedById = assessDto.IsRecommended ? assessedByEmployeeId : null;
 
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

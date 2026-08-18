@@ -93,7 +93,7 @@ public interface ISuccessionCandidateService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Workflow
-    Task<bool> AssessAsync(AssessCandidateDto assessDto, CancellationToken cancellationToken = default);
+    Task<bool> AssessAsync(AssessCandidateDto assessDto, Guid assessedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> SelectCandidateAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>

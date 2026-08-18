@@ -2,6 +2,18 @@ import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   SuccessionPlan,
+  SuccessionCandidate,
+  SuccessionCandidateGap,
+  SuccessionCandidateFeedback,
+  SuccessionDevelopmentActivitySummary,
+  ReadinessLevel,
+  RetentionRisk,
+  CreateSuccessionCandidate,
+  UpdateSuccessionCandidate,
+  AssessCandidate,
+  CandidateRankUpdate,
+  CreateSuccessionCandidateFeedback,
+  CreateSuccessionCandidateGap,
   SuccessionPlanSummary,
   SuccessionPlanStatus,
   PositionCriticality,
@@ -180,3 +192,134 @@ class SuccessionService {
 }
 
 export const successionService = new SuccessionService();
+
+/**
+ * Succession candidates. Backend route: api/succession-candidates.
+ *
+ * ⚠ **Recommendation is the gate on selection.** `selectCandidate` refuses a candidate who has not
+ * been assessed and recommended, so a screen that offers Select without showing whether the
+ * candidate is recommended is offering a button that will fail.
+ *
+ * ⚠ The assessor and the assessment date are **not** on {@link AssessCandidate}. They come from the
+ * token and the clock — see the type's note for why that mattered here more than elsewhere.
+ */
+class SuccessionCandidateService {
+  private readonly baseUrl = '/succession-candidates';
+
+  getById(id: string) {
+    return apiService.get<SuccessionCandidate>(`${this.baseUrl}/${id}`);
+  }
+
+  getByPlan(planId: string) {
+    return apiService.get<SuccessionCandidate[]>(`${this.baseUrl}/plan/${planId}`);
+  }
+
+  getByEmployee(employeeId: string) {
+    return apiService.get<SuccessionCandidate[]>(`${this.baseUrl}/employee/${employeeId}`);
+  }
+
+  getByReadiness(planId: string, readiness: ReadinessLevel) {
+    return apiService.get<SuccessionCandidate[]>(`${this.baseUrl}/plan/${planId}/readiness/${readiness}`);
+  }
+
+  getReadyNow(planId: string) {
+    return apiService.get<SuccessionCandidate[]>(`${this.baseUrl}/plan/${planId}/ready-now`);
+  }
+
+  getEmergency(planId: string) {
+    return apiService.get<SuccessionCandidate[]>(`${this.baseUrl}/plan/${planId}/emergency`);
+  }
+
+  /** At most one per plan — selecting a second deselects the first. */
+  getSelected(planId: string) {
+    return apiService.get<SuccessionCandidate | null>(`${this.baseUrl}/plan/${planId}/selected`);
+  }
+
+  getByRetentionRisk(planId: string, risk: RetentionRisk) {
+    return apiService.get<SuccessionCandidate[]>(`${this.baseUrl}/plan/${planId}/retention-risk/${risk}`);
+  }
+
+  create(data: CreateSuccessionCandidate) {
+    return apiService.post<SuccessionCandidate>(this.baseUrl, data);
+  }
+
+  update(id: string, data: UpdateSuccessionCandidate) {
+    return apiService.put<SuccessionCandidate>(`${this.baseUrl}/${id}`, data);
+  }
+
+  /** ⚠ Admin, like every other delete in this area. */
+  remove(id: string) {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
+  assess(id: string, data: AssessCandidate) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/assess`, data);
+  }
+
+  /** ⚠ Refused with 400 unless the candidate has been recommended. */
+  select(id: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/select`, {});
+  }
+
+  /** ⚠ PATCH, not PUT, and it takes a bare array rather than a wrapper object. */
+  bulkUpdateRanks(updates: CandidateRankUpdate[]) {
+    return apiService.patch<{ message: string }>(`${this.baseUrl}/bulk-rank`, updates);
+  }
+
+  // ── Competency gaps ────────────────────────────────────────────────────────
+
+  getGaps(id: string) {
+    return apiService.get<SuccessionCandidateGap[]>(`${this.baseUrl}/${id}/gaps`);
+  }
+
+  getUnaddressedGaps(id: string) {
+    return apiService.get<SuccessionCandidateGap[]>(`${this.baseUrl}/${id}/gaps/unaddressed`);
+  }
+
+  addGap(id: string, data: CreateSuccessionCandidateGap) {
+    return apiService.post<SuccessionCandidateGap>(`${this.baseUrl}/${id}/gaps`, data);
+  }
+
+  updateGap(gapId: string, data: CreateSuccessionCandidateGap) {
+    return apiService.put<SuccessionCandidateGap>(`${this.baseUrl}/gaps/${gapId}`, data);
+  }
+
+  removeGap(gapId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/gaps/${gapId}`);
+  }
+
+  /**
+   * Derives gaps by comparing the candidate against the plan's competency requirements.
+   *
+   * ⚠ Returns an **empty array** today, and will keep doing so until area 17 populates the
+   * competency library. That is not a failure — the screen must say so rather than showing a
+   * silent no-op.
+   */
+  generateGapsFromPosition(id: string) {
+    return apiService.post<SuccessionCandidateGap[]>(`${this.baseUrl}/${id}/gaps/generate-from-position`, {});
+  }
+
+  // ── Feedback ───────────────────────────────────────────────────────────────
+
+  getFeedback(id: string) {
+    return apiService.get<SuccessionCandidateFeedback[]>(`${this.baseUrl}/${id}/feedback`);
+  }
+
+  /** The reviewer is the signed-in user; there is no field to name someone else. */
+  addFeedback(id: string, data: CreateSuccessionCandidateFeedback) {
+    return apiService.post<SuccessionCandidateFeedback>(`${this.baseUrl}/${id}/feedback`, data);
+  }
+
+  /** ⚠ Admin. */
+  removeFeedback(feedbackId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/feedback/${feedbackId}`);
+  }
+
+  getDevelopmentActivities(id: string) {
+    return apiService.get<SuccessionDevelopmentActivitySummary[]>(
+      `${this.baseUrl}/${id}/development-activities`,
+    );
+  }
+}
+
+export const successionCandidateService = new SuccessionCandidateService();
