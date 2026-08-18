@@ -1186,9 +1186,11 @@ function defaultsFor(
 function missingWorkspaceInputs(kind: AcquisitionWorkspaceKind, values: WorkspaceValues) {
   if (kind === 'vendor-payment' || kind === 'stamp-duty-payment') {
     const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
+    const paymentId = `${values.accountsPayablePaymentId ?? ''}`.trim();
     const paid = values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
     if (!invoiceId) return [field('accountsPayableRequest', 'Accounts Payable Request')];
-    return paid ? [] : [field('accountsPayablePayment', 'Accounts Payable Payment')];
+    if (!paymentId) return [field('accountsPayablePayment', 'Accounts Payable Payment')];
+    return paid ? [] : [field('accountsPayablePaymentProcessing', 'Finance Processing')];
   }
 
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
@@ -1376,6 +1378,7 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
   labels.set('vendorId', 'Linked Vendor / Owner');
   labels.set('stageDocuments', 'Stage Documents');
   labels.set('witnessOath', 'Witness Oath');
+  labels.set('accountsPayablePaymentProcessing', 'Finance Processing');
   return keys.map((key) => labels.get(key) || key);
 }
 
@@ -2351,6 +2354,9 @@ function AcquisitionDetail({
     null
   );
   const [summaryLoading, setSummaryLoading] = React.useState(false);
+  const [summaryLocations, setSummaryLocations] = React.useState<
+    HrLocationLookup[]
+  >([]);
   const [stageDocuments, setStageDocuments] = React.useState<
     LandAcquisitionDocument[]
   >([]);
@@ -2392,7 +2398,12 @@ function AcquisitionDetail({
     setSummaryOpen(true);
     setSummaryLoading(true);
     try {
-      setSummary(await estateAcquisitionService.getSummary(item.id));
+      const [nextSummary, locations] = await Promise.all([
+        estateAcquisitionService.getSummary(item.id),
+        estateAcquisitionService.getActiveHrLocations().catch(() => []),
+      ]);
+      setSummary(nextSummary);
+      setSummaryLocations(locations);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -2784,16 +2795,23 @@ function AcquisitionDetail({
                     candidate.order === savedStage.procedureId
                 );
                 const labels = new Map(
-                  (definition
-                    ? WORKSPACE_FIELDS[definition.workspaceKind]
-                    : []
+                  (
+                    definition
+                      ? WORKSPACE_FIELDS[definition.workspaceKind]
+                      : []
                   ).map((workspaceField) => [
                     workspaceField.key,
                     workspaceField.label,
                   ])
                 );
-                const entries = Object.entries(savedStage.values).filter(
-                  ([, value]) => value !== null && value !== ''
+                const fields = definition
+                  ? WORKSPACE_FIELDS[definition.workspaceKind]
+                  : [];
+                const entries = summaryEntries(
+                  savedStage.values,
+                  fields,
+                  labels,
+                  summaryLocations
                 );
                 return (
                   <section
@@ -2810,14 +2828,11 @@ function AcquisitionDetail({
                     </div>
                     {entries.length ? (
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        {entries.map(([key, value]) => (
+                        {entries.map((entry) => (
                           <Field
-                            key={key}
-                            label={
-                              labels.get(key) ||
-                              key.replace(/([a-z])([A-Z])/g, '$1 $2')
-                            }
-                            value={formatSummaryValue(value)}
+                            key={entry.key}
+                            label={entry.label}
+                            value={entry.value}
                           />
                         ))}
                       </div>
@@ -2847,6 +2862,95 @@ function AcquisitionDetail({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+type SummaryValue = string | boolean | number | null;
+
+type SummaryEntry = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+function summaryEntries(
+  values: Record<string, SummaryValue>,
+  fields: WorkspaceField[],
+  labels: Map<string, string>,
+  locations: HrLocationLookup[]
+): SummaryEntry[] {
+  const fieldByKey = new Map(
+    fields.map((fieldConfig) => [fieldConfig.key, fieldConfig])
+  );
+
+  return Object.entries(values).flatMap(([key, value]) => {
+    if (value === null || value === '') return [];
+
+    if (key === 'pastOwnersJson') {
+      return pastOwnerSummaryEntries(value);
+    }
+
+    const config = fieldByKey.get(key);
+    return [
+      {
+        key,
+        label: labels.get(key) || key.replace(/([a-z])([A-Z])/g, '$1 $2'),
+        value: formatSummaryValue(
+          resolveSummaryValue(key, value, config, locations)
+        ),
+      },
+    ];
+  });
+}
+
+function pastOwnerSummaryEntries(value: SummaryValue): SummaryEntry[] {
+  const owners = parsePastOwners(typeof value === 'string' ? value : undefined)
+    .filter((owner) =>
+      Object.values(owner).some((entry) => `${entry || ''}`.trim())
+    );
+
+  return owners.map((owner, index) => ({
+    key: `pastOwnersJson-${index}`,
+    label: `Past Owner ${index + 1}`,
+    value: [
+      owner.ownerName,
+      owner.contactNumber ? `Contact: ${owner.contactNumber}` : '',
+      owner.address ? `Address: ${owner.address}` : '',
+      owner.identificationNumber
+        ? `ID: ${owner.identificationType || 'Identification'} ${owner.identificationNumber}`
+        : '',
+      owner.ownershipStartDate || owner.ownershipEndDate
+        ? `Ownership: ${owner.ownershipStartDate || 'Not recorded'} to ${owner.ownershipEndDate || 'Not recorded'}`
+        : '',
+      owner.dateGapReason ? `Gap reason: ${owner.dateGapReason}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | '),
+  }));
+}
+
+function resolveSummaryValue(
+  key: string,
+  value: SummaryValue,
+  config: WorkspaceField | undefined,
+  locations: HrLocationLookup[]
+): SummaryValue {
+  if (typeof value !== 'string') return value;
+
+  const isLocationField =
+    config?.type === 'region' ||
+    config?.type === 'district' ||
+    /(region|district|country|town)id$/i.test(key);
+  if (!isLocationField) return value;
+
+  return (
+    locations.find(
+      (location) =>
+        location.id === value ||
+        location.name.localeCompare(value, undefined, {
+          sensitivity: 'accent',
+        }) === 0
+    )?.name || value
   );
 }
 
@@ -3325,6 +3429,8 @@ function WorkspaceDialog({
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
       description: `${accountsPayableSubject} for ${item.projectReference}`,
+      source: 'land-acquisition',
+      locked: 'true',
     });
     router.push(`/finance/ap/payments/create?${params.toString()}`);
   };

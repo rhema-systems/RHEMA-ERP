@@ -1975,6 +1975,7 @@ public class LandAcquisitionsController : ControllerBase
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
 
+        var shouldApprovePayable = false;
         if (invoice == null)
         {
             var approvedAt = DateTime.UtcNow;
@@ -2002,12 +2003,10 @@ public class LandAcquisitionsController : ControllerBase
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
                 MatchingStatus = InvoiceMatchingStatus.Unmatched,
-                Status = VendorInvoiceStatus.Approved,
-                ApprovalStatus = "Approved",
+                Status = VendorInvoiceStatus.Draft,
+                ApprovalStatus = "Draft",
                 SubmittedById = userId == Guid.Empty ? null : userId,
                 SubmittedDate = approvedAt,
-                ApprovedById = userId == Guid.Empty ? null : userId,
-                ApprovedDate = approvedAt,
                 ApprovalComments = $"Approval inherited from land acquisition agreement approval {acquisition.Agreement?.BoardApprovalReference ?? SnapshotText(approvalSnapshot, "boardApprovalReference") ?? acquisition.ProjectReference}.",
                 Reference = sourceReference,
                 Notes = $"Vendor consideration payable for land acquisition {acquisition.ProjectReference}.",
@@ -2035,6 +2034,7 @@ public class LandAcquisitionsController : ControllerBase
                 }
             };
             _context.Set<VendorInvoice>().Add(invoice);
+            shouldApprovePayable = true;
         }
         else if (!invoice.JournalEntryId.HasValue)
         {
@@ -2044,6 +2044,10 @@ public class LandAcquisitionsController : ControllerBase
                 line.UpdatedAt = DateTime.UtcNow;
                 line.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
             }
+
+            shouldApprovePayable =
+                invoice.Status != VendorInvoiceStatus.Approved ||
+                !string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase);
         }
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
@@ -2070,9 +2074,15 @@ public class LandAcquisitionsController : ControllerBase
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        if (!invoice.JournalEntryId.HasValue)
+        if (shouldApprovePayable)
         {
-            await _vendorInvoiceService.PostAsync(invoice.Id, cancellationToken);
+            invoice.Status = VendorInvoiceStatus.Approved;
+            invoice.ApprovalStatus = "Approved";
+            invoice.ApprovedById = userId == Guid.Empty ? null : userId;
+            invoice.ApprovedDate = DateTime.UtcNow;
+            invoice.UpdatedAt = DateTime.UtcNow;
+            invoice.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
+            await _context.SaveChangesAsync(cancellationToken);
         }
     }
 
@@ -2192,12 +2202,10 @@ public class LandAcquisitionsController : ControllerBase
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
                 MatchingStatus = InvoiceMatchingStatus.Unmatched,
-                Status = VendorInvoiceStatus.Approved,
-                ApprovalStatus = "Approved",
+                Status = VendorInvoiceStatus.Draft,
+                ApprovalStatus = "Draft",
                 SubmittedById = userId == Guid.Empty ? null : userId,
                 SubmittedDate = approvedAt,
-                ApprovedById = userId == Guid.Empty ? null : userId,
-                ApprovedDate = approvedAt,
                 ApprovalComments =
                     $"Approval inherited from land acquisition finance approval {assessment.FinanceApprovalReference}.",
                 Reference = sourceReference,
@@ -2262,9 +2270,16 @@ public class LandAcquisitionsController : ControllerBase
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        if (!invoice.JournalEntryId.HasValue)
+        if (invoice.Status != VendorInvoiceStatus.Approved ||
+            !string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
         {
-            await _vendorInvoiceService.PostAsync(invoice.Id, cancellationToken);
+            invoice.Status = VendorInvoiceStatus.Approved;
+            invoice.ApprovalStatus = "Approved";
+            invoice.ApprovedById = userId == Guid.Empty ? null : userId;
+            invoice.ApprovedDate = DateTime.UtcNow;
+            invoice.UpdatedAt = DateTime.UtcNow;
+            invoice.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
+            await _context.SaveChangesAsync(cancellationToken);
         }
     }
 
@@ -2368,19 +2383,28 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
-        var completedAllocation = invoice.PaymentAllocations
+        var activeAllocation = invoice.PaymentAllocations
             .Where(allocation =>
                 !allocation.IsDeleted &&
                 !allocation.IsReversal &&
                 allocation.VendorPayment != null &&
                 !allocation.VendorPayment.IsDeleted &&
-                allocation.VendorPayment.Status is VendorPaymentStatus.Processed
-                    or VendorPaymentStatus.Cleared
-                    or VendorPaymentStatus.Reconciled)
+                IsActiveAccountsPayablePayment(allocation.VendorPayment.Status))
             .OrderByDescending(allocation => allocation.AllocationDate)
             .FirstOrDefault();
-        var vendorPayment = completedAllocation?.VendorPayment;
-        var isPaid = invoice.Status == VendorInvoiceStatus.Paid && vendorPayment != null;
+        var completedAllocation = activeAllocation?.VendorPayment.Status is VendorPaymentStatus.Processed
+                or VendorPaymentStatus.Cleared
+                or VendorPaymentStatus.Reconciled
+            ? activeAllocation
+            : null;
+        var vendorPayment = activeAllocation?.VendorPayment;
+        var completedPayment = completedAllocation?.VendorPayment;
+        var isPaid = invoice.Status == VendorInvoiceStatus.Paid && completedPayment != null;
+        var paymentNotes = vendorPayment == null
+            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            : isPaid
+                ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
+                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; finance processing is still required.";
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
         {
@@ -2405,9 +2429,14 @@ public class LandAcquisitionsController : ControllerBase
             ["vendorPaymentDueDate"] = SnapshotText(paymentSnapshot, "vendorPaymentDueDate"),
             ["boardApprovalReference"] = SnapshotText(paymentSnapshot, "boardApprovalReference"),
             ["isPaid"] = isPaid,
-            ["paymentNotes"] = vendorPayment?.Notes ?? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            ["paymentNotes"] = paymentNotes
         });
     }
+
+    private static bool IsActiveAccountsPayablePayment(VendorPaymentStatus status)
+        => status is not VendorPaymentStatus.Voided
+            and not VendorPaymentStatus.Failed
+            and not VendorPaymentStatus.Reversed;
 
     private async Task SyncStampDutyPaymentFromAccountsPayableAsync(
         LandAcquisition acquisition,
@@ -2460,19 +2489,23 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
-        var completedAllocation = invoice.PaymentAllocations
+        var activeAllocation = invoice.PaymentAllocations
             .Where(allocation =>
                 !allocation.IsDeleted &&
                 !allocation.IsReversal &&
                 allocation.VendorPayment != null &&
                 !allocation.VendorPayment.IsDeleted &&
-                allocation.VendorPayment.Status is VendorPaymentStatus.Processed
-                    or VendorPaymentStatus.Cleared
-                    or VendorPaymentStatus.Reconciled)
+                IsActiveAccountsPayablePayment(allocation.VendorPayment.Status))
             .OrderByDescending(allocation => allocation.AllocationDate)
             .FirstOrDefault();
-        var vendorPayment = completedAllocation?.VendorPayment;
-        var isPaid = invoice.Status == VendorInvoiceStatus.Paid && vendorPayment != null;
+        var completedAllocation = activeAllocation?.VendorPayment.Status is VendorPaymentStatus.Processed
+                or VendorPaymentStatus.Cleared
+                or VendorPaymentStatus.Reconciled
+            ? activeAllocation
+            : null;
+        var vendorPayment = activeAllocation?.VendorPayment;
+        var completedPayment = completedAllocation?.VendorPayment;
+        var isPaid = invoice.Status == VendorInvoiceStatus.Paid && completedPayment != null;
 
         var accountsPayablePaymentId = vendorPayment?.Id;
         var receiptNumber = vendorPayment?.PaymentNumber;
@@ -2480,7 +2513,11 @@ public class LandAcquisitionsController : ControllerBase
         var paymentDate = vendorPayment?.PaymentDate;
         var amountPaid = invoice.PaidAmount;
         var paymentMethod = vendorPayment?.PaymentMethod.ToString();
-        var notes = vendorPayment?.Notes ?? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}.";
+        var notes = vendorPayment == null
+            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}."
+            : isPaid
+                ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
+                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; finance processing is still required.";
 
         SetIfChanged(stampDutyPayment.AccountsPayablePaymentId, accountsPayablePaymentId,
             value => stampDutyPayment.AccountsPayablePaymentId = value);
@@ -2556,9 +2593,13 @@ public class LandAcquisitionsController : ControllerBase
             {
                 paymentMissing.Add("accountsPayableRequest");
             }
-            else if (!paid || string.IsNullOrWhiteSpace(paymentId))
+            else if (string.IsNullOrWhiteSpace(paymentId))
             {
                 paymentMissing.Add("accountsPayablePayment");
+            }
+            else if (!paid)
+            {
+                paymentMissing.Add("accountsPayablePaymentProcessing");
             }
 
             if (documentRequirementsByStage != null &&
@@ -2582,10 +2623,13 @@ public class LandAcquisitionsController : ControllerBase
             {
                 paymentMissing.Add("accountsPayableRequest");
             }
-            else if (acquisition.StampDutyPayment?.IsPaid != true ||
-                     !acquisition.StampDutyPayment.AccountsPayablePaymentId.HasValue)
+            else if (acquisition.StampDutyPayment?.AccountsPayablePaymentId.HasValue != true)
             {
                 paymentMissing.Add("accountsPayablePayment");
+            }
+            else if (acquisition.StampDutyPayment?.IsPaid != true)
+            {
+                paymentMissing.Add("accountsPayablePaymentProcessing");
             }
 
             if (documentRequirementsByStage != null &&

@@ -205,6 +205,11 @@ public class GlobalExceptionHandlingMiddleware
             var shortMessage = exception.Message ?? string.Empty;
 
             var tenantId = currentUser.TenantId ?? Guid.Empty;
+            if (tenantId == Guid.Empty)
+            {
+                return;
+            }
+
             var now = DateTime.UtcNow;
 
             var requestPath = context.Request.Path.Value;

@@ -8504,6 +8504,7 @@ namespace ErpSystem.Web.Services
                     "Finance.PeriodClose.Workspace.Maintain",
                     "Finance.PeriodClose.Waivers.Approve",
                     "Finance.PeriodReopen.Approve",
+                    "Finance.AP.Payments.Approve",
                     "Finance.Workflow.Submit",
                     "Finance.Workflow.Approve",
                     "Finance.Workflow.Reject",
