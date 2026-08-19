@@ -17,6 +17,14 @@ public interface IJobDescriptionService
     Task<JobDescriptionDto?> GetCurrentVersionForPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobDescriptionSummaryDto>> GetDueForReviewAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<JobAnalyticsDto> GetAnalyticsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Positions with no approved job description — the work list behind FR-HR-134, ordered by how
+    /// many people are doing a job nobody has described.
+    /// </summary>
+    Task<IEnumerable<UncoveredPositionDto>> GetUncoveredPositionsAsync(
+        CancellationToken cancellationToken = default);
+
     Task<IEnumerable<JobDescriptionSummaryDto>> GetVersionHistoryAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> UpdateAsync(UpdateJobDescriptionDto updateDto, CancellationToken cancellationToken = default);

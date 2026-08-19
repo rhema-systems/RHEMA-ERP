@@ -69,6 +69,14 @@ public class EmployeeCompetencyController : ControllerBase
     // ANALYTICS
     // =========================================================================
 
+    /// <summary>
+    /// Where the organisation is short against what its positions require — the training-needs view.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.CompetencyReadPolicy)]
+    [HttpGet("gaps/organisation")]
+    public async Task<ActionResult<IEnumerable<OrganisationCompetencyGapDto>>> GetOrganisationGaps()
+        => Ok(await _service.GetOrganisationGapsAsync());
+
     [Authorize(Policy = HrPermissions.CompetencyReadPolicy)]
     [HttpGet("employee/{employeeId:guid}/gaps")]
     public async Task<ActionResult<EmployeePositionCompetencyGapSummaryDto>> GetGapsForEmployee(Guid employeeId)

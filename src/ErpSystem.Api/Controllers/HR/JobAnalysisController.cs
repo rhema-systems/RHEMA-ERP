@@ -73,6 +73,12 @@ public class JobAnalysisController : ControllerBase
     public async Task<ActionResult<JobAnalyticsDto>> GetAnalytics()
         => Ok(await _jobDescriptionService.GetAnalyticsAsync());
 
+    /// <summary>Positions with no approved job description (FR-HR-134 coverage).</summary>
+    [Authorize(Policy = HrPermissions.JobArchitectureReadPolicy)]
+    [HttpGet("positions/uncovered")]
+    public async Task<ActionResult<IEnumerable<UncoveredPositionDto>>> GetUncoveredPositions()
+        => Ok(await _jobDescriptionService.GetUncoveredPositionsAsync());
+
     [Authorize(Policy = HrPermissions.JobArchitectureReadPolicy)]
     [HttpGet("descriptions/position/{positionId:guid}/history")]
     public async Task<ActionResult<IEnumerable<JobDescriptionSummaryDto>>> GetVersionHistory(Guid positionId)

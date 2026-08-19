@@ -663,6 +663,84 @@ public class EmployeeCompetencyService : IEmployeeCompetencyService
         return true;
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<OrganisationCompetencyGapDto>> GetOrganisationGapsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        // Every requirement any position carries, with the competency it names.
+        var requirements = await _positionCompetencyRepository.GetQueryable()
+            .Where(pc => pc.TenantId == tenantId && !pc.IsDeleted)
+            .Include(pc => pc.Competency)
+            .Select(pc => new
+            {
+                pc.PositionId,
+                pc.CompetencyId,
+                pc.RequiredProficiencyLevel,
+                Code = pc.Competency!.Code,
+                Name = pc.Competency!.Name,
+                Category = pc.Competency!.CompetencyCategory,
+            })
+            .ToListAsync(cancellationToken);
+
+        if (requirements.Count == 0) return new List<OrganisationCompetencyGapDto>();
+
+        var positionIds = requirements.Select(r => r.PositionId).Distinct().ToList();
+
+        var employees = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.IsActive && positionIds.Contains(e.PositionId))
+            .Select(e => new { e.Id, e.PositionId })
+            .ToListAsync(cancellationToken);
+
+        var employeeIds = employees.Select(e => e.Id).ToList();
+        var assessments = await _employeeCompetencyRepository.GetQueryable()
+            .Where(ec => ec.TenantId == tenantId && !ec.IsDeleted && employeeIds.Contains(ec.EmployeeId))
+            .Select(ec => new { ec.EmployeeId, ec.CompetencyId, ec.CurrentProficiencyLevel })
+            .ToListAsync(cancellationToken);
+
+        var results = new List<OrganisationCompetencyGapDto>();
+        foreach (var group in requirements.GroupBy(r => r.CompetencyId))
+        {
+            var first = group.First();
+            var row = new OrganisationCompetencyGapDto
+            {
+                CompetencyId = group.Key,
+                CompetencyCode = first.Code,
+                CompetencyName = first.Name,
+                CompetencyCategory = first.Category.ToString(),
+            };
+
+            foreach (var requirement in group)
+            {
+                foreach (var employee in employees.Where(e => e.PositionId == requirement.PositionId))
+                {
+                    row.EmployeesRequiring++;
+                    var assessment = assessments.FirstOrDefault(
+                        a => a.EmployeeId == employee.Id && a.CompetencyId == group.Key);
+
+                    // ⚠ Three outcomes, not two. "Never assessed" is not a shortfall — it is an
+                    // unknown, and folding it into "below requirement" would report a training need
+                    // the organisation has no evidence for, on the screen that decides training
+                    // spend.
+                    if (assessment == null) row.NotAssessed++;
+                    else if (assessment.CurrentProficiencyLevel >= requirement.RequiredProficiencyLevel)
+                        row.MeetingRequirement++;
+                    else row.BelowRequirement++;
+                }
+            }
+
+            results.Add(row);
+        }
+
+        // Biggest measured shortfall first — the order a training plan is written in.
+        return results
+            .OrderByDescending(r => r.BelowRequirement)
+            .ThenByDescending(r => r.NotAssessed)
+            .ThenBy(r => r.CompetencyName)
+            .ToList();
+    }
+
     public async Task<EmployeePositionCompetencyGapSummaryDto> GetGapsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();

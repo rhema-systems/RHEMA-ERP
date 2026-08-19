@@ -219,6 +219,57 @@ public class JobDescriptionService : IJobDescriptionService
         return entities.Where(j => j.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<UncoveredPositionDto>> GetUncoveredPositionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var covered = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId
+                      && (jd.Status == JobDescriptionStatus.Approved || jd.Status == JobDescriptionStatus.Active))
+            .Select(jd => jd.PositionId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        // A position with a draft sitting on it is a different conversation from one nobody has
+        // started: the first needs an approval, the second needs an author.
+        var drafted = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId
+                      && (jd.Status == JobDescriptionStatus.Draft
+                       || jd.Status == JobDescriptionStatus.PendingReview
+                       || jd.Status == JobDescriptionStatus.UnderRevision))
+            .Select(jd => jd.PositionId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(pos => pos.TenantId == tenantId && !covered.Contains(pos.Id))
+            .Include(pos => pos.OrganizationUnit)
+            .ToListAsync(cancellationToken);
+
+        var positionIds = positions.Select(pos => pos.Id).ToList();
+        var occupancy = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && positionIds.Contains(e.PositionId) && e.IsActive)
+            .GroupBy(e => e.PositionId)
+            .Select(g => new { PositionId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        return positions
+            .Select(pos => new UncoveredPositionDto
+            {
+                PositionId = pos.Id,
+                PositionTitle = pos.Title,
+                OrganizationUnitName = pos.OrganizationUnit?.Name,
+                CurrentlyFilled = occupancy.FirstOrDefault(o => o.PositionId == pos.Id)?.Count ?? 0,
+                HasUnapprovedDraft = drafted.Contains(pos.Id),
+            })
+            // Most people doing an undescribed job first: that is where the risk is.
+            .OrderByDescending(p => p.CurrentlyFilled)
+            .ThenBy(p => p.PositionTitle)
+            .ToList();
+    }
+
     public async Task<JobAnalyticsDto> GetAnalyticsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -242,6 +293,36 @@ public class JobDescriptionService : IJobDescriptionService
             ValuedRoleCount = jds.Count(j => j.EstimatedSalaryLow != null),
             MissionCriticalRoleCount = jds.Count(j => j.RoleCriticality == RoleCriticalityLevel.MissionCritical),
         };
+
+        // ⚠ Coverage needs its denominator. "1 position covered" says nothing without knowing
+        // whether that is 1 of 2 or 1 of 146, and FR-HR-134 is a question about positions, not
+        // about documents.
+        var livePositions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(pos => pos.TenantId == tenantId)
+            .Select(pos => new { pos.Id, pos.ExpectedHeadcount, pos.EstablishmentApprovedOn })
+            .ToListAsync(cancellationToken);
+
+        analytics.TotalPositions = livePositions.Count;
+        analytics.PositionsUncovered = analytics.TotalPositions - analytics.PositionsCovered;
+        analytics.PositionsEstablished = livePositions.Count(pos => pos.EstablishmentApprovedOn != null);
+
+        var establishedIds = livePositions
+            .Where(pos => pos.EstablishmentApprovedOn != null)
+            .Select(pos => pos.Id)
+            .ToList();
+        if (establishedIds.Count > 0)
+        {
+            var occupancy = await _unitOfWork.Repository<Employee>().GetQueryable()
+                .Where(e => e.TenantId == tenantId && establishedIds.Contains(e.PositionId) && e.IsActive)
+                .GroupBy(e => e.PositionId)
+                .Select(g => new { PositionId = g.Key, Count = g.Count() })
+                .ToListAsync(cancellationToken);
+
+            analytics.PositionsOverStrength = livePositions
+                .Where(pos => pos.EstablishmentApprovedOn != null)
+                .Count(pos => (occupancy.FirstOrDefault(o => o.PositionId == pos.Id)?.Count ?? 0)
+                              > pos.ExpectedHeadcount);
+        }
 
         var valued = jds.Where(j => j.EstimatedSalaryLow != null && j.EstimatedSalaryHigh != null)
             .Select(j => (j.EstimatedSalaryLow!.Value + j.EstimatedSalaryHigh!.Value) / 2m).ToList();

@@ -829,8 +829,48 @@ was hired into a harness position, which accumulated **125 employees** and then 
 achievability guard refuse any budget naming it. Renamed to sort last, and slices 0 and 1 now give
 their budget lines a position of their own.
 
+### Slice 9 — analytics worth acting on (2026-08-19) — `run-slice9.mjs`, 25 assertions
+
+Green twice; slices 0-8 re-run green. **619 assertions in the area.** Backend complete.
+
+The existing `analytics` endpoint counted job descriptions correctly, and reported
+`positionsCovered` **with no denominator** — "1 position covered" out of 2, or out of 146?
+FR-HR-134 asks for approved job descriptions *against positions*, so coverage is the whole
+reporting question. Added `totalPositions`, `positionsUncovered`, `positionsEstablished` and
+`positionsOverStrength` — that last being the only number on the dashboard that is a **live problem
+rather than a progress bar**, since every over-strength post refuses movements and requisitions
+until someone resolves it.
+
+`GET positions/uncovered` is the work list behind it, ordered by **how many people are doing a job
+nobody has described**. ⚠ It distinguishes a position carrying an unapproved draft from one with
+nothing at all: the first needs an approver, the second needs an author, and reporting them as the
+same thing sends the wrong person to fix it.
+
+`GET employee-competencies/gaps/organisation` is the training-needs view — the reason the
+competency framework is worth maintaining. ⚠ It reports **three** outcomes, not two: meets, below,
+and *never assessed*. Folding "never assessed" into "below requirement" would report a training need
+the organisation has no evidence for, on the screen that decides training spend. The fixture puts
+three employees in one position — one meeting, one short, one unassessed — so each number is an
+answer rather than a coincidence.
+
+⚠ **Deliberately not built, and asserted as absent so it reads as a decision rather than an
+oversight: budget variance.** `ManpowerBudget.ActualSpent` and `.Variance` have no writer anywhere;
+they can only come from Finance actuals. A variance chart would report zero and call it news. It is
+registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-HR sweep.
+
+**Two of my own mistakes, both the same shape as the defects this area keeps finding:**
+
+- `GetUncoveredPositionsAsync` landed in `ManpowerBudgetService`, which has no job-description
+  repository, while the controller called it on the job-description service. A coverage question
+  about job descriptions belongs on the job-description service; moved, along with its interface
+  declaration.
+- The fixture moved employees between positions with `PUT /api/hr/Employees/{id}`, spreading the
+  **read** DTO into the update — a 500. `mintActorWithRoles` now accepts a position **id**, so
+  actors are hired into the right post rather than moved afterwards. *Written from the wrong
+  artefact*, again, this time in the harness.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-8 of 13 landed 2026-08-19. **594 assertions.** FR-HR-134, 135 and 136 all delivered.
+**IN PROGRESS** — slices 0-9 of 13 landed 2026-08-19. **619 assertions.** FR-HR-134, 135 and 136 all delivered; the backend is complete. Slices 10-12 are the screens, slice 13 the content audit.
