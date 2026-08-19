@@ -25867,6 +25867,9 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanyHrPolicySettings", b =>
                 {
+                    b.Property<int>("EstablishmentEnforcementMode")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -25990,6 +25993,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             Id = new Guid("b2c3d4e5-0000-0000-0000-000000000001"),
                             BudgetEnforcementMode = 2,
+                            EstablishmentEnforcementMode = 3,
                             CompulsoryRetirementAge = 60,
                             ContractExpiryLeadDays = 60,
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
@@ -29689,6 +29693,12 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeePosition", b =>
                 {
+                    b.Property<DateTime?>("EstablishmentApprovedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("EstablishmentSourceBudgetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");

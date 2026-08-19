@@ -3517,6 +3517,9 @@ private void ConfigureHREntities(ModelBuilder builder)
                 FiscalYearStartMonth           = 1,
                 MinimumWorkingAge              = 18,
                 BudgetEnforcementMode          = ErpSystem.Core.Enums.BudgetEnforcementMode.Warn,
+                // ⚠ Stricter than the budget ladder on purpose: this only ever fires for a position
+                // whose establishment completed FR-HR-135's chain. See the entity for the reasoning.
+                EstablishmentEnforcementMode   = ErpSystem.Core.Enums.BudgetEnforcementMode.Block,
                 FitWeightPerformance           = 35,
                 FitWeightCompetency            = 30,
                 FitWeightPotential             = 20,

@@ -781,6 +781,35 @@ public class EmployeePosition : TenantEntity
     // Capacity planning
     public int ExpectedHeadcount { get; set; } = 1;
 
+    /// <summary>When an approved manpower budget last set <see cref="ExpectedHeadcount"/>.</summary>
+    /// <remarks>
+    /// <para>⚠ This column exists to answer one question FR-HR-136 cannot be enforced without:
+    /// <b>is this position's establishment an authorised number, or is it still the column
+    /// default?</b> Measured on the live tenant, <b>132 of 146 positions carry
+    /// <c>ExpectedHeadcount = 1</c></b> — the default, never touched — while one of them holds over
+    /// a thousand people. A rule that refuses a vacancy "outside the establishment" would therefore
+    /// refuse almost everything, which is why area 8 had to downgrade FR-HR-173 to advisory and why
+    /// area 6's establishment classification is decorative.</para>
+    ///
+    /// <para>With this, the rule can have teeth exactly where it is meaningful: null means nobody
+    /// has ever authorised a headcount for this post, so it is not establishment-constrained — the
+    /// same shape as the requisition budget check's "no approved budget line" branch. Set means the
+    /// number came from a manpower budget that went the whole way up FR-HR-135's chain, and it is
+    /// then worth refusing to exceed.</para>
+    ///
+    /// <para>Written by <c>ManpowerBudgetService</c> on approval (decision D-2) and by the
+    /// establishment admin endpoint for posts no budget covers.</para>
+    /// </remarks>
+    public DateTime? EstablishmentApprovedOn { get; set; }
+
+    /// <summary>The manpower budget that authorised the current establishment, when one did.</summary>
+    /// <remarks>
+    /// Null when the establishment was set directly by HR rather than derived from a budget — both
+    /// are legitimate, and telling them apart is what lets a screen say <i>where the number came
+    /// from</i> rather than just showing it.
+    /// </remarks>
+    public Guid? EstablishmentSourceBudgetId { get; set; }
+
     public Guid? SalaryGradeId { get; set; }
 
     public WorkMode WorkMode { get; set; } = WorkMode.OnSite;

@@ -38,6 +38,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     // Budget-aware requisitions
     public BudgetEnforcementMode BudgetEnforcementMode { get; set; }
 
+    /// <summary>FR-HR-136 enforcement. See the entity for why this defaults to Block.</summary>
+    public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; }
+
     // Succession fit-score weights (relative)
     public int FitWeightPerformance { get; set; }
     public int FitWeightCompetency { get; set; }
@@ -83,6 +86,9 @@ public class UpdateCompanyHrPolicySettingsDto
 
     // Budget-aware requisitions
     public BudgetEnforcementMode BudgetEnforcementMode { get; set; } = BudgetEnforcementMode.Warn;
+
+    /// <summary>FR-HR-136 enforcement. See the entity for why this defaults to Block.</summary>
+    public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; } = BudgetEnforcementMode.Block;
 
     // Succession fit-score weights (relative)
     [Range(0, 100)] public int FitWeightPerformance { get; set; } = 35;

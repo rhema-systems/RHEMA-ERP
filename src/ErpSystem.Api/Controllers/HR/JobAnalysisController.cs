@@ -639,6 +639,54 @@ public class JobAnalysisController : ControllerBase
 
     #endregion
 
+    #region Establishment (FR-HR-136)
+
+    /// <summary>
+    /// Sets a position's approved establishment directly, for posts no manpower budget covers.
+    /// </summary>
+    /// <remarks>
+    /// <para>Decision D-2 makes an approved manpower budget the establishment, and that is the route
+    /// that should carry most of the organisation. This is the other half of it: an establishment
+    /// that can only be set by a budget cannot be set at all for a position no budget names, and
+    /// there will always be some — a post created mid-year, a unit that budgets annually while
+    /// hiring quarterly.</para>
+    ///
+    /// <para>⚠ Admin-tier, and deliberately so: this writes the same authorised number that
+    /// FR-HR-135's three-step chain produces, so it is the one place the chain can be bypassed. It
+    /// is auditable — <c>EstablishmentSourceBudgetId</c> stays null, which is exactly how a screen
+    /// tells "approved by budget X" from "set by HR".</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetAdminPolicy)]
+    [HttpPut("establishment/position/{positionId:guid}")]
+    public async Task<ActionResult<PositionEstablishmentResultDto>> SetPositionEstablishment(
+        Guid positionId, [FromBody] SetPositionEstablishmentDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _manpowerBudgetService.SetPositionEstablishmentAsync(positionId, dto));
+    }
+
+    /// <summary>
+    /// Withdraws a position's approved establishment, returning it to unconstrained.
+    /// </summary>
+    /// <remarks>
+    /// Admin-tier, like setting one. An establishment that cannot be withdrawn is a trap: a wrong
+    /// number, once approved, would refuse every requisition and movement against the post forever.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetAdminPolicy)]
+    [HttpDelete("establishment/position/{positionId:guid}")]
+    public async Task<ActionResult<PositionEstablishmentResultDto>> WithdrawPositionEstablishment(
+        Guid positionId, [FromQuery] string? reason)
+        => Ok(await _manpowerBudgetService.WithdrawPositionEstablishmentAsync(
+            positionId, string.IsNullOrWhiteSpace(reason) ? "No reason given." : reason));
+
+    /// <summary>What a position's establishment is, and where the number came from.</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("establishment/position/{positionId:guid}")]
+    public async Task<ActionResult<PositionEstablishmentResultDto>> GetPositionEstablishment(Guid positionId)
+        => Ok(await _manpowerBudgetService.GetPositionEstablishmentAsync(positionId));
+
+    #endregion
+
     #region Manpower Budgets
 
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]

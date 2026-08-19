@@ -150,6 +150,31 @@ public interface IManpowerBudgetService
 
     /// <summary>Rejects the current workflow step for a manpower budget, keeping the reason.</summary>
     Task<bool> RejectViaWorkflowAsync(Guid budgetId, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets a position's approved establishment directly (FR-HR-136), for posts no manpower budget
+    /// covers. Stamps <c>EstablishmentApprovedOn</c> and leaves <c>EstablishmentSourceBudgetId</c>
+    /// null, so a screen can tell an HR-set number from a budget-derived one.
+    /// </summary>
+    Task<PositionEstablishmentResultDto> SetPositionEstablishmentAsync(
+        Guid positionId, SetPositionEstablishmentDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Withdraws a position's approved establishment, returning it to unconstrained.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Needed because an establishment can be set in error — the wrong budget approved, the wrong
+    /// number typed — and until this existed there was no way back: the position was permanently
+    /// constrained by a figure nobody meant, and every requisition and movement against it was
+    /// refused for a reason no one could undo. <c>ExpectedHeadcount</c> is left as it stands; the
+    /// authorisation is what is withdrawn, not the planning number.
+    /// </remarks>
+    Task<PositionEstablishmentResultDto> WithdrawPositionEstablishmentAsync(
+        Guid positionId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>A position's establishment, how many are actually in post, and where the number came from.</summary>
+    Task<PositionEstablishmentResultDto> GetPositionEstablishmentAsync(
+        Guid positionId, CancellationToken cancellationToken = default);
     Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 

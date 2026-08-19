@@ -1904,6 +1904,8 @@ public class ManpowerBudgetService : IManpowerBudgetService
             throw JobArchitectureException.InvalidState(
                 "This budget has no lines, so it authorises no posts. Add at least one before submitting it.");
 
+        await RequireEstablishmentIsAchievableAsync(entity, cancellationToken);
+
         if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
         {
             var submitResult = await _workflowIntegration.SubmitAsync(BudgetWorkflowEntityType, entity.Id);
@@ -1977,7 +1979,13 @@ public class ManpowerBudgetService : IManpowerBudgetService
         // Head approving the first must not stamp the budget as approved — the engine returns
         // Pending for a mid-chain step, and an approver is not the approver until the last one.
         if (result.Outcome == WorkflowOutcome.Approved)
+        {
             entity.ApprovedById = approvedById;
+            // Only now. A department head approving step 1 of 3 has authorised nothing yet, and
+            // writing the establishment there would let the first approver set the headcount the
+            // other two are still deciding on.
+            await ApplyEstablishmentAsync(entity, cancellationToken);
+        }
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2033,12 +2041,229 @@ public class ManpowerBudgetService : IManpowerBudgetService
         entity.ApprovalDate = DateTime.UtcNow;
         entity.Status = ManpowerBudgetStatus.Approved;
 
+        await ApplyEstablishmentAsync(entity, cancellationToken);
+
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Manpower budget approved: {BudgetNumber}", entity.BudgetNumber);
 
         return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionEstablishmentResultDto> SetPositionEstablishmentAsync(
+        Guid positionId, SetPositionEstablishmentDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound($"Position with ID '{positionId}' not found.");
+
+        // ⚠ Refuse to establish a post below the number of people already in it. The establishment
+        // is what a later requisition or movement is measured against, and one that is already
+        // breached on the day it is set makes every subsequent action fail for a reason nobody took.
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .CountAsync(e => e.TenantId == tenantId && e.PositionId == positionId && e.IsActive,
+                cancellationToken);
+        if (dto.ExpectedHeadcount < occupied)
+            throw JobArchitectureException.Invalid(
+                $"{position.Title} already has {occupied} employee(s) in post, so it cannot be "
+                + $"established for {dto.ExpectedHeadcount}. Move them first, or establish it for at least {occupied}.");
+
+        position.ExpectedHeadcount = dto.ExpectedHeadcount;
+        position.EstablishmentApprovedOn = DateTime.UtcNow;
+        // Null on purpose: this number did NOT come from a budget, and a screen has to be able to
+        // say so rather than implying an approval chain that never ran.
+        position.EstablishmentSourceBudgetId = null;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Establishment for position {PositionId} set to {Headcount} directly by HR: {Reason}",
+            positionId, dto.ExpectedHeadcount, dto.Reason);
+
+        return await GetPositionEstablishmentAsync(positionId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionEstablishmentResultDto> WithdrawPositionEstablishmentAsync(
+        Guid positionId, string reason, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound($"Position with ID '{positionId}' not found.");
+
+        if (position.EstablishmentApprovedOn == null)
+            throw JobArchitectureException.InvalidState(
+                $"{position.Title} has no approved establishment to withdraw.");
+
+        position.EstablishmentApprovedOn = null;
+        position.EstablishmentSourceBudgetId = null;
+        // ⚠ ExpectedHeadcount is deliberately LEFT AS IT IS. Withdrawing an establishment says "this
+        // number is no longer authorised", not "this number is wrong" — and the column has no
+        // meaningful null. Every rule keys off EstablishmentApprovedOn, so clearing that is what
+        // actually releases the constraint; blanking the count as well would destroy the planning
+        // figure for no benefit.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Establishment withdrawn for position {PositionId}: {Reason}", positionId, reason);
+
+        return await GetPositionEstablishmentAsync(positionId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionEstablishmentResultDto> GetPositionEstablishmentAsync(
+        Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound($"Position with ID '{positionId}' not found.");
+
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .CountAsync(e => e.TenantId == tenantId && e.PositionId == positionId && e.IsActive,
+                cancellationToken);
+
+        string? sourceNumber = null;
+        if (position.EstablishmentSourceBudgetId != null)
+        {
+            sourceNumber = await _budgetRepository.GetQueryable()
+                .Where(b => b.Id == position.EstablishmentSourceBudgetId)
+                .Select(b => b.BudgetNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return new PositionEstablishmentResultDto
+        {
+            PositionId = position.Id,
+            PositionTitle = position.Title,
+            ExpectedHeadcount = position.ExpectedHeadcount,
+            CurrentlyFilled = occupied,
+            EstablishmentApprovedOn = position.EstablishmentApprovedOn,
+            EstablishmentSourceBudgetId = position.EstablishmentSourceBudgetId,
+            EstablishmentSourceBudgetNumber = sourceNumber,
+            // ⚠ The whole point of the column. An unestablished post is not constrained by anything,
+            // whatever its ExpectedHeadcount happens to say.
+            IsEstablished = position.EstablishmentApprovedOn != null,
+        };
+    }
+
+    /// <summary>
+    /// Refuses a budget that would establish a post for fewer people than are already in it.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Written after the area-8 movements harness caught the omission: the <b>admin</b>
+    /// establishment path had this guard from the start and the <b>budget</b> path did not, so an
+    /// approved budget quietly established a post for 1 while 62 employees stood in it. Every
+    /// movement into that post was then refused, correctly and unhelpfully, by a rule enforcing a
+    /// number that had never been achievable.</para>
+    ///
+    /// <para>The budget path is the one that will carry most of the organisation, so it needed the
+    /// stricter guard, not the looser one. An approved budget that establishes fewer posts than
+    /// exist is a data error either way — either the planned count is wrong or people are in the
+    /// wrong posts — and creating an immediately-breached establishment resolves neither.</para>
+    ///
+    /// <para>⚠ Checked at <b>submit</b> as well as at approval. Failing at step 3 of FR-HR-135's
+    /// chain, after a department head, HR and the Managing Director have each spent time on it, is
+    /// the worst moment to discover a number that was wrong when it was typed.</para>
+    /// </remarks>
+    private async Task RequireEstablishmentIsAchievableAsync(
+        ManpowerBudget budget, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        var lines = await _budgetLineRepository.GetQueryable()
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted && l.TenantId == tenantId)
+            .Select(l => new { l.PositionId, l.PlannedCount })
+            .ToListAsync(cancellationToken);
+        if (lines.Count == 0) return;
+
+        var positionIds = lines.Select(l => l.PositionId).Distinct().ToList();
+
+        var occupancy = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && positionIds.Contains(e.PositionId) && e.IsActive)
+            .GroupBy(e => e.PositionId)
+            .Select(g => new { PositionId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        var titles = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(p => positionIds.Contains(p.Id) && p.TenantId == tenantId)
+            .Select(p => new { p.Id, p.Title })
+            .ToListAsync(cancellationToken);
+
+        var breaches = new List<string>();
+        foreach (var positionId in positionIds)
+        {
+            var planned = lines.Where(l => l.PositionId == positionId).Max(l => l.PlannedCount);
+            var filled = occupancy.FirstOrDefault(o => o.PositionId == positionId)?.Count ?? 0;
+            if (planned >= filled) continue;
+
+            var title = titles.FirstOrDefault(t => t.Id == positionId)?.Title ?? positionId.ToString();
+            breaches.Add($"{title} is budgeted for {planned} but {filled} are in post");
+        }
+
+        if (breaches.Count > 0)
+            throw JobArchitectureException.Invalid(
+                "This budget would establish fewer posts than are currently filled: "
+                + string.Join("; ", breaches)
+                + ". Raise the planned count, or move the employees first.");
+    }
+
+    /// <summary>
+    /// Writes the approved budget's planned headcount onto each position it covers — decision D-2,
+    /// and what makes FR-HR-136 enforceable at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>The budget IS the approved establishment. Once Department Head, HR and the Managing
+    /// Director have signed off <c>PlannedCount</c> for a position (FR-HR-135), that number is what
+    /// the organisation has authorised, and there is no second artefact to keep in step with it.</para>
+    ///
+    /// <para>⚠ <c>EstablishmentApprovedOn</c> is the load-bearing part, not the headcount.
+    /// <c>ExpectedHeadcount</c> already existed and already held a number for every position — the
+    /// default, 1, on 132 of 146. Stamping the date is what lets every downstream rule tell an
+    /// authorised establishment from an untouched column, and therefore have teeth on the first
+    /// without refusing everything on the second.</para>
+    ///
+    /// <para>Runs on both approval routes, from the one place, for the same reason superseding a
+    /// job description does.</para>
+    /// </remarks>
+    private async Task ApplyEstablishmentAsync(ManpowerBudget budget, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        await RequireEstablishmentIsAchievableAsync(budget, cancellationToken);
+
+        var lines = await _budgetLineRepository.GetQueryable()
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted && l.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        if (lines.Count == 0) return;
+
+        var positionIds = lines.Select(l => l.PositionId).Distinct().ToList();
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(pos => positionIds.Contains(pos.Id) && pos.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var stamped = DateTime.UtcNow;
+        foreach (var position in positions)
+        {
+            // Highest planned count wins if a budget names a position twice — a budget that
+            // contradicts itself should authorise the larger number rather than whichever row the
+            // query happened to return last.
+            position.ExpectedHeadcount = lines
+                .Where(l => l.PositionId == position.Id)
+                .Max(l => l.PlannedCount);
+            position.EstablishmentApprovedOn = stamped;
+            position.EstablishmentSourceBudgetId = budget.Id;
+        }
+
+        _logger.LogInformation(
+            "Manpower budget {Number} set the establishment for {Count} position(s)",
+            budget.BudgetNumber, positions.Count);
     }
 
     public async Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default)

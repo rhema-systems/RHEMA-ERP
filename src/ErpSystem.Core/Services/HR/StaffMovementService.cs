@@ -878,6 +878,12 @@ public class StaffMovementService : IStaffMovementService
     /// <summary>
     /// Reports how the destination position stands against its establishment (FR-HR-173).
     ///
+    /// <para><b>⚠ Advisory only where the establishment was never authorised — area 17 slice 8.</b>
+    /// A post whose <c>EstablishmentApprovedOn</c> is set has had its headcount approved by
+    /// Department Head, HR and the Managing Director (FR-HR-135), and moving someone into it beyond
+    /// that number is now <b>refused</b> rather than noted. The paragraph below records why it was
+    /// advisory in the first place, and it still governs every position nobody has established.</para>
+    ///
     /// <para><b>Advisory, not a block — a decision taken with the user.</b> The rule as specified
     /// refuses a move into a full post, and that is the right rule the day the establishment is
     /// maintained. It is not maintained: in the live tenant 132 of 146 positions still carry
@@ -912,8 +918,28 @@ public class StaffMovementService : IStaffMovementService
 
         if (occupied < position.ExpectedHeadcount) return null;
 
-        return $"{position.Title} is established for {position.ExpectedHeadcount} and already has {occupied} " +
-               $"in post. This movement takes it to {occupied + 1}.";
+        var note = $"{position.Title} is established for {position.ExpectedHeadcount} and already has {occupied} " +
+                   $"in post. This movement takes it to {occupied + 1}.";
+
+        // ⚠ PROMOTED FROM ADVISORY, but only where the establishment was actually authorised.
+        //
+        // Area 8 downgraded FR-HR-173 to a note because ExpectedHeadcount could not be trusted: 132
+        // of 146 positions carried the column default of 1, so refusing a move into a "full" post
+        // would have refused very nearly every movement. Area 17 slice 8 gives the column the thing
+        // it was missing — EstablishmentApprovedOn, stamped when a manpower budget completes
+        // FR-HR-135's chain — so an authorised establishment is now distinguishable from an
+        // untouched default.
+        //
+        // Where it IS authorised, three people have said how many posts exist and the rule as
+        // specified applies. Where it is not, the note stays a note, exactly as before. The rule did
+        // not change; the data caught up with it.
+        if (position.EstablishmentApprovedOn != null)
+            throw new InvalidOperationException(
+                $"This movement cannot be submitted: {note} That establishment was approved on " +
+                $"{position.EstablishmentApprovedOn:dd MMM yyyy}. Revise the manpower budget for the " +
+                "position, or move the employee into a post with capacity.");
+
+        return note;
     }
 
     /// <summary>

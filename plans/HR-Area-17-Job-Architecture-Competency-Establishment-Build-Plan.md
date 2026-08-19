@@ -773,8 +773,64 @@ a budget's variance is permanently zero until the sweep decides who fills them. 
 training double-count: area 7's training budget, succession development activities, and
 `ManpowerBudget.TrainingBudget`.
 
+### Slice 8 — FR-HR-136, the approved establishment (2026-08-19) — `run-slice8.mjs`, 40 assertions
+
+Green twice; all of area 17 re-run green, **and all of area 8** — 594 assertions here, 306 there.
+**This is the requirement the area was chosen for, and the one three previous areas worked around.**
+
+**The design turns on one column.** FR-HR-136 cannot be enforced against `ExpectedHeadcount`,
+because that column cannot distinguish an authorised number from its own default — 132 of 146 live
+positions carry `1`, untouched, while one holds over a thousand people. `EstablishmentApprovedOn`
+answers the missing question: **null means nobody ever authorised a headcount, so nothing constrains
+the post.** That is what makes `EstablishmentEnforcementMode` safe to default to **Block** where the
+budget ladder defaults to Warn — warning about exceeding something three people authorised would
+make the authorisation pointless.
+
+What landed:
+
+- **D-2**: budget approval writes `ExpectedHeadcount` from each line's `PlannedCount` and stamps the
+  date — **only on the step that completes FR-HR-135's chain**, so a department head cannot set the
+  headcount the other two are still deciding on. Asserted at each of the three steps.
+- **FR-HR-136** enforced on requisition submit *and* approve. ⚠ It differs from the budget check
+  beside it in a way worth stating: the budget check reads `ManpowerBudgetLine.CurrentFilled`, a
+  number typed when the budget was written; this counts **who is actually in the post now**. A
+  budget written in January and a requisition raised in November will disagree, and the live count
+  is the true one.
+- **Area 8's FR-HR-173 promoted from advisory to a block** — but only for posts with an authorised
+  establishment. Everywhere else it stays the note it was. *The rule did not change; the data caught
+  up with it.*
+- **An admin path** for posts no budget covers, Admin-tier because it is the one place FR-HR-135's
+  chain can be bypassed, leaving `EstablishmentSourceBudgetId` null so a screen can say the number
+  came from HR rather than implying an approval that never ran.
+
+⚠⚠ **Two defects in my own slice, both found by running ANOTHER AREA'S harness**, which is the
+lesson worth keeping:
+
+1. **The guard was on the wrong path.** The admin endpoint refused to establish a post below the
+   number already in it; the **budget** path had no such check — and the budget path is the one that
+   will carry most of the organisation. An approved budget quietly established a post for 1 with 62
+   employees standing in it, after which every movement into that post was refused, correctly and
+   uselessly, by a rule enforcing a number that was never achievable.
+   `RequireEstablishmentIsAchievableAsync` now refuses it, naming each position and its live count,
+   **at submit as well as at approval** — failing at step 3 of 3 after three people have spent time
+   on it is the worst moment to discover a number that was wrong when it was typed.
+2. **An establishment set in error could not be withdrawn.** Wrong budget approved, wrong number
+   typed, and the post was permanently constrained by a figure nobody meant, with every requisition
+   and movement against it refused forever. That is a trap, not a rule.
+   `DELETE establishment/position/{id}` withdraws it. ⚠ `ExpectedHeadcount` is deliberately left as
+   it stands: withdrawing says *"no longer authorised"*, not *"wrong"*, and every rule keys off
+   `EstablishmentApprovedOn`.
+
+⚠ **And a fixture defect with a moral: a helper that names itself to the front of a shared list
+silently redirects everything else.** `mintPosition` created positions titled
+`A17 Harness Position …`; `/api/EmployeePositions` returns them **sorted by title**, and
+`mintActorWithRoles` hires into `positionList[0]`. So every actor minted by every slice thereafter
+was hired into a harness position, which accumulated **125 employees** and then made the new
+achievability guard refuse any budget naming it. Renamed to sort last, and slices 0 and 1 now give
+their budget lines a position of their own.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-7 of 13 landed 2026-08-19. **554 assertions.**
+**IN PROGRESS** — slices 0-8 of 13 landed 2026-08-19. **594 assertions.** FR-HR-134, 135 and 136 all delivered.

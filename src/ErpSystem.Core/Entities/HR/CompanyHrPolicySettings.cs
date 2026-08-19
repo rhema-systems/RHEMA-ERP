@@ -135,6 +135,24 @@ public class CompanyHrPolicySettings : TenantEntity
     /// </summary>
     public BudgetEnforcementMode BudgetEnforcementMode { get; set; } = BudgetEnforcementMode.Warn;
 
+    /// <summary>
+    /// How strictly FR-HR-136 is applied: verify the position against the approved establishment
+    /// before a vacancy may be approved. Default <see cref="Enums.BudgetEnforcementMode.Block"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Block by default, where the budget ladder defaults to Warn</b>, and the difference
+    /// is deliberate. The budget check reads numbers a department typed into a budget line; this one
+    /// reads <c>EmployeePosition.ExpectedHeadcount</c>, and only ever fires for positions whose
+    /// <c>EstablishmentApprovedOn</c> is set — meaning a manpower budget went the whole way up
+    /// FR-HR-135's chain to Department Head, HR and the Managing Director to establish that number.
+    /// Warning about exceeding something three people authorised would make the authorisation
+    /// pointless.</para>
+    ///
+    /// <para>A position nobody has established is not constrained at all, whatever this is set to.
+    /// That is what makes Block safe on a tenant where most positions still carry the default.</para>
+    /// </remarks>
+    public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; } = BudgetEnforcementMode.Block;
+
     // ═══════════════════════════════════════════
     //  SUCCESSION FIT-SCORE WEIGHTS (relative)
     // ═══════════════════════════════════════════

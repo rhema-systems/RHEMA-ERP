@@ -1,6 +1,7 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.Requisition;
@@ -342,6 +343,7 @@ public class StaffRequisitionService : IStaffRequisitionService
         // exceeds approved manpower budget is a fact about the requisition, not a routing choice,
         // and Block mode must refuse before an approver is ever troubled with it.
         await EnforceBudgetAsync(entity, "submitted", cancellationToken);
+        await EnforceEstablishmentAsync(entity, "submitted", cancellationToken);
 
         var fromStatus = entity.Status;
 
@@ -383,7 +385,10 @@ public class StaffRequisitionService : IStaffRequisitionService
         if (entity.RequestedById == approvedByUserId)
             throw new InvalidOperationException("You cannot approve a requisition that you raised yourself.");
 
+        // FR-HR-136 is worded about approving a vacancy, and this is the act that authorises one:
+        // a vacancy is opened FROM an approved requisition, never standalone.
         await EnforceBudgetAsync(entity, "approved", cancellationToken);
+        await EnforceEstablishmentAsync(entity, "approved", cancellationToken);
 
         // The engine resolves approvers by ApplicationUser, so it gets UserId; everything the
         // entity stores (RequestedById, the history row's ChangedById) is an Employee FK and gets
@@ -828,6 +833,53 @@ public class StaffRequisitionService : IStaffRequisitionService
     /// requisition's desired start date, finds the matching <see cref="ManpowerBudgetLine"/> for the
     /// position, and compares the projected headcount against the approved planned count.
     /// </summary>
+    /// <summary>
+    /// FR-HR-136: verify the position against the approved establishment before a vacancy may be
+    /// approved. Returns null when there is nothing to say.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>How this differs from the budget check next to it</b>, which is not obvious and
+    /// matters: the budget check reads <c>ManpowerBudgetLine.CurrentFilled</c> — a number someone
+    /// typed when they wrote the budget, possibly in January. This one counts the employees
+    /// <b>actually in the post right now</b>. A budget written in January and a requisition raised
+    /// in November will disagree, and when they do, the live count is the true one.</para>
+    ///
+    /// <para>⚠ <b>Only positions with an authorised establishment are constrained.</b>
+    /// <c>EstablishmentApprovedOn == null</c> means nobody has ever approved a headcount for the
+    /// post, and <c>ExpectedHeadcount</c> is then just its default of 1 — which 132 of 146 live
+    /// positions still carry. Enforcing against that would refuse very nearly every requisition,
+    /// and a rule that refuses everything is one people route around rather than obey. This is the
+    /// same shape as the budget check's "no approved budget line" branch, and it is what allows the
+    /// mode to default to Block.</para>
+    /// </remarks>
+    private async Task<string?> CheckEstablishmentAsync(
+        StaffRequisition entity, bool blockingOnly, CancellationToken cancellationToken)
+    {
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var mode = settings.EstablishmentEnforcementMode;
+        if (mode == BudgetEnforcementMode.Off) return null;
+        if (blockingOnly && mode != BudgetEnforcementMode.Block) return null;
+
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId,
+                cancellationToken);
+
+        // Not established by anyone: not constrained. See the remarks.
+        if (position?.EstablishmentApprovedOn == null) return null;
+
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .CountAsync(e => e.TenantId == entity.TenantId
+                          && e.PositionId == entity.PositionId
+                          && e.IsActive, cancellationToken);
+
+        var projected = occupied + entity.NumberOfPositions;
+        if (projected <= position.ExpectedHeadcount) return null;
+
+        return $"{position.Title} is established for {position.ExpectedHeadcount} post(s) and "
+             + $"{occupied} are filled. This requisition would take it to {projected}, outside the "
+             + $"establishment approved on {position.EstablishmentApprovedOn:dd MMM yyyy}.";
+    }
+
     private async Task<RequisitionBudgetCheckDto> BuildBudgetCheckAsync(StaffRequisition entity, CancellationToken cancellationToken)
     {
         var settings = await _policyProvider.GetAsync(cancellationToken);
@@ -910,6 +962,18 @@ public class StaffRequisitionService : IStaffRequisitionService
     /// Applies budget enforcement on a workflow transition. Throws when the mode is Block and the
     /// requisition is over budget; otherwise logs a warning (Warn) or does nothing (Off / within budget).
     /// </summary>
+    /// <summary>Refuses the action when FR-HR-136 is set to Block and the post is full.</summary>
+    private async Task EnforceEstablishmentAsync(
+        StaffRequisition entity, string action, CancellationToken cancellationToken)
+    {
+        var breach = await CheckEstablishmentAsync(entity, blockingOnly: true, cancellationToken);
+        if (breach == null) return;
+
+        throw new InvalidOperationException(
+            $"This requisition cannot be {action}: {breach} Revise the manpower budget for this "
+            + "position, or reduce the number of posts requested.");
+    }
+
     private async Task EnforceBudgetAsync(StaffRequisition entity, string action, CancellationToken cancellationToken)
     {
         var check = await BuildBudgetCheckAsync(entity, cancellationToken);

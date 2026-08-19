@@ -855,6 +855,42 @@ public class UpdateManpowerBudgetDto : UpdateDtoBase
 /// <summary>
 /// DTO for approving a manpower budget
 /// </summary>
+/// <summary>Sets a position's approved establishment without going through a manpower budget.</summary>
+public class SetPositionEstablishmentDto
+{
+    [Range(0, 10000)]
+    public int ExpectedHeadcount { get; set; }
+
+    /// <summary>Why this number, for the audit trail a budget approval would otherwise provide.</summary>
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>A position's establishment, and where the number came from.</summary>
+public class PositionEstablishmentResultDto
+{
+    public Guid PositionId { get; set; }
+
+    public string PositionTitle { get; set; } = string.Empty;
+
+    public int ExpectedHeadcount { get; set; }
+
+    /// <summary>Live count of active employees in the post — not a figure anyone typed.</summary>
+    public int CurrentlyFilled { get; set; }
+
+    /// <summary>Null when nobody has ever authorised a headcount for this post.</summary>
+    public DateTime? EstablishmentApprovedOn { get; set; }
+
+    /// <summary>The budget that authorised it; null when HR set it directly.</summary>
+    public Guid? EstablishmentSourceBudgetId { get; set; }
+
+    public string? EstablishmentSourceBudgetNumber { get; set; }
+
+    /// <summary>False when the post is unestablished, in which case no rule constrains it.</summary>
+    public bool IsEstablished { get; set; }
+}
+
 /// <summary>Why a manpower budget was refused.</summary>
 public class RejectManpowerBudgetDto
 {
