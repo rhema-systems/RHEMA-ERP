@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
@@ -266,11 +267,52 @@ public class JobDescriptionService : IJobDescriptionService
         return analytics;
     }
 
+    /// <summary>
+    /// Refuses a classification that does not hang together: a sub-family that belongs to a
+    /// different family, or either naming a row that is not there.
+    /// </summary>
+    /// <remarks>
+    /// The two ids arrive independently on the DTO and nothing related them, so a job description
+    /// could be filed under family "Finance" and sub-family "Architecture" at the same time. Neither
+    /// value is wrong on its own, which is why no foreign key catches it and why a screen with two
+    /// dropdowns will produce it the first time someone changes the family and not the sub-family.
+    /// </remarks>
+    private async Task RequireCoherentClassificationAsync(
+        Guid? jobFamilyId, Guid? jobSubFamilyId, Guid? jobLevelId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        if (jobFamilyId.HasValue && !await _unitOfWork.Repository<JobFamily>().GetQueryable()
+                .AnyAsync(f => f.Id == jobFamilyId && f.TenantId == tenantId, cancellationToken))
+            throw JobArchitectureException.NotFound("Job family not found");
+
+        if (jobLevelId.HasValue && !await _unitOfWork.Repository<CareerLevel>().GetQueryable()
+                .AnyAsync(l => l.Id == jobLevelId && l.TenantId == tenantId, cancellationToken))
+            throw JobArchitectureException.NotFound("Job level not found");
+
+        if (!jobSubFamilyId.HasValue) return;
+
+        var subFamily = await _unitOfWork.Repository<JobSubFamily>().GetQueryable()
+            .FirstOrDefaultAsync(sf => sf.Id == jobSubFamilyId && sf.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound("Sub-family not found");
+
+        if (!jobFamilyId.HasValue)
+            throw JobArchitectureException.Invalid(
+                "A sub-family cannot be set without the job family it belongs to.");
+
+        if (subFamily.JobFamilyId != jobFamilyId.Value)
+            throw JobArchitectureException.Invalid(
+                "The sub-family belongs to a different job family. Choose one from the selected family.");
+    }
+
     public async Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
+        await RequireCoherentClassificationAsync(
+            createDto.JobFamilyId, createDto.JobSubFamilyId, createDto.JobLevelId, cancellationToken);
+
         entity.JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken);
         entity.VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(createDto.PositionId);
         entity.PreparedById = preparedById;
@@ -388,6 +430,9 @@ public class JobDescriptionService : IJobDescriptionService
 
         if (entity.Status == JobDescriptionStatus.Approved)
             throw JobArchitectureException.InvalidState("Cannot update an approved job description. Create a new version instead.");
+
+        await RequireCoherentClassificationAsync(
+            updateDto.JobFamilyId, updateDto.JobSubFamilyId, updateDto.JobLevelId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 

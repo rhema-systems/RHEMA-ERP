@@ -132,6 +132,20 @@ public class HrSeedOrchestrator
             ct => _context.Set<Skill>().AnyAsync(x => x.TenantId == tenantId, ct),
             ct => new SkillDataSeeder(_context, Log<SkillDataSeeder>()).SeedForDefaultTenantAsync(ct)),
 
+        // The job-family / sub-family / career-level vocabulary a job description is classified
+        // against (area 17, decision D-5). Deliberately after Skills and before the organogram:
+        // it depends on neither, and belongs with the other reference lookups.
+        new SeedStep(
+            "Job architecture (families, sub-families, career levels)",
+            // The probe asks for a row THIS SEED creates, not for a non-empty table. Measured
+            // 2026-08-19: an "any job family exists?" probe skipped the step entirely, because the
+            // area-17 harness had already created twenty families of its own — so a tenant where
+            // anyone had ever added one job family would silently never receive the starter
+            // vocabulary. A starter-vocabulary seed and a create-the-baseline seed need different
+            // questions: "is the table empty" is only the right signal for the latter.
+            ct => _context.Set<JobFamily>().AnyAsync(x => x.TenantId == tenantId && x.Code == "EXE", ct),
+            ct => new JobArchitectureSeeder(_context, Log<JobArchitectureSeeder>()).SeedAsync(tenantId, ct)),
+
         // TDC organisation: levels, staff bands, the 8 salary grades, units and positions.
         new SeedStep(
             "TDC organisation structure",

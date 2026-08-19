@@ -568,8 +568,65 @@ position.
 backend catalog by area 15b but never added to `entityTypeMapping.ts`, so its workflow tab never
 appeared under the HR module filter.
 
+### Slice 4 — the job architecture taxonomy (2026-08-19) — `run-slice4.mjs`, 60 assertions
+
+Green twice; slices 0-3 re-run green. **404 assertions in the area.**
+
+Fifteen endpoints, zero rows, and a service that was pure CRUD with no rules at all. What it now
+enforces, and why each matters:
+
+- **Codes are unique** per tenant, case-insensitively, on all three tables. None of them carries a
+  unique index beyond its primary key, so two families could share the code `ENG`. ⚠ Enforced in
+  the service **rather than by an index, deliberately**: an index does not know about the soft
+  delete (the area-13 trap), so a deleted `ENG` would block a new one forever. Scoping the check to
+  live rows gets the rule without that consequence — and the harness asserts a deleted family's
+  code *is* reusable, so the distinction is pinned down rather than assumed.
+- **Ranks are unique.** Two career levels at the same rank make "more senior than" unanswerable,
+  which is the one question a ladder exists to answer. The refusal names the level already holding
+  the rank.
+- **A classification in use cannot be removed.** A soft delete hides the row from every list and
+  leaves the foreign key intact, so job descriptions keep resolving a name HR can no longer see or
+  edit — the classification becomes unmaintainable rather than going away.
+- **The classification must hang together.** `JobFamilyId` and `JobSubFamilyId` arrive
+  independently on the DTO and nothing related them, so a job description could be filed under
+  family *Finance* and sub-family *Architecture* at once. No foreign key catches it because neither
+  id is wrong on its own — and a screen with two dropdowns produces it the first time someone
+  changes the family and not the sub-family. Validated on create **and** update.
+
+**The starter seed (D-5)** is `JobArchitectureSeeder`, wired into `HrSeedOrchestrator`: 11 families,
+29 sub-families and an 8-rung ladder, all read off the organisation units `TdcOrganogramSeeder`
+already creates. Nothing invented. ⚠ `CareerLevel.SalaryGradeId` is left **null** on every level —
+mapping a career ladder onto pay grades is a TDC decision with money attached and payroll owns the
+grade store. The harness asserts it stays unset, so if someone links them later that line fails and
+the decision is visible rather than silent.
+
+⚠ **The slice's own defect: the seed step silently skipped, and a count assertion would have hidden
+it.** The probe was `AnyAsync(x => x.TenantId == tenantId)` — "does this tenant have any job
+family?" The harness had already created twenty of its own, so the orchestrator reported
+`[skip] Job architecture — already seeded` and the starter vocabulary never landed. In production
+that means **any tenant where one person had ever added a single job family would silently never
+receive the starter set.** Generalised: *"is the table empty?" is the right signal for a
+create-the-baseline seed and the wrong one for a starter-vocabulary seed* — the latter must ask
+whether **its own** rows are present, because the table can be non-empty for reasons that have
+nothing to do with it. It was caught only because the harness asserts the seeded rows **by code**;
+`families.length >= 11` would have passed on the residue and told me nothing.
+
+⚠ **And the area-13 lesson again, live: the rank rule immediately broke slices 0-2**, which each
+created a level at a fixed rank (4, 5, 6) and now collided with the seeded ladder and with each
+other. The rule is right; the fixtures were assuming a free field. `harnessRank()` in `setup.mjs`
+derives a non-colliding rank from the stamp. **When you make a field unique, grep every fixture
+that sets it — the compiler cannot help, and neither can the tests until they run.**
+
+**One refusal, every obstacle.** Deleting a family in real use first reported only its sub-families,
+so a user would clear four of them to be told about the job descriptions underneath. It now collects
+both and states them together.
+
+**Recorded for D-6:** `SalaryGrades` holds ten rows named `E2E RecD Band 141309` — area-6 harness
+residue alongside the two real TDC grades (`M1 General Managers`, `M2 Heads of Department`). Same
+shape as the 43 residue job descriptions; both belong in the area-close cleanup.
+
 ---
 
 ## 10. Area status
 
-**IN PROGRESS** — slices 0-3 of 13 landed 2026-08-19. **344 assertions.**
+**IN PROGRESS** — slices 0-4 of 13 landed 2026-08-19. **404 assertions.**
